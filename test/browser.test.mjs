@@ -13,6 +13,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const directory = path.resolve(process.env.PLAYGROUND_DIST || path.join(root, 'dist'));
 const manifestBytes = await readFile(path.join(directory, 'assets/manifest.json'));
 const manifest = JSON.parse(manifestBytes);
+const guidedTourProgram = await readFile(new URL('./fixtures/guided-tour.php', import.meta.url), 'utf8');
 const manifestSha256 = createHash('sha256').update(manifestBytes).digest('hex');
 const inventoryBytes = await readFile(path.join(directory, 'asset-inventory.json'));
 const inventorySha256 = createHash('sha256').update(inventoryBytes).digest('hex');
@@ -124,6 +125,24 @@ async function request(page, pathname) {
   }, pathname), `HTTP ${pathname}`);
 }
 
+async function assertGuidedTour(page) {
+  const result = await php(page, guidedTourProgram);
+  assert.equal(result.status, 200, result.text);
+  const tour = JSON.parse(result.text);
+  assert.equal(tour.idType, 'int');
+  assert.equal(Number.isInteger(tour.id), true);
+  assert.equal(tour.uid, tour.expectedUid, 'TourModel must resolve the native integer ID to its exact UID.');
+  assert.equal(typeof tour.uid, 'string');
+  assert.ok(tour.uid.length > 0);
+  const response = await request(page, `/administrator/index.php?option=com_ajax&plugin=guidedtours&group=system&format=json&id=${tour.id}`);
+  assert.equal(response.status, 200, response.text);
+  const payload = JSON.parse(response.text);
+  assert.equal(payload.success, true, response.text);
+  assert.equal(Number(payload.data.id), tour.id);
+  assert.ok(Array.isArray(payload.data.steps) && payload.data.steps.length > 0, 'The real guided-tour AJAX response must contain its steps.');
+  assert.equal(typeof payload.data.steps[0].title, 'string');
+}
+
 async function assertSite(page, config) {
   const frontend = await request(page, '/');
   assert.equal(frontend.status, 200, frontend.text.slice(-4000));
@@ -133,6 +152,7 @@ async function assertSite(page, config) {
   assert.equal(administrator.status, 200, administrator.text.slice(-4000));
   assert.match(administrator.text, /com_cpanel|task=logout|value=["']logout["']/i, 'The administrator request must use the authenticated Joomla session.');
   assert.doesNotMatch(administrator.text, /name=["']username["']/i, 'The administrator should not be at the login form.');
+  await assertGuidedTour(page);
   const initialURL = await page.evaluate(() => window.playground.url);
   assert.ok(initialURL.endsWith(config.initialPath), 'The configured initial page must be reflected in the iframe URL.');
   for (const pathname of ['/', '/administrator/']) {
@@ -180,13 +200,24 @@ async function assertPDO(page, pair) {
     $numeric = $db->query('SELECT 1 AS repeated, 2 AS repeated')->fetch(PDO::FETCH_NUM);
     $associative = $db->query('SELECT 1 AS repeated, 2 AS repeated')->fetch(PDO::FETCH_ASSOC);
     echo json_encode(['numeric' => $numeric, 'associative' => $associative], JSON_THROW_ON_ERROR);`);
-  assert.deepEqual(duplicateNames, { numeric: ['1', '2'], associative: { repeated: '2' } },
+  assert.deepEqual(duplicateNames, { numeric: [1, 2], associative: { repeated: 2 } },
     'Repeated SQL column names must retain all positional values and normal PDO associative semantics.');
+  const typed = await phpJSON(page, `${PDO}
+    $sql = "SELECT CAST(-7 AS SIGNED) AS integer_value, CAST(2147483648 AS UNSIGNED) AS wide_integer, CAST('42' AS CHAR) AS numeric_text, 1.25e0 AS approximate, CAST(1.25 AS DECIMAL(4,2)) AS exact_value";
+    $row = $db->query($sql)->fetch(PDO::FETCH_ASSOC);
+    $db->setAttribute(PDO::ATTR_STRINGIFY_FETCHES, true);
+    $strings = $db->query($sql)->fetch(PDO::FETCH_ASSOC);
+    echo json_encode(['values' => $row, 'types' => array_map('get_debug_type', $row), 'strings' => $strings], JSON_THROW_ON_ERROR);`);
+  assert.deepEqual(typed, {
+    values: { integer_value: -7, wide_integer: '2147483648', numeric_text: '42', approximate: 1.25, exact_value: '1.25' },
+    types: { integer_value: 'int', wide_integer: 'string', numeric_text: 'string', approximate: 'float', exact_value: 'string' },
+    strings: { integer_value: '-7', wide_integer: '2147483648', numeric_text: '42', approximate: '1.25', exact_value: '1.25' },
+  }, 'PDO must preserve native numeric types, string columns and out-of-range precision.');
   for (const retained of [false, true]) {
     const retain = retained ? 'final class RetainedConnection { public static PDO $connection; } RetainedConnection::$connection = $db;' : '';
     await php(page, `<?php ${PDO} ${retain} $db->beginTransaction(); $db->exec('INSERT INTO playground_contract (id) VALUES (2)'); return;`);
     const state = await phpJSON(page, `${PDO} echo json_encode(['count' => $db->query('SELECT COUNT(*) FROM playground_contract')->fetchColumn(), 'transaction' => $db->inTransaction()], JSON_THROW_ON_ERROR);`);
-    assert.deepEqual(state, { count: '1', transaction: false }, `Request cleanup must roll back with a ${retained ? 'static' : 'global'} PDO reference.`);
+    assert.deepEqual(state, { count: 1, transaction: false }, `Request cleanup must roll back with a ${retained ? 'static' : 'global'} PDO reference.`);
   }
   return identity;
 }
@@ -198,7 +229,7 @@ async function assertAbnormalShutdown(page, config) {
     await close(page);
     await start(page, config);
     const state = await phpJSON(page, `${PDO} echo json_encode(['count' => $db->query('SELECT COUNT(*) FROM playground_contract')->fetchColumn(), 'transaction' => $db->inTransaction()], JSON_THROW_ON_ERROR);`);
-    assert.deepEqual(state, { count: '1', transaction: false }, `An abandoned native connection must roll back after ${ending}`);
+    assert.deepEqual(state, { count: 1, transaction: false }, `An abandoned native connection must roll back after ${ending}`);
   }
 }
 
@@ -233,9 +264,16 @@ for (const name of browserNames) {
         });
         try {
           await start(page, config);
+          if (pair.phpVersion === manifest.defaults.phpVersion && pair.joomlaVersion === manifest.defaults.joomlaVersion) {
+            const competingPage = await openHarness(context, server.url);
+            try {
+              await assert.rejects(() => start(competingPage, config), /already open/i,
+                'A second tab must not open the same persisted site concurrently.');
+            } finally { await competingPage.close(); }
+          }
           await assertSite(page, config);
           const installedExtension = await phpJSON(page, `${PDO} echo json_encode($db->query("SELECT enabled FROM jml_extensions WHERE element='mod_playground_contract' AND type='module' AND client_id=0")->fetchColumn(), JSON_THROW_ON_ERROR);`);
-          assert.equal(installedExtension, '1', 'Joomla must register the configured extension through its installer.');
+          assert.equal(installedExtension, 1, 'Joomla must register the configured extension through its installer.');
           const identity = await assertPDO(page, pair);
           await assertAbnormalShutdown(page, config);
           await bounded(page.evaluate(() => window.playground.flush()), 'Durable filesystem and database flush');
@@ -247,7 +285,7 @@ for (const name of browserNames) {
           assert.deepEqual(stored, { big: '18446744073709551615', amount: '123456789012345678.123456' });
           assert.deepEqual(page.errors, [], `Uncaught browser errors: ${page.errors.join('\n')}`);
           await close(page, true);
-          records.push({ ...pair, php: identity.php, persistedReload: true, nativePDO: true, requestCleanup: true, iframe: true, extensionInstall: true, startupCommand: true });
+          records.push({ ...pair, php: identity.php, persistedReload: true, nativePDO: true, requestCleanup: true, iframe: true, extensionInstall: true, startupCommand: true, guidedTourModelAndAjax: true });
           console.log(JSON.stringify({ browser: name, ...pair, completed: true, resumedProgress: resumed.progress.map((item) => item.phase) }));
         } catch (error) {
           console.error(JSON.stringify({ browser: name, ...pair, error: error.message, progress: await page.evaluate(() => window.validationProgress).catch(() => null), browserLogs: page.logs.slice(-15).map((line) => line.slice(0, 4000)) }));
@@ -263,7 +301,25 @@ for (const name of browserNames) {
       try {
         await start(page, config);
         await assertPDO(page, defaultPair);
+        const memorySite = await page.evaluate(async () => {
+          await window.playground.fs.writeFile('/persist/www/memory-contract.txt', 'Memory-only file');
+          const response = await window.playground.request('/memory-contract.txt');
+          return { prefix: window.playground.baseUrl, status: response.status, text: await response.text() };
+        });
+        assert.equal(memorySite.status, 200);
+        assert.equal(memorySite.text, 'Memory-only file');
+        const cachedSiteFiles = () => page.evaluate(async (prefix) => {
+          const matches = [];
+          for (const name of await caches.keys()) {
+            for (const request of await (await caches.open(name)).keys()) {
+              if (request.url.startsWith(prefix)) matches.push(request.url);
+            }
+          }
+          return matches;
+        }, memorySite.prefix);
+        assert.deepEqual(await cachedSiteFiles(), [], 'Memory-only files must not enter persistent CacheStorage.');
         await close(page);
+        assert.deepEqual(await cachedSiteFiles(), [], 'Closing a memory-only site must leave no cached site files.');
         await start(page, config);
         const result = await phpJSON(page, `${PDO} echo json_encode($db->query("SHOW TABLES LIKE 'playground_contract'")->fetchAll(PDO::FETCH_COLUMN), JSON_THROW_ON_ERROR);`);
         assert.deepEqual(result, [], 'A new memory-only site must not retain the previous database.');
@@ -295,7 +351,7 @@ for (const name of browserNames) {
         await close(page);
         await start(page, config);
         const result = await phpJSON(page, `${PDO} echo json_encode($db->query('SELECT COUNT(*) FROM playground_contract')->fetchColumn(), JSON_THROW_ON_ERROR);`);
-        assert.equal(result, '1', 'An abandoned uncommitted write must not appear after reopening.');
+        assert.equal(result, 1, 'An abandoned uncommitted write must not appear after reopening.');
         await assertSite(page, config);
         assert.deepEqual(page.errors, []);
         await close(page, true);
@@ -325,7 +381,9 @@ for (const name of browserNames) {
       page.on('response', async (response) => {
         if (!response.url().includes('/__site/') || !['fetch', 'xhr'].includes(response.request().resourceType())) return;
         const text = await response.text().catch(() => '');
-        if (/^\s*<|Fatal error|Warning:/.test(text)) responseErrors.push({ url: response.url(), status: response.status(), text: text.slice(0, 3000) });
+        const phpDiagnostic = /<(?:b|strong)>(?:Warning|Deprecated|Fatal error)<|^(?:Warning|Deprecated|Fatal error):/m.test(text);
+        const malformedJSON = response.headers()['content-type']?.includes('application/json') && /^\s*</.test(text);
+        if (phpDiagnostic || malformedJSON) responseErrors.push({ url: response.url(), status: response.status(), text: text.slice(0, 3000) });
       });
       page.setDefaultTimeout(requestTimeout);
       try {
@@ -367,6 +425,7 @@ for (const name of browserNames) {
         await page.locator('#close-button').click();
         await page.locator('#launch-button:enabled').waitFor();
         assert.deepEqual(errors, [], JSON.stringify(responseErrors));
+        assert.deepEqual(responseErrors, [], 'Dashboard AJAX must not contain PHP diagnostics or malformed JSON.');
         records.push({ ...defaultPair, interfaceLaunch: true, interfaceReset: true });
       } finally { await context.close(); }
     });

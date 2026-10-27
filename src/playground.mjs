@@ -55,8 +55,9 @@ async function clientIdentity() {
 }
 
 class PhpSession {
-  constructor(database) {
+  constructor(database, onFailure) {
     this.database = database;
+    this.onFailure = onFailure;
     this.worker = new Worker(new URL('./php-worker.mjs', import.meta.url), { type: 'module' });
     this.sequence = 0;
     this.pending = new Map();
@@ -123,6 +124,7 @@ class PhpSession {
     if (this.failure) return this.recovery;
     this.failure = error;
     this.worker.terminate();
+    try { this.onFailure?.(error); } catch { /* Cleanup still completes if a UI callback fails. */ }
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
     this.pending.clear();
     this.recovery = this.database.reset().catch(() => {});
@@ -200,7 +202,7 @@ export async function createPlayground(input, { onProgress = () => {} } = {}) {
     progress({ phase: 'database', message: 'Starting MariaDB…' });
     const { createMariaDB } = await import(resolveAsset(manifest.bridge.moduleUrl));
     database = await createMariaDB({ database: 'joomla', timeoutMs: 120_000, ...(config.persistence ? { persistence: { key: `joomengine-${identity}` } } : {}) });
-    session = new PhpSession(database);
+    session = new PhpSession(database, error => progress({ phase: 'failed', message: error.message }));
     progress({ phase: 'php', message: `Loading PHP ${phpEntry.patchVersion ?? config.phpVersion} and its extensions…` });
     const runtimeInfo = await session.send('initialize', {
       moduleUrl: resolveAsset(phpEntry.moduleUrl), adapterUrl: resolveAsset(manifest.bridge.adapterUrl),

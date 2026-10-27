@@ -33,9 +33,9 @@
   },
   "nativeDriver": {
     "repository": "joomengine/mariadb-wasm-bridge",
-    "sourceCommit": "226f29025c59a7dc871851f5fbb517d67264e16d",
+    "sourceCommit": "8a69c0367f7f70db0786e8b973711a3a33a3748c",
     "nativeSources": {
-      "pdo_mariadb_wasm.c": "b9c96b76123367bba2c91648d310ccdaa32f55c80b165a60528bee2c9441b630",
+      "pdo_mariadb_wasm.c": "a827cd7b515da9b238d74c1bda64a2e4f27cb21cb79134346139de7bd7a7739e",
       "php_pdo_mariadb_wasm.h": "538723d9a7af28f07e5d3a0350a77c98b79a831d7dd936156a8c4a18230af88b",
       "config.m4": "2c2d01f8a28171deb3774d81ef5abfdf889cb805bcd38a90a48350ae54466006"
     },

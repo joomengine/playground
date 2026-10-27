@@ -369,9 +369,11 @@ database. Keep independent applications in separate site keys; this is not a
 multi-tenant hosting boundary.
 
 The bridge exposes one native connection per MariaDB instance, uses PDO emulated
-prepares, and does not implement `mysqli` or remote database connections. Numeric
-values such as BIGINT and DECIMAL remain exact strings. Files and database state
-are separate stores; they are not committed together as one transaction.
+prepares, and does not implement `mysqli` or remote database connections. Integer
+values within PHP’s integer range are returned as integers; larger integers and
+DECIMAL values remain exact strings. `PDO::ATTR_STRINGIFY_FETCHES` requests
+numeric strings explicitly. Files and database state are separate stores; they
+are not committed together as one transaction.
 
 The selected upstream CGI release accepts request bodies for POST. The playground
 rejects bodies on other HTTP methods instead of discarding them. Request queues,

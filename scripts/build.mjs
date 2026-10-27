@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile, stat } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -171,6 +171,7 @@ try {
   };
   await writeFile(path.join(assets, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   await writeFile(path.join(staging, 'asset-inventory.json'), `${JSON.stringify(await inventory(staging), null, 2)}\n`);
+  await chmod(staging, 0o755);
   await rm(destination, { recursive: true, force: true });
   await rename(staging, destination);
   console.log(`Built ${destination} with ${php.length} PHP runtimes and ${joomla.length} Joomla distributions.`);
