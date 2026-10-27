@@ -13,6 +13,7 @@
     "build:blueprints": "node scripts/build-blueprints.mjs",
     "serve": "node scripts/serve.mjs",
     "test": "node scripts/test.mjs",
+    "test:provisioning": "node --test test/*.integration.mjs",
     "test:browser": "node --test test/browser.test.mjs",
     "check": "node scripts/check.mjs"
   },

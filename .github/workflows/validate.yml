@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: '24'
+          node-version-file: '.node-version'
           cache: npm
       - name: Read immutable build inputs
         id: pins
@@ -83,10 +83,10 @@ jobs:
           MARIADB_DRIVER_DIR: .cache/native
           BRIDGE_SOURCE_DIR: external/bridge
         run: npm run build
+      - name: Validate provisioning and cross-version snapshot restoration
+        run: npm run test:provisioning
       - name: Build verified demonstration snapshots
         run: npm run build:blueprints
-      - name: Validate Joomla provisioning and portable export
-        run: node --test test/provisioning.integration.mjs
       - name: Install browser engines
         run: npx playwright install --with-deps chromium firefox
       - name: Validate Joomla in Chromium and Firefox

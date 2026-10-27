@@ -78,3 +78,14 @@ export function runtimeLocation(currentURL, config) {
   }
   return url.href;
 }
+
+/** A changed setup recipe must not silently reopen a site built with older steps. */
+export async function isolateSetup(state, config) {
+  const previous = Object.hasOwn(state.sites, config.storageKey) ? state.sites[config.storageKey] : null;
+  const signature = (value) => JSON.stringify({ extensions: value.extensions || [], startupCommands: value.startupCommands || [] });
+  if (!config.persistence || !previous || signature(previous) === signature(config)) return { configuration: config, changed: false };
+  const content = JSON.stringify({ key: config.storageKey, blueprintId: config.blueprintId, joomlaVersion: config.joomlaVersion, setup: signature(config) });
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content))), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  const key = `${config.storageKey.slice(0, 40)}-setup-${digest.slice(0, 16)}`;
+  return { configuration: { ...config, storageKey: key }, changed: true, previousKey: config.storageKey };
+}

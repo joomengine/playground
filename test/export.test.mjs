@@ -30,10 +30,21 @@ test('actual PHP exporter preserves quoted SQL while normalizing portable DDL', 
     $rejected = false;
     try { exportPortableDdl('CREATE TRIGGER counter BEFORE UPDATE ON items FOR EACH ROW BEGIN SET NEW.hits=1; SET NEW.title=2; END', 'joomla', 'TRIGGER', '', []); }
     catch (RuntimeException $error) { $rejected = str_contains($error->getMessage(), 'Compound'); }
+    $crossDatabaseRejected = false;
+    try { exportPortableDdl('CREATE VIEW sample AS SELECT a.id FROM joomla.items a, external.items b WHERE a.id=b.id', 'joomla', 'VIEW', '', []); }
+    catch (RuntimeException $error) { $crossDatabaseRejected = str_contains($error->getMessage(), 'Cross-database'); }
+    $cteRejected = 0;
+    foreach ([
+      'CREATE VIEW sample AS WITH joomla AS (SELECT id FROM a) SELECT joomla.id,b.id FROM joomla JOIN b ON joomla.id=b.id',
+      'CREATE VIEW sample AS WITH first AS (SELECT id FROM a), joomla (id) AS (SELECT id FROM first) SELECT joomla.id,b.id FROM joomla JOIN b ON joomla.id=b.id',
+    ] as $definition) {
+      try { exportPortableDdl($definition, 'joomla', 'VIEW', '', []); }
+      catch (RuntimeException $error) { if (str_contains($error->getMessage(), 'common table expression')) ++$cteRejected; }
+    }
     class JConfig { public $host='localhost'; public $user='root'; public $password=''; public $db='joomla'; public $log_path='/persist/www/administrator/logs'; public $tmp_path='/persist/www/tmp'; public $session_handler='filesystem'; public $session_filesystem_path='/persist/sessions'; }
     $configuration = exportConfiguration(new JConfig(), ['name'=>'destination','user'=>'site_owner','password'=>"a'b\\\\c"]);
     token_get_all($configuration, TOKEN_PARSE);
-    echo json_encode(['view'=>$portable,'trigger'=>$trigger,'compoundRejected'=>$rejected,'configuration'=>$configuration], JSON_THROW_ON_ERROR);
+    echo json_encode(['view'=>$portable,'trigger'=>$trigger,'compoundRejected'=>$rejected,'crossDatabaseRejected'=>$crossDatabaseRejected,'cteRejected'=>$cteRejected,'configuration'=>$configuration], JSON_THROW_ON_ERROR);
   `);
   assert.equal(result, 0, `${errors}\n${output}`);
   assert.equal(errors, '');
@@ -44,6 +55,8 @@ test('actual PHP exporter preserves quoted SQL while normalizing portable DDL', 
   assert.doesNotMatch(value.view.sql, /`joomla`\./);
   assert.match(value.trigger.sql, /ON `items` FOR EACH ROW SET NEW\.hits=OLD\.hits\+1/);
   assert.equal(value.compoundRejected, true);
+  assert.equal(value.crossDatabaseRejected, true);
+  assert.equal(value.cteRejected, 2);
   assert.match(value.configuration, /public \$db = 'destination'/);
   assert.match(value.configuration, /__DIR__ \. '\/administrator\/logs'/);
   assert.match(value.configuration, /session_handler = 'database'/);

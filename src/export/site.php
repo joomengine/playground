@@ -150,6 +150,22 @@ function exportPortableDdl(string $sql, string $schema, string $kind, string $mo
         $object = $positions[$position + 2] ?? null;
         $previous = $tokens[$positions[$position - 1] ?? -1]['value'] ?? '';
         $previousKind = $tokens[$positions[$position - 1] ?? -1]['kind'] ?? '';
+        if ($token['value'] === $schema) {
+            $aliasPosition = $position + 1;
+            // A CTE may supply an explicit column list before its AS clause.
+            if (($tokens[$positions[$aliasPosition] ?? -1]['value'] ?? null) === '(') {
+                $depth = 0;
+                do {
+                    $value = $tokens[$positions[$aliasPosition++] ?? -1]['value'] ?? null;
+                    if ($value === '(') ++$depth;
+                    elseif ($value === ')') --$depth;
+                } while ($depth > 0 && $aliasPosition < count($positions));
+            }
+            if (strtoupper($tokens[$positions[$aliasPosition] ?? -1]['value'] ?? '') === 'AS'
+                && ($tokens[$positions[$aliasPosition + 1] ?? -1]['value'] ?? null) === '(') {
+                throw new RuntimeException('A common table expression conflicts with its source database name. Rename that expression before exporting.');
+            }
+        }
         if (end($contexts) === 'from' && $token['value'] === $schema && ($tokens[$next ?? -1]['value'] ?? null) !== '.'
             && (strtoupper($previous) === 'AS' || $previous === ')' || in_array($previousKind, ['identifier', 'word'], true))
             && !in_array(strtoupper($previous), ['FROM', 'JOIN'], true)) throw new RuntimeException('A view alias conflicts with its source database name. Rename that alias before exporting.');
@@ -160,11 +176,24 @@ function exportPortableDdl(string $sql, string $schema, string $kind, string $mo
             $tokens[$index]['raw'] = '';
             $tokens[$next]['raw'] = '';
             if (in_array($tokens[$object]['value'], $viewNames, true) && $position > $objectPosition + 1) $dependencies[] = $tokens[$object]['value'];
-        } elseif (in_array(strtoupper($previous), ['FROM', 'JOIN', 'UPDATE', 'INTO', 'REFERENCES'], true)) {
+        } elseif (in_array(strtoupper($previous), ['FROM', 'JOIN', 'UPDATE', 'INTO', 'REFERENCES'], true)
+            || (end($contexts) === 'from' && in_array($previous, [',', '('], true))) {
             throw new RuntimeException('Cross-database references cannot be included in a portable site export.');
         }
     }
     return ['sql' => implode('', array_column($tokens, 'raw')), 'dependencies' => array_values(array_unique($dependencies))];
+}
+
+function exportCheckTableDefinition(string $definition): void
+{
+    $tokens = array_values(array_filter(exportSqlTokens($definition), static fn (array $token): bool => !in_array($token['kind'], ['space', 'comment'], true)));
+    for ($index = 0; $index < count($tokens) - 2; ++$index) {
+        $clause = array_slice($tokens, $index, 3);
+        if (array_column($clause, 'kind') === ['word', 'word', 'word']
+            && array_map('strtoupper', array_column($clause, 'value')) === ['WITH', 'SYSTEM', 'VERSIONING']) {
+            throw new RuntimeException('Portable export does not support system-versioned tables because their historical rows require a separate history export. No partial export was produced.');
+        }
+    }
 }
 
 function exportDatabase(JConfig $config, string $path): array
@@ -215,6 +244,7 @@ function exportDatabase(JConfig $config, string $path): array
             $identifier = exportIdentifier($name);
             $definition = $database->query('SHOW CREATE TABLE ' . $identifier)->fetch(PDO::FETCH_NUM);
             if (!isset($definition[1]) || !is_string($definition[1])) throw new RuntimeException('Cannot read table schema: ' . $name);
+            exportCheckTableDefinition($definition[1]);
             exportStatement($streams, 'DROP TABLE IF EXISTS ' . $identifier, $size);
             exportStatement($streams, $definition[1], $size);
             $tables[] = $name;

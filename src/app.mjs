@@ -1,7 +1,7 @@
 import { createShareURL, normalizeConfiguration, parseCatalog, readURLConfiguration } from './config.mjs';
 import { loadBlueprintCatalog, resolveBlueprintConfiguration } from './blueprints.mjs';
 import { createPlayground, prepareEnvironment, resetPlayground } from './playground.mjs';
-import { defaultSiteKey, forgetSite, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from './ui-state.mjs';
+import { defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from './ui-state.mjs';
 
 const $ = (id) => document.getElementById(id);
 const deploymentURL = new URL('../', import.meta.url).href;
@@ -80,6 +80,8 @@ function setBusy(value) {
   $('launch-button').disabled = busy || Boolean(runtime) || unavailable;
   $('embedded-launch').disabled = busy || Boolean(runtime) || unavailable;
   $('retry-button').disabled = busy || unavailable;
+  $('new-site-button').disabled = busy || unavailable;
+  $('saved-site').disabled = busy || unavailable || Object.keys(savedState.sites).length === 0;
   for (const id of controls) $(id).disabled = busy || !runtime;
   $('reset-button').disabled = busy || (!runtime && (unavailable || !fields.persistence.checked));
   $('save-button').disabled = busy || !runtime || !currentConfig?.persistence;
@@ -186,6 +188,7 @@ function applyConfiguration(config, input = config, blueprint) {
   updateCompatibility({ preserve: true });
 }
 function writePreferences() {
+  renderSavedSites();
   try {
     if (!preferences) throw new Error('Browser preference storage is unavailable.');
     preferences.setItem(preferenceKey, JSON.stringify(savedState));
@@ -194,6 +197,20 @@ function writePreferences() {
     activity('Site data is available, but automatic-resume preferences could not be saved. Keep the site key to open it again.');
     return false;
   }
+}
+function renderSavedSites(selectedKey = runtime && currentConfig?.persistence ? currentConfig.storageKey : savedState.active) {
+  const select = $('saved-site');
+  const entries = Object.values(savedState.sites).reverse();
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = entries.length ? 'Choose a saved site…' : 'No saved sites yet';
+  select.replaceChildren(empty, ...entries.map((entry) => {
+    const option = document.createElement('option');
+    option.value = entry.storageKey;
+    option.textContent = `${entry.siteName} · Joomla ${entry.joomlaVersion} · ${entry.storageKey}`;
+    return option;
+  }));
+  select.value = selectedKey || '';
 }
 function rememberCurrentSite() {
   if (currentConfig?.persistence) {
@@ -224,6 +241,12 @@ async function launch() {
     if (freshKeyPending) {
       input.storageKey = `${defaultSiteKey(input.blueprintId, input.joomlaVersion).slice(0, 44)}-fresh-${crypto.randomUUID().slice(0, 8)}`;
       fields.storageKey.value = input.storageKey;
+    }
+    const recipe = await isolateSetup(savedState, input);
+    input = recipe.configuration;
+    if (recipe.changed) {
+      fields.storageKey.value = input.storageKey;
+      activity(`Changed setup steps use a separate site key, “${input.storageKey}”. Your previous site is preserved.`);
     }
     const resolved = await resolve(input);
     currentInput = input;
@@ -256,7 +279,7 @@ async function launch() {
     const resumeSaved = rememberCurrentSite();
     selectedProfile = { blueprintId: currentConfig.blueprintId, joomlaVersion: currentConfig.joomlaVersion };
     rememberDraft({ blueprintId: currentConfig.blueprintId, joomlaVersion: currentConfig.joomlaVersion });
-    activity(currentConfig.persistence
+    activity(recipe.changed ? `Site ready under “${currentConfig.storageKey}”. Your previous site is available in Saved sites.` : currentConfig.persistence
       ? resumeSaved ? 'Site ready. Reopening this playground will resume your saved site.' : `Site ready. Keep saved site key “${currentConfig.storageKey}” to reopen it.`
       : 'Temporary site ready. Download your work before closing.');
   } catch (error) {
@@ -271,13 +294,14 @@ async function launch() {
     if (!$('error-view').hidden) $('preview-dot').className = 'status-dot failed';
   }
 }
-async function closeSite({ reset = false } = {}) {
+async function closeSite({ reset = false, save = false } = {}) {
   if (busy || !runtime) return false;
   setBusy(true);
   closing = true;
   const handle = runtime;
   destroyPreview();
   try {
+    if (save) { activity('Saving the current site before closing…'); await handle.flush(); }
     if (reset) await handle.reset();
     else await handle.close();
     runtime = undefined;
@@ -296,6 +320,45 @@ async function closeSite({ reset = false } = {}) {
     displayError(error, reset ? 'The saved site could not be reset' : 'The site could not be closed');
     return false;
   } finally { closing = false; setBusy(false); }
+}
+
+async function newSite() {
+  if (busy || !catalog || !blueprintCatalog) return;
+  if (runtime && !currentConfig.persistence && !confirm('Starting another site closes this temporary site. Download your work first if you want to keep it. Continue?')) return;
+  rememberDraft();
+  if (runtime && !await closeSite({ save: currentConfig.persistence })) return;
+  const label = blueprintCatalog.blueprints.find((entry) => entry.id === fields.blueprintId.value)?.title || 'Joomla site';
+  fields.storageKey.value = `${defaultSiteKey(fields.blueprintId.value, fields.joomlaVersion.value).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`;
+  fields.siteName.value = `${label.slice(0, 88)} ${Object.keys(savedState.sites).length + 1}`;
+  $('admin-password').value = password();
+  pendingFresh = true;
+  freshKeyPending = false;
+  renderSavedSites('');
+  show('welcome');
+  setBusy(false);
+  activity(`Choose settings for new site “${fields.storageKey.value}”, then Launch. Your saved sites are preserved.`);
+  fields.siteName.focus();
+}
+
+async function openSavedSite(key) {
+  if (busy || !Object.hasOwn(savedState.sites, key)) return;
+  if (runtime && currentConfig.storageKey === key && currentConfig.persistence) return;
+  if (runtime && !currentConfig.persistence && !confirm('Opening a saved site closes this temporary site. Download your work first if you want to keep it. Continue?')) {
+    renderSavedSites(''); return;
+  }
+  if (runtime && !await closeSite({ save: currentConfig.persistence })) return;
+  setBusy(true);
+  try {
+    const input = { ...savedState.sites[key], hideToolbar, admin: administrator() };
+    const resolved = await resolve(input);
+    applyConfiguration(resolved.configuration, input, resolved.blueprint);
+    freshKeyPending = false;
+    show('welcome');
+    $('retry-button').hidden = false;
+    renderSavedSites(key);
+  } catch (error) { displayError(error, 'This saved site is unavailable'); }
+  finally { setBusy(false); }
+  if ($('error-view').hidden) await launch();
 }
 async function changeProfile() {
   if (busy || !catalog) return;
@@ -339,6 +402,8 @@ $('launch-form').addEventListener('submit', (event) => { event.preventDefault();
 $('embedded-launch').addEventListener('click', () => void launch());
 $('retry-button').addEventListener('click', async () => { if (runtime && !await closeSite()) return; await launch(); });
 $('close-button').addEventListener('click', () => void closeSite());
+$('new-site-button').addEventListener('click', () => void newSite());
+$('saved-site').addEventListener('change', (event) => void openSavedSite(event.target.value));
 $('restart-button').addEventListener('click', async () => {
   if (currentConfig && !currentConfig.persistence && !confirm('Restarting creates a fresh temporary site. Download your work first if you want to keep it. Continue?')) return;
   if (await closeSite()) await launch();
@@ -464,6 +529,7 @@ async function initialize() {
     ]);
     catalog = parseCatalog(manifest);
     blueprintCatalog = recipes;
+    renderSavedSites();
     fillOptions(fields.joomlaVersion, catalog.joomla);
     fillOptions(fields.phpVersion, catalog.php);
     fillOptions(fields.blueprintId, blueprintCatalog.blueprints);

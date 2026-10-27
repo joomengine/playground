@@ -80,6 +80,14 @@ async function bounded(promise, label, timeoutMs = requestTimeout) {
 }
 
 function observePage(page) {
+  let step;
+  Object.defineProperty(page, 'testStep', {
+    get: () => step,
+    set(value) {
+      step = value;
+      console.log(JSON.stringify({ browser: page.context().browser().browserType().name(), step: value }));
+    },
+  });
   page.errors = [];
   page.logs = [];
   page.failedSiteRequests = [];
@@ -228,7 +236,7 @@ async function renderedSiteFrame(page) {
 }
 
 async function previewContract(page, action = 'read') {
-  const response = await page.evaluate(async (action) => {
+  const response = await bounded(page.evaluate(async (action) => {
     const frame = document.getElementById('site-frame');
     const source = new URL(frame.src);
     const prefix = source.pathname.match(/^.*\/__site\/[^/]+\/[^/]+\//)?.[0];
@@ -237,7 +245,7 @@ async function previewContract(page, action = 'read') {
     url.searchParams.set('action', action);
     const response = await fetch(url);
     return { status: response.status, text: await response.text() };
-  }, action);
+  }, action), `Preview data ${action}`);
   assert.equal(response.status, 200, response.text);
   return JSON.parse(response.text);
 }
@@ -498,13 +506,13 @@ for (const name of browserNames) {
       const setup = () => ({ admin: configuration(defaultPair).admin, persistence: false, storageKey: `blueprint-${randomUUID()}` });
       try {
         const componentCases = [
-          ...manifest.joomla.map((entry) => ({ id: 'jcb', version: entry.version, element: 'com_componentbuilder' })),
+          ...combinations.map((pair) => ({ id: 'jcb', version: pair.joomlaVersion, phpVersion: pair.phpVersion, element: 'com_componentbuilder' })),
           { id: 'patchtester', version: defaultPair.joomlaVersion, element: 'com_patchtester' },
           { id: 'weblinks', version: defaultPair.joomlaVersion, element: 'com_weblinks' },
         ];
         for (const item of componentCases) {
-          page.testStep = `${item.id} on Joomla ${item.version}`;
-          const result = await startBlueprint(page, new URLSearchParams({ blueprint: item.id, joomla: item.version, php: defaultPair.phpVersion }).toString(), setup());
+          page.testStep = `${item.id} on Joomla ${item.version}, PHP ${item.phpVersion ?? defaultPair.phpVersion}`;
+          const result = await startBlueprint(page, new URLSearchParams({ blueprint: item.id, joomla: item.version, php: item.phpVersion ?? defaultPair.phpVersion }).toString(), setup());
           const registered = await phpJSON(page, `${PDO} echo json_encode($db->query("SELECT enabled FROM jml_extensions WHERE type='component' AND element='${item.element}'")->fetchColumn(), JSON_THROW_ON_ERROR);`);
           assert.equal(registered, 1, `${item.id} must be installed and enabled by Joomla.`);
           const component = await request(page, `/administrator/index.php?option=${item.element}`);
@@ -512,6 +520,23 @@ for (const name of browserNames) {
           assert.doesNotMatch(component.text, /name\s*=\s*["']passwd["']|Fatal error|Class .* not found|Call to undefined/i, 'The installed component must render in an authenticated administrator session.');
           assert.match(component.text, new RegExp(item.element));
           assert.ok(result.configuration.extensions.length > 0);
+          if (item.id === 'jcb') {
+            const spreadsheet = await phpJSON(page, `
+              require '/persist/www/libraries/phpspreadsheet/vendor/autoload.php';
+              $book = new \\PhpOffice\\PhpSpreadsheet\\Spreadsheet();
+              $book->getActiveSheet()->setCellValue('A1', 'JoomEngine browser spreadsheet');
+              $book->getActiveSheet()->setCellValue('B2', 42);
+              (new \\PhpOffice\\PhpSpreadsheet\\Writer\\Xlsx($book))->save('/tmp/browser-spreadsheet.xlsx');
+              $restored = \\PhpOffice\\PhpSpreadsheet\\IOFactory::load('/tmp/browser-spreadsheet.xlsx');
+              echo json_encode(['text'=>$restored->getActiveSheet()->getCell('A1')->getValue(),
+                'number'=>$restored->getActiveSheet()->getCell('B2')->getValue(),
+                'bytes'=>filesize('/tmp/browser-spreadsheet.xlsx'), 'integerSize'=>PHP_INT_SIZE], JSON_THROW_ON_ERROR);
+              unlink('/tmp/browser-spreadsheet.xlsx');`);
+            assert.equal(spreadsheet.text, 'JoomEngine browser spreadsheet');
+            assert.equal(spreadsheet.number, 42);
+            assert.ok(spreadsheet.bytes > 0);
+            assert.equal(spreadsheet.integerSize, 4, 'The official dependency solution must actually operate on upstream wasm32 PHP.');
+          }
           proof.push({ ...item, administrator: true });
           await close(page);
         }
@@ -539,6 +564,15 @@ for (const name of browserNames) {
           proof.push({ id: 'heritage-demo', fresh, fromSnapshot: Boolean(result.installation.fromSnapshot), content });
           await close(page);
         }
+        page.testStep = 'default domain automatically opens JCB';
+        await page.goto(server.url);
+        await renderedSiteFrame(page);
+        assert.equal(await page.locator('#blueprint').inputValue(), 'jcb');
+        assert.match(await page.frameLocator('#site-frame').locator('html').innerHTML(), /com_componentbuilder/);
+        assert.equal(await page.frameLocator('#site-frame').locator('input[name="passwd"]').count(), 0);
+        await page.locator('#close-button').click();
+        await page.locator('#launch-button:enabled').waitFor();
+        proof.push({ id: 'jcb', defaultDomainAutostart: true });
         assert.deepEqual(page.errors, []);
         records.push({ ...defaultPair, blueprints: proof });
       } catch (error) { await saveBrowserDiagnostics(page, `blueprints-${name}`, error); throw error; }
@@ -677,11 +711,23 @@ for (const name of browserNames) {
         assert.equal((await previewContract(page)).database, null);
         await page.locator('#close-button').click();
         await page.locator('#launch-button:enabled').waitFor();
-        freshURL.searchParams.delete('fresh');
-        await page.goto(freshURL.href);
+        const savedURL = new URL(server.url);
+        savedURL.searchParams.set('key', savedKey);
+        await page.goto(savedURL.href);
         await renderedSiteFrame(page);
         assert.equal(await page.locator('#storage-key').inputValue(), savedKey);
         assert.deepEqual(await previewContract(page), afterSwitch, 'A fresh URL must leave the original saved site intact.');
+        page.testStep = 'new site control preserves saved sites';
+        await page.locator('#new-site-button').click();
+        await page.locator('#launch-button:enabled').waitFor();
+        assert.notEqual(await page.locator('#storage-key').inputValue(), savedKey);
+        assert.equal(await page.locator('#site-frame').count(), 0);
+        await page.locator('#launch-button').click();
+        await renderedSiteFrame(page);
+        assert.equal((await previewContract(page)).database, null, 'New site must install an independent database.');
+        await page.locator('#saved-site').selectOption(savedKey);
+        await renderedSiteFrame(page);
+        assert.deepEqual(await previewContract(page), afterSwitch, 'The saved-site selector must reopen the original files and database.');
         page.testStep = 'reset site';
         page.once('dialog', (dialog) => dialog.accept());
         await page.locator('#reset-button').click();
@@ -703,7 +749,7 @@ for (const name of browserNames) {
         await bounded(Promise.allSettled([...page.responseChecks]), 'Read dashboard responses', 10_000);
         assert.deepEqual(page.errors, [], JSON.stringify(page.responseErrors));
         assert.deepEqual(page.responseErrors, [], 'Dashboard AJAX must not contain PHP diagnostics or malformed JSON.');
-        records.push({ ...defaultPair, interfaceLaunch: true, interfaceReset: true, phpSwitch: changedPHP, persistedAutomaticResume: true, portableDownload: true, freshPreservesOriginal: true });
+        records.push({ ...defaultPair, interfaceLaunch: true, interfaceReset: true, phpSwitch: changedPHP, persistedAutomaticResume: true, portableDownload: true, freshPreservesOriginal: true, savedSiteSelector: true });
       } catch (error) {
         await saveBrowserDiagnostics(page, `interface-${name}`, error);
         throw error;
