@@ -93,6 +93,58 @@ function playgroundConsoleSession($container): void
         ->alias(\Joomla\Session\SessionInterface::class, 'session.cli');
 }
 
+function playgroundRuntimeConstants(string $root): void
+{
+    $entrypoint = file_get_contents($root . '/cli/joomla.php');
+    if (!preg_match('/const\s+JOOMLA_MINIMUM_PHP\s*=\s*[\'\"]([0-9.]+)[\'\"]/', $entrypoint, $match)) {
+        throw new RuntimeException('Cannot determine the Joomla release PHP requirement.');
+    }
+    define('JOOMLA_MINIMUM_PHP', $match[1]);
+    if (version_compare(PHP_VERSION, JOOMLA_MINIMUM_PHP, '<')) {
+        throw new RuntimeException('This Joomla release requires PHP ' . JOOMLA_MINIMUM_PHP . ' or newer.');
+    }
+}
+
+/** Bootstrap Joomla provisioning APIs with a private console session. */
+function playgroundApplication(string $root, bool $administratorModels = false): array
+{
+    chdir($root);
+    playgroundRuntimeConstants($root);
+    define('_JEXEC', 1);
+    define('JPATH_BASE', $root);
+    require $root . '/includes/defines.php';
+    require $root . '/includes/framework.php';
+    playgroundConsoleStreams(['cli/joomla.php']);
+    $container = \Joomla\CMS\Factory::getContainer();
+    playgroundConsoleSession($container);
+    $application = $administratorModels
+        ? $container->get(\Joomla\CMS\Application\AdministratorApplication::class)
+        : new \Joomla\CMS\Application\ConsoleApplication(
+        $container->get('config'),
+        $container->get(\Joomla\Event\DispatcherInterface::class),
+        $container,
+        $container->get(\Joomla\CMS\Language\LanguageFactoryInterface::class)->createLanguage('en-GB', false),
+        new \Symfony\Component\Console\Input\ArrayInput([]),
+        new \Symfony\Component\Console\Output\BufferedOutput()
+    );
+    $application->setSession($container->get(\Joomla\Session\SessionInterface::class));
+    $application->setUserFactory($container->get(\Joomla\CMS\User\UserFactoryInterface::class));
+    $application->setLogger($container->get(\Psr\Log\LoggerInterface::class));
+    \Joomla\CMS\Factory::$application = $application;
+    if ($administratorModels) {
+        $application->loadLanguage($container->get(\Joomla\CMS\Language\LanguageFactoryInterface::class)->createLanguage('en-GB', false));
+    }
+    $application->createExtensionNamespaceMap();
+    return [$application, $container, $container->get(\Joomla\Database\DatabaseInterface::class)];
+}
+
+function playgroundStoreTable($table, array $values): void
+{
+    if (!$table->bind($values) || !$table->check() || !$table->store()) {
+        throw new RuntimeException('Cannot save Joomla ' . get_class($table) . ': ' . $table->getError());
+    }
+}
+
 function playgroundRunConsole($application): int
 {
     $exitCode = null;

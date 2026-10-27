@@ -9,6 +9,7 @@ try {
         $zip->close();
     }
     chdir($root);
+    playgroundRuntimeConstants($root);
     define('_JEXEC', 1);
     define('JPATH_BASE', $root);
     require $root . '/includes/defines.php';
@@ -24,6 +25,8 @@ try {
     $language = $container->get(\Joomla\CMS\Language\LanguageFactoryInterface::class)->createLanguage(
         $config->get('language'), $config->get('debug_lang')
     );
+    $language->load('lib_joomla', JPATH_ADMINISTRATOR, 'en-GB', true);
+    $language->load('joomla', JPATH_ADMINISTRATOR, 'en-GB', true);
     $application = new \Joomla\CMS\Application\ConsoleApplication(
         $config, $container->get(\Joomla\Event\DispatcherInterface::class), $container, $language, $input, $output
     );

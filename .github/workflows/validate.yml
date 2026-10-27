@@ -1,8 +1,6 @@
 name: Validate playground
 
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -85,6 +83,10 @@ jobs:
           MARIADB_DRIVER_DIR: .cache/native
           BRIDGE_SOURCE_DIR: external/bridge
         run: npm run build
+      - name: Build verified demonstration snapshots
+        run: npm run build:blueprints
+      - name: Validate Joomla provisioning and portable export
+        run: node --test test/provisioning.integration.mjs
       - name: Install browser engines
         run: npx playwright install --with-deps chromium firefox
       - name: Validate Joomla in Chromium and Firefox

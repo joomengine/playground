@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  parseProvisioningResult, sha256, validateCommand, validateInstallOptions, verifyPackage,
+  parseProvisioningResult, sha256, validateCommand, validateContent, validateInstallOptions, verifyPackage,
 } from '../src/joomla/index.mjs';
 
 const configuration = {
@@ -32,6 +32,37 @@ test('extension URLs and optional checksums are validated', () => {
   assert.throws(() => validateInstallOptions({ ...configuration, extensions: [{ url: 'https://user:secret@example.test/file.zip' }] }), /credentials/);
   assert.throws(() => validateInstallOptions({ ...configuration, extensions: [{ url: '/extension.zip', sha256: 'invalid' }] }), /SHA-256/);
   assert.equal(validateInstallOptions({ ...configuration, extensions: [{ url: '/extension.zip', sha256: 'A'.repeat(64) }] }).extensions[0].sha256, 'a'.repeat(64));
+});
+
+test('language packages require exact tags and pinned download integrity', () => {
+  const language = { tag: 'nl-NL', url: '/packages/nl-NL.zip', sha256: 'A'.repeat(64) };
+  const options = validateInstallOptions({ ...configuration, language: 'nl-NL', languages: [language], blueprintId: 'heritage-demo' });
+  assert.equal(options.language, 'nl-NL');
+  assert.equal(options.languages[0].sha256, 'a'.repeat(64));
+  assert.equal(options.blueprintId, 'heritage-demo');
+  assert.throws(() => validateInstallOptions({ ...configuration, language: '../nl-NL' }), /language tag/);
+  assert.throws(() => validateInstallOptions({ ...configuration, languages: [{ ...language, sha256: undefined }] }), /checksum/);
+  assert.throws(() => validateInstallOptions({ ...configuration, languages: [{ ...language, url: 'javascript:alert(1)' }] }), /HTTP/);
+  assert.throws(() => validateInstallOptions({ ...configuration, blueprintId: '../demo' }), /identity/);
+});
+
+test('multilingual content requires real categories and a unique home in each language', () => {
+  const categories = [
+    { key: 'english', title: 'English heritage', language: 'en-GB' },
+    { key: 'dutch', title: 'Nederlands erfgoed', language: 'nl-NL' },
+  ];
+  const articles = [
+    { key: 'home-en', title: 'Our heritage', language: 'en-GB', category: 'english', home: true, introtext: '<p>Our stories</p>' },
+    { key: 'home-nl', title: 'Ons erfgoed', language: 'nl-NL', category: 'dutch', home: true, introtext: '<p>Onze verhalen</p>' },
+  ];
+  const content = { multilingual: true, categories, articles };
+  assert.equal(validateContent(content).articles[1].introtext, '<p>Onze verhalen</p>');
+  assert.equal(validateContent(content).articles[0].fulltext, '');
+  assert.throws(() => validateContent({ ...content, articles: [{ ...articles[0], category: 'dutch' }, articles[1]] }), /own language/);
+  assert.throws(() => validateContent({ ...content, articles: [articles[0]] }), /at least two/);
+  assert.throws(() => validateContent({ ...content, articles: [...articles, { ...articles[0], key: 'second-home' }] }), /one home/);
+  assert.throws(() => validateContent({ ...content, categories: [...categories, categories[0]] }), /unique/);
+  assert.throws(() => validateContent({ ...content, articles: [{ ...articles[0], introtext: 'x'.repeat(32769) }, articles[1]] }), /introduction/);
 });
 
 test('package checksum verification detects corrupt downloads before PHP extraction', async () => {

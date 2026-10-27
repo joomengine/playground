@@ -12,6 +12,7 @@ const admin = { password: 'a-long-test-password' };
 test('catalog limits configuration to a tested version combination', () => {
   const catalog = parseCatalog(manifest);
   assert.equal(normalizeConfiguration({ admin }, { catalog }).joomlaVersion, '6.2.0');
+  assert.equal(normalizeConfiguration({ admin, joomlaVersion: '5.4' }, { catalog }).joomlaVersion, '5.4.10');
   assert.throws(() => normalizeConfiguration({ admin, phpVersion: '8.3' }, { catalog }), /not available/);
   assert.throws(() => parseCatalog({ ...manifest, defaults: { phpVersion: '8.2', joomlaVersion: '6.2.0' } }), /incompatible/);
   assert.throws(() => parseCatalog({ php: [], joomla: [] }), /No tested/);
@@ -50,21 +51,39 @@ test('configuration validates credentials, storage and booleans', () => {
   assert.equal(config.admin.username, 'admin');
 });
 
-test('URL configuration cannot inject credentials, packages or commands', () => {
-  const { config, autostart } = readURLConfiguration('https://example.test/?php=8.5&joomla=6.2.0&path=%2Fadministrator%2F&toolbar=0&persist=0&start=1&password=secret&extensions=%5B%5D&startupCommands=evil');
-  assert.deepEqual(config, { phpVersion: '8.5', joomlaVersion: '6.2.0', initialPath: '/administrator/', hideToolbar: true, persistence: false });
+test('URL deployment options validate packages and commands while excluding credentials', () => {
+  const url = new URL('https://example.test/?blueprint=blank&php=8.5&joomla=6.2&language=nl-NL&login=no&fresh=1&path=%2Fadministrator%2F&toolbar=0&persist=0&password=secret');
+  url.searchParams.set('extensions', JSON.stringify([{ url: './public-package.zip' }]));
+  url.searchParams.set('commands', JSON.stringify([['cache:clean']]));
+  const { config, autostart } = readURLConfiguration(url);
+  assert.deepEqual(config, { blueprintId: 'blank', phpVersion: '8.5', joomlaVersion: '6.2', language: 'nl-NL', autoLogin: false, fresh: true,
+    initialPath: '/administrator/', hideToolbar: true, persistence: false,
+    extensions: [{ url: 'https://example.test/public-package.zip' }], startupCommands: [['cache:clean']] });
   assert.equal(autostart, true);
+  assert.equal(readURLConfiguration(`${url}&start=0`).autostart, false);
+  assert.equal(readURLConfiguration('https://example.test/?key=my-site').config.storageKey, 'my-site');
+  for (const query of ['login=maybe', 'blueprint=../private', 'key=../site', 'commands=not-json', 'language=dutch', 'extension=javascript:alert(1)']) {
+    assert.throws(() => readURLConfiguration(`https://example.test/?${query}`));
+  }
 });
 
-test('share URLs include only public display and version settings', () => {
+test('share URLs preserve public setup directives without administrator credentials or saved data', () => {
   const url = new URL(createShareURL('https://example.test/play/?secret=old#credentials', {
     phpVersion: '8.4', joomlaVersion: '6.2.0', initialPath: '/administrator/', hideToolbar: true,
     persistence: false, admin: { password: 'secret' }, storageKey: 'private-key',
-    extensions: [{ url: 'https://example.test/private.zip' }], startupCommands: [['secret:command']],
+    blueprintId: 'blank', language: 'nl-NL', autoLogin: false,
+    extensions: [{ url: 'https://example.test/public-package.zip' }], startupCommands: [['cache:clean']],
   }));
   assert.equal(url.pathname, '/play/');
-  assert.deepEqual([...url.searchParams.keys()], ['joomla', 'php', 'path', 'toolbar', 'persist', 'start']);
+  assert.equal(url.searchParams.get('blueprint'), 'blank');
+  assert.equal(url.searchParams.get('language'), 'nl-NL');
+  assert.equal(url.searchParams.get('login'), 'no');
+  assert.deepEqual(JSON.parse(url.searchParams.get('extensions')), [{ url: 'https://example.test/public-package.zip' }]);
+  assert.deepEqual(JSON.parse(url.searchParams.get('commands')), [['cache:clean']]);
   assert.equal(url.hash, '');
   assert.equal(url.href.includes('secret'), false);
   assert.equal(url.href.includes('private'), false);
+  const { config } = readURLConfiguration(url);
+  assert.deepEqual(config.extensions, [{ url: 'https://example.test/public-package.zip' }]);
+  assert.deepEqual(config.startupCommands, [['cache:clean']]);
 });
