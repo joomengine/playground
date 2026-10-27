@@ -110,7 +110,7 @@ export async function buildBlueprints({ directory = process.env.PLAYGROUND_DIST 
             'The restored administrator page must use the new authenticated session.');
         } finally { await runtime?.close(); runtime = undefined; }
 
-        const filename = `${descriptor.id}-${release.version}.zip`;
+        const filename = `${descriptor.id}-${release.version}-${sha256}.zip`;
         await writeFile(path.join(staging, filename), exported.bytes);
         const snapshot = {
           url: `../assets/snapshots/${filename}`, sha256, format: 'joomengine-playground-export',
