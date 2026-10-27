@@ -83,6 +83,7 @@ jobs:
         env:
           MARIADB_DRIVER_DIR: .cache/native
           BRIDGE_SOURCE_DIR: external/bridge
+          PHP_BINARY: php8.3
         run: npm run build
       - name: Validate provisioning and cross-version snapshot restoration
         run: npm run test:provisioning
