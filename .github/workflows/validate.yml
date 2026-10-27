@@ -1,0 +1,109 @@
+name: Validate playground
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Read immutable build inputs
+        id: pins
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          const pins = JSON.parse(readFileSync('versions.json', 'utf8'));
+          for (const value of [pins.nativeDriver.sourceCommit, pins.upstream.emsdkCommit]) {
+            if (!/^[a-f0-9]{40}$/.test(value)) throw new Error('Build sources must be immutable commit SHAs');
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, [
+            `bridge=${pins.nativeDriver.sourceCommit}`,
+            `emsdk=${pins.upstream.emsdkCommit}`,
+            `emscripten=${pins.upstream.emscripten}`,
+          ].join('\n') + '\n');
+          NODE
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: joomengine/mariadb-wasm-bridge
+          ref: ${{ steps.pins.outputs.bridge }}
+          path: external/bridge
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: emscripten-core/emsdk
+          ref: ${{ steps.pins.outputs.emsdk }}
+          path: external/emsdk
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake bison re2c libtool pkg-config
+          npm ci --ignore-scripts
+      - name: Configure pinned Emscripten compiler
+        env:
+          EMSCRIPTEN_VERSION: ${{ steps.pins.outputs.emscripten }}
+        run: |
+          external/emsdk/emsdk install "$EMSCRIPTEN_VERSION"
+          external/emsdk/emsdk activate "$EMSCRIPTEN_VERSION"
+      - name: Compile version-matched native PDO extensions
+        run: |
+          source external/emsdk/emsdk_env.sh
+          while IFS= read -r minor; do
+            bash external/bridge/native/build-upstream.sh "$minor" "$PWD/.cache/native"
+          done < <(node --input-type=module -e "import p from './versions.json' with {type:'json'}; for (const v of p.php) console.log(v.version)")
+      - name: Prepare real MariaDB engine for native validation
+        working-directory: external/bridge
+        run: |
+          npm ci --ignore-scripts
+          npm run prepare:engine
+      - name: Validate upstream PHP and native MariaDB PDO
+        run: |
+          PHP_WASM_MODULE_ROOT="$PWD/node_modules" \
+          PHP_WASM_EXTENSION_DIR="$PWD/.cache/native" \
+          node --test external/bridge/native/tests/upstream.test.mjs
+      - name: Validate source and integration helpers
+        run: |
+          npm run check
+          npm test
+      - name: Build verified static distribution
+        env:
+          MARIADB_DRIVER_DIR: .cache/native
+          BRIDGE_SOURCE_DIR: external/bridge
+        run: npm run build
+      - name: Install browser engines
+        run: npx playwright install --with-deps chromium firefox
+      - name: Validate Joomla in Chromium and Firefox
+        env:
+          PLAYGROUND_BROWSERS: chromium,firefox
+        run: npm run test:browser
+      - name: Retain tested static distribution
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playground-static
+          path: dist/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playground-test-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14

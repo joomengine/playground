@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f5f4ef">
+  <meta name="description" content="A real Joomla site in your browser, powered by PHP WebAssembly and MariaDB.">
+  <title>JoomEngine Playground</title>
+  <link rel="stylesheet" href="./src/styles.css">
+  <script type="module" src="./src/app.mjs"></script>
+</head>
+<body>
+  <a class="skip-link" href="#settings">Skip to playground settings</a>
+  <header class="site-header" id="site-header">
+    <a class="brand" href="./" aria-label="JoomEngine Playground home">
+      <svg viewBox="0 0 36 36" aria-hidden="true"><rect x="2" y="2" width="14" height="14" rx="4"/><rect x="20" y="2" width="14" height="14" rx="4"/><rect x="2" y="20" width="14" height="14" rx="4"/><path d="M20 20h14v4a10 10 0 0 1-10 10h-4z"/></svg>
+      <span>JoomEngine<span class="brand-product">Playground</span></span>
+    </a>
+    <a class="source-link" href="https://github.com/joomengine/playground" target="_blank" rel="noopener noreferrer">View source <span aria-hidden="true">↗</span></a>
+  </header>
+
+  <main id="main">
+    <section class="intro" id="intro" aria-labelledby="page-title">
+      <div><p class="eyebrow">A little room to build something.</p><h1 id="page-title">Joomla. In your browser.</h1><p class="intro-copy">Explore a real Joomla site with PHP and MariaDB. Start a fresh idea, try an extension, or make yourself at home.</p></div>
+      <div class="runtime-note"><span class="status-dot" aria-hidden="true"></span>Runs on your device<span>No server setup required</span></div>
+    </section>
+
+    <div class="workspace">
+      <aside class="settings-panel" id="settings" aria-labelledby="settings-title">
+        <div class="panel-heading"><span class="step-number">01</span><div><h2 id="settings-title">Make it yours</h2><p>Choose your starting point.</p></div></div>
+        <form id="launch-form">
+          <fieldset id="configuration-fields" disabled>
+            <legend class="sr-only">Site configuration</legend>
+            <div class="field"><label for="joomla-version">Joomla version</label><select id="joomla-version" name="joomlaVersion" required><option>Loading versions…</option></select></div>
+            <div class="field"><label for="php-version">PHP version</label><select id="php-version" name="phpVersion" required><option>Loading versions…</option></select><p class="field-help" id="compatibility-note">Available combinations are checked together.</p></div>
+            <div class="field"><label for="site-name">Site name</label><input id="site-name" name="siteName" value="Joomla Playground" maxlength="100" required autocomplete="off"></div>
+            <label class="toggle-row" for="persistence"><span><strong>Keep my site</strong><small>Save files and database in this browser.</small></span><input id="persistence" name="persistence" type="checkbox" checked><span class="toggle" aria-hidden="true"></span></label>
+            <p class="storage-note">Browser data can be cleared or evicted. Keep a separate backup of work you need.</p>
+
+            <details id="advanced-settings" class="advanced-settings">
+              <summary>More settings <span aria-hidden="true">+</span></summary>
+              <div class="advanced-content">
+                <div class="field"><label for="storage-key">Saved site key</label><input id="storage-key" value="default" maxlength="64" pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}" required autocomplete="off"><p class="field-help">Use a different key for an independent site.</p></div>
+                <div class="field"><label for="initial-path">Initial page</label><input id="initial-path" value="/" maxlength="2048" required spellcheck="false"><p class="field-help">For example, /administrator/.</p></div>
+                <label class="check-row"><input id="auto-login" type="checkbox" checked><span>Sign in to administration automatically</span></label>
+                <div class="settings-divider">New site administrator</div>
+                <p class="field-help">These details apply to a new installation. An existing saved site keeps its account.</p>
+                <div class="field"><label for="admin-name">Full name</label><input id="admin-name" value="Playground Administrator" maxlength="100" required autocomplete="off"></div>
+                <div class="field"><label for="admin-username">Username</label><input id="admin-username" value="admin" maxlength="100" required autocomplete="off" autocapitalize="none" spellcheck="false"></div>
+                <div class="field"><label for="admin-email">Email</label><input id="admin-email" type="email" value="admin@example.test" maxlength="254" required autocomplete="off"></div>
+                <div class="field"><label for="admin-password">Password</label><div class="password-field"><input id="admin-password" type="password" minlength="12" maxlength="128" required autocomplete="new-password"><button type="button" id="show-password" aria-label="Show password" aria-pressed="false">Show</button></div><p class="field-help">Generated for this session. Passwords are never added to shared links.</p></div>
+                <div class="settings-divider">Setup steps</div>
+                <div class="field"><label for="extensions">Extension packages <span class="optional">optional</span></label><textarea id="extensions" rows="4" spellcheck="false" aria-describedby="extensions-help">[]</textarea><p class="field-help" id="extensions-help">JSON list of ZIP packages: [{"url":"https://…","sha256":"…"}]. The checksum is optional. The server must allow browser downloads.</p></div>
+                <div class="field"><label for="startup-commands">Joomla console commands <span class="optional">optional</span></label><textarea id="startup-commands" rows="3" spellcheck="false" aria-describedby="commands-help">[]</textarea><p class="field-help" id="commands-help">JSON list of argument lists, for example [["cache:clean"]]. Commands run through Joomla’s console.</p></div>
+              </div>
+            </details>
+          </fieldset>
+          <button class="button button-primary launch-button" id="launch-button" type="submit" disabled><span>Launch playground</span><span aria-hidden="true">↗</span></button>
+          <p class="launch-hint" id="launch-hint">The first launch downloads the runtime and Joomla.</p>
+        </form>
+      </aside>
+
+      <section class="preview-panel" aria-label="Joomla site preview">
+        <div class="preview-toolbar" id="preview-toolbar">
+          <div class="preview-title"><span class="status-dot muted" id="preview-dot" aria-hidden="true"></span><span id="preview-label">Your playground</span></div>
+          <div class="preview-actions">
+            <button class="icon-button" id="save-button" type="button" disabled title="Save files and database">Save</button>
+            <button class="icon-button" id="restart-button" type="button" disabled title="Restart PHP and reopen this site">Restart</button>
+            <button class="icon-button" id="close-button" type="button" disabled title="Close this site and change settings">Close</button>
+            <button class="icon-button danger" id="reset-button" type="button" disabled title="Delete this playground site">Reset</button>
+            <button class="icon-button" id="share-button" type="button" disabled title="Copy a link with the selected versions">Share</button>
+            <a class="icon-button" id="open-link" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true" title="Open site in a new tab">Open <span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+        <div class="preview-body" id="preview-body">
+          <div class="welcome" id="welcome">
+            <div class="welcome-art" aria-hidden="true"><span class="art-window"><span></span><span></span><span></span><i></i><b></b><em></em></span><span class="art-tag">&lt;?php</span><span class="art-database"><i></i><i></i><i></i></span><span class="art-spark">✳</span></div>
+            <p class="eyebrow">A real site. A fresh start.</p><h2>Your next idea goes here.</h2><p>Everything runs locally in your browser.<br>Pick your versions, then launch your playground.</p>
+            <button class="button button-primary" id="embedded-launch" type="button" hidden>Launch playground <span aria-hidden="true">↗</span></button>
+            <div class="technology-tags" aria-label="Runtime technologies"><span>Joomla</span><span>PHP WebAssembly</span><span>MariaDB</span></div>
+          </div>
+          <div class="loading-view" id="loading-view" hidden>
+            <span class="loading-symbol" aria-hidden="true">✳</span><h2 id="loading-title">Preparing your playground</h2><p id="loading-message">Getting ready…</p><progress id="loading-progress" aria-label="Playground setup progress"></progress><p class="field-help">The first launch can take a few minutes. Keep this tab open.</p>
+          </div>
+          <div class="error-view" id="error-view" hidden tabindex="-1"><span class="error-symbol" aria-hidden="true">!</span><h2 id="error-title">The playground couldn’t start</h2><p id="error-message"></p><button class="button button-secondary" id="retry-button" type="button">Try again</button></div>
+          <iframe id="site-frame" title="Your Joomla playground" hidden referrerpolicy="same-origin" allow="clipboard-write"></iframe>
+        </div>
+        <div class="status-bar"><p id="status-message" role="status" aria-live="polite">Loading the runtime catalog…</p><button id="log-toggle" type="button" aria-expanded="false" aria-controls="activity-log">Activity <span aria-hidden="true">⌃</span></button></div>
+        <ol id="activity-log" class="activity-log" aria-label="Playground activity" hidden></ol>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer" id="site-footer"><p>Built on the work of <a href="https://github.com/seanmorris/php-wasm" target="_blank" rel="noopener noreferrer">Sean Morris &amp; php-wasm contributors</a>, <a href="https://github.com/emscripten-core/emscripten" target="_blank" rel="noopener noreferrer">Emscripten</a> and <a href="https://github.com/shyim/lite4mariadb" target="_blank" rel="noopener noreferrer">lite4mariadb</a>.</p><span>Made for exploring.</span></footer>
+  <noscript><div class="noscript">This playground needs JavaScript and WebAssembly enabled to run PHP and MariaDB in your browser.</div></noscript>
+</body>
+</html>
