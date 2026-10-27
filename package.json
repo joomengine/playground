@@ -1,0 +1,39 @@
+{
+  "name": "@joomengine/playground",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Joomla in the browser with upstream PHP WebAssembly and MariaDB",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.5.0"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "serve": "node scripts/serve.mjs",
+    "test": "node scripts/test.mjs",
+    "test:browser": "node --test test/browser.test.mjs",
+    "check": "node scripts/check.mjs"
+  },
+  "dependencies": {
+    "fflate": "0.8.3",
+    "php-cgi-wasm": "0.2.0",
+    "php-wasm-dom": "0.2.0",
+    "php-wasm-gd": "0.2.0",
+    "php-wasm-iconv": "0.2.0",
+    "php-wasm-intl": "0.2.0",
+    "php-wasm-libxml": "0.2.0",
+    "php-wasm-libzip": "0.2.0",
+    "php-wasm-mbstring": "0.2.0",
+    "php-wasm-openssl": "0.2.0",
+    "php-wasm-simplexml": "0.2.0",
+    "php-wasm-xml": "0.2.0",
+    "php-wasm-xmlreader": "0.2.0",
+    "php-wasm-xmlwriter": "0.2.0",
+    "php-wasm-zlib": "0.2.0"
+  },
+  "devDependencies": {
+    "playwright": "1.64.1",
+    "php-wasm": "0.2.0"
+  }
+}
