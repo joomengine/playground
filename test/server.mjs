@@ -20,7 +20,7 @@ const contentTypes = {
 };
 
 /** Serve the built artifact exactly as static hosting would, beneath a project path. */
-export async function createStaticServer({ directory, prefix = '/playground/', isolation = true, fixtures = {} }) {
+export async function createStaticServer({ directory, prefix = '/playground/', isolation = true, fixtures = {}, corsOrigin, corsPaths } = {}) {
   if (!prefix.startsWith('/') || !prefix.endsWith('/') || prefix.includes('..')) {
     throw new TypeError('A static test prefix must start and end with a slash.');
   }
@@ -39,9 +39,20 @@ export async function createStaticServer({ directory, prefix = '/playground/', i
         return;
       }
       const relative = pathname.slice(prefix.length);
+      const allowCORS = corsOrigin && (!corsPaths || corsPaths.includes(relative));
+      if (allowCORS) {
+        response.setHeader('Access-Control-Allow-Origin', corsOrigin);
+        response.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, PATCH, OPTIONS');
+        response.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Playground-Proof');
+        response.setHeader('Vary', 'Origin');
+      }
+      if (request.method === 'OPTIONS') {
+        response.writeHead(allowCORS ? 204 : 403).end();
+        return;
+      }
       if (Object.hasOwn(fixtures, relative)) {
         response.setHeader('Content-Type', contentTypes[path.extname(relative)] || 'application/octet-stream');
-        response.end(fixtures[relative]);
+        response.end(typeof fixtures[relative] === 'function' ? await fixtures[relative](request) : fixtures[relative]);
         return;
       }
       if (relative === '__test__.html') {

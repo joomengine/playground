@@ -47,23 +47,25 @@ jobs:
           repository: emscripten-core/emsdk
           ref: ${{ steps.pins.outputs.emsdk }}
           path: external/emsdk
-      - name: Install build prerequisites
+      - name: Install native build prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install -y autoconf automake bison re2c libtool pkg-config php8.3-cli php8.3-mbstring php8.3-xml php8.3-gd php8.3-zip php8.3-curl
-          npm ci --ignore-scripts
+      - name: Install locked JavaScript dependencies
+        run: npm ci --ignore-scripts
       - name: Configure pinned Emscripten compiler
         env:
           EMSCRIPTEN_VERSION: ${{ steps.pins.outputs.emscripten }}
         run: |
           external/emsdk/emsdk install "$EMSCRIPTEN_VERSION"
           external/emsdk/emsdk activate "$EMSCRIPTEN_VERSION"
-      - name: Compile version-matched native PDO and fileinfo extensions
+      - name: Compile version-matched native PDO, fileinfo and curl extensions
         run: |
           source external/emsdk/emsdk_env.sh
           while IFS= read -r minor; do
             bash external/bridge/native/build-upstream.sh "$minor" "$PWD/.cache/native"
             BRIDGE_SOURCE_DIR=external/bridge node scripts/build-fileinfo.mjs "$minor"
+            BRIDGE_SOURCE_DIR=external/bridge node scripts/build-curl.mjs "$minor"
           done < <(node --input-type=module -e "import p from './versions.json' with {type:'json'}; for (const v of p.php) console.log(v.version)")
       - name: Prepare real MariaDB engine for native validation
         working-directory: external/bridge

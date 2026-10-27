@@ -14,6 +14,8 @@ const directory = path.resolve(process.env.PLAYGROUND_DIST || path.join(root, 'd
 const manifestBytes = await readFile(path.join(directory, 'assets/manifest.json'));
 const manifest = JSON.parse(manifestBytes);
 const guidedTourProgram = await readFile(new URL('./fixtures/guided-tour.php', import.meta.url), 'utf8');
+const bannerAssets = JSON.parse(await readFile(new URL('../dependencies/jcb-banners/assets.json', import.meta.url), 'utf8')).assets;
+assert.equal(bannerAssets.length, 7, 'The complete set of JCB sponsor artwork must be audited.');
 const manifestSha256 = createHash('sha256').update(manifestBytes).digest('hex');
 const inventoryBytes = await readFile(path.join(directory, 'asset-inventory.json'));
 const inventorySha256 = createHash('sha256').update(inventoryBytes).digest('hex');
@@ -60,6 +62,14 @@ echo json_encode(['php' => PHP_VERSION,
 `),
 });
 const extensionSha256 = createHash('sha256').update(extensionArchive).digest('hex');
+const curlProof = { proof: 'Native PHP cURL through browser HTTP', nonce: randomUUID() };
+const curlCorsProof = { proof: 'Native PHP cURL with browser CORS', nonce: randomUUID() };
+
+function dashboardErrors(html) {
+  return [...html.matchAll(/<script\b[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi)]
+    .flatMap((match) => JSON.parse(match[1])['joomla.messages'] ?? [])
+    .flatMap((message) => [...(message.danger ?? []), ...(message.error ?? [])]);
+}
 
 function configuration(pair, extra = {}) {
   return {
@@ -377,10 +387,15 @@ for (const name of browserNames) {
     const browser = await browsers[name].launch({ headless: true, ...(executablePath ? { executablePath } : {}),
       ...(name === 'chromium' ? { args: ['--no-sandbox'] } : {}),
       env: { ...process.env, MOZ_DISABLE_CONTENT_SANDBOX: '1', MOZ_DISABLE_RDD_SANDBOX: '1' } });
-    const fixtures = { '__test_extension.zip': extensionArchive };
+    const fixtures = { '__test_extension.zip': extensionArchive, '__test_curl.json': JSON.stringify(curlProof) };
     const server = await createStaticServer({ directory, prefix: '/nested/playground/', fixtures });
+    const corsServer = await createStaticServer({ directory, prefix: '/cors/', corsOrigin: new URL(server.url).origin,
+      corsPaths: ['allowed.json'], fixtures: {
+        'allowed.json': (request) => JSON.stringify({ ...curlCorsProof, header: request.headers['x-playground-proof'] ?? null }),
+        'denied.json': JSON.stringify({ confidential: randomUUID() }),
+      } });
     const records = [];
-    t.after(async () => { await browser.close(); await server.close(); });
+    t.after(async () => { await browser.close(); await server.close(); await corsServer.close(); });
     for (const pair of scenarios.includes('matrix') ? combinations : []) {
       await t.test(`Joomla ${pair.joomlaVersion}, PHP ${pair.phpVersion}: install, PDO and persisted reload`, { timeout: 900_000 }, async () => {
         const context = await browser.newContext();
@@ -523,6 +538,55 @@ for (const name of browserNames) {
           assert.match(component.text, new RegExp(item.element));
           assert.ok(result.configuration.extensions.length > 0);
           if (item.id === 'jcb') {
+            assert.deepEqual(dashboardErrors(component.text), [], 'JCB must not report missing requirements or fatal configuration errors.');
+            const installedArtwork = await bounded(page.evaluate(async (assets) => {
+              const results = [];
+              for (const asset of assets) {
+                const relative = `administrator/components/com_componentbuilder/assets/images/banner/${asset.name}`;
+                const response = await fetch(new URL(relative, window.playground.baseUrl), { cache: 'no-store' });
+                const bytes = await response.arrayBuffer();
+                const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+                results.push({ name: asset.name, status: response.status, mime: response.headers.get('Content-Type'), size: bytes.byteLength, sha256: digest });
+              }
+              return results;
+            }, bannerAssets), 'Installed JCB artwork');
+            for (const [index, image] of installedArtwork.entries()) {
+              assert.equal(image.status, 200, `${image.name} must be served by the installed site.`);
+              assert.match(image.mime, /^image\//);
+              assert.equal(image.size, bannerAssets[index].size, image.name);
+              assert.equal(image.sha256, bannerAssets[index].sha256, image.name);
+            }
+            const curlURL = Buffer.from(new URL('__test_curl.json', server.url).href).toString('base64');
+            const http = await phpJSON(page, `
+              if (!extension_loaded('curl')) { echo json_encode(['loaded'=>false]); return; }
+              $http = curl_init(base64_decode('${curlURL}'));
+              curl_setopt_array($http, [CURLOPT_RETURNTRANSFER=>true, CURLOPT_TIMEOUT=>15]);
+              $body = curl_exec($http);
+              echo json_encode(['loaded'=>true, 'status'=>curl_getinfo($http, CURLINFO_RESPONSE_CODE),
+                'body'=>$body, 'error'=>curl_error($http)], JSON_THROW_ON_ERROR);`);
+            assert.equal(http.loaded, true, 'JCB requires the real native cURL extension.');
+            assert.equal(http.status, 200, http.error);
+            assert.equal(http.error, '');
+            assert.deepEqual(JSON.parse(http.body), curlProof, 'Native PHP cURL must receive the actual HTTP fixture response.');
+            const corsURL = Buffer.from(new URL('allowed.json', corsServer.url).href).toString('base64');
+            const cors = await phpJSON(page, `
+              $http = curl_init(base64_decode('${corsURL}'));
+              curl_setopt_array($http, [CURLOPT_RETURNTRANSFER=>true, CURLOPT_TIMEOUT=>15,
+                CURLOPT_HTTPHEADER=>['X-Playground-Proof: cors-check']]);
+              $body = curl_exec($http);
+              echo json_encode(['status'=>curl_getinfo($http, CURLINFO_RESPONSE_CODE), 'body'=>$body,
+                'error'=>curl_error($http)], JSON_THROW_ON_ERROR);`);
+            assert.equal(cors.status, 200, cors.error);
+            assert.equal(cors.error, '');
+            assert.deepEqual(JSON.parse(cors.body), { ...curlCorsProof, header: 'cors-check' }, 'PHP cURL must honor a real CORS preflight and preserve its request headers.');
+            const deniedURL = Buffer.from(new URL('denied.json', corsServer.url).href).toString('base64');
+            const denied = await phpJSON(page, `
+              $http = curl_init(base64_decode('${deniedURL}'));
+              curl_setopt_array($http, [CURLOPT_RETURNTRANSFER=>true, CURLOPT_TIMEOUT=>15]);
+              $body = curl_exec($http);
+              echo json_encode(['body'=>$body, 'error'=>curl_error($http), 'errno'=>curl_errno($http)], JSON_THROW_ON_ERROR);`);
+            assert.equal(denied.body, false, 'A response without CORS permission must remain inaccessible to PHP.');
+            assert.ok(denied.errno > 0 && denied.error.length > 0, 'CORS rejection must be a visible cURL transport error.');
             const spreadsheet = await phpJSON(page, `
               require '/persist/www/libraries/phpspreadsheet/vendor/autoload.php';
               $book = new \\PhpOffice\\PhpSpreadsheet\\Spreadsheet();
@@ -584,7 +648,9 @@ for (const name of browserNames) {
         assert.equal(await page.locator('#blueprint').inputValue(), 'jcb');
         assert.match(await page.frameLocator('#site-frame').locator('html').innerHTML(), /com_componentbuilder/);
         assert.equal(await page.frameLocator('#site-frame').locator('input[name="passwd"]').count(), 0);
-        assert.deepEqual(page.failedSiteRequests.filter((item) => /\.(?:css|m?js|svg|png|jpe?g|webp|woff2?|ttf)$/i.test(new URL(item.url).pathname)), [],
+        assert.deepEqual(dashboardErrors(await page.frameLocator('#site-frame').locator('html').innerHTML()), [],
+          'The default JCB dashboard must be free of missing-runtime requirement alerts.');
+        assert.deepEqual(page.failedSiteRequests.filter((item) => /\.(?:css|m?js|svg|png|gif|jpe?g|webp|woff2?|ttf)$/i.test(new URL(item.url).pathname)), [],
           'The actual JCB interface and heritage pages must load their local scripts, styles, fonts and images.');
         if (name === 'chromium') {
           await mkdir(path.join(root, 'test-results'), { recursive: true });

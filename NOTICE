@@ -21,6 +21,11 @@ Development Method through https://github.com/joomengine/pkg-component-builder .
 Its GPL-2.0-or-later license and copyright notices remain in the derived browser
 packages. The reviewed reader-interface adjustment preserves its source header.
 The upstream fixture license is included at test/fixtures/LICENSE.jcb.txt.
+JCB's original sponsor banner artwork is included unchanged from the pinned
+https://github.com/vdm-io/jcb-external source. The artwork remains credited to
+its respective creators; sponsor destinations and visible references are retained.
+Asset checksums, source URLs and the reviewed magazine image reference correction
+are recorded in dependencies/jcb-banners/assets.json and package provenance.
 
 JCB spreadsheet support builds on PHPOffice/PhpSpreadsheet and ZipStream-PHP,
 with Composer PCRE, Mark Baker's Complex and Matrix libraries, MyCLabs PHP Enum,
@@ -43,3 +48,11 @@ The loadable fileinfo extensions are compiled from the pinned official PHP
 sources and include libmagic. Their PHP and libmagic licenses and compiled-source
 copyright notices are distributed beside each module, with source checksums and
 build provenance.
+
+The loadable cURL extensions use PHP's unchanged ext/curl and Sean Morris's
+https://github.com/seanmorris/php-wasm-curl implementation of libcurl over Fetch,
+revision 6085917954da9682c32ebcbea27a626d2308381b. php-wasm-curl is copyright 2026
+Sean Morris, offered under Apache-2.0 or GPL-2.0-only. Its vendored curl 8.22.0 public
+headers are copyright 1996-2026 Daniel Stenberg and contributors under the curl
+license. PHP's license and the implementation's LICENSE, LICENSE-GPL, NOTICE,
+and COPYING.curl notices accompany the compiled modules and their provenance.
