@@ -1,0 +1,21 @@
+{
+  "$schema": "./schema.json",
+  "schemaVersion": 1,
+  "id": "patchtester",
+  "title": "Patch Tester",
+  "description": "Test Joomla pull requests with the official Patch Tester component. GitHub access is configured inside the component.",
+  "joomla": [
+    "5",
+    "6"
+  ],
+  "configuration": {
+    "siteName": "Joomla Patch Tester",
+    "initialPath": "/administrator/index.php?option=com_patchtester",
+    "extensions": [
+      {
+        "url": "https://github.com/joomla-extensions/patchtester/releases/download/5.0.1/com_patchtester_5.0.1.zip",
+        "sha256": "2633eb69d81e0345c6285301e6d5a07e62708613240bacdbbf80f180297b9c31"
+      }
+    ]
+  }
+}

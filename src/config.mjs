@@ -1,6 +1,8 @@
 const VERSION = /^\d+\.\d+(?:\.\d+)?(?:-[A-Za-z0-9.-]+)?$/;
 const SHA256 = /^[a-f\d]{64}$/i;
 const STORAGE_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
+const LANGUAGE = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?-[A-Z]{2}$/;
+const BLUEPRINT_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export const DEFAULTS = Object.freeze({
   phpVersion: '8.4',
@@ -11,6 +13,8 @@ export const DEFAULTS = Object.freeze({
   storageKey: 'default',
   autoLogin: true,
   hideToolbar: false,
+  language: 'en-GB',
+  fresh: false,
   admin: Object.freeze({
     name: 'Playground Administrator',
     username: 'admin',
@@ -115,8 +119,31 @@ export function parseCatalog(manifest) {
   return { php, joomla, defaults };
 }
 
+export function normalizeLanguage(value = 'en-GB') {
+  if (typeof value !== 'string' || !LANGUAGE.test(value)) throw new TypeError('Use a Joomla language tag such as en-GB or nl-NL.');
+  return value;
+}
+
+export function normalizeBlueprintId(value) {
+  if (value === 'none') return 'blank';
+  if (typeof value !== 'string' || !BLUEPRINT_ID.test(value)) throw new TypeError('Blueprint names must use lowercase letters, numbers or hyphens.');
+  return value;
+}
+
+export function resolveJoomlaVersion(value, catalog) {
+  if (typeof value !== 'string' || !VERSION.test(value)) throw new TypeError('Select a valid Joomla version.');
+  if (!catalog) return value;
+  const exact = catalog.joomla.find((entry) => entry.version === value);
+  if (exact) return exact.version;
+  const releases = catalog.joomla.filter((entry) => entry.version.startsWith(`${value}.`))
+    .sort((a, b) => b.version.localeCompare(a.version, 'en', { numeric: true }));
+  if (!releases.length) throw new TypeError(`Joomla ${value} is not available in the tested runtime catalog.`);
+  return releases[0].version;
+}
+
 export function normalizeConfiguration(input = {}, { catalog, baseURL = 'https://playground.invalid/' } = {}) {
   const config = { ...DEFAULTS, ...catalog?.defaults, ...input, admin: { ...DEFAULTS.admin, ...input.admin } };
+  config.joomlaVersion = resolveJoomlaVersion(config.joomlaVersion, catalog);
   if (typeof config.phpVersion !== 'string' || !VERSION.test(config.phpVersion) || typeof config.joomlaVersion !== 'string' || !VERSION.test(config.joomlaVersion)) {
     throw new TypeError('Select a valid PHP and Joomla version.');
   }
@@ -126,7 +153,9 @@ export function normalizeConfiguration(input = {}, { catalog, baseURL = 'https:/
   config.siteName = requireText(config.siteName, 'Site name', 100);
   config.initialPath = normalizeInitialPath(config.initialPath);
   if (typeof config.storageKey !== 'string' || !STORAGE_KEY.test(config.storageKey)) throw new TypeError('Site key must use 1–64 letters, numbers, dots, underscores or hyphens.');
-  for (const key of ['persistence', 'autoLogin', 'hideToolbar']) config[key] = requireBoolean(config[key], key);
+  for (const key of ['persistence', 'autoLogin', 'hideToolbar', 'fresh']) config[key] = requireBoolean(config[key], key);
+  config.language = normalizeLanguage(config.language);
+  if (config.blueprintId !== undefined) config.blueprintId = normalizeBlueprintId(config.blueprintId);
   config.admin.name = requireText(config.admin.name, 'Administrator name', 100);
   config.admin.username = requireText(config.admin.username, 'Administrator username', 100);
   config.admin.email = requireText(config.admin.email, 'Administrator email', 254);
@@ -135,30 +164,58 @@ export function normalizeConfiguration(input = {}, { catalog, baseURL = 'https:/
   if (config.admin.password.length < 12) throw new TypeError('Administrator password must contain at least 12 characters.');
   config.extensions = parseExtensions(config.extensions ?? [], baseURL);
   config.startupCommands = parseStartupCommands(config.startupCommands ?? []);
+  if (!Array.isArray(config.languages ?? []) || (config.languages ?? []).length > 30) throw new TypeError('Language packages must be an array of at most 30 entries.');
+  config.languages = (config.languages ?? []).map((entry) => ({ ...parseExtensions([entry], baseURL)[0], tag: normalizeLanguage(requireText(entry.tag, 'Language package tag', 20)) }));
   return config;
 }
 
 export function readURLConfiguration(url) {
-  const params = new URL(url).searchParams;
+  const location = new URL(url);
+  if (location.href.length > 65_536) throw new TypeError('The playground configuration link is too long.');
+  const params = location.searchParams;
   const config = {};
+  const boolean = (name) => {
+    const value = params.get(name).toLowerCase();
+    if (['1', 'true', 'yes'].includes(value)) return true;
+    if (['0', 'false', 'no'].includes(value)) return false;
+    throw new TypeError(`${name} must be yes/no, true/false or 1/0.`);
+  };
+  if (params.has('blueprint')) config.blueprintId = normalizeBlueprintId(params.get('blueprint'));
   if (params.has('php')) config.phpVersion = params.get('php');
   if (params.has('joomla')) config.joomlaVersion = params.get('joomla');
+  if (params.has('language')) config.language = normalizeLanguage(params.get('language'));
+  if (params.has('login')) config.autoLogin = boolean('login');
+  if (params.has('fresh')) config.fresh = boolean('fresh');
   if (params.has('path') || params.has('initialPath')) config.initialPath = normalizeInitialPath(params.get('path') ?? params.get('initialPath'));
-  if (params.has('toolbar')) config.hideToolbar = params.get('toolbar') === '0';
-  if (params.has('hideToolbar')) config.hideToolbar = ['1', 'true'].includes(params.get('hideToolbar'));
-  if (params.has('persist')) config.persistence = params.get('persist') !== '0';
-  return { config, autostart: params.get('start') === '1' };
+  if (params.has('toolbar')) config.hideToolbar = !boolean('toolbar');
+  if (params.has('hideToolbar')) config.hideToolbar = boolean('hideToolbar');
+  if (params.has('persist')) config.persistence = boolean('persist');
+  if (params.has('key')) {
+    config.storageKey = params.get('key');
+    if (!STORAGE_KEY.test(config.storageKey)) throw new TypeError('The saved-site key contains invalid characters.');
+  }
+  if (params.has('extensions')) config.extensions = parseExtensions(params.get('extensions'), location.href);
+  if (params.has('extension')) config.extensions = parseExtensions([...(config.extensions ?? []), ...params.getAll('extension').map((value) => ({ url: value }))], location.href);
+  if (params.has('commands') || params.has('startupCommands')) config.startupCommands = parseStartupCommands(params.get('commands') ?? params.get('startupCommands'));
+  const deploymentOptions = ['blueprint', 'php', 'joomla', 'language', 'login', 'fresh', 'extensions', 'extension', 'commands', 'startupCommands'];
+  return { config, autostart: params.has('start') ? boolean('start') : deploymentOptions.some((name) => params.has(name)) };
 }
 
 export function createShareURL(location, config) {
   const url = new URL(location);
   url.search = '';
   url.hash = '';
+  if (config.blueprintId) url.searchParams.set('blueprint', normalizeBlueprintId(config.blueprintId));
   url.searchParams.set('joomla', config.joomlaVersion);
   url.searchParams.set('php', config.phpVersion);
   if (config.initialPath !== '/') url.searchParams.set('path', config.initialPath);
   if (config.hideToolbar) url.searchParams.set('toolbar', '0');
   if (!config.persistence) url.searchParams.set('persist', '0');
+  if (config.language && config.language !== 'en-GB') url.searchParams.set('language', normalizeLanguage(config.language));
+  if (config.autoLogin === false) url.searchParams.set('login', 'no');
+  if (config.fresh) url.searchParams.set('fresh', '1');
+  if (config.extensions?.length) url.searchParams.set('extensions', JSON.stringify(parseExtensions(config.extensions, url.href)));
+  if (config.startupCommands?.length) url.searchParams.set('commands', JSON.stringify(parseStartupCommands(config.startupCommands)));
   url.searchParams.set('start', '1');
   return url.href;
 }

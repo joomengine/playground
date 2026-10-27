@@ -3,11 +3,17 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { downloadVerified, extractTarGzip, hashFile, inventory, verifyBridgeBundle } from './assets.mjs';
+import { stageBlueprintCatalog } from './blueprints.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const versions = JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
 const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
+const domain = (await readFile(path.join(root, 'CNAME'), 'utf8')).trim();
+if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
+  throw new Error('CNAME must contain one valid deployment hostname.');
+}
+const canonicalUrl = `https://${domain}/`;
 const cache = path.join(root, '.cache');
 const destination = path.join(root, 'dist');
 const driverDirectory = path.resolve(root, process.env.MARIADB_DRIVER_DIR || '../mariadb-wasm-bridge/.native-build/upstream');
@@ -144,7 +150,8 @@ try {
     await cp(archive, path.join(assets, 'joomla', filename));
     joomla.push({ ...release, sourceUrl: release.url, url: `joomla/${filename}` });
   }
-  for (const name of ['index.html', 'src', 'service-worker.mjs', 'LICENSE', 'NOTICE']) {
+  const blueprints = await stageBlueprintCatalog({ root, staging, assets, cache, canonicalUrl });
+  for (const name of ['index.html', 'src', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
     await cp(path.join(root, name), path.join(staging, name), { recursive: true });
   }
   await writeFile(path.join(staging, '.nojekyll'), '');
@@ -153,7 +160,8 @@ try {
   catch { throw new Error('Build requires a Git checkout to record source provenance'); }
   const manifest = {
     schemaVersion: 1, projectVersion: pkg.version, sourceCommit,
-    upstream: versions.upstream, nativeDriver: versions.nativeDriver, packages, php, joomla,
+    deployment: { canonicalUrl, domain },
+    upstream: versions.upstream, nativeDriver: versions.nativeDriver, packages, php, joomla, blueprints,
     bridge: {
       protocolVersion: versions.bridge.protocolVersion,
       sourceCommit: versions.nativeDriver.sourceCommit,

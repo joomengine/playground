@@ -5,6 +5,10 @@ MariaDB WebAssembly database. The playground assembles published upstream PHP
 packages, the MariaDB bridge, and a separately compiled native PDO extension into
 a static site. PHP requests and SQL execute in browser workers.
 
+The deployment address is **https://playground.joomengine.org/**. The default
+recipe installs Joomla Component Builder (JCB); select **Joomla only** to start
+without additional extensions.
+
 ## Upstream foundations and credits
 
 This project builds directly on the work of these maintainers and contributors:
@@ -93,6 +97,7 @@ while IFS= read -r minor; do
 done < <(node --input-type=module -e "import p from './versions.json' with {type:'json'}; for (const v of p.php) console.log(v.version)")
 
 BRIDGE_SOURCE_DIR=external/bridge MARIADB_DRIVER_DIR=.cache/native npm run build
+npm run build:blueprints
 npm run serve
 ```
 
@@ -131,27 +136,33 @@ matching native modules, and running the complete validation suite.
 
 ## Using the playground
 
-Select a Joomla release and PHP version, set the administrator credentials, and
-launch. The interface generates a random administrator password initially; use
-its password control to retain that value if you need to log in manually later.
-The setup creates a real Joomla installation and can sign in through Joomla’s
-normal administrator login form.
+The default page automatically starts the JCB blueprint. Its top bar selects
+Joomla, PHP, a blueprint, language, persistence, and export format. Use `?start=0`
+to configure a site before launching it. The setup panel generates a random
+administrator password. Authentication uses Joomla's normal login form.
 
 Persistence is enabled by default. Joomla files, session data, cookies, and the
 MariaDB database are kept in IndexedDB. A site key identifies saved data within
 this playground’s URL. Use different keys for independent sites or Joomla
-versions. A saved site cannot be opened concurrently in another tab.
+versions. Returning to the domain reopens the last saved site. Switching PHP
+keeps its files and database; switching Joomla or blueprints selects a separate
+profile. A saved site cannot be opened concurrently in another tab.
 
 - **Save** flushes PHP files and database changes to browser storage.
 - **Restart** reopens the saved site. Restarting a temporary site creates a fresh
   installation.
 - **Close** shuts down the workers and releases the site lock.
 - **Reset** deletes that site’s saved files and database after confirmation.
+- **New site** keeps the current saved site and starts an independent installation.
+- **Export** downloads a deployment bundle, Joomla files, or the SQL database.
 
 Administrator settings, extension installation, and startup commands apply when
 a site is first installed. Reopening a completed installation keeps its existing
 configuration. Changing its Joomla release requires a different site key or a
-reset. Browser storage can be evicted or cleared and is not a backup; unloading
+reset. Administrator credentials are kept in private runtime metadata, outside
+the webroot and exports; they are never included in URLs or browser preferences.
+Storage is scoped to the deployment origin, so changing domains does not migrate
+saved sites. Browser storage can be evicted or cleared and is not a backup; unloading
 a tab cannot guarantee completion of an outstanding save.
 
 The initial page accepts a path within the site, such as `/` or
@@ -173,18 +184,60 @@ Use command names and arguments directly; do not prepend `php`, a script path,
 or shell operators. A failed extension installation or command stops setup and
 reports the failure. An interrupted installation must be reset before retrying.
 
+A complete export contains `site/`, `database.sql`, `database.ndjson` for
+prepared-site import, `export.json`, and `DEPLOYMENT.md`. Its Joomla configuration
+uses portable paths and placeholder hosting database settings. Follow the
+included instructions to upload files, import SQL, and configure the destination
+database. Private runtime metadata, browser sessions, and generated caches are
+excluded. Files-only ZIP and SQL-only downloads are also available. Tables,
+views, and simple triggers are supported. Stored routines, events, and compound
+trigger bodies currently stop export with an explicit error.
+
 ## Embedding and URL configuration
+
+Repository blueprints define packages, language packs, content, and console
+commands. See the [contributor guide and schemas](blueprints/README.md) to add
+another recipe. The default is `jcb`; `blank` (also `none`) installs Joomla alone.
+
+- [JCB](https://playground.joomengine.org/?blueprint=jcb)
+- [Joomla only](https://playground.joomengine.org/?blueprint=blank)
+- [Multilingual heritage site](https://playground.joomengine.org/?blueprint=heritage-demo)
+- [Heritage built from its recipe](https://playground.joomengine.org/?blueprint=heritage-demo&fresh=1)
+- [Patch Tester](https://playground.joomengine.org/?blueprint=patchtester)
+- [Weblinks](https://playground.joomengine.org/?blueprint=weblinks)
+- [Joomla 5.4](https://playground.joomengine.org/?joomla=5.4)
+- [PHP 8.5](https://playground.joomengine.org/?php=8.5)
+- [Dutch](https://playground.joomengine.org/?language=nl-NL)
+- [Start logged out](https://playground.joomengine.org/?login=no)
+
+`fresh=1` creates an independent site key and bypasses prepared snapshots. It
+does not erase another saved site. The flag is consumed after launch and the new
+key stays in the address for subsequent reloads. Use Reset to erase the current
+site explicitly.
+
+The build stages verified packages on the same origin. For `prebuild: true`
+recipes, `npm run build:blueprints` installs real Joomla, exports it, and imports
+the archive into a second runtime with new credentials before publishing it.
+Prepared copies match an exact Joomla release. The heritage demonstration is
+prepared for both catalog releases; `fresh=1` builds its original recipe instead.
 
 The interface recognizes these query parameters:
 
 | Parameter | Meaning |
 | --- | --- |
-| `joomla=6.2.0` | Select the exact Joomla catalog entry |
+| `blueprint=jcb` | Choose a repository recipe; `blank` installs Joomla alone |
+| `joomla=5.4` | Resolve a minor or exact version to a tested catalog release |
 | `php=8.4` | Select the PHP minor whose patch version is pinned in the catalog |
 | `path=/administrator/` | Initial page inside Joomla |
 | `toolbar=0` | Hide the configuration toolbar |
 | `persist=0` | Use a temporary site |
-| `start=1` | Launch automatically after environment preparation |
+| `language=nl-NL` | Install and select a pinned language pack |
+| `login=no` | Start or reopen with the administrator logged out |
+| `fresh=1` | Create an independent site from the recipe |
+| `key=example` | Reopen a saved site in this browser |
+| `extensions=[...]` | Additional objects containing `url` and optional `sha256` |
+| `commands=[["cache:clean"]]` | Additional Joomla console argument arrays |
+| `start=0` | Show setup first; the default page starts automatically |
 
 For a deployment hosted at `/playground/`, this same-origin iframe opens an
 administrator playground with the toolbar hidden:
@@ -204,9 +257,10 @@ cross-origin isolated. Start with same-origin embedding and matching COOP/COEP
 headers. A copied site-preview URL requires its owning playground tab to remain
 open; use the interface’s share URL to launch an independent session.
 
-Share URLs contain public version and display settings only. They do not include
-administrator credentials, extension packages, or startup commands, and they do
-not transfer a saved site to another browser.
+Share URLs contain public recipe, version, and display settings, including any
+additional package URLs or console commands. They never include administrator
+credentials and do not transfer saved files or databases to another browser.
+Review the link before sharing package locations or command arguments.
 
 ## JavaScript API
 
@@ -293,6 +347,7 @@ provisioning completes:
 | `fs.readFile(path)` | Read bytes; pass `{ encoding: 'utf8' }` as the second argument for text |
 | `fs.readdir(path)`, `fs.stat(path)`, `fs.unlink(path)` | Inspect or remove virtual files |
 | `flush()` | Flush both stores |
+| `exportSite({ format })` | Return `{ bytes, filename, mimeType, metadata }`; format is `bundle`, `files`, or `database` |
 | `close()` | Close the instance while keeping saved data |
 | `reset()` | Close the instance and delete its saved data |
 
@@ -322,10 +377,16 @@ included service worker adds them to controlled responses and the interface
 reloads once to activate isolation. That worker also handles the PHP site routes;
 do not replace it with an unrelated isolation worker.
 
-The **Publish playground to Pages** workflow is manual and accepts only `main`.
-It runs validation first and deploys the resulting artifact through the
-`github-pages` environment. Configure the repository’s Pages source as GitHub
-Actions and apply any required environment approvals before running it.
+The **Publish playground to Pages** workflow runs on every push or merge to
+`main`, and can also be started manually on `main`. It validates first, then
+deploys that exact tested artifact through the `github-pages` environment.
+Failed validation prevents deployment.
+
+Configure Pages with source **GitHub Actions** and custom domain
+**playground.joomengine.org**. The committed `CNAME` is copied into the build.
+Point the domain's DNS CNAME record to `joomengine.github.io`, then enable HTTPS
+in Pages once GitHub has provisioned its certificate. Repository environment
+approvals still apply.
 
 ## Validation
 
@@ -383,6 +444,5 @@ Restart the instance before continuing after a runtime failure.
 
 Host processes, system executables, arbitrary socket services, and a production
 mail server are not supplied by this static playground. Extensions that require
-those facilities need a different environment. JCB can be supplied through the
-extension configuration; a complete JCB compilation workload requires its own
-application-level validation.
+those facilities need a different environment. The default recipe installs JCB;
+a complete JCB compilation workload requires its own application-level validation.

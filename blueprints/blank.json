@@ -1,0 +1,15 @@
+{
+  "$schema": "./schema.json",
+  "schemaVersion": 1,
+  "id": "blank",
+  "title": "Joomla only",
+  "description": "Start with Joomla, then install your own extensions through its administrator or URL setup options.",
+  "joomla": [
+    "5",
+    "6"
+  ],
+  "configuration": {
+    "siteName": "Joomla Playground",
+    "initialPath": "/"
+  }
+}

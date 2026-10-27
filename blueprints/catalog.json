@@ -1,0 +1,53 @@
+{
+  "$schema": "./catalog.schema.json",
+  "schemaVersion": 1,
+  "default": "jcb",
+  "blueprints": [
+    {
+      "id": "jcb",
+      "title": "Joomla Component Builder",
+      "description": "Joomla with the complete JCB component and plugin package.",
+      "file": "./jcb.json"
+    },
+    {
+      "id": "blank",
+      "title": "Joomla only",
+      "description": "A clean Joomla installation without additional extensions.",
+      "file": "./blank.json"
+    },
+    {
+      "id": "heritage-demo",
+      "title": "Multilingual heritage site",
+      "description": "A bilingual English and Dutch heritage site with linked home pages.",
+      "file": "./heritage-demo.json"
+    },
+    {
+      "id": "patchtester",
+      "title": "Patch Tester",
+      "description": "Joomla with the official Patch Tester component.",
+      "file": "./patchtester.json"
+    },
+    {
+      "id": "weblinks",
+      "title": "Weblinks",
+      "description": "Joomla with the official Weblinks package.",
+      "file": "./weblinks.json"
+    }
+  ],
+  "languages": {
+    "5": [
+      {
+        "tag": "nl-NL",
+        "url": "https://downloads.joomla.org/language-packs/translations-joomla5/downloads/joomla5-dutch/5-4-10-1/nl-nl_joomla_lang_full_5-4-10v1-zip?format=zip",
+        "sha256": "b268fa617a00c97c521139b4aecf6843ed88b585cce75b700db979f387f9f603"
+      }
+    ],
+    "6": [
+      {
+        "tag": "nl-NL",
+        "url": "https://downloads.joomla.org/language-packs/translations-joomla6/downloads/joomla6-dutch/6-2-0-1/nl-nl_joomla_lang_full_6-2-0v1-zip?format=zip",
+        "sha256": "2dfb180adf6003db2dcabbe36d08c38f3ba7876a58893ecb8fa42498cb32bc8d"
+      }
+    ]
+  }
+}

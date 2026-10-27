@@ -1,5 +1,6 @@
 import { normalizeConfiguration, parseCatalog, normalizeInitialPath } from './config.mjs';
-import { installJoomla, sha256 } from './joomla/index.mjs';
+import { installJoomla, inspectJoomla, sha256 } from './joomla/index.mjs';
+import { exportSite } from './export.mjs';
 import { serializeRequest, restoreResponse } from './http.mjs';
 
 const base = new URL('../', import.meta.url);
@@ -222,12 +223,30 @@ export async function createPlayground(input, { onProgress = () => {} } = {}) {
         return restoreResponse(await session.send('request', await serializeRequest(request), init.timeoutMs ?? 180_000), request.method);
       },
       async flush() { await session.send('flush'); await database.flush(); },
+      exportSite: options => exportSite(handle, options),
       reset: () => finish(true), close: () => finish(false),
     };
-    progress({ phase: 'download', message: `Loading Joomla ${config.joomlaVersion}…` });
-    const archive = await fetch(resolveAsset(joomlaEntry.url));
-    if (!archive.ok) throw new Error(`Cannot load Joomla: HTTP ${archive.status}.`);
-    const installed = await installJoomla(handle, config, { archiveBytes: await archive.arrayBuffer(), sha256: joomlaEntry.sha256, progress });
+    const state = await inspectJoomla(handle);
+    const pristine = !state.marker && !state.configured && !state.installerPresent;
+    let installed;
+    if (pristine && config.snapshot && !config.fresh) {
+      progress({ phase: 'download', message: 'Loading the prepared blueprint…' });
+      const archive = await fetch(config.snapshot.url);
+      if (!archive.ok) throw new Error(`Cannot load the prepared blueprint: HTTP ${archive.status}.`);
+      const { importJoomlaSnapshot } = await import('./joomla/index.mjs');
+      installed = await importJoomlaSnapshot(handle, config, {
+        archiveBytes: await archive.arrayBuffer(), sha256: config.snapshot.sha256, progress,
+      });
+    } else {
+      let archiveBytes;
+      if (pristine) {
+        progress({ phase: 'download', message: `Loading Joomla ${config.joomlaVersion}…` });
+        const archive = await fetch(resolveAsset(joomlaEntry.url));
+        if (!archive.ok) throw new Error(`Cannot load Joomla: HTTP ${archive.status}.`);
+        archiveBytes = await archive.arrayBuffer();
+      }
+      installed = await installJoomla(handle, config, { archiveBytes, sha256: joomlaEntry.sha256, progress });
+    }
     await handle.flush();
     handle.installation = installed;
     instances.set(instanceId, session);
