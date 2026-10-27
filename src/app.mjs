@@ -143,19 +143,24 @@ async function closeSite({ reset = false } = {}) {
   if (busy || !runtime) return false;
   setBusy(true);
   const handle = runtime;
+  // Destroy the site document before shutting down its workers. Navigating it
+  // to a blank page can start a cross-document transition and late requests.
+  const frame = $('site-frame');
+  const emptyFrame = frame.cloneNode(false);
+  emptyFrame.removeAttribute('src');
+  emptyFrame.hidden = true;
+  frame.replaceWith(emptyFrame);
+  $('open-link').removeAttribute('href');
   try {
     if (reset) await handle.reset();
     else await handle.close();
     runtime = undefined;
-    $('site-frame').removeAttribute('src');
-    $('open-link').removeAttribute('href');
     $('preview-label').textContent = 'Your playground';
     show('welcome');
     activity(reset ? 'Site data was deleted. Launch to create a fresh installation.' : 'Site closed. You can now change its settings.');
     return true;
   } catch (error) {
     runtime = undefined;
-    $('site-frame').removeAttribute('src');
     activity(`Could not ${reset ? 'reset' : 'close'} the site: ${messageOf(error)}`);
     return false;
   } finally { setBusy(false); }
