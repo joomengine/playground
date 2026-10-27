@@ -67,6 +67,10 @@ function setBusy(value) {
 function progress(event) {
   const details = typeof event === 'string' ? { message: event } : event;
   const message = details?.message || details?.phase || 'Preparing the playground…';
+  if (details?.phase === 'failed' && runtime) {
+    displayError(new Error(message), 'The PHP session stopped');
+    return;
+  }
   $('loading-message').textContent = messageOf(message);
   if (typeof details?.progress === 'number' && Number.isFinite(details.progress)) {
     $('loading-progress').max = 1;
@@ -150,6 +154,8 @@ async function closeSite({ reset = false } = {}) {
     activity(reset ? 'Site data was deleted. Launch to create a fresh installation.' : 'Site closed. You can now change its settings.');
     return true;
   } catch (error) {
+    runtime = undefined;
+    $('site-frame').removeAttribute('src');
     activity(`Could not ${reset ? 'reset' : 'close'} the site: ${messageOf(error)}`);
     return false;
   } finally { setBusy(false); }
@@ -177,7 +183,10 @@ function updateCompatibility({ preserve = false } = {}) {
 
 $('launch-form').addEventListener('submit', (event) => { event.preventDefault(); void launch(); });
 $('embedded-launch').addEventListener('click', () => void launch());
-$('retry-button').addEventListener('click', () => void launch());
+$('retry-button').addEventListener('click', async () => {
+  if (runtime && !await closeSite()) return;
+  await launch();
+});
 $('close-button').addEventListener('click', () => void closeSite());
 $('restart-button').addEventListener('click', async () => {
   if (currentConfig && !currentConfig.persistence && !confirm('This is a temporary site. Restarting creates a fresh installation and discards its changes. Continue?')) return;

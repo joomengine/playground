@@ -121,6 +121,8 @@ async function initialize(args) {
   if (persistent && (typeof mountPath !== 'string' || !/^\/[a-zA-Z0-9_-]+$/.test(mountPath) || ['/persist', '/config', '/internal', '/tmp'].includes(mountPath))) {
     throw new TypeError('Persistent storage requires a unique top-level mount path.');
   }
+  // Site files follow our explicit filesystem persistence policy, including temporary sites.
+  Object.defineProperty(globalThis, 'caches', { value: undefined, configurable: true });
   const [{ PhpCgiWorker }, { createPhpWasmAdapter }] = await Promise.all([import(moduleURL.href), import(adapterURL.href)]);
   const adapter = createPhpWasmAdapter({ 'mariadb.v1': databaseCall });
   php = new PhpCgiWorker({

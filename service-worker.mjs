@@ -25,9 +25,11 @@ async function routeToPlayground(request) {
   if (!owner || !new URL(owner.url).pathname.startsWith(scope.pathname)) {
     return new Response('This playground is closed. Open the playground page to start the site.', { status: 503 });
   }
+  const serialized = await serializeRequest(request);
   const channel = new MessageChannel();
+  let timer;
   const result = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       channel.port1.close();
       reject(new Error('The playground did not answer the request within 180 seconds'));
     }, 180_000);
@@ -39,10 +41,12 @@ async function routeToPlayground(request) {
     };
   });
   try {
-    owner.postMessage({ type: 'playground-request', instanceId, request: await serializeRequest(request) }, [channel.port2]);
+    owner.postMessage({ type: 'playground-request', instanceId, request: serialized }, [channel.port2]);
     return restoreResponse(await result, request.method);
   } finally {
+    clearTimeout(timer);
     channel.port1.close();
+    channel.port2.close();
   }
 }
 
