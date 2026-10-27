@@ -43,8 +43,12 @@ passes database operations to the MariaDB bridge. The playground service worker
 routes site requests to a dedicated PHP worker and adds the isolation headers
 needed by the threaded MariaDB engine.
 
-The native build compiles the PDO and fileinfo extensions against matching PHP
-headers. Fileinfo supplies MIME detection with its embedded magic database.
+The native build compiles the PDO, fileinfo, and cURL extensions against matching
+PHP headers. Fileinfo supplies MIME detection with its embedded magic database.
+cURL uses Sean Morris’s [php-wasm-curl](https://github.com/seanmorris/php-wasm-curl)
+to connect PHP’s unchanged `ext/curl` to the host’s Fetch API. The implementation
+is pinned to [6085917954da9682c32ebcbea27a626d2308381b](https://github.com/seanmorris/php-wasm-curl/tree/6085917954da9682c32ebcbea27a626d2308381b)
+and loaded alongside the published `0.2.0` PHP runtime.
 The distributed `.so`
 files are WebAssembly extensions for these specific upstream builds, not native
 Linux PHP modules.
@@ -104,6 +108,7 @@ source external/emsdk/emsdk_env.sh
 while IFS= read -r minor; do
   bash external/bridge/native/build-upstream.sh "$minor" "$PWD/.cache/native"
   BRIDGE_SOURCE_DIR=external/bridge node scripts/build-fileinfo.mjs "$minor"
+  BRIDGE_SOURCE_DIR=external/bridge node scripts/build-curl.mjs "$minor"
 done < <(node --input-type=module -e "import p from './versions.json' with {type:'json'}; for (const v of p.php) console.log(v.version)")
 
 BRIDGE_SOURCE_DIR=external/bridge MARIADB_DRIVER_DIR=.cache/native npm run build
@@ -143,6 +148,28 @@ rather than the assembled bridge directory.
 `dist/asset-inventory.json` records the files, sizes, and SHA-256 values in the
 assembled site. Updating a dependency means updating its pins, rebuilding its
 matching native modules, and running the complete validation suite.
+
+## PHP HTTP requests
+
+PHP’s `curl_*` functions and HTTP stream wrappers perform real HTTP requests
+through the upstream Fetch integration. cURL supports request methods, headers,
+binary bodies, status codes, redirects, timeouts, and streaming response
+callbacks. The native extension is exercised on every supported PHP build,
+including the HTTP patterns used by JCB’s file and API helpers.
+
+In a browser, remote servers must permit the playground origin through CORS.
+Only HTTP and HTTPS are supported. The browser controls certificate validation,
+cookies, forbidden request headers, and connection behavior; options for disabling
+TLS verification cannot bypass browser security. Redirect responses are hidden
+from browser Fetch: enable following explicitly when a client needs redirects.
+PHP’s cookie-file settings do not create a separate browser cookie store.
+HTTP proxies and Unix sockets are unsupported. Requests to PHP in the same
+playground instance cannot complete recursively while its worker is already
+executing a request; use a separate server or independent instance for HTTP
+service calls. See
+the [upstream compatibility guide](https://github.com/seanmorris/php-wasm/blob/6e206f8c053f74f209a10d99fab0a7fa74b01ee5/packages/curl/README.md#differences-from-native-curl)
+before relying on server-specific networking behavior. The playground does not
+provide a public CORS proxy.
 
 ## Using the playground
 
@@ -417,6 +444,7 @@ and MariaDB packages:
 PHP_WASM_MODULE_ROOT="$PWD/node_modules" \
 PHP_WASM_EXTENSION_DIR="$PWD/.cache/native" \
 node --test external/bridge/native/tests/upstream.test.mjs
+node --test test/fileinfo.integration.mjs test/curl.integration.mjs
 ```
 
 Build the static site, install the browser engines, and run browser integration:

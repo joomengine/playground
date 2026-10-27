@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "url": "https://github.com/vdm-io/jcb-external",
+    "commit": "3c052973397d364fe88b245c309bf1551eb7c141"
+  },
+  "assets": [
+    {
+      "name": "joomla-heart-wide.gif",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/3c052973397d364fe88b245c309bf1551eb7c141/src/images/banner/joomla-heart-wide.gif",
+      "sha256": "f7ef3ec3b44e1f28926cb2d9520427dd5568910fdf5790ee3acb3c9d3d4b5958",
+      "md5": "f857e3a38facaeac9eba3cffa912b620",
+      "size": 107903,
+      "width": 728,
+      "height": 90
+    },
+    {
+      "name": "JCM_2010_728x90.png",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/3c052973397d364fe88b245c309bf1551eb7c141/src/images/banner/JCM_2010_728x90.png",
+      "sha256": "f41bb9faef51aedbb51df00bf4f4e8dc2adf646c1680fc3afec2518d59a90993",
+      "md5": "4083c66f996279fd5a76adffc3a7d194",
+      "size": 30602,
+      "width": 728,
+      "height": 90
+    },
+    {
+      "name": "tlwebdesign_jcb_sponsor_728_90.png",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/3c052973397d364fe88b245c309bf1551eb7c141/src/images/banner/tlwebdesign_jcb_sponsor_728_90.png",
+      "sha256": "162f5071b6d7a5f6222262c51b7a3666dee486e76ee0da93db78d5cf7e27c287",
+      "md5": "d19be1f9f5b2049ff901096aafc246be",
+      "size": 24031,
+      "width": 728,
+      "height": 90
+    },
+    {
+      "name": "vdm_jcb_sponsor_728_90.gif",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/3c052973397d364fe88b245c309bf1551eb7c141/src/images/banner/vdm_jcb_sponsor_728_90.gif",
+      "sha256": "95de16ab3ef04292426985f36d16fe522ba7f4cb4eb6e98cf7f67146cd8e2804",
+      "md5": "84478dfa0cd880395815e0ee026812a4",
+      "size": 22596,
+      "width": 728,
+      "height": 90
+    },
+    {
+      "name": "agerix-loves-jcb-728-90.gif",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/3c052973397d364fe88b245c309bf1551eb7c141/src/images/banner/agerix-loves-jcb-728-90.gif",
+      "sha256": "d12780f0c43af4a346c90cf7183cbef9dbe4d9e41aa18e1df608af4f709bc89c",
+      "md5": "b24c0726aa809cdcc04bcffe7e1e1529",
+      "size": 57753,
+      "width": 728,
+      "height": 90,
+      "originalUrl": "https://cms-experts.org/images/banners/agerix/agerix-loves-jcb-728-90.gif"
+    },
+    {
+      "name": "joomla-heart-tall.gif",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/3c052973397d364fe88b245c309bf1551eb7c141/src/images/banner/joomla-heart-tall.gif",
+      "sha256": "f79e843a1313361c266d0000849aacd5943a747276e8af637d5578d5dc30015b",
+      "md5": "9a75e4929b86c318128b53cf78251678",
+      "size": 79535,
+      "width": 160,
+      "height": 600
+    },
+    {
+      "name": "JCM_2010_120x600.png",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/3c052973397d364fe88b245c309bf1551eb7c141/src/images/banner/JCM_2010_120x600.png",
+      "sha256": "06296161b3e46f05774d64f94646abf29dfbc56f0bf701cd0466dcabdc458291",
+      "md5": "5389cf3be8569cb3f6793e8bd4013d19",
+      "size": 28182,
+      "width": 120,
+      "height": 600
+    }
+  ]
+}
