@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { downloadVerified, extractTarGzip, hashFile, inventory, verifyBridgeBundle } from './assets.mjs';
 import { stageBlueprintCatalog } from './blueprints.mjs';
+import { stageFileinfo } from './fileinfo.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const versions = JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
@@ -18,6 +19,7 @@ const cache = path.join(root, '.cache');
 const destination = path.join(root, 'dist');
 const driverDirectory = path.resolve(root, process.env.MARIADB_DRIVER_DIR || '../mariadb-wasm-bridge/.native-build/upstream');
 const bridgeSourceDirectory = path.resolve(root, process.env.BRIDGE_SOURCE_DIR || '../mariadb-wasm-bridge');
+const fileinfoDirectory = path.resolve(root, process.env.FILEINFO_EXTENSION_DIR || '.cache/fileinfo');
 const extensionPackages = [
   'php-wasm-zlib', 'php-wasm-libxml', 'php-wasm-xml', 'php-wasm-dom',
   'php-wasm-simplexml', 'php-wasm-xmlreader', 'php-wasm-xmlwriter',
@@ -137,7 +139,10 @@ try {
     await cp(driver, path.join(assets, 'extensions', `${basename}.so`));
     await cp(path.join(driverDirectory, `${basename}.json`), path.join(assets, 'extensions', `${basename}.json`));
     sharedLibs.push({ name: `${basename}.so`, url: `extensions/${basename}.so`, ini: true });
+    const fileinfo = await stageFileinfo({ directory: fileinfoDirectory, destination: path.join(assets, 'extensions'), version, upstream: versions.upstream });
+    sharedLibs.push({ name: `php${version.version}-fileinfo.so`, url: fileinfo.url, ini: true });
     php.push({ ...version, label: `PHP ${version.patchVersion}`, moduleUrl: 'php-cgi-wasm/PhpCgiWorker.mjs', sharedLibs, files,
+      fileinfo,
       driver: { url: `extensions/${basename}.so`, sha256: driverHash, provenance } });
   }
 

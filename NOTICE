@@ -16,5 +16,30 @@ MariaDB and lite4mariadb retain their upstream licenses and source provenance.
 Joomla is provided by https://github.com/joomla/joomla-cms and retains its GNU
 General Public License and all notices included in its release packages.
 
+Joomla Component Builder is provided by Llewellyn van der Merwe and Vast
+Development Method through https://github.com/joomengine/pkg-component-builder .
+Its GPL-2.0-or-later license and copyright notices remain in the derived browser
+packages. The reviewed reader-interface adjustment preserves its source header.
+The upstream fixture license is included at test/fixtures/LICENSE.jcb.txt.
+
+JCB spreadsheet support builds on PHPOffice/PhpSpreadsheet and ZipStream-PHP,
+with Composer PCRE, Mark Baker's Complex and Matrix libraries, MyCLabs PHP Enum,
+and PHP-FIG HTTP Message and Simple Cache interfaces. Their MIT licenses are
+retained in the composed vendor tree. Four reviewed XLS/OLE packing constants
+use signed integer equivalents to preserve their bytes on 32-bit PHP. A numeric
+range check preserves floating-point values outside the integer range before
+casting. Original and adjusted source hashes are recorded without changing
+upstream notices.
+Exact source URLs, versions, archive
+checksums and license declarations are recorded in
+dependencies/jcb-spreadsheet/packages.json and each derived package's provenance.
+Composer is provided by https://github.com/composer/composer under the MIT
+license; its version and verified binary checksum are recorded in that provenance.
+
 The playground source license does not replace the licenses of these bundled
 dependencies. The static distribution includes their notices and source links.
+
+The loadable fileinfo extensions are compiled from the pinned official PHP
+sources and include libmagic. Their PHP and libmagic licenses and compiled-source
+copyright notices are distributed beside each module, with source checksums and
+build provenance.

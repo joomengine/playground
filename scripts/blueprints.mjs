@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile, cp } from 'node:fs/promises';
 import path from 'node:path';
 import { downloadVerified } from './assets.mjs';
 import { normalizeBlueprint, normalizeBlueprintCatalog } from '../src/blueprints.mjs';
+import { deriveJcbPackage, isReviewedJcbPackage } from './jcb-package.mjs';
 
 /** Stage verified repository recipes and their packages on the playground origin. */
 export async function stageBlueprintCatalog({ root, staging, assets, cache, canonicalUrl }) {
@@ -26,17 +27,27 @@ export async function stageBlueprintCatalog({ root, staging, assets, cache, cano
       throw new Error(`Repository blueprint packages require HTTPS URLs: ${context}`);
     }
     const sha256 = asset.sha256.toLowerCase();
-    const filename = `${sha256}.zip`;
     if (!downloaded.has(sha256)) {
       downloaded.set(sha256, (async () => {
         console.log(`Verifying blueprint package ${context}…`);
-        const archive = await downloadVerified(url.href, sha256, path.join(cache, 'packages', filename));
+        let archive = await downloadVerified(url.href, sha256, path.join(cache, 'packages', `${sha256}.zip`));
+        let deployedSha256 = sha256;
+        let provenanceUrl;
+        if (isReviewedJcbPackage(sha256)) {
+          const derived = await deriveJcbPackage({ root, cache, archive, sourceUrl: url.href, sourceSha256: sha256 });
+          archive = derived.archive;
+          deployedSha256 = derived.sha256;
+          provenanceUrl = `packages/${deployedSha256}.provenance.json`;
+          await writeFile(path.join(assets, provenanceUrl), `${JSON.stringify(derived.provenance, null, 2)}\n`);
+        }
+        const filename = `${deployedSha256}.zip`;
         await cp(archive, path.join(assets, 'packages', filename));
-        return { sourceUrl: url.href, sha256, url: `packages/${filename}` };
+        return { sourceUrl: url.href, sourceSha256: sha256, sha256: deployedSha256, url: `packages/${filename}`,
+          ...(provenanceUrl ? { provenanceUrl } : {}) };
       })());
     }
-    await downloaded.get(sha256);
-    return { ...asset, url: `../assets/packages/${filename}`, sourceUrl: url.href, sha256 };
+    const deployed = await downloaded.get(sha256);
+    return { ...asset, url: `../assets/${deployed.url}`, sourceUrl: url.href, sha256: deployed.sha256 };
   }
 
   async function stageConfiguration(configuration, context) {

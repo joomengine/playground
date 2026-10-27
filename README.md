@@ -43,8 +43,9 @@ passes database operations to the MariaDB bridge. The playground service worker
 routes site requests to a dedicated PHP worker and adds the isolation headers
 needed by the threaded MariaDB engine.
 
-The native build compiles only the PDO extension against matching PHP headers.
-It does not rebuild PHP or maintain another PHP runtime. The distributed `.so`
+The native build compiles the PDO and fileinfo extensions against matching PHP
+headers. Fileinfo supplies MIME detection with its embedded magic database.
+The distributed `.so`
 files are WebAssembly extensions for these specific upstream builds, not native
 Linux PHP modules.
 
@@ -71,8 +72,13 @@ header-configuration prerequisites:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential autoconf automake bison re2c libtool pkg-config curl git python3 xz-utils
+sudo apt-get install -y build-essential autoconf automake bison re2c libtool pkg-config curl git python3 xz-utils php8.3-cli php8.3-mbstring php8.3-xml php8.3-gd php8.3-zip php8.3-curl
 ```
+
+Native PHP composes the [locked JCB spreadsheet dependencies](dependencies/jcb-spreadsheet/README.md)
+for the browser's 32-bit PHP platform. The build downloads and verifies its pinned
+Composer binary. `PHP_BINARY` can select a native PHP executable; the browser
+continues to use the upstream WebAssembly runtime.
 
 Clone the playground, install its locked packages, and check out the exact bridge
 and Emscripten SDK revisions selected by the catalog:
@@ -97,6 +103,7 @@ source external/emsdk/emsdk_env.sh
 
 while IFS= read -r minor; do
   bash external/bridge/native/build-upstream.sh "$minor" "$PWD/.cache/native"
+  BRIDGE_SOURCE_DIR=external/bridge node scripts/build-fileinfo.mjs "$minor"
 done < <(node --input-type=module -e "import p from './versions.json' with {type:'json'}; for (const v of p.php) console.log(v.version)")
 
 BRIDGE_SOURCE_DIR=external/bridge MARIADB_DRIVER_DIR=.cache/native npm run build

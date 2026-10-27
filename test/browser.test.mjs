@@ -213,9 +213,11 @@ async function request(page, pathname) {
 
 async function waitForSiteFrame(frame, expectedURL) {
   const expected = new URL(expectedURL);
-  // Joomla may navigate a directory URL to its index document during startup.
+  const sitePrefix = expected.pathname.match(/^.*\/__site\/[^/]+\/[^/]+\//)?.[0];
+  assert.ok(sitePrefix, 'A preview must belong to a running playground instance.');
+  // Joomla may redirect to its index document or a language-specific home page.
   await frame.waitForURL((actual) => actual.origin === expected.origin
-    && (actual.pathname === expected.pathname || actual.pathname === `${expected.pathname}index.php`),
+    && actual.pathname.startsWith(sitePrefix),
   { waitUntil: 'load' });
 }
 
@@ -561,15 +563,33 @@ for (const name of browserNames) {
           const content = await phpJSON(page, `${PDO} echo json_encode($db->query("SELECT language, COUNT(*) AS articles FROM jml_content WHERE state=1 GROUP BY language ORDER BY language")->fetchAll(PDO::FETCH_ASSOC), JSON_THROW_ON_ERROR);`);
           assert.ok(content.some((entry) => entry.language === 'en-GB' && entry.articles > 0));
           assert.ok(content.some((entry) => entry.language === 'nl-NL' && entry.articles > 0));
+          const siteURL = await page.evaluate(() => {
+            const frame = document.createElement('iframe');
+            frame.id = 'site-frame'; frame.src = window.playground.url;
+            document.body.append(frame);
+            return frame.src;
+          });
+          const frame = await (await page.locator('#site-frame').elementHandle()).contentFrame();
+          await waitForSiteFrame(frame, siteURL);
+          assert.match(await frame.locator('body').innerText(), /Stories connect generations/);
+          assert.ok(await frame.locator('.mod-languages').count() > 0, 'The actual multilingual home page must offer its language switcher.');
+          await page.locator('#site-frame').evaluate((frame) => frame.remove());
           proof.push({ id: 'heritage-demo', fresh, fromSnapshot: Boolean(result.installation.fromSnapshot), content });
           await close(page);
         }
         page.testStep = 'default domain automatically opens JCB';
+        await page.setViewportSize({ width: 1440, height: 1000 });
         await page.goto(server.url);
         await renderedSiteFrame(page);
         assert.equal(await page.locator('#blueprint').inputValue(), 'jcb');
         assert.match(await page.frameLocator('#site-frame').locator('html').innerHTML(), /com_componentbuilder/);
         assert.equal(await page.frameLocator('#site-frame').locator('input[name="passwd"]').count(), 0);
+        assert.deepEqual(page.failedSiteRequests.filter((item) => /\.(?:css|m?js|svg|png|jpe?g|webp|woff2?|ttf)$/i.test(new URL(item.url).pathname)), [],
+          'The actual JCB interface and heritage pages must load their local scripts, styles, fonts and images.');
+        if (name === 'chromium') {
+          await mkdir(path.join(root, 'test-results'), { recursive: true });
+          await page.screenshot({ path: path.join(root, 'test-results/jcb-desktop.png'), fullPage: true });
+        }
         await page.locator('#close-button').click();
         await page.locator('#launch-button:enabled').waitFor();
         proof.push({ id: 'jcb', defaultDomainAutostart: true });
