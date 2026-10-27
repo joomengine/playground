@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { defaultSiteKey, forgetSite, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from '../src/ui-state.mjs';
+import { defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from '../src/ui-state.mjs';
 
 const configuration = {
   blueprintId: 'jcb', joomlaVersion: '6.2.0', phpVersion: '8.4', siteName: 'Saved work',
@@ -70,4 +70,37 @@ test('location follows runtime choices, consumes fresh and keeps private setup o
   assert.deepEqual(JSON.parse(explicit.searchParams.get('commands')), [['cache:clean']]);
   assert.deepEqual(JSON.parse(explicit.searchParams.get('extensions')), configuration.extensions);
   assert.equal(explicit.searchParams.has('extension'), false);
+});
+
+test('changed setup instructions create an independent stable site and preserve the original', async () => {
+  const original = rememberSite(empty(), configuration);
+  const input = { ...configuration, startupCommands: [['cache:clean'], ['config:set', 'offline', '1']] };
+  const changed = await isolateSetup(original, input);
+  assert.equal(changed.changed, true);
+  assert.equal(changed.previousKey, configuration.storageKey);
+  assert.notEqual(changed.configuration.storageKey, configuration.storageKey);
+  assert.match(changed.configuration.storageKey, /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/);
+  assert.equal(input.storageKey, configuration.storageKey);
+  const both = rememberSite(original, changed.configuration);
+  assert.deepEqual(both.sites.work.startupCommands, configuration.startupCommands);
+  assert.deepEqual(both.sites[changed.configuration.storageKey].startupCommands, input.startupCommands);
+  assert.equal((await isolateSetup(both, input)).configuration.storageKey, changed.configuration.storageKey);
+  assert.equal((await isolateSetup(both, changed.configuration)).changed, false);
+  const changedExtension = await isolateSetup(original, { ...configuration, extensions: [] });
+  assert.equal(changedExtension.changed, true);
+  assert.notEqual(changedExtension.configuration.storageKey, changed.configuration.storageKey);
+});
+
+test('identical setup, PHP changes and new or temporary sites keep their requested identity', async () => {
+  const state = rememberSite(empty(), configuration);
+  for (const input of [
+    structuredClone(configuration),
+    { ...configuration, phpVersion: '8.3' },
+    { ...configuration, storageKey: 'new-independent-site', startupCommands: [] },
+    { ...configuration, persistence: false, startupCommands: [] },
+  ]) {
+    const result = await isolateSetup(state, input);
+    assert.equal(result.changed, false);
+    assert.equal(result.configuration.storageKey, input.storageKey);
+  }
 });

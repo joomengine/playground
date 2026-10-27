@@ -62,8 +62,11 @@ PHP 8.4.1. [versions.json](versions.json) is the authoritative build catalog.
 
 ## Build and run locally
 
-Use Node.js 24.5 or newer, npm, Git, Python 3, Bash, curl, tar, Make, and the
-Emscripten toolchain pinned in `versions.json`. On Ubuntu, install the native
+Use Node.js 26.12.1 as pinned in [.node-version](.node-version), npm, Git, Python 3,
+Bash, curl, tar, Make, and the Emscripten toolchain pinned in `versions.json`.
+This is the tested build runtime; Node.js 24.x has a known
+[V8 shared-WASM lifecycle crash](https://github.com/nodejs/node/issues/66366).
+On Ubuntu, install the native
 header-configuration prerequisites:
 
 ```bash
@@ -190,8 +193,10 @@ uses portable paths and placeholder hosting database settings. Follow the
 included instructions to upload files, import SQL, and configure the destination
 database. Private runtime metadata, browser sessions, and generated caches are
 excluded. Files-only ZIP and SQL-only downloads are also available. Tables,
-views, and simple triggers are supported. Stored routines, events, and compound
-trigger bodies currently stop export with an explicit error.
+views, and simple triggers are supported. Stored routines, events, compound
+trigger bodies, system-versioned tables, cross-database references, and aliases
+or common table expressions matching the source database name stop export with
+an explicit error.
 
 ## Embedding and URL configuration
 
@@ -412,6 +417,8 @@ Build the static site, install the browser engines, and run browser integration:
 ```bash
 BRIDGE_SOURCE_DIR=external/bridge MARIADB_DRIVER_DIR=.cache/native npm run build
 npx playwright install --with-deps chromium firefox
+npm run test:provisioning
+npm run build:blueprints
 npm run test:browser
 ```
 
