@@ -125,6 +125,14 @@ async function request(page, pathname) {
   }, pathname), `HTTP ${pathname}`);
 }
 
+async function waitForSiteFrame(frame, expectedURL) {
+  const expected = new URL(expectedURL);
+  // Joomla may navigate a directory URL to its index document during startup.
+  await frame.waitForURL((actual) => actual.origin === expected.origin
+    && (actual.pathname === expected.pathname || actual.pathname === `${expected.pathname}index.php`),
+  { waitUntil: 'load' });
+}
+
 async function assertGuidedTour(page) {
   const result = await php(page, guidedTourProgram);
   assert.equal(result.status, 200, result.text);
@@ -166,7 +174,7 @@ async function assertSite(page, config) {
     assert.ok(iframe.includes('/__site/'), 'The browser URL routes through the playground service worker.');
     await bounded(page.frameLocator('#site-frame').locator('body').waitFor(), `Service worker iframe ${pathname}`);
     const frame = await page.locator('#site-frame').elementHandle().then((element) => element.contentFrame());
-    await frame.waitForURL(iframe, { waitUntil: 'load' });
+    await waitForSiteFrame(frame, iframe);
     const html = await page.frameLocator('#site-frame').locator('html').innerHTML();
     if (pathname === '/') assert.ok(html.includes(config.siteName));
     else {
@@ -401,7 +409,7 @@ for (const name of browserNames) {
         await page.frameLocator('#site-frame').locator('body').waitFor();
         await page.locator('#site-frame').elementHandle().then(async (element) => {
           const frame = await element.contentFrame();
-          await frame.waitForURL(await element.getAttribute('src'), { waitUntil: 'load' });
+          await waitForSiteFrame(frame, await element.getAttribute('src'));
         });
         assert.match(await page.frameLocator('#site-frame').locator('html').innerHTML(), /com_cpanel|task=logout|value=["']logout["']/i);
         await mkdir(path.join(root, 'test-results'), { recursive: true });
@@ -419,7 +427,7 @@ for (const name of browserNames) {
         await page.frameLocator('#site-frame').locator('body').waitFor();
         await page.locator('#site-frame').elementHandle().then(async (element) => {
           const frame = await element.contentFrame();
-          await frame.waitForURL(await element.getAttribute('src'), { waitUntil: 'load' });
+          await waitForSiteFrame(frame, await element.getAttribute('src'));
         });
         assert.ok((await page.frameLocator('#site-frame').locator('html').innerHTML()).includes('Interface installation after reset'));
         await page.locator('#close-button').click();
