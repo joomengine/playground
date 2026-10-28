@@ -1,5 +1,6 @@
 import { ensureManagedDatabaseConfiguration } from './managed-database.mjs';
 import { parseMenus, parseTemplate, parseLanguageTags } from '../site-configuration.mjs';
+import { createMcpClient } from '../mcp.mjs';
 const RESULT_MARKER = '\n__JOOMENGINE_RESULT__';
 const phpSourceCache = new Map();
 const MAX_PACKAGE_BYTES = 128 * 1024 * 1024;
@@ -164,7 +165,7 @@ async function defaultSourceLoader(name) {
 }
 
 export async function buildPhpProgram(operation, payload, sourceLoader = defaultSourceLoader) {
-  if (!['extract', 'install', 'console', 'status', 'health', 'customize', 'administrator', 'import', 'configure', 'discover', 'mcp-probe'].includes(operation)) throw new TypeError('Unknown provisioning operation.');
+  if (!['extract', 'install', 'console', 'status', 'health', 'customize', 'administrator', 'import', 'configure', 'discover', 'mcp'].includes(operation)) throw new TypeError('Unknown provisioning operation.');
   const [common, script] = await Promise.all([sourceLoader('common'), sourceLoader(operation)]);
   const encoded = new TextEncoder().encode(JSON.stringify(payload));
   let binary = '';
@@ -210,9 +211,28 @@ export async function checkJoomla(runtime, { sourceLoader } = {}) {
   return execute(runtime, 'health', paths(runtime), sourceLoader);
 }
 
-/** Run the installed MCP component's fixed native read diagnostic as its administrator. */
-export async function checkMcpRuntime(runtime, { sourceLoader, admin } = {}) {
-  return execute(runtime, 'mcp-probe', { ...paths(runtime), admin }, sourceLoader);
+/** Return a private native Joomla token for a client running in this browser. */
+export async function getMcpConnection(runtime, { sourceLoader, admin, initialize = false } = {}) {
+  return execute(runtime, 'mcp', { ...paths(runtime), admin, initialize,
+    apiBase: new URL('api/index.php', runtime.baseUrl).href }, sourceLoader);
+}
+
+/** Exercise the unchanged component through its real token-authenticated HTTP transport. */
+export async function checkMcpRuntime(runtime, { sourceLoader, admin, initialize = false } = {}) {
+  const connection = await getMcpConnection(runtime, { sourceLoader, admin, initialize });
+  if (!connection.installed) return { installed: false };
+  const client = createMcpClient({ request: runtime.request.bind(runtime), token: connection.token });
+  try {
+    const initialized = await client.initialize();
+    const { tools } = await client.request('tools/list');
+    if (!Array.isArray(tools) || !tools.some(tool => tool.name === 'joomla_action_describe')) {
+      throw new Error('The installed MCP endpoint did not expose its action catalogue.');
+    }
+    const description = await client.callTool('joomla_action_describe', { action: 'content.categories.list' });
+    if (description.action?.id !== 'content.categories.list') throw new Error('MCP did not describe the installed Joomla action.');
+    return { installed: true, version: connection.version, endpoint: connection.endpoint,
+      protocolVersion: initialized.protocolVersion, toolCount: tools.length, describedAction: description.action.id };
+  } finally { await client.close(); }
 }
 
 export async function runStartupCommand(runtime, argv, { sourceLoader } = {}) {
@@ -428,7 +448,7 @@ export async function installJoomla(runtime, config, {
   const health = await checkJoomla(runtime, { sourceLoader });
   progress({ stage: 'login', message: options.autoLogin ? 'Signing in to Joomla…' : 'Starting without an administrator session…' });
   const administrator = await restoreJoomlaSession(runtime, options, { sourceLoader });
-  const mcp = options.deployId === 'jcb-mcp' ? await checkMcpRuntime(runtime, { sourceLoader, admin: administrator }) : undefined;
+  const mcp = options.deployId === 'jcb-mcp' ? await checkMcpRuntime(runtime, { sourceLoader, admin: administrator, initialize: true }) : undefined;
   const frontend = await requestJoomlaPage(runtime);
   await frontend.arrayBuffer();
   if (frontend.status !== 200) throw new Error(`The installed Joomla site returned HTTP ${frontend.status}.`);
@@ -474,7 +494,7 @@ export async function importJoomlaSnapshot(runtime, config, {
   const health = await checkJoomla(runtime, { sourceLoader });
   if (health.version !== options.joomlaVersion) throw new Error('The restored Joomla version does not match the selected release.');
   await restoreJoomlaSession(runtime, options, { sourceLoader });
-  const mcp = options.deployId === 'jcb-mcp' ? await checkMcpRuntime(runtime, { sourceLoader, admin: administrator }) : undefined;
+  const mcp = options.deployId === 'jcb-mcp' ? await checkMcpRuntime(runtime, { sourceLoader, admin: administrator, initialize: true }) : undefined;
   const frontend = await requestJoomlaPage(runtime);
   await frontend.arrayBuffer();
   if (frontend.status !== 200) throw new Error(`The restored Joomla site returned HTTP ${frontend.status}.`);

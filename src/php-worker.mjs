@@ -1,6 +1,8 @@
 import { MAX_BODY_BYTES, serializeResponse } from './http.mjs';
 import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeHealthSource, runtimeRandomValue, assertRuntimeHealth } from './php-settings.mjs';
 import { checkpointSource, restoreCheckpointSource } from './checkpoint-program.mjs';
+import { configurePhpRouting } from './php-routing.mjs';
+import { createPhpFetch } from './php-network.mjs';
 
 const MAX_OPERATIONS = 64;
 const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
@@ -17,6 +19,7 @@ let routePrefix;
 let mountPath;
 let phpSettings;
 let requestBodyLimit = MAX_BODY_BYTES;
+let requestActive = false;
 
 class FatalRuntimeError extends Error {
   fatal = true;
@@ -83,9 +86,13 @@ async function request(value) {
   }
   php.error = [];
   const captured = php.binary;
-  const response = await php.request(new Request(url, {
-    method, headers, body: ['GET', 'HEAD'].includes(method) ? null : body, redirect: 'manual',
-  }));
+  let response;
+  requestActive = true;
+  try {
+    response = await php.request(new Request(url, {
+      method, headers, body: ['GET', 'HEAD'].includes(method) ? null : body, redirect: 'manual',
+    }));
+  } finally { requestActive = false; }
   if (php.binary !== captured) {
     const diagnostics = new TextDecoder().decode(new Uint8Array(php.error || [])).trim().slice(0, 2000);
     throw new FatalRuntimeError(`PHP stopped abnormally. Restart the playground before continuing.${diagnostics ? ` ${diagnostics}` : ''}`);
@@ -123,6 +130,8 @@ async function initialize(args) {
     throw new TypeError('The site route prefix must be an absolute URL path.');
   }
   routePrefix = `${args.prefix.replace(/\/+$/, '')}/`;
+  globalThis.fetch = createPhpFetch(globalThis.fetch.bind(globalThis),
+    new URL(routePrefix, self.location.origin), () => requestActive);
   phpSettings = normalizePhpSettings(args.phpSettings);
   requestBodyLimit = phpRequestBodyLimit(phpSettings);
   persistent = args.persistence === true;
@@ -155,6 +164,7 @@ async function initialize(args) {
     },
   });
   binary = await php.binary;
+  configurePhpRouting(php, binary);
   if (persistent) {
     mkdir(`${mountPath}/data`);
     mkdir(`${mountPath}/config`);

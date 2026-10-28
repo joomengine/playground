@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "help.mcpPreview": "Προεπισκόπηση MCP: συνδεθείτε και ανακαλύψτε εργαλεία σε αυτό το πρόγραμμα περιήγησης. Τα εργαλεία επεξεργασίας Joomla δεν είναι διαθέσιμα σε αυτήν την έκδοση.",
   "app.name": "JoomEngine Rocket",
   "app.tagline": "Επιταχυνόμενες εγκαταστάσεις Joomla",
   "action.launch": "Εκκίνηση",

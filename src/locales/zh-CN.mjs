@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "help.mcpPreview": "MCP 预览：在此浏览器中连接并发现工具。此版本暂不提供 Joomla 编辑工具。",
   "app.name": "JoomEngine Rocket",
   "app.tagline": "快速部署 Joomla",
   "action.launch": "启动",

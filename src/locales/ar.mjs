@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "help.mcpPreview": "معاينة MCP: اتصل واكتشف الأدوات في هذا المتصفح. أدوات تحرير Joomla غير متاحة في هذا الإصدار.",
   "app.name": "JoomEngine Rocket",
   "app.tagline": "عمليات نشر Joomla سريعة",
   "action.launch": "تشغيل",

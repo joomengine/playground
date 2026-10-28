@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "help.mcpPreview": "Попередня версія MCP: підключайтеся та знаходьте інструменти в цьому браузері. Інструменти редагування Joomla недоступні в цьому випуску.",
   "app.name": "JoomEngine Rocket",
   "app.tagline": "Швидке розгортання Joomla",
   "action.launch": "Запустити",

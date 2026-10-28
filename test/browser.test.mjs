@@ -8,8 +8,9 @@ import { chromium, firefox } from 'playwright';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { createStaticServer } from './server.mjs';
 import { assertBrowserRequestBodies } from './browser-request-contract.mjs';
+import { assertExternalAssets } from './external-assets-contract.mjs';
+import { assertMcpHttp } from './mcp-http.mjs';
 import { probeSyntheticRedirect, startRedirectTrace, recordVerifiedRedirectDiagnostic } from './firefox-redirect-probe.mjs';
-import { assertJcbDashboardArtwork } from './jcb-dashboard-artwork.mjs';
 import { inventory } from '../scripts/assets.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -17,8 +18,6 @@ const directory = path.resolve(process.env.PLAYGROUND_DIST || path.join(root, 'd
 const manifestBytes = await readFile(path.join(directory, 'assets/manifest.json'));
 const manifest = JSON.parse(manifestBytes);
 const guidedTourProgram = await readFile(new URL('./fixtures/guided-tour.php', import.meta.url), 'utf8');
-const bannerAssets = JSON.parse(await readFile(new URL('../dependencies/jcb-banners/assets.json', import.meta.url), 'utf8')).assets;
-assert.equal(bannerAssets.length, 7, 'The complete set of JCB sponsor artwork must be audited.');
 const manifestSha256 = createHash('sha256').update(manifestBytes).digest('hex');
 const inventoryBytes = await readFile(path.join(directory, 'asset-inventory.json'));
 const inventorySha256 = createHash('sha256').update(inventoryBytes).digest('hex');
@@ -589,15 +588,17 @@ for (const name of browserNames) {
         const config = configuration(defaultPair, { persistence: false });
         await start(page, config);
         await assertSite(page, config);
+        const externalAssets = await assertExternalAssets(page);
         await assertCleanConsole(page);
         await close(page);
-        records.push({ ...defaultPair, staticServiceWorkerIsolation: true });
+        records.push({ ...defaultPair, staticServiceWorkerIsolation: true, externalAssets });
       } finally { if (page) await close(page).catch(() => {}); await context.close(); await plainServer.close(); }
     });
     if (scenarios.includes('deploys')) await runScenario('repository and URL recipes install actual components, languages and prepared content', { timeout: 900_000 }, async () => {
       const context = await browser.newContext();
       const page = await openHarness(context, server.url);
       const proof = [];
+      let mcpHttpVerified = false;
       const setup = () => ({ admin: configuration(defaultPair).admin, persistence: false, storageKey: `deploy-${randomUUID()}` });
       try {
         const componentCases = [
@@ -620,25 +621,12 @@ for (const name of browserNames) {
             if (item.id === 'jcb-mcp') {
               assert.equal(await phpJSON(page, `${PDO} echo json_encode($db->query("SELECT enabled FROM jml_extensions WHERE element='com_joomengine_mcp' AND type='component'")->fetchColumn());`), 1);
               assert.equal(await phpJSON(page, `echo json_encode(extension_loaded('sodium'));`), true);
+              if (!mcpHttpVerified) {
+                proof.push({ id: 'jcb-mcp', ...(await assertMcpHttp(page)) });
+                mcpHttpVerified = true;
+              }
             }
             assert.deepEqual(dashboardErrors(component.text), [], 'JCB must not report missing requirements or fatal configuration errors.');
-            const installedArtwork = await bounded(page.evaluate(async (assets) => {
-              const results = [];
-              for (const asset of assets) {
-                const relative = `administrator/components/com_componentbuilder/assets/images/banner/${asset.name}`;
-                const response = await fetch(new URL(relative, window.playground.baseUrl), { cache: 'no-store' });
-                const bytes = await response.arrayBuffer();
-                const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-                results.push({ name: asset.name, status: response.status, mime: response.headers.get('Content-Type'), size: bytes.byteLength, sha256: digest });
-              }
-              return results;
-            }, bannerAssets), 'Installed JCB artwork');
-            for (const [index, image] of installedArtwork.entries()) {
-              assert.equal(image.status, 200, `${image.name} must be served by the installed site.`);
-              assert.match(image.mime, /^image\//);
-              assert.equal(image.size, bannerAssets[index].size, image.name);
-              assert.equal(image.sha256, bannerAssets[index].sha256, image.name);
-            }
             const curlURL = Buffer.from(new URL('__test_curl.json', server.url).href).toString('base64');
             const http = await phpJSON(page, `
               if (!extension_loaded('curl')) { echo json_encode(['loaded'=>false]); return; }
@@ -738,8 +726,7 @@ for (const name of browserNames) {
         page.testStep = 'default domain automatically opens JCB and MCP in English';
         await page.setViewportSize({ width: 1440, height: 1000 });
         await page.goto(server.url);
-        const dashboardFrame = await renderedSiteFrame(page);
-        const dashboardArtwork = await assertJcbDashboardArtwork(dashboardFrame);
+        await renderedSiteFrame(page);
         assert.equal(await page.locator('#deploy').inputValue(), 'jcb-mcp');
         assert.match(await page.frameLocator('#site-frame').locator('html').innerHTML(), /com_componentbuilder/);
         assert.equal(await page.frameLocator('#site-frame').locator('input[name="passwd"]').count(), 0);
@@ -755,7 +742,7 @@ for (const name of browserNames) {
         await page.locator('#close-button').click();
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
-        proof.push({ id: 'jcb-mcp', defaultDomainAutostart: true, dashboardArtwork });
+        proof.push({ id: 'jcb-mcp', defaultDomainAutostart: true });
         await assertCleanConsole(page);
         records.push({ ...defaultPair, deploys: proof, knownBrowserDiagnostics: page.knownBrowserDiagnostics });
       } catch (error) { await saveBrowserDiagnostics(page, `deploys-${name}`, error); throw error; }
@@ -852,12 +839,12 @@ for (const name of browserNames) {
         const changedPHP = manifest.joomla.find((entry) => entry.version === defaultPair.joomlaVersion).php.find((version) => version !== defaultPair.phpVersion);
         assert.ok(changedPHP, 'The interface contract needs two compatible PHP versions.');
         page.testStep = 'switch PHP with saved files and database';
-        const originalFrame = await page.locator('#site-frame').getAttribute('src');
+        const originalFrameURL = (await renderedSiteFrame(page)).url();
         await showQuickSettings(page);
         await page.locator('#php-version').selectOption(changedPHP);
         await page.locator('#status-message').filter({ hasText: 'PHP settings applied.' }).waitFor({ timeout: requestTimeout });
-        await renderedSiteFrame(page);
-        assert.equal(await page.locator('#site-frame').getAttribute('src'), originalFrame,
+        const switchedFrame = await renderedSiteFrame(page);
+        assert.equal(switchedFrame.url(), originalFrameURL,
           'Restarting PHP must retain the active Joomla route.');
         const afterSwitch = await previewContract(page);
         assert.deepEqual(afterSwitch, { ...marker, php: manifest.php.find((entry) => entry.version === changedPHP).patchVersion });

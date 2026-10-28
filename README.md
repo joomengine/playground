@@ -119,7 +119,7 @@ while IFS= read -r minor; do
   BRIDGE_SOURCE_DIR=external/bridge node scripts/build-sodium.mjs "$minor"
 done < <(node --input-type=module -e "import p from './versions.json' with {type:'json'}; for (const v of p.php) console.log(v.version)")
 
-BRIDGE_SOURCE_DIR=external/bridge MARIADB_DRIVER_DIR=.cache/native npm run build
+MARIADB_DRIVER_DIR=.cache/native npm run build
 npm run build:deploys
 npm run serve
 ```
@@ -129,9 +129,10 @@ COOP/COEP headers. `PORT` and `HOST` can override its listen address. Build outp
 are written to `dist/`; source downloads and compiled modules are cached under
 `.cache/` and the bridge’s `.native-build/` directory.
 
-If the bridge is checked out next to the playground, the build also supports its
-default paths: `../mariadb-wasm-bridge` for adapter sources and
-`../mariadb-wasm-bridge/.native-build/upstream` for compiled extensions.
+If the bridge is checked out next to the playground, native extension compilation
+also supports `../mariadb-wasm-bridge` as its source directory. The static build
+uses `../mariadb-wasm-bridge/.native-build/upstream` as its default compiled-driver
+directory; all bridge JavaScript and engine assets come from the verified release.
 
 ## Build provenance
 
@@ -140,12 +141,9 @@ default paths: `../mariadb-wasm-bridge` for adapter sources and
 release archive checksum, native and adapter source hashes, Joomla distributions,
 and compatible runtime combinations.
 
-The build verifies every entry in the MariaDB bridge 0.1.3 release inventory and
-retains its engine WebAssembly binary unchanged. It stages the bridge runtime,
-PHP adapter and generated engine JavaScript glue from the pinned source revision
-`090c29d2b25dcd216941cfbeaf17b847d6f3658a`, checking their source and generated hashes.
-The overlay records the browser CPU scheduling budget and UTF-8 charset handling
-separately from the immutable release archive. The
+The build verifies every entry in the MariaDB bridge 0.1.5 release inventory and
+stages its runtime, PHP adapter, engine JavaScript and WebAssembly directly from
+that release. Native driver source hashes must match the same release. The
 PDO extension’s compiler, PHP version, source hashes, upstream revision, and
 binary hash must also match. Native fileinfo, cURL and Sodium modules retain
 their matching source inventories, compiler identities and licenses. The CGI
@@ -154,10 +152,9 @@ verified before staging. A missing driver or mismatched input fails the build.
 
 `dist/assets/manifest.json` records the selected runtimes, extension assets,
 preload files, source revisions, and dependency identities. Its `bridge.release`
-entry identifies the original release archive; `bridge.overlay` identifies the
-effective JavaScript runtime, adapter and engine-glue sources. The original archive inventory is
-retained as `assets/mariadb/release-manifest.json` and describes that release,
-rather than the assembled bridge directory.
+entry identifies the published release archive. Its complete inventory is retained
+as `assets/mariadb/release-manifest.json`; copied runtime and engine assets retain
+their released hashes.
 `dist/asset-inventory.json` records the files, sizes, and SHA-256 values in the
 assembled site. Updating a dependency means updating its pins, rebuilding its
 matching native modules, and running the complete validation suite.
@@ -323,12 +320,12 @@ cryptography, database access and uploads. GD supports JPEG, PNG and WebP; AVIF
 and XPM are not built into this runtime. The [official Joomla Docker image](https://github.com/joomla/docker-joomla)
 is a setup reference, while browser limitations remain explicit below.
 
-The Joomla 6 **JCB + MCP** deploy installs the real MCP package and verifies
-Sodium, administrator authentication/ACL, system information and installed
-extension reads through its native Joomla integration. This read-only diagnostic
-does not expose an external MCP endpoint or provide a native CLI process. Its
-stdio transport and process-based jobs remain unavailable in a static browser
-runtime; see [the MCP integration notes](dependencies/mcp/README.md).
+The Joomla 6 **JCB + MCP** deploy installs the unchanged MCP package and configures
+its native Joomla token-authenticated HTTP endpoint for clients in the same browser.
+Deployment verification exercises HTTP initialization, tool discovery and an action
+description. Executing actions that call Joomla's API again also requires nested
+PHP request support; discovery alone does not verify those operations. Native
+processes and stdio are outside this integration. See [the MCP integration notes](dependencies/mcp/README.md).
 
 ## Embedding and URL configuration
 
@@ -531,7 +528,7 @@ A static host that supports response headers should supply:
 
 ```text
 Cross-Origin-Opener-Policy: same-origin
-Cross-Origin-Embedder-Policy: require-corp
+Cross-Origin-Embedder-Policy: credentialless
 ```
 
 MariaDB requires `SharedArrayBuffer`, a secure context, and cross-origin
@@ -540,6 +537,21 @@ Locks. GitHub Pages cannot configure these response headers directly, so the
 included service worker adds them to controlled responses and the interface
 reloads once to activate isolation. That worker also handles the PHP site routes;
 do not replace it with an unrelated isolation worker.
+
+The credentialless policy allows ordinary public images, classic scripts, and
+stylesheets to load directly from their original hosts without requiring CORS or
+CORP response headers. These cross-origin `no-cors` requests omit cookies and
+other credentials. Fonts, JavaScript modules, and requests that read remote data
+still follow normal CORS rules; an explicit remote CORP restriction is respected.
+No extension-specific image URLs or artwork snapshots are maintained.
+
+Current desktop Chromium and Firefox are the validated browser targets. The
+required `COEP: credentialless` policy is not currently supported by Safari/iOS
+or Firefox for Android. Those browsers cannot run this release's combined
+MariaDB and public-asset setup; the interface stops with a compatibility message
+after the single isolation reload instead of silently applying a policy that
+breaks extension assets. Responsive layout does not imply runtime support on
+every mobile browser.
 
 The **Publish playground to Pages** workflow runs on every push or merge to
 `main`, and can also be started manually on `main`. It validates first, then
@@ -575,7 +587,7 @@ node --test test/fileinfo.integration.mjs test/curl.integration.mjs test/sodium.
 Build the static site, install the browser engines, and run browser integration:
 
 ```bash
-BRIDGE_SOURCE_DIR=external/bridge MARIADB_DRIVER_DIR=.cache/native npm run build
+MARIADB_DRIVER_DIR=.cache/native npm run build
 npx playwright install --with-deps chromium firefox
 npm run test:provisioning
 npm run build:deploys

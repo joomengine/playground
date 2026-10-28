@@ -112,6 +112,10 @@ function mountPreview(url) {
   $('open-link').href = url;
   show('site-mount');
 }
+function updateMcpPreview() {
+  $('deploy-mcp-preview').hidden = fields.deployId.value !== 'jcb-mcp';
+  $('credentials-mcp-preview').hidden = !runtime || !(runtime.installation?.mcp || runtime.installation?.deployId === 'jcb-mcp');
+}
 function setBusy(value) {
   busy = value;
   const unavailable = !catalog || !deployCatalog;
@@ -140,6 +144,7 @@ function setBusy(value) {
   document.body.classList.toggle('running', Boolean(runtime));
   $('preview-label').textContent = runtime && currentConfig ? currentConfig.siteName : t('title.site');
   updateSaveState();
+  updateMcpPreview();
 }
 function progress(event) {
   const details = typeof event === 'string' ? { message: event } : event;
@@ -612,6 +617,7 @@ function openEditor() {
   $('deploy-error').hidden = true;
   $('advanced-settings').open = true;
   $('editor-runtime-summary').textContent = `${fields.deployId.value} · Joomla ${fields.joomlaVersion.value} · PHP ${fields.phpVersion.value}`;
+  updateMcpPreview();
   renderEditorLists(); openDialog('deploy-dialog');
   if (runtime?.discoverConfiguration && !busy) void runtime.discoverConfiguration().then(discovered => {
     $('component-options').replaceChildren(...[...new Set(discovered.menuTypes.map(item => item.component))].map(value => { const option = document.createElement('option'); option.value = value; return option; }));
@@ -754,6 +760,7 @@ function setupInterface() {
   $('information-button').addEventListener('click', () => openDialog('information-dialog'));
   $('download-dialog-button').addEventListener('click', () => openDialog('download-dialog'));
   $('credentials-button').addEventListener('click', () => {
+    updateMcpPreview();
     $('credential-username').value = $('admin-username').value; $('credential-password').value = $('admin-password').value;
     $('credential-password').type = 'password'; $('reveal-credentials').textContent = t('action.show'); openDialog('credentials-dialog');
   });
@@ -844,7 +851,7 @@ async function initialize() {
       let previousReload;
       try { previousReload = sessionStorage.getItem(reloadMarker); sessionStorage.setItem(reloadMarker, '1'); }
       catch { throw new Error('Allow session storage for this page, then reload to enable the browser database runtime.'); }
-      if (previousReload) throw new Error('This browser or host could not enable cross-origin isolation. Use HTTPS and allow service workers.');
+      if (previousReload) throw new Error('This browser or host could not enable the credentialless isolation required by MariaDB and external assets. Use a current desktop Firefox or Chromium browser over HTTPS with service workers enabled.');
       location.reload(); return;
     }
     try { sessionStorage.removeItem(reloadMarker); } catch { /* Already-isolated temporary sites need no saved preference. */ }

@@ -25,11 +25,6 @@ Development Method through https://github.com/joomengine/pkg-component-builder .
 Its GPL-2.0-or-later license and copyright notices remain in the derived browser
 packages. The reviewed reader-interface adjustment preserves its source header.
 The upstream fixture license is included at test/fixtures/LICENSE.jcb.txt.
-JCB's original sponsor banner artwork is included unchanged from the pinned
-https://github.com/vdm-io/jcb-external source. The artwork remains credited to
-its respective creators; sponsor destinations and visible references are retained.
-Asset checksums, source URLs and the reviewed magazine image reference correction
-are recorded in dependencies/jcb-banners/assets.json and package provenance.
 
 JCB spreadsheet support builds on PHPOffice/PhpSpreadsheet and ZipStream-PHP,
 with Composer PCRE, Mark Baker's Complex and Matrix libraries, MyCLabs PHP Enum,

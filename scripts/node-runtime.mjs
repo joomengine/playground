@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeHealthSource, runtimeRandomValue, assertRuntimeHealth } from '../src/php-settings.mjs';
+import { configurePhpRouting } from '../src/php-routing.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -165,6 +166,7 @@ export async function createNodeRuntime({ directory = path.join(root, 'dist'), p
       ini: `${adapter.ini}${phpIni(phpSettings)}`,
     });
     binary = await php.binary;
+    configurePhpRouting(php, binary);
     for (const directory of ['/persist/www', '/persist/sessions', '/persist/meta', '/config', '/internal']) binary.FS.mkdirTree(directory);
     php.initialized = true;
     php.staticCacheTime = 0;

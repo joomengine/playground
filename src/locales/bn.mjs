@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "help.mcpPreview": "MCP পূর্বরূপ: এই ব্রাউজারে সংযোগ করুন ও টুল খুঁজুন। এই সংস্করণে Joomla সম্পাদনার টুল উপলব্ধ নেই।",
   "app.name": "JoomEngine Rocket",
   "app.tagline": "দ্রুত Joomla স্থাপন",
   "action.launch": "চালু করুন",

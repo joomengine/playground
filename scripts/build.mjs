@@ -8,7 +8,6 @@ import { stageFileinfo } from './fileinfo.mjs';
 import { stageCurl } from './curl.mjs';
 import { stageSodium } from './sodium.mjs';
 import { applyCgiRequestOverlay } from './cgi-request-overlay.mjs';
-import { stageBridgeOverlay } from './bridge-overlay.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const versions = JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
@@ -21,7 +20,6 @@ if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
 const canonicalUrl = `https://${domain}/`;
 const cache = path.join(root, '.cache');
 const destination = path.join(root, 'dist');
-const bridgeSourceDirectory = path.resolve(root, process.env.BRIDGE_SOURCE_DIR || '../mariadb-wasm-bridge');
 const driverDirectory = path.resolve(root, process.env.MARIADB_DRIVER_DIR || '../mariadb-wasm-bridge/.native-build/upstream');
 const fileinfoDirectory = path.resolve(root, process.env.FILEINFO_EXTENSION_DIR || '.cache/fileinfo');
 const sodiumDirectory = path.resolve(root, process.env.SODIUM_EXTENSION_DIR || '.cache/sodium');
@@ -83,6 +81,14 @@ try {
   await extractTarGzip(archive, bridgeStaging);
   const bridgeDirectory = path.join(bridgeStaging, `mariadb-wasm-bridge-${versions.bridge.version}`);
   const bridgeManifest = await verifyBridgeBundle(bridgeDirectory, versions.bridge);
+  if (versions.nativeDriver.sourceCommit !== versions.bridge.sourceCommit) {
+    throw new Error('Native driver sources must belong to the selected bridge release.');
+  }
+  for (const [filename, expected] of Object.entries(versions.nativeDriver.nativeSources)) {
+    if (bridgeManifest.files[`native/${filename}`]?.sha256 !== expected) {
+      throw new Error(`Bridge release source differs from the native driver pin: ${filename}`);
+    }
+  }
   const bridgeTarget = path.join(assets, 'mariadb');
   await mkdir(bridgeTarget);
   for (const filename of ['vendor', 'patches', 'LICENSE', 'NOTICE']) {
@@ -91,14 +97,12 @@ try {
   await cp(path.join(bridgeDirectory, 'bridge-manifest.json'), path.join(bridgeTarget, 'release-manifest.json'));
   for (const [directory, sourcePins] of [['src', versions.nativeDriver.runtimeSources], ['adapters', versions.nativeDriver.adapterSources]]) {
     for (const [filename, expected] of Object.entries(sourcePins)) {
-      if (versions.nativeDriver.sourceCommit === versions.bridge.sourceCommit && bridgeManifest.files[`${directory}/${filename}`]?.sha256 !== expected) {
+      if (bridgeManifest.files[`${directory}/${filename}`]?.sha256 !== expected) {
         throw new Error(`Bridge release source differs from the native adapter pin: ${directory}/${filename}`);
       }
     }
     await cp(path.join(bridgeDirectory, directory), path.join(bridgeTarget, directory), { recursive: true });
   }
-  const bridgeOverlay = await stageBridgeOverlay({ source: bridgeSourceDirectory, destination: bridgeTarget,
-    pins: versions.nativeDriver, release: versions.bridge, engine: bridgeManifest.engine });
   await rm(bridgeStaging, { recursive: true });
 
   const php = [];
@@ -175,8 +179,7 @@ try {
       moduleUrl: 'mariadb/src/index.mjs',
       adapterUrl: 'mariadb/adapters/php-wasm.mjs',
       release: { ...versions.bridge, manifestUrl: 'mariadb/release-manifest.json' },
-      engine: bridgeOverlay?.engine || bridgeManifest.engine,
-      ...(bridgeOverlay ? { overlay: { sourceCommit: bridgeOverlay.sourceCommit, files: bridgeOverlay.files } } : {}),
+      engine: bridgeManifest.engine,
     },
     defaults: versions.defaults,
   };

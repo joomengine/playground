@@ -10,7 +10,7 @@ Rocket provides the next JoomEngine Playground interface and deployment workflow
 - [x] Afrikaans-first multilingual deployments with all requested languages; ordinary deployments default to English.
 - [x] Independently translated Rocket interface, starting in English, including RTL support.
 - [x] Clear persistence, credentials, downloads and standalone viewing.
-- [x] Verified bridge 0.1.3 assets, compatibility fixes and focused validation.
+- [x] Verified bridge 0.1.5 release assets, compatibility fixes and focused validation.
 
 The footer copyright and Powered by attribution form one line when space permits. The Joomla affiliation notice remains separate and smaller. Upstream credits remain in README and the interface information dialog.
 

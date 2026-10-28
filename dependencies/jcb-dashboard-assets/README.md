@@ -1,9 +1,0 @@
-# JCB dashboard artwork snapshots
-
-These unchanged image responses were retrieved on 28 October 2026 from the URLs referenced by the reviewed JCB 5.2.0 and 6.2.0 dashboard README, support layout and current Joomla Social profile avatar. The build verifies every byte against `assets.json` and includes the images inside the derived JCB package, so these dashboard images do not depend on external servers accepting the browser’s isolation policy.
-
-The manifest records each original URL, final response URL, media type, size, SHA-256, retrieval date and source-file hash. Its ordered README links preserve the original contributor and sponsor destinations. All artwork remains the work of its respective creators; the original JCB text, visible credits and links are retained. These snapshots do not change ownership or applicable upstream licenses.
-
-There are 30 source references and 14 distinct image files. OpenCollective currently returns an identical transparent 1×1 PNG for unoccupied sponsor positions 4–20; those original responses are retained with their actual media type. Contributor and backer SVGs embed their raster artwork, and their HTTPS profile links remain intact. SVGs were checked for scripts, event handlers, foreign content and external resource references. HTTPS navigation links and embedded raster images or recursively checked SVGs are permitted; executable content and external image dependencies are not.
-
-The snapshots are historical artwork, including the support badges’ values at retrieval time. Updating them is an explicit review: retrieve the original references again, inspect the images and SVG content, update the hashes, and verify that every credit link remains unchanged. The social feed itself remains live. Its verified account ID and profile URL select the recorded avatar snapshot, so a new avatar filename does not break the isolated dashboard; other configured profiles retain their original behavior.

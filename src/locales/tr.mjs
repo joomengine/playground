@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "help.mcpPreview": "MCP önizlemesi: Bu tarayıcıda bağlanın ve araçları keşfedin. Joomla düzenleme araçları bu sürümde kullanılamaz.",
   "app.name": "JoomEngine Rocket",
   "app.tagline": "Hızlandırılmış Joomla dağıtımları",
   "action.launch": "Başlat",

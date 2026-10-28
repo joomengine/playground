@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "help.mcpPreview": "MCP-Vorschau: In diesem Browser verbinden und Werkzeuge entdecken. Werkzeuge zur Bearbeitung von Joomla sind in dieser Version nicht verfügbar.",
   "app.name": "JoomEngine Rocket",
   "app.tagline": "Beschleunigte Joomla-Bereitstellungen",
   "action.launch": "Starten",

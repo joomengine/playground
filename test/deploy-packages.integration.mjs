@@ -4,7 +4,8 @@ import { test } from 'node:test';
 import { createNodeRuntime } from '../scripts/node-runtime.mjs';
 import { parseCatalog } from '../src/config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
-import { checkMcpRuntime, discoverJoomlaConfiguration, installJoomla, requestJoomlaPage } from '../src/joomla/index.mjs';
+import { checkMcpRuntime, getMcpConnection, discoverJoomlaConfiguration, installJoomla, requestJoomlaPage } from '../src/joomla/index.mjs';
+import { createMcpClient } from '../src/mcp.mjs';
 
 const sourceLoader = (name) => readFile(new URL(`../src/joomla/php/${name}.php`, import.meta.url), 'utf8');
 const pairs = [ ['servicedirectory', '5'], ['servicedirectory', '6'], ['jcb-mcp', '6'] ];
@@ -48,11 +49,19 @@ for (const [deployId, major] of pairs) {
         assert.deepEqual(JSON.parse(health.text), { sodium: true, sodiumRoundTrip: '00ff80' });
         assert.equal(installed.mcp?.installed, true);
         assert.equal(installed.mcp.version, '1.0.10');
-        assert.equal(installed.mcp.nativeReads.systemInfo.joomlaVersion, release.version);
-        assert.match(installed.mcp.nativeReads.systemInfo.phpVersion, /^8\.4\./);
-        assert.ok(installed.mcp.nativeReads.extensions.items.some((entry) => entry.element === 'com_joomengine_mcp' && entry.enabled));
-        assert.ok(installed.mcp.nativeReads.extensions.items.some((entry) => entry.element === 'com_componentbuilder' && entry.enabled));
-        assert.deepEqual(installed.mcp.capabilities, { browserNativeReadProbe: true, externalMcpEndpoint: false, nativeProcessJobs: false, stdio: false });
+        assert.equal(installed.mcp.protocolVersion, '2025-11-25');
+        assert.ok(installed.mcp.toolCount > 0);
+        assert.equal(installed.mcp.describedAction, 'content.categories.list');
+        assert.equal(Object.hasOwn(installed.mcp, 'token'), false, 'Installation diagnostics never expose API credentials.');
+        const invalid = createMcpClient({ request: runtime.request.bind(runtime), token: 'invalid-test-token' });
+        await assert.rejects(invalid.initialize(), /HTTP 401/);
+        const connection = await getMcpConnection(runtime, { sourceLoader, admin: configuration.admin });
+        const client = createMcpClient({ request: runtime.request.bind(runtime), token: connection.token });
+        try {
+          await client.initialize();
+          const result = await client.request('ping');
+          assert.deepEqual(result, {});
+        } finally { await client.close(); }
         await assert.rejects(checkMcpRuntime(runtime, { sourceLoader,
           admin: { ...configuration.admin, password: `Wrong-${crypto.randomUUID()}!` } }), /authentication failed/i);
       }

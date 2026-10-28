@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "help.mcpPreview": "תצוגה מקדימה של MCP: התחברות וגילוי כלים בדפדפן הזה. כלי עריכת Joomla אינם זמינים בגרסה זו.",
   "app.name": "JoomEngine Rocket",
   "app.tagline": "פריסות Joomla מואצות",
   "action.launch": "הפעלה",

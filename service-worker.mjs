@@ -5,7 +5,10 @@ const sitePrefix = `${scope.pathname}__site/`;
 const isolationHeaders = headers => {
   const result = new Headers(headers);
   result.set('Cross-Origin-Opener-Policy', 'same-origin');
-  result.set('Cross-Origin-Embedder-Policy', 'require-corp');
+  // Keep MariaDB's shared memory available without requiring public image,
+  // classic script and stylesheet hosts to opt into our document's policy.
+  // Cross-origin no-cors requests omit credentials; CORS requests retain CORS.
+  result.set('Cross-Origin-Embedder-Policy', 'credentialless');
   result.set('Cross-Origin-Resource-Policy', 'same-origin');
   return result;
 };

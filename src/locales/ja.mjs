@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "help.mcpPreview": "MCP プレビュー：このブラウザーで接続し、ツールを検出できます。このリリースでは Joomla の編集ツールは利用できません。",
   "app.name": "JoomEngine Rocket",
   "app.tagline": "Joomlaをすばやくデプロイ",
   "action.launch": "起動",

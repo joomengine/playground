@@ -1,5 +1,5 @@
 import { normalizeConfiguration, parseCatalog, normalizeInitialPath, resolveSiteURL } from './config.mjs';
-import { installJoomla, inspectJoomla, sha256, importJoomlaSnapshot, importJoomlaCheckpoint, checkJoomla, restoreJoomlaSession, applyJoomlaConfiguration, discoverJoomlaConfiguration } from './joomla/index.mjs';
+import { installJoomla, inspectJoomla, sha256, importJoomlaSnapshot, importJoomlaCheckpoint, checkJoomla, restoreJoomlaSession, applyJoomlaConfiguration, discoverJoomlaConfiguration, getMcpConnection } from './joomla/index.mjs';
 import { exportSite } from './export.mjs';
 import { serializeRequest, restoreResponse } from './http.mjs';
 import { normalizePhpSettings, phpRequestTimeoutMs } from './php-settings.mjs';
@@ -275,6 +275,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       },
       exportSite: options => exportSite(handle, options),
       discoverConfiguration: () => discoverJoomlaConfiguration(handle),
+      getMcpConnection: () => getMcpConnection(handle, { admin: handle.installation?.administrator }),
       async openStandalone(options) {
         if (changing || closePromise) throw new Error('Wait for the current site operation.');
         changing = true; instances.delete(instanceId);

@@ -82,7 +82,6 @@ jobs:
             .cache/*.tar.gz
             .cache/packages
             .cache/jcb-dependency-archives
-            .cache/jcb-banners
             .cache/language-sources
             .cache/language-packages
             .cache/tools
@@ -158,7 +157,6 @@ jobs:
       - name: Build verified static distribution
         env:
           MARIADB_DRIVER_DIR: .cache/native
-          BRIDGE_SOURCE_DIR: external/bridge
           PHP_BINARY: php8.3
         run: npm run build
       - name: Cache verified download archives
@@ -170,7 +168,6 @@ jobs:
             .cache/*.tar.gz
             .cache/packages
             .cache/jcb-dependency-archives
-            .cache/jcb-banners
             .cache/language-sources
             .cache/language-packages
             .cache/tools

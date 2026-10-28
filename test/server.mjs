@@ -32,7 +32,7 @@ export async function createStaticServer({ directory, prefix = '/playground/', i
     response.setHeader('Cache-Control', 'no-store');
     if (isolation) {
       response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-      response.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+      response.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
     }
     response.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     try {

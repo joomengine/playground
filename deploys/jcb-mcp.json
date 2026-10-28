@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "id": "jcb-mcp",
   "title": "JCB + MCP",
-  "description": "Joomla Component Builder with the Joomla-native JoomEngine MCP component and its console and webservices plugins.",
+  "description": "Joomla Component Builder with JoomEngine MCP and its Joomla token-authenticated HTTP endpoint for a client in this browser.",
   "joomla": [
     "6"
   ],

@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "help.mcpPreview": "Pratinjau MCP: hubungkan dan temukan alat di browser ini. Alat penyuntingan Joomla belum tersedia dalam rilis ini.",
   "app.name": "JoomEngine Rocket",
   "app.tagline": "Penerapan Joomla yang cepat",
   "action.launch": "Jalankan",

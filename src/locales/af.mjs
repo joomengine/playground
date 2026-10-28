@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "help.mcpPreview": "MCP-voorskou: koppel en ontdek nutsgoed in hierdie blaaier. Joomla-redigeernutsgoed is nie in hierdie weergawe beskikbaar nie.",
   "app.name": "JoomEngine Rocket",
   "app.tagline": "Versnelde Joomla-ontplooiings",
   "action.launch": "Begin",
