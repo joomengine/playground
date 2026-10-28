@@ -56,14 +56,15 @@ export function connectFrame(frame, { onNavigate = () => {} } = {}) {
     window.addEventListener('scroll', viewport, { passive: true });
     window.addEventListener('resize', viewport);
     viewport();
-    const focus = event => bringIntoView(event.target);
+    // Native focus scrolling crosses frame boundaries and honors preventScroll.
+    // Scrolling again on focusin would override dialogs and tours that opt out.
     const hash = () => { let id; try { id = decodeURIComponent(win.location.hash.slice(1)); } catch { return; } if (id) bringIntoView(doc.getElementById(id)); };
-    doc.addEventListener('load', schedule, true); doc.addEventListener('focusin', focus);
+    doc.addEventListener('load', schedule, true);
     win.addEventListener('hashchange', hash);
     doc.fonts?.ready.then(schedule).catch(() => {});
     cleanupDocument = () => {
       if (parentReplaced) { try { if (win.document === doc) { if (originalParent) Object.defineProperty(win, 'parent', originalParent); else delete win.parent; } } catch { /* A cross-origin navigation owns its new document. */ } }
-      changed.disconnect(); observer?.disconnect(); style.remove(); doc.removeEventListener('load', schedule, true); doc.removeEventListener('focusin', focus); win.removeEventListener('hashchange', hash); window.removeEventListener('scroll', viewport); window.removeEventListener('resize', viewport); };
+      changed.disconnect(); observer?.disconnect(); style.remove(); doc.removeEventListener('load', schedule, true); win.removeEventListener('hashchange', hash); window.removeEventListener('scroll', viewport); window.removeEventListener('resize', viewport); };
     try { onNavigate({ url: win.location.href, title: doc.title, administrator: /\/administrator\//.test(win.location.pathname), signedOut: Boolean(doc.querySelector('form#form-login, form#login-form, input[name="passwd"]')) }); } catch { /* Cross-origin navigation cannot expose its document. */ }
     if (navigated && !win.location.hash) window.scrollTo({ top: Math.max(0, frame.getBoundingClientRect().top + window.scrollY), behavior: 'instant' });
     navigated = true;
