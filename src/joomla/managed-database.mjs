@@ -1,8 +1,12 @@
-const MODEL = '/administrator/components/com_config/src/Model/ApplicationModel.php';
+const PATHS = { model: '/administrator/components/com_config/src/Model/ApplicationModel.php', console: '/libraries/src/Console/SetConfigurationCommand.php' };
 const REFERENCES = [
-  { version: '5.4.10', sha256: 'f53ce977b42d0c373660fe4c4cb22313b8ad972809c76afdda266cad01336cee',
+  { kind: 'model', version: '5.4.10', sha256: 'f53ce977b42d0c373660fe4c4cb22313b8ad972809c76afdda266cad01336cee',
     connection: '$revisedDbo = DatabaseDriver::getInstance($options);' },
-  { version: '6.2.0', sha256: '4c818d664dccb05f12a19930275cd7b3cc64ad54c7b1a98bfd1e7b6d9314abf3',
+  { kind: 'console', version: '5.4.10', sha256: '7de63a108161b5d57414c1f93a49a8889b7aaa8c9dc6c6f886d4aa4da9ff5e95',
+    connection: '$db = DatabaseDriver::getInstance($settings);' },
+  { kind: 'console', version: '6.2.0', sha256: '7b57dab5a8c1a3215c4febaa8b91a763e67f0fe3a52970da15f0b160759d17cd',
+    connection: "$db = (new DatabaseFactory())->getDriver($settings['driver'], $settings);" },
+  { kind: 'model', version: '6.2.0', sha256: '4c818d664dccb05f12a19930275cd7b3cc64ad54c7b1a98bfd1e7b6d9314abf3',
     connection: "$revisedDbo = (new DatabaseFactory())->getDriver($options['driver'], $options);" },
 ];
 const marker = '// Rocket managed browser database validation.';
@@ -11,9 +15,12 @@ async function digest(value) {
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(value))), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 function original(reference) {
-  return `            ${reference.connection}\n            $revisedDbo->getVersion();`;
+  return `            ${reference.connection}\n            ${reference.kind === 'console' ? '$db' : '$revisedDbo'}->getVersion();`;
 }
 function replacement(reference) {
+  const data = reference.kind === 'console' ? '$options' : '$data';
+  const database = reference.kind === 'console' ? '$db' : '$revisedDbo';
+  const driver = reference.kind === 'console' ? '\\Joomla\\CMS\\Factory::getContainer()->get(\\Joomla\\Database\\DatabaseInterface::class)' : '$this->getDatabase()';
   return `            ${marker}
             if (\\extension_loaded('pdo_mariadb_wasm')) {
                 $managed = new \\JConfig();
@@ -21,22 +28,22 @@ function replacement(reference) {
                     'dbsslverifyservercert', 'dbsslkey', 'dbsslcert', 'dbsslca', 'dbsslcipher',
                     'session_handler', 'session_filesystem_path'] as $field) {
                     $expected = $managed->$field ?? '';
-                    if (array_key_exists($field, $data) && $data[$field] != $expected) {
+                    if (array_key_exists($field, ${data}) && ${data}[$field] != $expected) {
                         throw new \\RuntimeException('The browser manages the database and session settings. Export the site to change them on another server.');
                     }
-                    $data[$field] = $expected;
+                    ${data}[$field] = $expected;
                 }
-                $revisedDbo = $this->getDatabase();
-                $revisedDbo->getVersion();
+                ${database} = ${driver};
+                ${database}->getVersion();
             } else {
                 ${reference.connection}
-                $revisedDbo->getVersion();
+                ${database}->getVersion();
             }`;
 }
 
 /** Preserve Joomla's native save flow while validating its existing managed browser connection. */
-export async function managedDatabaseSource(source, version) {
-  const reference = REFERENCES.find(item => item.version === version);
+export async function managedDatabaseSource(source, version, kind = 'model') {
+  const reference = REFERENCES.find(item => item.version === version && item.kind === kind);
   if (!reference) throw new Error('This Joomla release has no reviewed browser database configuration adapter.');
   const before = original(reference);
   const after = replacement(reference);
@@ -53,10 +60,14 @@ export async function managedDatabaseSource(source, version) {
 }
 
 export async function ensureManagedDatabaseConfiguration(runtime, version) {
-  const path = (runtime.documentRoot ?? '/persist/www') + MODEL;
-  const data = await runtime.fs.readFile(path);
-  const source = typeof data === 'string' ? data : new TextDecoder('utf-8', { fatal: true }).decode(data);
-  const result = await managedDatabaseSource(source, version);
-  if (result.changed) await runtime.fs.writeFile(path, result.source);
-  return { managedDatabase: true, sourceSha256: result.sourceSha256 };
+  const prepared = [];
+  for (const [kind, relative] of Object.entries(PATHS)) {
+    const path = (runtime.documentRoot ?? '/persist/www') + relative;
+    const data = await runtime.fs.readFile(path);
+    const source = typeof data === 'string' ? data : new TextDecoder('utf-8', { fatal: true }).decode(data);
+    prepared.push({ path, ...await managedDatabaseSource(source, version, kind) });
+  }
+  // Verify every affected source before changing either file.
+  for (const result of prepared) if (result.changed) await runtime.fs.writeFile(result.path, result.source);
+  return { managedDatabase: true, sources: prepared.map(({ path, sourceSha256 }) => ({ path, sourceSha256 })) };
 }

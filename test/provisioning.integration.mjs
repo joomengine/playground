@@ -5,6 +5,7 @@ import { createNodeRuntime } from '../scripts/node-runtime.mjs';
 import { parseCatalog } from '../src/config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
 import { exportSite } from '../src/export.mjs';
+import { managedDatabaseSource } from '../src/joomla/managed-database.mjs';
 import { applyJoomlaConfiguration, discoverJoomlaConfiguration, checkJoomla, importJoomlaSnapshot, inspectJoomla, installJoomla, requestJoomlaPage, runStartupCommand, sha256 } from '../src/joomla/index.mjs';
 
 const sourceLoader = (name) => readFile(new URL(`../src/joomla/php/${name}.php`, import.meta.url), 'utf8');
@@ -57,6 +58,12 @@ for (const major of ['5', '6']) {
       assert.equal(installed.resumed, false);
       assert.equal(installed.deployId, 'heritage-demo');
       assert.equal(installed.language, 'af-ZA');
+      for (const [kind, path] of [['model', '/administrator/components/com_config/src/Model/ApplicationModel.php'], ['console', '/libraries/src/Console/SetConfigurationCommand.php']]) {
+        const bytes = await runtime.fs.readFile(runtime.documentRoot + path);
+        const source = typeof bytes === 'string' ? bytes : new TextDecoder().decode(bytes);
+        assert.equal((await managedDatabaseSource(source, release.version, kind)).changed, false);
+        await assert.rejects(managedDatabaseSource(source + '\n', release.version, kind), /reviewed/);
+      }
       assert.match(await page(runtime, 'index.php?lang=en'), /Stories connect generations/);
       assert.match(await page(runtime, 'index.php'), /mod-languages/);
       assert.match(await page(runtime, 'index.php?lang=nl'), /Verhalen verbinden generaties/);

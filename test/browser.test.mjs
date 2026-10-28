@@ -882,6 +882,8 @@ for (const name of browserNames) {
         page.testStep = 'new site control preserves saved sites';
         await showSiteActions(page);
         await page.locator('#new-site-button').click();
+        await page.locator('#deploy-dialog').waitFor({ state: 'visible' });
+        await closeDeployEditor(page);
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         assert.notEqual(await page.locator('#storage-key').inputValue(), savedKey);
@@ -984,6 +986,29 @@ for (const name of browserNames) {
         assert.equal(await page.locator('#credential-username').inputValue(), credentials.username);
         assert.equal(await page.locator('#credential-password').inputValue(), credentials.password);
         await page.locator('#credentials-dialog [data-close-dialog]').click();
+        page.testStep = 'a failed save keeps the running site available';
+        const savedFrameURL = await page.locator('#site-frame').getAttribute('src');
+        await page.evaluate(() => {
+          const original = Worker.prototype.postMessage;
+          window.__flushFailureInjected = false;
+          Worker.prototype.postMessage = function (message, ...options) {
+            if (message?.type === 'operation' && message.operation === 'flush') {
+              Worker.prototype.postMessage = original; window.__flushFailureInjected = true;
+              queueMicrotask(() => this.dispatchEvent(new MessageEvent('message', { data: { type: 'result', id: message.id, error: 'Simulated storage quota failure', fatal: false } })));
+              return;
+            }
+            return original.call(this, message, ...options);
+          };
+        });
+        await showSiteActions(page);
+        await page.locator('#new-site-button').click();
+        await page.locator('#header-feedback').filter({ hasText: 'Simulated storage quota failure' }).waitFor();
+        assert.equal(await page.evaluate(() => window.__flushFailureInjected), true);
+        await renderedSiteFrame(page);
+        assert.equal(await page.locator('#site-frame').getAttribute('src'), savedFrameURL);
+        assert.deepEqual(await previewContract(page), marker);
+        assert.equal(await page.locator('#save-button').isEnabled(), true);
+        assert.equal(await page.locator('#download-dialog-button').isEnabled(), true);
         page.testStep = 'apply and verify PHP settings without losing data';
         await showSiteActions(page);
         await page.locator('#php-settings-button').click();
@@ -992,14 +1017,14 @@ for (const name of browserNames) {
           const { loadDeployCatalog, resolveDeployConfiguration } = await import('./src/deploys.mjs');
           const catalog = parseCatalog(await (await fetch('./assets/manifest.json')).json());
           const deployCatalog = await loadDeployCatalog();
-          return (await resolveDeployConfiguration({ deployId: 'servicedirectory' }, { catalog, deployCatalog, baseURL: location.href })).configuration.phpSettings;
+          return (await resolveDeployConfiguration({ deployId: 'servicedirectory', admin: { name: 'Runtime settings test', username: 'runtimetest', email: 'runtime@example.test', password: `Rocket!${crypto.randomUUID()}` } }, { catalog, deployCatalog, baseURL: location.href })).configuration.phpSettings;
         });
         assert.equal(serviceDirectoryProfile.max_execution_time, 180);
         await page.locator('#ini-execution').fill(String(serviceDirectoryProfile.max_execution_time));
         await page.locator('#ini-vars').fill('12000');
         await page.locator('#ini-memory').fill('640M');
         await page.locator('#php-apply-button').click();
-        await page.locator('#php-dialog').waitFor({ state: 'hidden' });
+        await page.locator('#php-dialog').waitFor({ state: 'hidden', timeout: requestTimeout });
         await renderedSiteFrame(page);
         assert.deepEqual(await previewContract(page), marker);
         const settings = await previewContract(page, 'settings');
@@ -1008,6 +1033,22 @@ for (const name of browserNames) {
         assert.equal(settings.memory_limit, '640M');
         assert.equal(settings.upload_max_filesize, '128M');
         assert.equal(settings.post_max_size, '160M');
+        page.testStep = 'native Joomla global configuration form saves through CGI';
+        const configurationFrame = await renderedSiteFrame(page);
+        const frontendURL = configurationFrame.url();
+        await configurationFrame.goto(new URL('administrator/index.php?option=com_config', frontendURL).href);
+        const originalName = await configurationFrame.locator('#jform_sitename').inputValue();
+        for (const name of ['Rocket configuration form proof', originalName]) {
+          await configurationFrame.locator('#jform_sitename').fill(name);
+          await Promise.all([
+            configurationFrame.waitForNavigation({ waitUntil: 'load' }),
+            configurationFrame.locator('joomla-toolbar-button[task="application.apply"] button').click(),
+          ]);
+          assert.equal(await configurationFrame.locator('#jform_sitename').inputValue(), name);
+          assert.match(await configurationFrame.locator('body').innerText(), /Configuration saved/i);
+        }
+        await configurationFrame.goto(frontendURL);
+        assert.deepEqual(await previewContract(page), marker);
         page.testStep = 'full width and one scrolling document';
         if (await page.locator('#settings').isVisible()) await page.locator('#settings-toggle').click();
         const actualFrame = await renderedSiteFrame(page);
@@ -1025,6 +1066,23 @@ for (const name of browserNames) {
           assert.ok(await page.locator('#site-frame').evaluate(frame => Math.abs(frame.getBoundingClientRect().width - innerWidth) <= 2));
           await page.screenshot({ path: path.join(root, 'test-results', `rocket-${name}-${width}.png`) });
         }
+        page.testStep = 'component parent reload preserves the Rocket shell and runtime';
+        const shellIdentity = randomUUID();
+        await page.evaluate(value => { window.__rocketIdentity = value; }, shellIdentity);
+        const frameURL = await page.locator('#site-frame').getAttribute('src');
+        assert.equal(await actualFrame.evaluate(() => parent === window), true);
+        await actualFrame.evaluate(() => {
+          const nested = document.createElement('iframe'); nested.id = 'rocket-nested-proof'; nested.srcdoc = '<!doctype html><title>Nested component dialog</title>'; document.body.append(nested);
+        });
+        await actualFrame.waitForFunction(() => document.getElementById('rocket-nested-proof')?.contentWindow.parent === window);
+        await actualFrame.locator('#rocket-nested-proof').evaluate(element => element.remove());
+        const reloaded = actualFrame.waitForNavigation({ waitUntil: 'load' });
+        await actualFrame.evaluate(() => { setTimeout(() => parent.location.reload(), 0); });
+        await reloaded;
+        await actualFrame.locator('body').waitFor();
+        assert.equal(await page.evaluate(() => window.__rocketIdentity), shellIdentity);
+        assert.equal(await page.locator('#site-frame').getAttribute('src'), frameURL);
+        assert.deepEqual(await previewContract(page), marker);
         await bounded(Promise.allSettled([...page.responseChecks]), 'Read embedded site responses', 10_000);
         page.testStep = 'standalone tab survives closing its former owner';
         const popup = context.waitForEvent('page');

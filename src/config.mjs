@@ -53,6 +53,19 @@ export function normalizeInitialPath(value = '/') {
   return value;
 }
 
+/** Resolve a local Joomla path without interpreting its first segment as a URL scheme. */
+export function resolveSiteURL(path, baseURL) {
+  const base = new URL(baseURL);
+  if (!['http:', 'https:'].includes(base.protocol) || !base.pathname.endsWith('/')) {
+    throw new TypeError('The site base must be an HTTP URL ending in a slash.');
+  }
+  const target = new URL(`.${normalizeInitialPath(path)}`, base);
+  if (target.origin !== base.origin || !target.pathname.startsWith(base.pathname)) {
+    throw new TypeError('The page must stay inside the playground site.');
+  }
+  return target.href;
+}
+
 function parseJSONList(value, name) {
   if (Array.isArray(value)) return value;
   if (typeof value !== 'string') throw new TypeError(`${name} must be a JSON array.`);

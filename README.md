@@ -141,8 +141,11 @@ release archive checksum, native and adapter source hashes, Joomla distributions
 and compatible runtime combinations.
 
 The build verifies every entry in the MariaDB bridge 0.1.3 release inventory and
-retains its prepared database engine. It then stages the bridge JavaScript runtime
-and PHP adapter from the pinned bridge source revision, checking every source hash. The
+retains its engine WebAssembly binary unchanged. It stages the bridge runtime,
+PHP adapter and generated engine JavaScript glue from the pinned source revision
+`090c29d2b25dcd216941cfbeaf17b847d6f3658a`, checking their source and generated hashes.
+The overlay records the browser CPU scheduling budget and UTF-8 charset handling
+separately from the immutable release archive. The
 PDO extension’s compiler, PHP version, source hashes, upstream revision, and
 binary hash must also match. Native fileinfo, cURL and Sodium modules retain
 their matching source inventories, compiler identities and licenses. The CGI
@@ -152,7 +155,7 @@ verified before staging. A missing driver or mismatched input fails the build.
 `dist/assets/manifest.json` records the selected runtimes, extension assets,
 preload files, source revisions, and dependency identities. Its `bridge.release`
 entry identifies the original release archive; `bridge.overlay` identifies the
-effective JavaScript and adapter sources. The original archive inventory is
+effective JavaScript runtime, adapter and engine-glue sources. The original archive inventory is
 retained as `assets/mariadb/release-manifest.json` and describes that release,
 rather than the assembled bridge directory.
 `dist/asset-inventory.json` records the files, sizes, and SHA-256 values in the

@@ -1,4 +1,4 @@
-import { normalizeConfiguration, parseCatalog, normalizeInitialPath } from './config.mjs';
+import { normalizeConfiguration, parseCatalog, normalizeInitialPath, resolveSiteURL } from './config.mjs';
 import { installJoomla, inspectJoomla, sha256, importJoomlaSnapshot, importJoomlaCheckpoint, checkJoomla, restoreJoomlaSession, applyJoomlaConfiguration, discoverJoomlaConfiguration } from './joomla/index.mjs';
 import { exportSite } from './export.mjs';
 import { serializeRequest, restoreResponse } from './http.mjs';
@@ -224,6 +224,20 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       if (erase && config.persistence) await eraseStoredSite(identity);
     } finally { await release(); }
   })();
+  const restorePrivateCopy = async (saved, kind, persistence = saved.configuration.persistence) => {
+    const storageKey = `${kind}-${crypto.randomUUID()}`;
+    try {
+      return await createPlayground({ ...saved.configuration, persistence, storageKey, fresh: false }, { onProgress, checkpoint: saved });
+    } catch (error) {
+      // This key was allocated for this attempt; a failed copy must not fill
+      // browser storage with an unreachable partial installation.
+      if (persistence) {
+        try { await resetPlayground({ storageKey }); }
+        catch (cleanupError) { error.message += ` Partial copy cleanup: ${cleanupError.message}`; }
+      }
+      throw error;
+    }
+  };
   try {
     progress({ phase: 'database', message: 'Starting MariaDB…' });
     const { createMariaDB } = await import(resolveAsset(manifest.bridge.moduleUrl));
@@ -239,7 +253,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     });
     const runtimeInfo = await initializeSession(session);
     const handle = {
-      url: new URL(config.initialPath.slice(1), siteUrl).href, baseUrl: siteUrl,
+      url: resolveSiteURL(config.initialPath, siteUrl), baseUrl: siteUrl,
       documentRoot: '/persist/www', installMarkerPath: '/persist/meta/joomla-install.json', runtimeInfo,
       get configuration() { return structuredClone(config); },
       get closed() { return Boolean(closePromise); },
@@ -251,7 +265,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       runPhp: (source, options = {}) => session.send('runPhp', { source }, options.timeoutMs ?? 180_000),
       async request(path = '/', init = {}) {
         const target = normalizeInitialPath(`/${String(path).replace(/^\/+/, '')}`);
-        const request = new Request(new URL(target.slice(1), siteUrl), init);
+        const request = new Request(resolveSiteURL(target, siteUrl), init);
         return restoreResponse(await session.send('request', await serializeRequest(request), init.timeoutMs ?? phpRequestTimeoutMs(config.phpSettings)), request.method);
       },
       async flush() {
@@ -289,8 +303,9 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         try {
           progress({ phase: 'saving', message: 'Saving the temporary site and verifying its files and database…' });
           const saved = await handle.checkpoint(pausedOperation);
-          const replacement = await createPlayground({ ...saved.configuration, persistence: true, storageKey: `saved-${crypto.randomUUID()}`, fresh: false }, { onProgress, checkpoint: saved });
-          await finish(false);
+          const replacement = await restorePrivateCopy(saved, 'saved', true);
+          try { await finish(false); }
+          catch (cleanupError) { progress({ phase: 'warning', message: `The saved site is ready. Previous runtime cleanup reported: ${cleanupError.message}` }); }
           return replacement;
         } catch (error) { registerSession(); throw error; }
         finally { changing = false; }
@@ -314,7 +329,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           if (template?.url && template.url === config.template?.url && template.sha256 === config.template?.sha256) { delete template.url; delete template.sha256; }
           const result = await applyJoomlaConfiguration(handle, { ...next, extensions: additions, startupCommands: commands, template }, { progress });
           Object.assign(config, next);
-          handle.url = new URL(config.initialPath.slice(1), siteUrl).href;
+          handle.url = resolveSiteURL(config.initialPath, siteUrl);
           handle.installation = { ...handle.installation, ...result, administrator: handle.installation.administrator };
           await session.send('flush'); await database.flush();
           registerSession();
@@ -322,7 +337,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           return result;
         } catch (error) {
           registerSession();
-          if (recoveryCheckpoint) error.recover = () => createPlayground({ ...recoveryCheckpoint.configuration, storageKey: `recovery-${crypto.randomUUID()}`, fresh: false }, { onProgress, checkpoint: recoveryCheckpoint });
+          if (recoveryCheckpoint) error.recover = () => restorePrivateCopy(recoveryCheckpoint, 'recovery');
           throw error;
         } finally { changing = false; }
       },

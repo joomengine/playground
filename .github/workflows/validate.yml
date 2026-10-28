@@ -65,7 +65,7 @@ jobs:
           path: external/bridge
       - name: Restore source-matched native extensions
         id: native
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             .cache/native
@@ -74,7 +74,8 @@ jobs:
             .cache/sodium
           key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('versions.json', 'scripts/build-fileinfo.mjs', 'scripts/build-curl.mjs', 'scripts/build-sodium.mjs', 'scripts/fileinfo.mjs', 'scripts/curl.mjs', 'scripts/sodium.mjs', 'src/php-settings.mjs') }}
       - name: Restore verified download archives
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: archives
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             .cache/*.zip
@@ -100,8 +101,9 @@ jobs:
           ref: ${{ needs.checks.outputs.emsdk }}
           path: external/emsdk
       - name: Restore pinned compiler tools
+        id: compiler
         if: steps.native.outputs.cache-hit != 'true'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             external/emsdk/upstream
@@ -124,6 +126,14 @@ jobs:
             BRIDGE_SOURCE_DIR=external/bridge node scripts/build-curl.mjs "$minor"
             BRIDGE_SOURCE_DIR=external/bridge node scripts/build-sodium.mjs "$minor"
           done < <(node --input-type=module -e "import p from './versions.json' with {type:'json'}; for (const v of p.php) console.log(v.version)")
+      - name: Cache pinned compiler after successful compilation
+        if: steps.native.outputs.cache-hit != 'true' && steps.compiler.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            external/emsdk/upstream
+            external/emsdk/node
+          key: ${{ steps.compiler.outputs.cache-primary-key }}
       - name: Prepare real MariaDB engine for native validation
         working-directory: external/bridge
         run: |
@@ -134,12 +144,36 @@ jobs:
           PHP_WASM_MODULE_ROOT="$PWD/node_modules" \
           PHP_WASM_EXTENSION_DIR="$PWD/.cache/native" \
           node --test external/bridge/native/tests/upstream.test.mjs
+      - name: Cache source-matched compiled extensions
+        if: steps.native.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .cache/native
+            .cache/fileinfo
+            .cache/curl
+            .cache/sodium
+          key: ${{ steps.native.outputs.cache-primary-key }}
       - name: Build verified static distribution
         env:
           MARIADB_DRIVER_DIR: .cache/native
           BRIDGE_SOURCE_DIR: external/bridge
           PHP_BINARY: php8.3
         run: npm run build
+      - name: Cache verified download archives
+        if: steps.archives.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .cache/*.zip
+            .cache/*.tar.gz
+            .cache/packages
+            .cache/jcb-dependency-archives
+            .cache/jcb-banners
+            .cache/language-sources
+            .cache/language-packages
+            .cache/tools
+          key: ${{ steps.archives.outputs.cache-primary-key }}
       - name: Validate provisioning and runtime capabilities
         env:
           PLAYGROUND_LARGE_UPLOAD: '1'

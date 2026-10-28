@@ -16,14 +16,20 @@ try {
     let configuration = transfer?.configuration;
     if (!configuration) {
       const site = new URL(location.href).searchParams.get('site');
-      const saved = site ? JSON.parse(sessionStorage.getItem(keyPrefix + site) || 'null') : null;
+      let saved = site ? history.state?.rocketSite : null;
+      if (!saved && site) {
+        try { saved = JSON.parse(sessionStorage.getItem(keyPrefix + site) || 'null'); } catch { /* Resume preferences are optional. */ }
+      }
       if (!saved?.persistence) throw new Error('This temporary site is no longer open. Return to Rocket to start a new site.');
       if (saved.storageKey !== site) throw new Error('The standalone site identity does not match its saved settings.');
       configuration = { ...saved, admin: { password: `Rocket!${crypto.randomUUID()}` } };
     }
     runtime = await createPlayground(configuration, { checkpoint: transfer?.checkpoint, onProgress: value => { status.textContent = value.message; } });
-    if (configuration.persistence) sessionStorage.setItem(keyPrefix + configuration.storageKey, JSON.stringify(publicConfiguration(runtime.configuration)));
-    history.replaceState(null, '', `${location.pathname}${configuration.persistence ? `?site=${encodeURIComponent(configuration.storageKey)}` : ''}`);
+    const resumeSettings = configuration.persistence ? publicConfiguration(runtime.configuration) : null;
+    if (resumeSettings) {
+      try { sessionStorage.setItem(keyPrefix + configuration.storageKey, JSON.stringify(resumeSettings)); } catch { /* History retains this tab's public resume settings. */ }
+    }
+    history.replaceState(resumeSettings ? { rocketSite: resumeSettings } : null, '', `${location.pathname}${configuration.persistence ? `?site=${encodeURIComponent(configuration.storageKey)}` : ''}`);
     frame.src = runtime.url;
     frame.hidden = false;
     document.querySelector('#launch').hidden = true;
@@ -35,6 +41,9 @@ try {
     }, 60_000);
   }
 } catch (error) {
+  if (runtime && !runtime.closed) {
+    try { await runtime.close(); } catch (cleanupError) { error.message += ` Cleanup: ${cleanupError.message}`; }
+  }
   transfer?.fail(error);
   status.textContent = error.message;
   document.querySelector('#launch').hidden = false;

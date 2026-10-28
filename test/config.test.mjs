@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createShareURL, normalizeConfiguration, normalizeInitialPath, parseCatalog, parseExtensions, parseStartupCommands, readURLConfiguration } from '../src/config.mjs';
+import { createShareURL, normalizeConfiguration, normalizeInitialPath, resolveSiteURL, parseCatalog, parseExtensions, parseStartupCommands, readURLConfiguration } from '../src/config.mjs';
 
 const manifest = {
   php: [{ version: '8.3' }, { version: '8.4' }, { version: '8.5' }],
@@ -22,6 +22,20 @@ test('initial pages remain within the playground route', () => {
   assert.equal(normalizeInitialPath('/administrator/index.php?option=com_content#articles'), '/administrator/index.php?option=com_content#articles');
   for (const path of ['https://example.com', '//example.com', '/%2fexample.com', '/%2e%2e/private', '/a/../private', '/a\\b', '/%0aheader', '/%zz']) {
     assert.throws(() => normalizeInitialPath(path), undefined, path);
+  }
+});
+
+test('site URL resolution keeps scheme-like paths inert and inside the owned route', () => {
+  const base = 'https://playground.example/__site/client/instance/';
+  for (const path of ['/javascript:console.log(1)', '/https://example.test/', '/data:text/html,hello', '/javascript%3Aalert(1)']) {
+    const result = new URL(resolveSiteURL(path, base));
+    assert.equal(result.protocol, 'https:');
+    assert.equal(result.origin, 'https://playground.example');
+    assert.equal(result.pathname, new URL(base).pathname + path.slice(1));
+  }
+  assert.equal(resolveSiteURL('/administrator/?option=com_config#settings', base), `${base}administrator/?option=com_config#settings`);
+  for (const path of ['//outside.test', '/%2e%2e/private', '/a/../private', '/%5coutside.test']) {
+    assert.throws(() => resolveSiteURL(path, base));
   }
 });
 

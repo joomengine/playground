@@ -81,6 +81,7 @@ async function request(value) {
     php.env[environmentName] = content;
     forwardedHeaders.add(environmentName);
   }
+  php.error = [];
   const captured = php.binary;
   const response = await php.request(new Request(url, {
     method, headers, body: ['GET', 'HEAD'].includes(method) ? null : body, redirect: 'manual',

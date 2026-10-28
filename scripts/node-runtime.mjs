@@ -81,6 +81,7 @@ export async function createNodeRuntime({ directory = path.join(root, 'dist'), p
     const headers = new Map(input.headers);
     headers.set('host', 'localhost');
     if (input.headers.has('content-type')) headers.set('Content-Type', input.headers.get('content-type'));
+    php.error = [];
     const original = php.binary;
     try {
       const response = await php.request({ url: `${url.pathname}${url.search}`, method: input.method, headers, body: inputBody ? new Blob([inputBody]).stream() : null });

@@ -9,6 +9,19 @@ for (const phpVersion of selected) {
     t.after(() => runtime.close());
     assert.equal(runtime.runtimeInfo.effectivePhpSettings.memory_limit, '256M');
     assert.equal(runtime.runtimeInfo.effectivePhpSettings.max_input_vars, '7000');
+    if (phpVersion === '8.4') {
+      await runtime.fs.writeFile('/persist/www/diagnostic.php', "<?php trigger_error('Rocket diagnostic contract', E_USER_WARNING); echo 'Clean application body';");
+      await runtime.fs.writeFile('/persist/www/diagnostic.txt', 'Static asset');
+      const warnings = [];
+      const previous = console.warn;
+      console.warn = (...values) => warnings.push(values.join(' '));
+      try {
+        assert.equal(await (await runtime.request('diagnostic.php')).text(), 'Clean application body');
+        assert.equal(await (await runtime.request('diagnostic.txt')).text(), 'Static asset');
+      } finally { console.warn = previous; }
+      assert.equal(warnings.length, 1, 'PHP warnings must be reported once without leaking into HTML or replaying on static requests.');
+      assert.match(warnings[0], /Rocket diagnostic contract/);
+    }
     const result = await runtime.runPhp(`<?php
       $image = imagecreatetruecolor(4, 3); $color = imagecolorallocate($image, 20, 60, 180); imagefill($image, 0, 0, $color);
       $images = [];

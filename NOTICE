@@ -14,7 +14,11 @@ and its separately maintained database dependency https://github.com/shyim/lite4
 MariaDB and lite4mariadb retain their upstream licenses and source provenance.
 
 Joomla is provided by https://github.com/joomla/joomla-cms and retains its GNU
-General Public License and all notices included in its release packages.
+General Public License and all notices included in its release packages. The
+reviewed browser database-configuration adapter verifies the original model and
+console-command source hashes, preserves their GPL headers, and retains the
+original behavior on conventional PHP. Its exact source inventory and scope are
+documented in dependencies/joomla/README.md.
 
 Joomla Component Builder is provided by Llewellyn van der Merwe and Vast
 Development Method through https://github.com/joomengine/pkg-component-builder .

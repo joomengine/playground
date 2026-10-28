@@ -471,7 +471,6 @@ try {
                 if (!$zip->addFromString('export.json', json_encode($metadata, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n")
                     || !$zip->addFromString('DEPLOYMENT.md', exportInstructions($format))) throw new RuntimeException('Cannot add export metadata.');
             }
-        } finally {
             $expanded = 0;
             if ($zip->numFiles > PLAYGROUND_EXPORT_ENTRIES) throw new RuntimeException('The export exceeds 100000 ZIP entries.');
             for ($index = 0; $index < $zip->numFiles; $index++) {
@@ -480,6 +479,7 @@ try {
                 $expanded += $entry['size'];
                 if ($expanded > PLAYGROUND_EXPORT_LIMIT) throw new RuntimeException('The complete export exceeds the 768 MiB extraction limit.');
             }
+        } finally {
             if (!$zip->close()) throw new RuntimeException('Cannot finish the site ZIP export.');
         }
     }
