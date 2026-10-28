@@ -9,6 +9,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { createStaticServer } from './server.mjs';
 import { assertBrowserRequestBodies } from './browser-request-contract.mjs';
 import { probeSyntheticRedirect, startRedirectTrace, recordVerifiedRedirectDiagnostic } from './firefox-redirect-probe.mjs';
+import { assertJcbDashboardArtwork } from './jcb-dashboard-artwork.mjs';
 import { inventory } from '../scripts/assets.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -737,7 +738,8 @@ for (const name of browserNames) {
         page.testStep = 'default domain automatically opens JCB and MCP in English';
         await page.setViewportSize({ width: 1440, height: 1000 });
         await page.goto(server.url);
-        await renderedSiteFrame(page);
+        const dashboardFrame = await renderedSiteFrame(page);
+        const dashboardArtwork = await assertJcbDashboardArtwork(dashboardFrame);
         assert.equal(await page.locator('#deploy').inputValue(), 'jcb-mcp');
         assert.match(await page.frameLocator('#site-frame').locator('html').innerHTML(), /com_componentbuilder/);
         assert.equal(await page.frameLocator('#site-frame').locator('input[name="passwd"]').count(), 0);
@@ -753,7 +755,7 @@ for (const name of browserNames) {
         await page.locator('#close-button').click();
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
-        proof.push({ id: 'jcb-mcp', defaultDomainAutostart: true });
+        proof.push({ id: 'jcb-mcp', defaultDomainAutostart: true, dashboardArtwork });
         await assertCleanConsole(page);
         records.push({ ...defaultPair, deploys: proof, knownBrowserDiagnostics: page.knownBrowserDiagnostics });
       } catch (error) { await saveBrowserDiagnostics(page, `deploys-${name}`, error); throw error; }

@@ -10,6 +10,7 @@ import { downloadVerified, hashFile, inventory } from './assets.mjs';
 import { applyJcbCompatibilityOverlay, JCB_SOURCE_OVERLAY } from './jcb-platform-overlay.mjs';
 import { applyJcbVendorOverlay, JCB_VENDOR_OVERLAYS } from './jcb-vendor-overlay.mjs';
 import { prepareJcbBanners } from './jcb-banners.mjs';
+import { prepareJcbDashboardAssets } from './jcb-dashboard-assets.mjs';
 
 const execute = promisify(execFile);
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -96,7 +97,8 @@ export async function deriveJcbPackage({ root, cache, archive, sourceUrl, source
   const componentPath = `pkg-component-builder-${source.version}/src/joomla__Component-Builder__${source.major}.x.zip`;
   if (!outer[componentPath]) throw new Error('The official JCB component archive is missing.');
   const banners = await prepareJcbBanners(applyJcbCompatibilityOverlay(unzipSync(outer[componentPath])), { root, cache, version: source.version });
-  const component = banners.files;
+  const dashboard = await prepareJcbDashboardAssets(banners.files, { root, version: source.version });
+  const component = dashboard.files;
   for (const name of Object.keys(component)) {
     if (name.startsWith(VENDOR) && !protections.has(name.slice(VENDOR.length))) delete component[name];
   }
@@ -118,6 +120,7 @@ export async function deriveJcbPackage({ root, cache, archive, sourceUrl, source
     vendorInventory: { file: 'vendor-inventory.json', sha256: sha256(vendorInventoryBytes), files: vendorInventory.length },
     vendorOverlays: JCB_VENDOR_OVERLAYS.map(({ path, sha256, patchedSha256 }) => ({ path, sha256, patchedSha256 })),
     banners: banners.provenance,
+    dashboard: dashboard.provenance,
     sourceOverlay: { path: JCB_SOURCE_OVERLAY.path, sha256: JCB_SOURCE_OVERLAY.sha256, patchedSha256: JCB_SOURCE_OVERLAY.patchedSha256 },
   };
   component['component-builder/libraries/phpspreadsheet/platform-provenance.json'] = new TextEncoder().encode(`${JSON.stringify(provenance, null, 2)}\n`);

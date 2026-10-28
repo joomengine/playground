@@ -24,6 +24,8 @@ Installation runs outside the Git checkout with a fixed root package version, di
 
 The same derived package includes the [original sponsor banners](../jcb-banners/README.md) with verified asset pins and a reviewed correction to the wide magazine image reference. Banner sources, installed paths and helper hashes are also included in package provenance.
 
+The [dashboard community artwork](../jcb-dashboard-assets/README.md) is also included as original, checksum-verified snapshots. JCB's contributor and sponsor links stay intact, while image requests remain within the isolated Joomla site.
+
 Inside the derived package, `vendor-source-inventory.json` preserves the clean Composer inventory. The separate `vendor-inventory.json` describes every final vendor file, including the reviewed packing and numeric-range adjustments and retained access-protection files. Provenance records both inventory checksums and each overlay's original and resulting file hashes. The vendor cache always contains the unmodified Composer output and is verified before overlays are applied in memory.
 
 The actual WASM validation in `test/jcb-spreadsheet.integration.mjs` exercises XLS and XLSX writing and reading, Unicode text, text with leading zeros, numeric values, formulas and JCB's chunk reader across all three PHP runtimes. The browser suite also opens the installed JCB administrator route.

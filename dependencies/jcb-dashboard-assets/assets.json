@@ -1,0 +1,500 @@
+{
+  "schemaVersion": 1,
+  "retrievedAt": "2026-10-28",
+  "attribution": "Original JCB dashboard images and contributor artwork remain the work of their respective creators. These snapshots preserve upstream display and credit links; image ownership and applicable upstream licenses are unchanged.",
+  "sources": {
+    "5.2.0": {
+      "readme": {
+        "path": "component-builder/admin/README.txt",
+        "sha256": "eaabc15e3e536de602acef7ea6cf684e9b94741962fad489120d13c820c8f78c"
+      },
+      "support": {
+        "path": "component-builder/admin/layouts/jcbsupportmessage.php",
+        "sha256": "648cb91049837b53d4b0f0cbddd268582fd3aa70e14cec84050fe0f362ef9b14"
+      },
+      "compiler": {
+        "path": "component-builder/admin/assets/js/compiler.js",
+        "sha256": "f07bf1c4ffbe79826999ebbbb60bdb0c75ab6a4b8b17dc122bfd1306a89fdc8b"
+      }
+    },
+    "6.2.0": {
+      "readme": {
+        "path": "component-builder/admin/README.txt",
+        "sha256": "dcd73d1ce82c2d52afa55dbf97dc74d39209280d2fa9ae6482391cd9e2997ba8"
+      },
+      "support": {
+        "path": "component-builder/admin/layouts/jcbsupportmessage.php",
+        "sha256": "648cb91049837b53d4b0f0cbddd268582fd3aa70e14cec84050fe0f362ef9b14"
+      },
+      "compiler": {
+        "path": "component-builder/admin/assets/js/compiler.js",
+        "sha256": "f07bf1c4ffbe79826999ebbbb60bdb0c75ab6a4b8b17dc122bfd1306a89fdc8b"
+      }
+    }
+  },
+  "assets": [
+    {
+      "url": "https://raw.githubusercontent.com/joomengine/Joomla-Component-Builder/refs/heads/5.x/admin/assets/images/jcb-banner.jpg",
+      "finalUrl": "https://raw.githubusercontent.com/joomengine/Joomla-Component-Builder/refs/heads/5.x/admin/assets/images/jcb-banner.jpg",
+      "file": "assets/f80759a39a1cc91ff6bfd548c6f61702c4db4f7ea82cc7364c2191153cf6c2d3.jpg",
+      "sha256": "f80759a39a1cc91ff6bfd548c6f61702c4db4f7ea82cc7364c2191153cf6c2d3",
+      "size": 212135,
+      "mime": "image/jpeg",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/contributors.svg?width=890&button=false",
+      "finalUrl": "https://opencollective.com/Joomla-Component-Builder/contributors.svg?width=890&button=false",
+      "file": "assets/ca32a295ccb10de5687cd2b856abd7d38b9048c01d480b84f16bcc191fb65381.svg",
+      "sha256": "ca32a295ccb10de5687cd2b856abd7d38b9048c01d480b84f16bcc191fb65381",
+      "size": 418631,
+      "mime": "image/svg+xml",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/backers.svg?width=890",
+      "finalUrl": "https://opencollective.com/Joomla-Component-Builder/backers.svg?width=890",
+      "file": "assets/aac60699476227cd076e976db07107390be8712df789b24e4f2475d9a3e870fb.svg",
+      "sha256": "aac60699476227cd076e976db07107390be8712df789b24e4f2475d9a3e870fb",
+      "size": 346243,
+      "mime": "image/svg+xml",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/0/avatar.svg",
+      "finalUrl": "https://opencollective.com/Joomla-Component-Builder/sponsor/0/avatar.svg",
+      "file": "assets/e41db18a9c9c26d75d437a424422c6336047d22ccd6dc1d50f5b33202ea76be8.svg",
+      "sha256": "e41db18a9c9c26d75d437a424422c6336047d22ccd6dc1d50f5b33202ea76be8",
+      "size": 20041,
+      "mime": "image/svg+xml",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/1/avatar.svg",
+      "finalUrl": "https://opencollective.com/Joomla-Component-Builder/sponsor/1/avatar.svg",
+      "file": "assets/ed777eda449189204d3aa85c1f8908e22e4648e6ffba656289cd433661644c94.svg",
+      "sha256": "ed777eda449189204d3aa85c1f8908e22e4648e6ffba656289cd433661644c94",
+      "size": 55173,
+      "mime": "image/svg+xml",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/2/avatar.svg",
+      "finalUrl": "https://opencollective.com/Joomla-Component-Builder/sponsor/2/avatar.svg",
+      "file": "assets/00fcadf38b8f5789505ad0be69c3b8867c4a48787f2ace1b6e7ee102a919fc5d.svg",
+      "sha256": "00fcadf38b8f5789505ad0be69c3b8867c4a48787f2ace1b6e7ee102a919fc5d",
+      "size": 20733,
+      "mime": "image/svg+xml",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/3/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/become_sponsor.svg",
+      "file": "assets/cf1fe9eb745f1aa65f26bfd69ea914e06dff143b0435dfc85c4ff7a9adae8163.svg",
+      "sha256": "cf1fe9eb745f1aa65f26bfd69ea914e06dff143b0435dfc85c4ff7a9adae8163",
+      "size": 17722,
+      "mime": "image/svg+xml",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/4/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/5/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/6/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/7/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/8/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/9/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/10/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/11/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/12/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/13/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/14/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/15/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/16/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/17/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/18/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/19/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/Joomla-Component-Builder/sponsor/20/avatar.svg",
+      "finalUrl": "https://images.opencollective.com/static/images/1px.png",
+      "file": "assets/93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20.png",
+      "sha256": "93ae7d494fad0fb30cbf3ae746a39c4bc7a0f8bbf87fbb587a3f3c01f3c5ce20",
+      "size": 68,
+      "mime": "image/png",
+      "usages": [
+        "readme"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://opencollective.com/joomla-component-builder/tiers/badge.svg",
+      "finalUrl": "https://opencollective.com/joomla-component-builder/tiers/badge.svg",
+      "file": "assets/7985b7dce439ea06e3bbe9659127fd713e2ce9120e121fe81d060df19a9d220c.svg",
+      "sha256": "7985b7dce439ea06e3bbe9659127fd713e2ce9120e121fe81d060df19a9d220c",
+      "size": 1353,
+      "mime": "image/svg+xml",
+      "usages": [
+        "support"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://status.vdm.dev/api/badge/25/uptime?labelPrefix=JCB+Powers+",
+      "finalUrl": "https://status.vdm.dev/api/badge/25/uptime?labelPrefix=JCB+Powers+",
+      "file": "assets/80cd5c233022cfdfd1f359a8a44aca264544fa45cd581db7149a1b8029718049.svg",
+      "sha256": "80cd5c233022cfdfd1f359a8a44aca264544fa45cd581db7149a1b8029718049",
+      "size": 1215,
+      "mime": "image/svg+xml",
+      "usages": [
+        "support"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://img.shields.io/badge/Joomla-6.x%20Compatible-orange.svg",
+      "finalUrl": "https://img.shields.io/badge/Joomla-6.x%20Compatible-orange.svg",
+      "file": "assets/403f50f30ed57f714a1bc0b5a188eb26a0e4bca08533b408293dfa853a7be011.svg",
+      "sha256": "403f50f30ed57f714a1bc0b5a188eb26a0e4bca08533b408293dfa853a7be011",
+      "size": 1328,
+      "mime": "image/svg+xml",
+      "usages": [
+        "support"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://img.shields.io/badge/License-GPLv2-blue.svg",
+      "finalUrl": "https://img.shields.io/badge/License-GPLv2-blue.svg",
+      "file": "assets/5d21d1f5cbc28c1ea6d0464ff6840b31c0382043ffb0396e48d88ba72e266ce6.svg",
+      "sha256": "5d21d1f5cbc28c1ea6d0464ff6840b31c0382043ffb0396e48d88ba72e266ce6",
+      "size": 1285,
+      "mime": "image/svg+xml",
+      "usages": [
+        "support"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://img.shields.io/github/stars/joomengine/Joomla-Component-Builder.svg?style=flat&label=Star",
+      "finalUrl": "https://img.shields.io/github/stars/joomengine/Joomla-Component-Builder.svg?style=flat&label=Star",
+      "file": "assets/ff0604eb67f9e7888295e6cc7a4a475c97c010e4d9ba27b1d8f9873d66d6fbcf.svg",
+      "sha256": "ff0604eb67f9e7888295e6cc7a4a475c97c010e4d9ba27b1d8f9873d66d6fbcf",
+      "size": 1498,
+      "mime": "image/svg+xml",
+      "usages": [
+        "support"
+      ],
+      "retrievedAt": "2026-10-28"
+    },
+    {
+      "url": "https://joomla.social/system/accounts/avatars/112/766/899/254/600/077/original/85392b72075a0b99.jpg",
+      "finalUrl": "https://joomla.social/system/accounts/avatars/112/766/899/254/600/077/original/85392b72075a0b99.jpg",
+      "file": "assets/2b1bcd4d4cf51ffa8b78cbaaf33c3f14d2c615b1cf1079b959e76fec5029cc58.jpg",
+      "sha256": "2b1bcd4d4cf51ffa8b78cbaaf33c3f14d2c615b1cf1079b959e76fec5029cc58",
+      "size": 30426,
+      "mime": "image/jpeg",
+      "usages": [
+        "avatar"
+      ],
+      "retrievedAt": "2026-10-28",
+      "profile": {
+        "id": "112766899254600077",
+        "url": "https://joomla.social/@llewellyn",
+        "source": "https://joomla.social/api/v1/accounts/112766899254600077"
+      }
+    }
+  ],
+  "readmeLinks": [
+    {
+      "image": "https://raw.githubusercontent.com/joomengine/Joomla-Component-Builder/refs/heads/5.x/admin/assets/images/jcb-banner.jpg",
+      "href": null
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/contributors.svg?width=890&button=false",
+      "href": "https://github.com/joomengine/Joomla-Component-Builder/graphs/contributors"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/backers.svg?width=890",
+      "href": "https://opencollective.com/Joomla-Component-Builder#backers"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/0/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/0/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/1/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/1/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/2/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/2/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/3/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/3/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/4/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/4/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/5/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/5/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/6/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/6/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/7/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/7/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/8/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/8/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/9/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/9/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/10/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/10/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/11/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/11/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/12/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/12/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/13/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/13/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/14/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/14/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/15/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/15/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/16/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/16/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/17/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/17/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/18/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/18/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/19/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/19/website"
+    },
+    {
+      "image": "https://opencollective.com/Joomla-Component-Builder/sponsor/20/avatar.svg",
+      "href": "https://opencollective.com/Joomla-Component-Builder/sponsor/20/website"
+    }
+  ]
+}
