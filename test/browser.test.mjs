@@ -1124,7 +1124,11 @@ for (const name of browserNames) {
         assert.equal(await actualFrame.evaluate(() => scrollY), 0);
         page.testStep = 'embedded focus respects preventScroll and keyboard navigation';
         await page.evaluate(() => window.scrollTo(0, 0));
-        await actualFrame.locator('#rocket-focus-proof').evaluate(button => button.focus({ preventScroll: true }));
+        await actualFrame.locator('#rocket-focus-proof').evaluate(button => {
+          // Activate the child browsing context before testing its focus request.
+          button.ownerDocument.defaultView.focus();
+          button.focus({ preventScroll: true });
+        });
         assert.equal(await actualFrame.locator('#rocket-focus-proof').evaluate(button => button === document.activeElement), true,
           'The no-scroll focus request must actually focus its target.');
         assert.equal(await page.evaluate(() => scrollY), 0, 'An extension that requests focus without scrolling must not move the Rocket header.');
