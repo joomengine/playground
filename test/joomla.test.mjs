@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  parseProvisioningResult, sha256, validateCommand, validateContent, validateInstallOptions, verifyPackage,
+  importJoomlaCheckpoint, parseProvisioningResult, sha256, validateCommand, validateContent, validateInstallOptions, verifyPackage,
 } from '../src/joomla/index.mjs';
 
 const configuration = {
@@ -36,14 +36,14 @@ test('extension URLs and optional checksums are validated', () => {
 
 test('language packages require exact tags and pinned download integrity', () => {
   const language = { tag: 'nl-NL', url: '/packages/nl-NL.zip', sha256: 'A'.repeat(64) };
-  const options = validateInstallOptions({ ...configuration, language: 'nl-NL', languages: [language], blueprintId: 'heritage-demo' });
+  const options = validateInstallOptions({ ...configuration, language: 'nl-NL', languages: [language], deployId: 'heritage-demo' });
   assert.equal(options.language, 'nl-NL');
   assert.equal(options.languages[0].sha256, 'a'.repeat(64));
-  assert.equal(options.blueprintId, 'heritage-demo');
+  assert.equal(options.deployId, 'heritage-demo');
   assert.throws(() => validateInstallOptions({ ...configuration, language: '../nl-NL' }), /language tag/);
   assert.throws(() => validateInstallOptions({ ...configuration, languages: [{ ...language, sha256: undefined }] }), /checksum/);
   assert.throws(() => validateInstallOptions({ ...configuration, languages: [{ ...language, url: 'javascript:alert(1)' }] }), /HTTP/);
-  assert.throws(() => validateInstallOptions({ ...configuration, blueprintId: '../demo' }), /identity/);
+  assert.throws(() => validateInstallOptions({ ...configuration, deployId: '../demo' }), /identity/);
 });
 
 test('multilingual content requires real categories and a unique home in each language', () => {
@@ -81,4 +81,35 @@ test('provisioning accepts only an explicit successful PHP envelope', async () =
   await assert.rejects(parseProvisioningResult({ status: 200, text: '\n__JOOMENGINE_RESULT__{"ok":false,"exitCode":1,"output":"Installer rejected the package"}' }), /Installer rejected/);
   await assert.rejects(parseProvisioningResult({ status: 200, text: '\n__JOOMENGINE_RESULT__{"ok":true}\nFatal error during shutdown' }), /Invalid PHP provisioning response/);
   await assert.rejects(parseProvisioningResult({ status: 500, text: '\n__JOOMENGINE_RESULT__{"ok":true}' }), /HTTP 500 after/);
+});
+
+
+test('private checkpoint import restores without rotating accounts or replaying provisioning', async () => {
+  const operations = [];
+  const writes = [];
+  const archive = new Uint8Array([0x50, 0x4b, 3, 4]);
+  const sourceLoader = async name => `<?php\n// operation:${name}\n`;
+  const runtime = {
+    documentRoot: '/persist/www', installMarkerPath: '/persist/meta/joomla-install.json',
+    fs: { writeFile: async (path, bytes) => writes.push({ path, bytes }) },
+    runPhp: async source => {
+      const operation = [...source.matchAll(/operation:([a-z-]+)/g)].at(-1)[1];
+      operations.push(operation);
+      return { status: 200, text: '\n__JOOMENGINE_RESULT__' + JSON.stringify(operation === 'status'
+        ? { ok: true, marker: null, configured: false, installerPresent: false } : { ok: true }) };
+    },
+    request: () => { throw new Error('Private restoration must not log in before restoring original sessions.'); },
+  };
+  const input = { ...configuration, deployId: 'jcb-mcp',
+    extensions: [{ url: 'https://example.test/package.zip' }], startupCommands: [['cache:clean']],
+    template: { element: 'cassiopeia', url: 'https://example.test/template.zip' } };
+  await assert.rejects(importJoomlaCheckpoint(runtime, input, { sourceLoader, archiveBytes: archive, sha256: '0'.repeat(64) }), /SHA-256 verification/);
+  assert.equal(writes.length, 0, 'Integrity must be checked before writing or importing.');
+  operations.length = 0;
+  const result = await importJoomlaCheckpoint(runtime, input, { sourceLoader, archiveBytes: archive, sha256: await sha256(archive) });
+  assert.deepEqual(operations, ['status', 'import']);
+  assert.equal(writes.length, 1);
+  assert.match(writes[0].path, /^\/tmp\/joomla-checkpoint-/);
+  assert.equal(result.fromCheckpoint, true);
+  assert.equal(result.resumed, true);
 });

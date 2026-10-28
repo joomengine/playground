@@ -25,17 +25,17 @@
     }
   ],
   "bridge": {
-    "version": "0.1.1",
+    "version": "0.1.5",
     "protocolVersion": 1,
-    "sourceCommit": "c1878dbb23c8e98d67983251ba7eb26a28b8edaa",
-    "url": "https://github.com/joomengine/mariadb-wasm-bridge/releases/download/v0.1.1/mariadb-wasm-bridge-0.1.1.tar.gz",
-    "sha256": "99f4c568ee6d52b70600e9fba75e3aa4d3d94c031157d4910409c57e71bf79eb"
+    "sourceCommit": "67c9f39c8491046c496aaec478fb1dd59d1d4688",
+    "url": "https://github.com/joomengine/mariadb-wasm-bridge/releases/download/v0.1.5/mariadb-wasm-bridge-0.1.5.tar.gz",
+    "sha256": "ba4f121211f77932c6ca240648674ea432988ae9d0687dee36a2d1d04d9b6ce4"
   },
   "nativeDriver": {
     "repository": "joomengine/mariadb-wasm-bridge",
-    "sourceCommit": "ac57d995d1da198cce24a0a276cb95e124a38f1f",
+    "sourceCommit": "67c9f39c8491046c496aaec478fb1dd59d1d4688",
     "nativeSources": {
-      "pdo_mariadb_wasm.c": "a827cd7b515da9b238d74c1bda64a2e4f27cb21cb79134346139de7bd7a7739e",
+      "pdo_mariadb_wasm.c": "971166c9ecb35d49132be2a6e2aac116afeeae473f01d7fafa39f9089737876f",
       "php_pdo_mariadb_wasm.h": "538723d9a7af28f07e5d3a0350a77c98b79a831d7dd936156a8c4a18230af88b",
       "config.m4": "2c2d01f8a28171deb3774d81ef5abfdf889cb805bcd38a90a48350ae54466006"
     },
@@ -47,7 +47,7 @@
       "engine.mjs": "4961326dfe6bf43c4273144e6e8f299d2240d394a19a0a41eedb9f46830a6922",
       "errors.mjs": "27a25610082b7cf34894a8066457fa46da40555ffc2e5cda7cbbfaa11673e217",
       "index.mjs": "f476bc6e75ffa9a3ef27e97d29c0381ab8ddb7e8091c88bfbf26e475f32c9605",
-      "protocol.mjs": "d710611eb6d3568f763ea015fdb62a7f6ccde88c6261bdca3708bbd995ad211c",
+      "protocol.mjs": "26e949f98a9b87403692edcbbd30d8a8b284a0fbabdf5c950efbef3bf353c998",
       "result.mjs": "c47406902784768a259eeeb86c9cd92de9b680a8e2058b034fcd1a587da120be",
       "worker.mjs": "0ebb4a9213a8278aeacb16841b725e79cdd7bee4655f9551a3626eb0382448a2"
     }

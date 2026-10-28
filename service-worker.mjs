@@ -5,7 +5,10 @@ const sitePrefix = `${scope.pathname}__site/`;
 const isolationHeaders = headers => {
   const result = new Headers(headers);
   result.set('Cross-Origin-Opener-Policy', 'same-origin');
-  result.set('Cross-Origin-Embedder-Policy', 'require-corp');
+  // Keep MariaDB's shared memory available without requiring public image,
+  // classic script and stylesheet hosts to opt into our document's policy.
+  // Cross-origin no-cors requests omit credentials; CORS requests retain CORS.
+  result.set('Cross-Origin-Embedder-Policy', 'credentialless');
   result.set('Cross-Origin-Resource-Policy', 'same-origin');
   return result;
 };
@@ -31,8 +34,8 @@ async function routeToPlayground(request) {
   const result = new Promise((resolve, reject) => {
     timer = setTimeout(() => {
       channel.port1.close();
-      reject(new Error('The playground did not answer the request within 180 seconds'));
-    }, 180_000);
+      reject(new Error('The playground did not answer the request within 600 seconds'));
+    }, 600_000);
     channel.port1.onmessage = event => {
       clearTimeout(timer);
       channel.port1.close();

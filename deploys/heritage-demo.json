@@ -1,0 +1,167 @@
+{
+  "$schema": "./schema.json",
+  "schemaVersion": 1,
+  "id": "heritage-demo",
+  "title": "Multilingual heritage site",
+  "description": "Explore an Afrikaans-first Joomla site in Afrikaans, German, French, Italian, Spanish, Chinese Simplified, Dutch and English.",
+  "joomla": [
+    "5",
+    "6"
+  ],
+  "prebuild": true,
+  "configuration": {
+    "siteName": "Lewende Erfenis",
+    "initialPath": "/",
+    "language": "af-ZA",
+    "languageTags": [
+      "af-ZA",
+      "de-DE",
+      "fr-FR",
+      "it-IT",
+      "es-ES",
+      "zh-CN",
+      "nl-NL",
+      "en-GB"
+    ],
+    "startupCommands": [
+      [
+        "cache:clean"
+      ]
+    ],
+    "content": {
+      "multilingual": true,
+      "categories": [
+        {
+          "key": "heritage-af",
+          "title": "Lewende Erfenis",
+          "alias": "heritage-af",
+          "language": "af-ZA"
+        },
+        {
+          "key": "heritage-de",
+          "title": "Lebendiges Erbe",
+          "alias": "heritage-de",
+          "language": "de-DE"
+        },
+        {
+          "key": "heritage-fr",
+          "title": "Patrimoine vivant",
+          "alias": "heritage-fr",
+          "language": "fr-FR"
+        },
+        {
+          "key": "heritage-it",
+          "title": "Patrimonio vivente",
+          "alias": "heritage-it",
+          "language": "it-IT"
+        },
+        {
+          "key": "heritage-es",
+          "title": "Patrimonio vivo",
+          "alias": "heritage-es",
+          "language": "es-ES"
+        },
+        {
+          "key": "heritage-zh",
+          "title": "鲜活的文化遗产",
+          "alias": "heritage-zh",
+          "language": "zh-CN"
+        },
+        {
+          "key": "heritage-nl",
+          "title": "Levend erfgoed",
+          "alias": "heritage-nl",
+          "language": "nl-NL"
+        },
+        {
+          "key": "heritage-en",
+          "title": "Living Heritage",
+          "alias": "heritage-en",
+          "language": "en-GB"
+        }
+      ],
+      "articles": [
+        {
+          "key": "welcome-af",
+          "title": "Ons gedeelde erfenis",
+          "alias": "welcome-af",
+          "language": "af-ZA",
+          "category": "heritage-af",
+          "introtext": "<h2>Verhale verbind geslagte</h2><p>Welkom by Lewende Erfenis, ’n plek vir plaaslike geskiedenis, tradisies en die plekke wat ons gemeenskappe vorm.</p><p>Kies ’n taal om hierdie Joomla-werf te verken. Voeg jou eie verhale en foto’s in die administrateur by.</p>",
+          "featured": true,
+          "home": true
+        },
+        {
+          "key": "welcome-de",
+          "title": "Unser gemeinsames Erbe",
+          "alias": "welcome-de",
+          "language": "de-DE",
+          "category": "heritage-de",
+          "introtext": "<h2>Geschichten verbinden Generationen</h2><p>Willkommen bei Lebendiges Erbe, einem Ort für regionale Geschichte, Traditionen und die Orte, die unsere Gemeinschaften prägen.</p><p>Wählen Sie eine Sprache, um diese Joomla-Website zu entdecken. Ergänzen Sie im Administrationsbereich eigene Geschichten und Fotos.</p>",
+          "featured": true,
+          "home": true
+        },
+        {
+          "key": "welcome-fr",
+          "title": "Notre patrimoine commun",
+          "alias": "welcome-fr",
+          "language": "fr-FR",
+          "category": "heritage-fr",
+          "introtext": "<h2>Les récits relient les générations</h2><p>Bienvenue dans Patrimoine vivant, un espace consacré à l’histoire locale, aux traditions et aux lieux qui façonnent nos communautés.</p><p>Choisissez une langue pour découvrir ce site Joomla. Ajoutez vos récits et vos photos dans l’administration.</p>",
+          "featured": true,
+          "home": true
+        },
+        {
+          "key": "welcome-it",
+          "title": "Il nostro patrimonio condiviso",
+          "alias": "welcome-it",
+          "language": "it-IT",
+          "category": "heritage-it",
+          "introtext": "<h2>Le storie uniscono le generazioni</h2><p>Benvenuti in Patrimonio vivente, uno spazio dedicato alla storia locale, alle tradizioni e ai luoghi che danno forma alle nostre comunità.</p><p>Scegliete una lingua per esplorare questo sito Joomla. Aggiungete storie e fotografie nell’area di amministrazione.</p>",
+          "featured": true,
+          "home": true
+        },
+        {
+          "key": "welcome-es",
+          "title": "Nuestro patrimonio compartido",
+          "alias": "welcome-es",
+          "language": "es-ES",
+          "category": "heritage-es",
+          "introtext": "<h2>Las historias conectan generaciones</h2><p>Bienvenidos a Patrimonio vivo, un espacio para la historia local, las tradiciones y los lugares que dan forma a nuestras comunidades.</p><p>Elige un idioma para explorar este sitio Joomla. Añade tus historias y fotografías desde la administración.</p>",
+          "featured": true,
+          "home": true
+        },
+        {
+          "key": "welcome-zh",
+          "title": "我们共同的文化遗产",
+          "alias": "welcome-zh",
+          "language": "zh-CN",
+          "category": "heritage-zh",
+          "introtext": "<h2>故事连接世代</h2><p>欢迎来到鲜活的文化遗产。这里分享地方历史、传统，以及塑造我们社区的地方。</p><p>请选择一种语言来浏览这个 Joomla 网站。您可以在管理后台添加自己的故事和照片。</p>",
+          "featured": true,
+          "home": true
+        },
+        {
+          "key": "welcome-nl",
+          "title": "Ons gedeelde erfgoed",
+          "alias": "welcome-nl",
+          "language": "nl-NL",
+          "category": "heritage-nl",
+          "introtext": "<h2>Verhalen verbinden generaties</h2><p>Welkom bij Levend erfgoed, een plek voor lokale geschiedenis, tradities en de plaatsen die onze gemeenschappen vormen.</p><p>Kies een taal om deze Joomla-website te bekijken. Voeg in het beheer eigen verhalen en foto’s toe.</p>",
+          "featured": true,
+          "home": true
+        },
+        {
+          "key": "welcome-en",
+          "title": "Our shared heritage",
+          "alias": "welcome-en",
+          "language": "en-GB",
+          "category": "heritage-en",
+          "introtext": "<h2>Stories connect generations</h2><p>Welcome to Living Heritage, a space for sharing local history, traditions and the places that shape our communities.</p><p>Choose a language to explore this Joomla site. Add your own stories and photographs in the administrator.</p>",
+          "featured": true,
+          "home": true
+        }
+      ]
+    }
+  }
+}

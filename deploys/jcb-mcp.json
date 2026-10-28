@@ -1,0 +1,29 @@
+{
+  "$schema": "./schema.json",
+  "schemaVersion": 1,
+  "id": "jcb-mcp",
+  "title": "JCB + MCP",
+  "description": "Joomla Component Builder with JoomEngine MCP and its Joomla token-authenticated HTTP endpoint for a client in this browser.",
+  "joomla": [
+    "6"
+  ],
+  "configuration": {
+    "siteName": "JCB + MCP Playground",
+    "initialPath": "/administrator/index.php?option=com_componentbuilder",
+    "language": "en-GB"
+  },
+  "variants": {
+    "6": {
+      "extensions": [
+        {
+          "url": "https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v6.2.0.zip",
+          "sha256": "17a2b4c7b352d0ead2592e7e5838ace8255bbcbdc71566d883e8e82ca3dacd8e"
+        },
+        {
+          "url": "https://codeload.github.com/joomengine/mcp_package/zip/refs/tags/v1.0.10",
+          "sha256": "4a05bcc33a99b6f38d63ccc6d2bf6708658221546d9f7e7af2fc714dadf0b865"
+        }
+      ]
+    }
+  }
+}

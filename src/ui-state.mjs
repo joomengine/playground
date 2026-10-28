@@ -1,21 +1,23 @@
+import { createShareURL } from './config.mjs';
 const SITE_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
-const PUBLIC_FIELDS = ['blueprintId', 'joomlaVersion', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'hideToolbar', 'persistence'];
+const PUBLIC_FIELDS = ['deployId', 'joomlaVersion', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'phpSettings', 'menus', 'template', 'languageTags', 'multilingual', 'content'];
 
 /** Scope resume preferences to this deployment, like its browser database stores. */
 export function savedStateKey(baseURL) {
   return `joomengine:launch:${new URL(baseURL).href}`;
 }
 
-export function defaultSiteKey(blueprintId, joomlaVersion) {
+export function defaultSiteKey(deployId, joomlaVersion) {
   const suffix = `-${joomlaVersion}`.replace(/[^a-zA-Z0-9._-]/g, '-').slice(-33);
-  const name = String(blueprintId || 'jcb').replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^[^a-zA-Z0-9]+/, '') || 'site';
+  const name = String(deployId || 'jcb').replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^[^a-zA-Z0-9]+/, '') || 'site';
   return `${name.slice(0, 64 - suffix.length)}${suffix}`;
 }
 
 /** Persist setup preferences, never administrator credentials or runtime objects. */
 export function publicConfiguration(config) {
-  const result = Object.fromEntries(PUBLIC_FIELDS.filter((name) => config[name] !== undefined).map((name) => [name, config[name]]));
+  const result = Object.fromEntries(PUBLIC_FIELDS.filter((name) => config[name] !== undefined).map((name) => [name, structuredClone(config[name])]));
   result.extensions = (config.extensions || []).map(({ url, sha256 }) => ({ url, ...(sha256 ? { sha256 } : {}) }));
+  result.languages = (config.languages || []).map(({ tag, url, sha256 }) => ({ tag, url, ...(sha256 ? { sha256 } : {}) }));
   result.startupCommands = (config.startupCommands || []).map((argv) => [...argv]);
   result.fresh = false;
   return result;
@@ -55,8 +57,22 @@ export function forgetSite(state, storageKey) {
 /** Reflect selected controls without newly exposing manually entered setup steps. */
 export function runtimeLocation(currentURL, config) {
   const url = new URL(currentURL);
+  const inbound = url.hash.startsWith('#deploy=') || url.searchParams.has('config');
+  if (inbound) {
+    url.hash = '';
+    url.searchParams.delete('config');
+    url.searchParams.delete('sha256');
+    if (!config.persistence) {
+      try {
+        const refreshed = new URL(createShareURL(currentURL, config));
+        url.search = refreshed.search; url.hash = refreshed.hash;
+      } catch { /* Local operation succeeds even when the updated setup cannot be put in a public link. */ }
+    }
+  }
   const params = url.searchParams;
-  for (const [parameter, name] of [['blueprint', 'blueprintId'], ['joomla', 'joomlaVersion'], ['php', 'phpVersion'], ['language', 'language'], ['key', 'storageKey']]) {
+  if (config.siteName) params.set('name', config.siteName);
+  else params.delete('name');
+  for (const [parameter, name] of [['deploy', 'deployId'], ['joomla', 'joomlaVersion'], ['php', 'phpVersion'], ['language', 'language'], ['key', 'storageKey']]) {
     if (config[name]) params.set(parameter, config[name]);
   }
   params.set('path', config.initialPath || '/');
@@ -82,9 +98,9 @@ export function runtimeLocation(currentURL, config) {
 /** A changed setup recipe must not silently reopen a site built with older steps. */
 export async function isolateSetup(state, config) {
   const previous = Object.hasOwn(state.sites, config.storageKey) ? state.sites[config.storageKey] : null;
-  const signature = (value) => JSON.stringify({ extensions: value.extensions || [], startupCommands: value.startupCommands || [] });
+  const signature = (value) => JSON.stringify({ extensions: value.extensions || [], startupCommands: value.startupCommands || [], siteName: value.siteName, menus: value.menus || [], template: value.template || null, languageTags: value.languageTags || [], multilingual: value.multilingual || false, content: value.content || null });
   if (!config.persistence || !previous || signature(previous) === signature(config)) return { configuration: config, changed: false };
-  const content = JSON.stringify({ key: config.storageKey, blueprintId: config.blueprintId, joomlaVersion: config.joomlaVersion, setup: signature(config) });
+  const content = JSON.stringify({ key: config.storageKey, deployId: config.deployId, joomlaVersion: config.joomlaVersion, setup: signature(config) });
   const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content))), (byte) => byte.toString(16).padStart(2, '0')).join('');
   const key = `${config.storageKey.slice(0, 40)}-setup-${digest.slice(0, 16)}`;
   return { configuration: { ...config, storageKey: key }, changed: true, previousKey: config.storageKey };

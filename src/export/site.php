@@ -4,6 +4,7 @@
 const PLAYGROUND_EXPORT_LIMIT = 768 * 1024 * 1024;
 const PLAYGROUND_DOWNLOAD_LIMIT = 512 * 1024 * 1024;
 const PLAYGROUND_EXPORT_FILES = 100000;
+const PLAYGROUND_EXPORT_ENTRIES = 100000;
 
 function exportFinish(array $result): void
 {
@@ -469,6 +470,14 @@ try {
                 if (!$zip->addFile($directory . '/database.sql', 'database.sql') || !$zip->addFile($directory . '/database.ndjson', 'database.ndjson')) throw new RuntimeException('Cannot add the SQL dump to the site export.');
                 if (!$zip->addFromString('export.json', json_encode($metadata, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n")
                     || !$zip->addFromString('DEPLOYMENT.md', exportInstructions($format))) throw new RuntimeException('Cannot add export metadata.');
+            }
+            $expanded = 0;
+            if ($zip->numFiles > PLAYGROUND_EXPORT_ENTRIES) throw new RuntimeException('The export exceeds 100000 ZIP entries.');
+            for ($index = 0; $index < $zip->numFiles; $index++) {
+                $entry = $zip->statIndex($index);
+                if ($entry === false) throw new RuntimeException('Cannot verify the completed export entries.');
+                $expanded += $entry['size'];
+                if ($expanded > PLAYGROUND_EXPORT_LIMIT) throw new RuntimeException('The complete export exceeds the 768 MiB extraction limit.');
             }
         } finally {
             if (!$zip->close()) throw new RuntimeException('Cannot finish the site ZIP export.');

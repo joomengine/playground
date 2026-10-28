@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from '../src/ui-state.mjs';
 
 const configuration = {
-  blueprintId: 'jcb', joomlaVersion: '6.2.0', phpVersion: '8.4', siteName: 'Saved work',
+  deployId: 'jcb', joomlaVersion: '6.2.0', phpVersion: '8.4', siteName: 'Saved work',
   initialPath: '/administrator/', storageKey: 'work', language: 'en-GB', autoLogin: true,
   persistence: true, hideToolbar: false, fresh: true,
   extensions: [{ url: 'https://example.test/extension.zip', sha256: 'a'.repeat(64) }],
@@ -15,7 +15,7 @@ const empty = () => readSavedState({ getItem() { return null; } }, 'settings');
 
 test('saved launch preferences whitelist public settings and consume fresh requests', () => {
   const value = publicConfiguration(configuration);
-  assert.equal(value.blueprintId, 'jcb');
+  assert.equal(value.deployId, 'jcb');
   assert.equal(value.fresh, false);
   assert.equal(Object.hasOwn(value, 'admin'), false);
   assert.equal(Object.hasOwn(value, 'runtime'), false);
@@ -27,7 +27,7 @@ test('saved launch preferences whitelist public settings and consume fresh reque
 
 test('persistent sites remember the active key while reset preserves other sites', () => {
   const first = rememberSite(empty(), configuration);
-  const both = rememberSite(first, { ...configuration, blueprintId: 'blank', storageKey: 'second' });
+  const both = rememberSite(first, { ...configuration, deployId: 'blank', storageKey: 'second' });
   assert.equal(both.active, 'second');
   assert.deepEqual(Object.keys(both.sites), ['work', 'second']);
   const restored = readSavedState({ getItem() { return JSON.stringify(both); } }, 'settings');
@@ -103,4 +103,26 @@ test('identical setup, PHP changes and new or temporary sites keep their request
     assert.equal(result.changed, false);
     assert.equal(result.configuration.storageKey, input.storageKey);
   }
+});
+
+
+test('launch locations discard stale remote setup and refresh temporary public setup', async () => {
+  const { createShareURL, readURLConfiguration } = await import('../src/config.mjs');
+  const config = { deployId: 'blank', joomlaVersion: '6.2.0', phpVersion: '8.4', siteName: 'Current name',
+    initialPath: '/', persistence: true, storageKey: 'current-site', autoLogin: true,
+    menus: [{ title: 'Current home', component: 'com_content', view: 'featured', home: true }] };
+  const persistent = new URL(runtimeLocation('https://example.test/?config=https://example.test/old.json&sha256=old&name=Old#deploy=stale', config));
+  assert.equal(persistent.hash, '');
+  assert.equal(persistent.searchParams.has('config'), false);
+  assert.equal(persistent.searchParams.has('sha256'), false);
+  assert.equal(persistent.searchParams.get('name'), 'Current name');
+  assert.equal(persistent.searchParams.get('key'), 'current-site');
+  const original = createShareURL('https://example.test/', { ...config, siteName: 'Old', persistence: false });
+  const temporary = readURLConfiguration(runtimeLocation(original, { ...config, persistence: false }));
+  assert.equal(temporary.config.siteName, 'Current name');
+  assert.equal(temporary.config.menus[0].title, 'Current home');
+  const privateChange = new URL(runtimeLocation(original, { ...config, persistence: false,
+    template: { element: 'cassiopeia', params: { token: 'private' } } }));
+  assert.equal(privateChange.hash, '');
+  assert.equal(privateChange.href.includes('private'), false);
 });

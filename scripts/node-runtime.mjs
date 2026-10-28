@@ -2,11 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeHealthSource, runtimeRandomValue, assertRuntimeHealth } from '../src/php-settings.mjs';
+import { configurePhpRouting } from '../src/php-routing.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
-/** Run the built, unmodified upstream CGI runtime and MariaDB for build tasks. */
-export async function createNodeRuntime({ directory = path.join(root, 'dist'), phpVersion, database = 'joomla' } = {}) {
+/** Run the verified upstream PHP binary and staged CGI adapter for build tasks. */
+export async function createNodeRuntime({ directory = path.join(root, 'dist'), phpVersion, database = 'joomla', phpSettings: requestedPhpSettings } = {}) {
+  const phpSettings = normalizePhpSettings(requestedPhpSettings);
+  const bodyLimit = phpRequestBodyLimit(phpSettings);
   const distribution = path.resolve(directory);
   const manifestPath = path.join(distribution, 'assets/manifest.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
@@ -64,7 +68,9 @@ export async function createNodeRuntime({ directory = path.join(root, 'dist'), p
     const url = new URL(String(pathname).replace(/^\/+/, ''), baseUrl);
     if (url.origin !== new URL(baseUrl).origin || !url.pathname.startsWith(prefix)) throw new TypeError('The request must stay within the build site.');
     const input = new Request(url, { ...init, redirect: 'manual' });
-    if (input.body && input.method !== 'POST') throw new TypeError('This upstream CGI release supports bodies for POST only.');
+    const inputBody = input.body ? new Uint8Array(await input.arrayBuffer()) : null;
+    if (inputBody?.byteLength > bodyLimit) throw new RangeError(`The HTTP request exceeds post_max_size (${phpSettings.post_max_size}).`);
+    if (inputBody?.byteLength && !['POST', 'PUT', 'PATCH', 'DELETE'].includes(input.method)) throw new TypeError(`Request bodies are not supported for ${input.method}.`);
     for (const name of headersSet) php.env[name] = '';
     headersSet.clear();
     for (const [name, value] of input.headers) {
@@ -76,14 +82,17 @@ export async function createNodeRuntime({ directory = path.join(root, 'dist'), p
     const headers = new Map(input.headers);
     headers.set('host', 'localhost');
     if (input.headers.has('content-type')) headers.set('Content-Type', input.headers.get('content-type'));
+    php.error = [];
     const original = php.binary;
     try {
-      const response = await php.request({ url: `${url.pathname}${url.search}`, method: input.method, headers, body: input.body });
+      const response = await php.request({ url: `${url.pathname}${url.search}`, method: input.method, headers, body: inputBody ? new Blob([inputBody]).stream() : null });
       if (php.binary !== original) {
         failed = new Error(`PHP stopped abnormally during build execution: ${new TextDecoder().decode(new Uint8Array(php.error || [])).slice(0, 2000)}`);
         throw failed;
       }
       if (!(response instanceof Response)) throw new Error('The upstream PHP runtime did not return a response.');
+      const diagnostics = new TextDecoder().decode(new Uint8Array(php.error || [])).trim();
+      if (diagnostics) console.warn(`[PHP ${entry.version}] ${diagnostics.slice(0, 8000)}`);
       return response;
     } finally {
       await databaseRuntime.reset();
@@ -124,7 +133,7 @@ export async function createNodeRuntime({ directory = path.join(root, 'dist'), p
     return readFile(path.join(distribution, 'src/joomla/php', `${name}.php`), 'utf8');
   };
   const raw = {
-    url: baseUrl, baseUrl, assetBaseUrl, manifest, phpVersion: entry.version,
+    url: baseUrl, baseUrl, assetBaseUrl, manifest, phpVersion: entry.version, phpSettings,
     documentRoot: '/persist/www', installMarkerPath: '/persist/meta/joomla-install.json',
     fs, request, runPhp, fetchAsset, sourceLoader, async flush() { await databaseRuntime.flush(); },
   };
@@ -151,20 +160,21 @@ export async function createNodeRuntime({ directory = path.join(root, 'dist'), p
   try {
     const adapter = createPhpWasmAdapter(databaseRuntime.hostCalls, { shimUrl: assetURL('mariadb/adapters/php-wasm.php') });
     php = new PhpCgiNode({
-      ...adapter, version: entry.version, prefix, docroot: raw.documentRoot, persist: [], staticFS: true, autoTransaction: false,
+      ...adapter, phpArgs: { ...adapter.phpArgs, getRandomValue: runtimeRandomValue }, version: entry.version, prefix, docroot: raw.documentRoot, persist: [], staticFS: true, autoTransaction: false,
       sharedLibs: entry.sharedLibs.map((library) => ({ ...library, url: assetURL(library.url).href })),
       files: [...(entry.files || []).map((file) => ({ ...file, url: assetURL(file.url).href })), ...adapter.files],
-      ini: `${adapter.ini}memory_limit=512M\nmax_execution_time=0\nmax_input_time=0\nsession.save_path=/persist/sessions\nupload_max_filesize=64M\npost_max_size=64M\nmax_input_vars=10000\ndisplay_errors=stderr\nhtml_errors=0\nlog_errors=1\n`,
+      ini: `${adapter.ini}${phpIni(phpSettings)}`,
     });
     binary = await php.binary;
+    configurePhpRouting(php, binary);
     for (const directory of ['/persist/www', '/persist/sessions', '/persist/meta', '/config', '/internal']) binary.FS.mkdirTree(directory);
     php.initialized = true;
     php.staticCacheTime = 0;
     php.dynamicCacheTime = 0;
-    const result = await handle.runPhp('<?php echo json_encode(["phpVersion" => PHP_VERSION, "native" => extension_loaded("pdo_mariadb_wasm"), "drivers" => PDO::getAvailableDrivers()], JSON_THROW_ON_ERROR);');
+    const result = await handle.runPhp(runtimeHealthSource());
     const identity = JSON.parse(result.text);
-    if (!identity.native || !identity.drivers.includes('mysql') || identity.phpVersion !== entry.patchVersion) throw new Error(`Build runtime identity differs from its manifest: ${result.text}`);
-    handle.runtimeInfo = identity;
+    if (!identity.extensions.includes('pdo_mariadb_wasm') || !identity.pdoDrivers.includes('mysql') || identity.phpVersion !== entry.patchVersion) throw new Error(`Build runtime identity differs from its manifest: ${result.text}`);
+    handle.runtimeInfo = assertRuntimeHealth(identity, phpSettings);
     return handle;
   } catch (error) {
     await handle.close();

@@ -1,7 +1,9 @@
-import { normalizeConfiguration, parseCatalog, normalizeInitialPath } from './config.mjs';
-import { installJoomla, inspectJoomla, sha256 } from './joomla/index.mjs';
+import { normalizeConfiguration, parseCatalog, normalizeInitialPath, resolveSiteURL } from './config.mjs';
+import { installJoomla, inspectJoomla, sha256, importJoomlaSnapshot, importJoomlaCheckpoint, checkJoomla, restoreJoomlaSession, applyJoomlaConfiguration, discoverJoomlaConfiguration, getMcpConnection } from './joomla/index.mjs';
 import { exportSite } from './export.mjs';
 import { serializeRequest, restoreResponse } from './http.mjs';
+import { normalizePhpSettings, phpRequestTimeoutMs } from './php-settings.mjs';
+import { openStandalone } from './standalone-transfer.mjs';
 
 const base = new URL('../', import.meta.url);
 const manifestUrl = new URL('assets/manifest.json', base);
@@ -121,6 +123,25 @@ class PhpSession {
     this.queue = result.catch(() => {});
     return result;
   }
+  async flushTogether() {
+    const previous = this.queue;
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    // Reserve the queue before yielding so no HTTP request can split the two stores' flush.
+    this.queue = previous.then(() => held).catch(() => {});
+    try {
+      await previous;
+      if (this.failure) throw this.failure;
+      const id = ++this.sequence;
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => this.fail(new Error('Saving PHP files timed out.')), 180_000);
+        this.pending.set(id, { resolve, reject, timer, operation: 'flush' });
+        try { this.worker.postMessage({ type: 'operation', id, operation: 'flush', args: {} }); }
+        catch (error) { this.fail(error); }
+      });
+      await this.database.flush();
+    } finally { release(); }
+  }
   fail(error) {
     if (this.failure) return this.recovery;
     this.failure = error;
@@ -173,7 +194,7 @@ export async function resetPlayground({ storageKey = 'default' } = {}) {
 }
 
 /** Create a real Joomla installation backed by upstream PHP and MariaDB WASM. */
-export async function createPlayground(input, { onProgress = () => {} } = {}) {
+export async function createPlayground(input, { onProgress = () => {}, checkpoint = null } = {}) {
   const environment = await prepareEnvironment();
   if (environment.reloadRequired) throw new Error('Reload this page once to activate browser isolation, then start the playground.');
   const progress = value => onProgress({ ...value, phase: value.phase ?? value.stage });
@@ -182,16 +203,20 @@ export async function createPlayground(input, { onProgress = () => {} } = {}) {
   if (!response.ok) throw new Error(`Cannot load the runtime catalog: HTTP ${response.status}.`);
   const manifest = await response.json();
   const config = normalizeConfiguration(input, { catalog: parseCatalog(manifest), baseURL: base.href });
-  const phpEntry = manifest.php.find(entry => entry.version === config.phpVersion);
+  let phpEntry = manifest.php.find(entry => entry.version === config.phpVersion);
   const joomlaEntry = manifest.joomla.find(entry => entry.version === config.joomlaVersion);
   const resolveAsset = value => new URL(value, manifestUrl).href;
   const identity = await storageIdentity(config.storageKey);
   const clientId = await clientIdentity();
   const release = config.persistence ? await acquireSiteLock(identity) : async () => {};
   const instanceId = crypto.randomUUID();
-  let database, session, closePromise;
+  let database, session, closePromise, changing = false;
+  const pausedOperation = Symbol('paused site operation');
   const prefix = `${base.pathname}__site/${clientId}/${instanceId}/`;
   const siteUrl = new URL(prefix, base).href;
+  const registerSession = () => instances.set(instanceId, {
+    send: (operation, args) => session.send(operation, args, phpRequestTimeoutMs(config.phpSettings)),
+  });
   const finish = erase => closePromise ??= (async () => {
     instances.delete(instanceId);
     try {
@@ -199,41 +224,182 @@ export async function createPlayground(input, { onProgress = () => {} } = {}) {
       if (erase && config.persistence) await eraseStoredSite(identity);
     } finally { await release(); }
   })();
+  const restorePrivateCopy = async (saved, kind, persistence = saved.configuration.persistence) => {
+    const storageKey = `${kind}-${crypto.randomUUID()}`;
+    try {
+      return await createPlayground({ ...saved.configuration, persistence, storageKey, fresh: false }, { onProgress, checkpoint: saved });
+    } catch (error) {
+      // This key was allocated for this attempt; a failed copy must not fill
+      // browser storage with an unreachable partial installation.
+      if (persistence) {
+        try { await resetPlayground({ storageKey }); }
+        catch (cleanupError) { error.message += ` Partial copy cleanup: ${cleanupError.message}`; }
+      }
+      throw error;
+    }
+  };
   try {
     progress({ phase: 'database', message: 'Starting MariaDB…' });
     const { createMariaDB } = await import(resolveAsset(manifest.bridge.moduleUrl));
     database = await createMariaDB({ database: 'joomla', timeoutMs: 120_000, ...(config.persistence ? { persistence: { key: `joomengine-${identity}` } } : {}) });
     session = new PhpSession(database, error => progress({ phase: 'failed', message: error.message }));
     progress({ phase: 'php', message: `Loading PHP ${phpEntry.patchVersion ?? config.phpVersion} and its extensions…` });
-    const runtimeInfo = await session.send('initialize', {
+    const initializeSession = (target, settings = config.phpSettings) => target.send('initialize', {
       moduleUrl: resolveAsset(phpEntry.moduleUrl), adapterUrl: resolveAsset(manifest.bridge.adapterUrl),
       phpVersion: config.phpVersion, prefix, persistence: config.persistence, mountPath: `/joomengine-${identity}`,
+      phpSettings: settings,
       sharedLibs: phpEntry.sharedLibs.map(lib => ({ ...lib, url: resolveAsset(lib.url) })),
       files: (phpEntry.files ?? []).map(file => ({ ...file, url: resolveAsset(file.url) })),
     });
+    const runtimeInfo = await initializeSession(session);
     const handle = {
-      url: new URL(config.initialPath.slice(1), siteUrl).href, baseUrl: siteUrl,
+      url: resolveSiteURL(config.initialPath, siteUrl), baseUrl: siteUrl,
       documentRoot: '/persist/www', installMarkerPath: '/persist/meta/joomla-install.json', runtimeInfo,
+      get configuration() { return structuredClone(config); },
+      get closed() { return Boolean(closePromise); },
+      get healthy() { return !closePromise && !session.failure; },
+      get changing() { return changing; },
+      lastSavedAt: null,
       fs: Object.fromEntries(['mkdir', 'readFile', 'writeFile', 'readdir', 'stat', 'unlink'].map(method => [method,
         (path, data) => session.send(`fs.${method}`, { path, data })])),
       runPhp: (source, options = {}) => session.send('runPhp', { source }, options.timeoutMs ?? 180_000),
       async request(path = '/', init = {}) {
         const target = normalizeInitialPath(`/${String(path).replace(/^\/+/, '')}`);
-        const request = new Request(new URL(target.slice(1), siteUrl), init);
-        return restoreResponse(await session.send('request', await serializeRequest(request), init.timeoutMs ?? 180_000), request.method);
+        const request = new Request(resolveSiteURL(target, siteUrl), init);
+        return restoreResponse(await session.send('request', await serializeRequest(request), init.timeoutMs ?? phpRequestTimeoutMs(config.phpSettings)), request.method);
       },
-      async flush() { await session.send('flush'); await database.flush(); },
+      async flush() {
+        if (changing) throw new Error('Wait for the current site operation before saving.');
+        await session.flushTogether();
+        handle.lastSavedAt = config.persistence ? new Date().toISOString() : null;
+      },
       exportSite: options => exportSite(handle, options),
+      discoverConfiguration: () => discoverJoomlaConfiguration(handle),
+      getMcpConnection: () => getMcpConnection(handle, { admin: handle.installation?.administrator }),
+      async openStandalone(options) {
+        if (changing || closePromise) throw new Error('Wait for the current site operation.');
+        changing = true; instances.delete(instanceId);
+        const transfer = Object.create(handle);
+        transfer.flush = () => session.flushTogether();
+        transfer.checkpoint = () => handle.checkpoint(pausedOperation);
+        try { return await openStandalone(transfer, options); }
+        finally { changing = false; if (!closePromise) registerSession(); }
+      },
       reset: () => finish(true), close: () => finish(false),
+      async checkpoint(token) {
+        if (closePromise) throw new Error('Open the site before creating a checkpoint.');
+        const managePause = token !== pausedOperation;
+        if (managePause && changing) throw new Error('Wait for the current site operation.');
+        if (managePause) { changing = true; instances.delete(instanceId); }
+        try {
+          const archive = await exportSite(handle, { format: 'bundle' });
+          const filesystem = await session.send('checkpoint', {}, 600_000);
+          return { archive: archive.bytes, sha256: await sha256(archive.bytes), filesystem, configuration: { ...structuredClone(config), admin: { ...handle.installation.administrator } } };
+        } finally { if (managePause) { changing = false; registerSession(); } }
+      },
+      async keep() {
+        if (config.persistence) { await handle.flush(); return handle; }
+        if (changing) throw new Error('Wait for the current site operation.');
+        changing = true; instances.delete(instanceId);
+        try {
+          progress({ phase: 'saving', message: 'Saving the temporary site and verifying its files and database…' });
+          const saved = await handle.checkpoint(pausedOperation);
+          const replacement = await restorePrivateCopy(saved, 'saved', true);
+          try { await finish(false); }
+          catch (cleanupError) { progress({ phase: 'warning', message: `The saved site is ready. Previous runtime cleanup reported: ${cleanupError.message}` }); }
+          return replacement;
+        } catch (error) { registerSession(); throw error; }
+        finally { changing = false; }
+      },
+      async applyConfiguration(inputConfiguration) {
+        if (changing || closePromise) throw new Error('Wait for the current site operation.');
+        const next = normalizeConfiguration({ ...config, ...inputConfiguration, admin: handle.installation.administrator }, { catalog: parseCatalog(manifest), baseURL: base.href });
+        if (next.phpVersion !== config.phpVersion || next.joomlaVersion !== config.joomlaVersion || next.persistence !== config.persistence || next.storageKey !== config.storageKey) {
+          throw new Error('Use a new deployment or the PHP settings control to change the runtime or storage.');
+        }
+        if (JSON.stringify(next.phpSettings) !== JSON.stringify(config.phpSettings)) throw new Error('Apply PHP settings using the PHP settings dialog before changing site configuration.');
+        changing = true; instances.delete(instanceId);
+        let recoveryCheckpoint;
+        try {
+          progress({ phase: 'saving', message: 'Creating a recovery checkpoint before applying deployment changes…' });
+          recoveryCheckpoint = await handle.checkpoint(pausedOperation);
+          const signature = value => JSON.stringify(value);
+          const additions = next.extensions.filter(entry => !config.extensions.some(previous => previous.url === entry.url && previous.sha256 === entry.sha256));
+          const commands = next.startupCommands.filter(argv => !config.startupCommands.some(previous => signature(previous) === signature(argv)));
+          const template = next.template ? { ...next.template } : null;
+          if (template?.url && template.url === config.template?.url && template.sha256 === config.template?.sha256) { delete template.url; delete template.sha256; }
+          const result = await applyJoomlaConfiguration(handle, { ...next, extensions: additions, startupCommands: commands, template }, { progress });
+          Object.assign(config, next);
+          handle.url = resolveSiteURL(config.initialPath, siteUrl);
+          handle.installation = { ...handle.installation, ...result, administrator: handle.installation.administrator };
+          await session.send('flush'); await database.flush();
+          registerSession();
+          progress({ phase: 'ready', message: 'Deployment changes applied to the current site.' });
+          return result;
+        } catch (error) {
+          registerSession();
+          if (recoveryCheckpoint) error.recover = () => restorePrivateCopy(recoveryCheckpoint, 'recovery');
+          throw error;
+        } finally { changing = false; }
+      },
+      switchPhpVersion: version => handle.updatePhpSettings(config.phpSettings, version),
+      async updatePhpSettings(inputSettings, version = config.phpVersion) {
+        if (changing || closePromise) throw new Error('Wait for the current site operation before restarting PHP.');
+        const settings = normalizePhpSettings(inputSettings);
+        const previous = config.phpSettings;
+        const previousEntry = phpEntry;
+        const previousVersion = config.phpVersion;
+        const selected = manifest.php.find(entry => entry.version === version);
+        if (!selected || !joomlaEntry.php.includes(version)) throw new Error('This PHP build is not supported by the selected Joomla release.');
+        changing = true; instances.delete(instanceId);
+        let filesystem;
+        try {
+          progress({ phase: 'php', message: 'Checkpointing site files before restarting PHP…' });
+          filesystem = await session.send('checkpoint', {}, 600_000);
+          await database.flush();
+          await session.close();
+          phpEntry = selected; config.phpVersion = version;
+          session = new PhpSession(database, error => progress({ phase: 'failed', message: error.message }));
+          handle.runtimeInfo = await initializeSession(session, settings);
+          await session.send('restoreCheckpoint', { bytes: filesystem }, 600_000);
+          config.phpSettings = settings;
+          await session.send('flush'); await database.flush();
+          registerSession();
+          progress({ phase: 'ready', message: 'PHP settings applied. Your site files and database are unchanged.' });
+          return handle.runtimeInfo;
+        } catch (error) {
+          if (filesystem) {
+            try {
+              await session.close().catch(() => {});
+              phpEntry = previousEntry; config.phpVersion = previousVersion;
+              session = new PhpSession(database, problem => progress({ phase: 'failed', message: problem.message }));
+              handle.runtimeInfo = await initializeSession(session, previous);
+              await session.send('restoreCheckpoint', { bytes: filesystem }, 600_000);
+              config.phpSettings = previous;
+              registerSession();
+              error.message += ' The previous PHP settings and site files were restored.';
+            } catch (recoveryError) { error.message += ` Recovery failed: ${recoveryError.message}`; }
+          } else registerSession();
+          throw error;
+        } finally { changing = false; }
+      },
     };
     const state = await inspectJoomla(handle);
     const pristine = !state.marker && !state.configured && !state.installerPresent;
     let installed;
-    if (pristine && config.snapshot && !config.fresh) {
-      progress({ phase: 'download', message: 'Loading the prepared blueprint…' });
+    if (checkpoint) {
+      if (!pristine) throw new Error('Restore a private checkpoint into a new site.');
+      installed = await importJoomlaCheckpoint(handle, config, {
+        archiveBytes: checkpoint.archive, sha256: checkpoint.sha256, progress,
+      });
+      await session.send('restoreCheckpoint', { bytes: checkpoint.filesystem }, 600_000);
+      installed = { ...installed, ...await checkJoomla(handle) };
+      installed.administrator = await restoreJoomlaSession(handle, config);
+      installed.resumed = true;
+    } else if (pristine && config.snapshot && !config.fresh) {
+      progress({ phase: 'download', message: 'Loading the prepared deploy…' });
       const archive = await fetch(config.snapshot.url);
-      if (!archive.ok) throw new Error(`Cannot load the prepared blueprint: HTTP ${archive.status}.`);
-      const { importJoomlaSnapshot } = await import('./joomla/index.mjs');
+      if (!archive.ok) throw new Error(`Cannot load the prepared deploy: HTTP ${archive.status}.`);
       installed = await importJoomlaSnapshot(handle, config, {
         archiveBytes: await archive.arrayBuffer(), sha256: config.snapshot.sha256, progress,
       });
@@ -249,7 +415,7 @@ export async function createPlayground(input, { onProgress = () => {} } = {}) {
     }
     await handle.flush();
     handle.installation = installed;
-    instances.set(instanceId, session);
+    registerSession();
     progress({ phase: 'ready', message: installed.resumed ? 'Your saved Joomla site is ready.' : 'Joomla is installed and ready.' });
     return handle;
   } catch (error) {

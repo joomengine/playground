@@ -13,91 +13,173 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate:
+  checks:
+    name: Fast source checks
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 10
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      full: ${{ steps.plan.outputs.full }}
+      scenarios: ${{ steps.plan.outputs.scenarios }}
+      php: ${{ steps.plan.outputs.php }}
+      joomla: ${{ steps.plan.outputs.joomla }}
+      bridge: ${{ steps.plan.outputs.bridge }}
+      emsdk: ${{ steps.plan.outputs.emsdk }}
+      emscripten: ${{ steps.plan.outputs.emscripten }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: '.node-version'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Validate source and focused integration helpers
+        run: |
+          npm run check
+          npm test
+      - name: Select validation from changed behavior
+        id: plan
+        env:
+          CI_FULL: ${{ github.event_name != 'pull_request' }}
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/ci-plan.mjs
+
+  build:
+    name: Build and validate native runtime
+    needs: checks
+    if: needs.checks.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version-file: '.node-version'
           cache: npm
-      - name: Read immutable build inputs
-        id: pins
-        run: |
-          node --input-type=module <<'NODE'
-          import { readFileSync, appendFileSync } from 'node:fs';
-          const pins = JSON.parse(readFileSync('versions.json', 'utf8'));
-          for (const value of [pins.nativeDriver.sourceCommit, pins.upstream.emsdkCommit]) {
-            if (!/^[a-f0-9]{40}$/.test(value)) throw new Error('Build sources must be immutable commit SHAs');
-          }
-          appendFileSync(process.env.GITHUB_OUTPUT, [
-            `bridge=${pins.nativeDriver.sourceCommit}`,
-            `emsdk=${pins.upstream.emsdkCommit}`,
-            `emscripten=${pins.upstream.emscripten}`,
-          ].join('\n') + '\n');
-          NODE
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: joomengine/mariadb-wasm-bridge
-          ref: ${{ steps.pins.outputs.bridge }}
+          ref: ${{ needs.checks.outputs.bridge }}
           path: external/bridge
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Restore source-matched native extensions
+        id: native
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          repository: emscripten-core/emsdk
-          ref: ${{ steps.pins.outputs.emsdk }}
-          path: external/emsdk
-      - name: Install native build prerequisites
+          path: |
+            .cache/native
+            .cache/fileinfo
+            .cache/curl
+            .cache/sodium
+          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('versions.json', 'scripts/build-fileinfo.mjs', 'scripts/build-curl.mjs', 'scripts/build-sodium.mjs', 'scripts/fileinfo.mjs', 'scripts/curl.mjs', 'scripts/sodium.mjs', 'src/php-settings.mjs') }}
+      - name: Restore verified download archives
+        id: archives
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .cache/*.zip
+            .cache/*.tar.gz
+            .cache/packages
+            .cache/jcb-dependency-archives
+            .cache/language-sources
+            .cache/language-packages
+            .cache/tools
+          key: archives-${{ runner.os }}-${{ hashFiles('versions.json', 'deploys/*.json', 'dependencies/**/*.json', 'scripts/language-packages.mjs') }}
+          restore-keys: archives-${{ runner.os }}-
+      - name: Install build prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install -y autoconf automake bison re2c libtool pkg-config php8.3-cli php8.3-mbstring php8.3-xml php8.3-gd php8.3-zip php8.3-curl
       - name: Install locked JavaScript dependencies
         run: npm ci --ignore-scripts
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        if: steps.native.outputs.cache-hit != 'true'
+        with:
+          repository: emscripten-core/emsdk
+          ref: ${{ needs.checks.outputs.emsdk }}
+          path: external/emsdk
+      - name: Restore pinned compiler tools
+        id: compiler
+        if: steps.native.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            external/emsdk/upstream
+            external/emsdk/node
+          key: emsdk-${{ runner.os }}-${{ runner.arch }}-${{ needs.checks.outputs.emsdk }}-${{ needs.checks.outputs.emscripten }}
       - name: Configure pinned Emscripten compiler
+        if: steps.native.outputs.cache-hit != 'true'
         env:
-          EMSCRIPTEN_VERSION: ${{ steps.pins.outputs.emscripten }}
+          EMSCRIPTEN_VERSION: ${{ needs.checks.outputs.emscripten }}
         run: |
           external/emsdk/emsdk install "$EMSCRIPTEN_VERSION"
           external/emsdk/emsdk activate "$EMSCRIPTEN_VERSION"
-      - name: Compile version-matched native PDO, fileinfo and curl extensions
+      - name: Compile version-matched native extensions
+        if: steps.native.outputs.cache-hit != 'true'
         run: |
           source external/emsdk/emsdk_env.sh
           while IFS= read -r minor; do
             bash external/bridge/native/build-upstream.sh "$minor" "$PWD/.cache/native"
             BRIDGE_SOURCE_DIR=external/bridge node scripts/build-fileinfo.mjs "$minor"
             BRIDGE_SOURCE_DIR=external/bridge node scripts/build-curl.mjs "$minor"
+            BRIDGE_SOURCE_DIR=external/bridge node scripts/build-sodium.mjs "$minor"
           done < <(node --input-type=module -e "import p from './versions.json' with {type:'json'}; for (const v of p.php) console.log(v.version)")
+      - name: Cache pinned compiler after successful compilation
+        if: steps.native.outputs.cache-hit != 'true' && steps.compiler.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            external/emsdk/upstream
+            external/emsdk/node
+          key: ${{ steps.compiler.outputs.cache-primary-key }}
       - name: Prepare real MariaDB engine for native validation
         working-directory: external/bridge
         run: |
           npm ci --ignore-scripts
           npm run prepare:engine
       - name: Validate upstream PHP and native MariaDB PDO
+        if: needs.checks.outputs.full == 'true' || steps.native.outputs.cache-hit != 'true'
         run: |
           PHP_WASM_MODULE_ROOT="$PWD/node_modules" \
           PHP_WASM_EXTENSION_DIR="$PWD/.cache/native" \
           node --test external/bridge/native/tests/upstream.test.mjs
-      - name: Validate source and integration helpers
-        run: |
-          npm run check
-          npm test
+      - name: Cache source-matched compiled extensions
+        if: steps.native.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .cache/native
+            .cache/fileinfo
+            .cache/curl
+            .cache/sodium
+          key: ${{ steps.native.outputs.cache-primary-key }}
       - name: Build verified static distribution
         env:
           MARIADB_DRIVER_DIR: .cache/native
-          BRIDGE_SOURCE_DIR: external/bridge
           PHP_BINARY: php8.3
         run: npm run build
-      - name: Validate provisioning and cross-version snapshot restoration
-        run: npm run test:provisioning
-      - name: Build verified demonstration snapshots
-        run: npm run build:blueprints
-      - name: Install browser engines
-        run: npx playwright install --with-deps chromium firefox
-      - name: Validate Joomla in Chromium and Firefox
+      - name: Cache verified download archives
+        if: steps.archives.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .cache/*.zip
+            .cache/*.tar.gz
+            .cache/packages
+            .cache/jcb-dependency-archives
+            .cache/language-sources
+            .cache/language-packages
+            .cache/tools
+          key: ${{ steps.archives.outputs.cache-primary-key }}
+      - name: Validate provisioning and runtime capabilities
+        if: needs.checks.outputs.full == 'true' || steps.native.outputs.cache-hit != 'true'
         env:
-          PLAYGROUND_BROWSERS: chromium,firefox
-        run: npm run test:browser
-      - name: Retain tested static distribution
+          PLAYGROUND_LARGE_UPLOAD: '1'
+        run: npm run test:provisioning
+      - name: Build independently verified demonstration snapshots
+        run: npm run build:deploys
+      - name: Retain candidate static distribution
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playground-static
@@ -105,11 +187,61 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
-      - name: Retain browser diagnostics
+
+  browser:
+    name: Browser validation (${{ matrix.browser }})
+    needs: [checks, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: true
+      matrix:
+        browser: [chromium, firefox]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: '.node-version'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: playground-static
+          path: dist
+      - name: Install selected browser engine
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Validate the exact candidate build
+        env:
+          PLAYGROUND_BROWSERS: ${{ matrix.browser }}
+          PLAYGROUND_SCENARIOS: ${{ needs.checks.outputs.scenarios }}
+          PLAYGROUND_PHP_VERSIONS: ${{ needs.checks.outputs.php }}
+          PLAYGROUND_JOOMLA_VERSIONS: ${{ needs.checks.outputs.joomla }}
+        run: npm run test:browser
+      - name: Retain browser receipts and diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: playground-test-results
+          name: playground-test-results-${{ matrix.browser }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 14
+
+  validate:
+    name: Validate playground
+    needs: [checks, build, browser]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require all selected checks
+        env:
+          CHECKS: ${{ needs.checks.result }}
+          BUILD_REQUIRED: ${{ needs.checks.outputs.build }}
+          BUILD: ${{ needs.build.result }}
+          BROWSERS: ${{ needs.browser.result }}
+        run: |
+          test "$CHECKS" = success
+          if [ "$BUILD_REQUIRED" = true ]; then
+            test "$BUILD" = success
+            test "$BROWSERS" = success
+          fi

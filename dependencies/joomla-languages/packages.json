@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "repository": "https://github.com/joomla/core-translations",
+    "commit": "35a99d4751d1e8809f928159f862c910834e6eb5",
+    "url": "https://codeload.github.com/joomla/core-translations/zip/35a99d4751d1e8809f928159f862c910834e6eb5",
+    "sha256": "caa77813b2d9b63b0cee9ba55ec135be40a00ed8c623ead739acdcb7f8c1e91f",
+    "date": "2026-10-26",
+    "license": "GPL-2.0-or-later"
+  },
+  "packages": [
+    {
+      "major": "5",
+      "tag": "af-ZA",
+      "version": "5.4.11.1",
+      "sha256": "a419db8a2f03f2b6a5bbca4635565b4e0f43eeeeba4e1ef1c41e5d513fa3329c"
+    },
+    {
+      "major": "5",
+      "tag": "de-DE",
+      "version": "5.4.9.1",
+      "sha256": "451000f82d46639f5bc4a20e9ccfce42faf247ab7fd8190a26c4a11883eb468a"
+    },
+    {
+      "major": "5",
+      "tag": "fr-FR",
+      "version": "5.4.10.0",
+      "sha256": "3bcf2b5d3fd3461cf67f84f4e9b91629575d410e971e2557e81814a39ac45f38"
+    },
+    {
+      "major": "5",
+      "tag": "it-IT",
+      "version": "5.4.11.1",
+      "sha256": "9df1069471f29746284e815d4f01e63325d1094c32334b0afd1d2d798d50cb25"
+    },
+    {
+      "major": "5",
+      "tag": "es-ES",
+      "version": "5.4.10.0",
+      "sha256": "550998e3da085e154ddfecdb370779dbd3b0784e6d6e270668a252247d8fe041"
+    },
+    {
+      "major": "5",
+      "tag": "zh-CN",
+      "version": "5.4.10.0",
+      "sha256": "93050b193308ca4b63fd1ed07ca16d1ddf75911f954fdc12f7b528dab56f8c25"
+    },
+    {
+      "major": "5",
+      "tag": "nl-NL",
+      "version": "5.4.11.1",
+      "sha256": "4f3e18c82c29ab6ea734424f5e3e9b94c8479dae9c071e008415dce3f51dd3bb"
+    },
+    {
+      "major": "6",
+      "tag": "af-ZA",
+      "version": "6.2.1.1",
+      "sha256": "add412662c42a4e8a7776a8edce7cc64e6b242845fadc878b8856899eec11ffd"
+    },
+    {
+      "major": "6",
+      "tag": "de-DE",
+      "version": "6.2.0.1",
+      "sha256": "1eb7d9affe19499b54659e76038d7986b7716f97d850961bc6515a16feff277c"
+    },
+    {
+      "major": "6",
+      "tag": "fr-FR",
+      "version": "6.2.0.0",
+      "sha256": "2d0bbde547d12b9386f393c6fd69307431e6bac01ff23640cfb826c76271031c"
+    },
+    {
+      "major": "6",
+      "tag": "it-IT",
+      "version": "6.2.1.1",
+      "sha256": "f8db7613cff64a236f7db044f3202c4ace39ac95603d938f49660a9711aeeff1"
+    },
+    {
+      "major": "6",
+      "tag": "es-ES",
+      "version": "6.2.0.0",
+      "sha256": "25c199c7c245910543dc9a098d01c87ddb636755431e3f7d7448acdce6c76568"
+    },
+    {
+      "major": "6",
+      "tag": "zh-CN",
+      "version": "6.2.0.0",
+      "sha256": "546cf82f5f7e8cb278742f97a6832b386fa6e93c0f7b649bda70f7501067ed9c"
+    },
+    {
+      "major": "6",
+      "tag": "nl-NL",
+      "version": "6.2.1.1",
+      "sha256": "8049fae2d90576522b57a5aa54c0f347da82f2249f0aaabc321f2ed507f0dd0f"
+    }
+  ]
+}

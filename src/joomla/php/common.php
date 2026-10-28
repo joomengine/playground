@@ -38,8 +38,9 @@ function playgroundRoot(array $options): string
     return $root;
 }
 
-function playgroundValidateArchive(string $path): ZipArchive
+function playgroundValidateArchive(string $path, int $maximumEntries = 50000): ZipArchive
 {
+    if ($maximumEntries < 1 || $maximumEntries > 100000) throw new InvalidArgumentException('Invalid ZIP entry limit.');
     if (!class_exists(ZipArchive::class)) {
         throw new RuntimeException('The PHP zip extension is required to install Joomla packages.');
     }
@@ -62,7 +63,7 @@ function playgroundValidateArchive(string $path): ZipArchive
             throw new RuntimeException('ZIP symbolic links are not supported.');
         }
         $expandedSize += $entry['size'];
-        if ($expandedSize > 768 * 1024 * 1024 || $zip->numFiles > 50000) {
+        if ($expandedSize > 768 * 1024 * 1024 || $zip->numFiles > $maximumEntries) {
             throw new RuntimeException('ZIP package exceeds the extraction limits.');
         }
     }

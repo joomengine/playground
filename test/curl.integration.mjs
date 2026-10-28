@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { PhpCgiNode } from 'php-cgi-wasm/PhpCgiNode.mjs';
 import { stageCurl } from '../scripts/curl.mjs';
+import { createPhpFetch, NESTED_PHP_REQUEST_ERROR } from '../src/php-network.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const pins = JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
@@ -77,6 +78,8 @@ for (const version of pins.php) {
       }
       $get = executeCurl($base . '/binary', [CURLOPT_USERAGENT => 'JoomEngine native cURL proof',
         CURLOPT_SSL_VERIFYPEER => false]);
+      $loopback = executeCurl($base . '/site/callback');
+      $afterLoopback = executeCurl($base . '/binary');
       $post = executeCurl($base . '/echo', [CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => base64_decode('${payload.toString('base64')}'),
         CURLOPT_HTTPHEADER => ['Content-Type: application/octet-stream', 'X-Client-Proof: binary-post']]);
@@ -100,13 +103,18 @@ for (const version of pins.php) {
       ]);
       echo json_encode(['php' => PHP_VERSION, 'intSize' => PHP_INT_SIZE, 'loaded' => extension_loaded('curl'),
         'version' => phpversion('curl'), 'protocols' => curl_version()['protocols'],
-        'get' => $get, 'post' => $post, 'head' => $head, 'missing' => $missing, 'status' => $status,
+        'get' => $get, 'loopback' => $loopback, 'afterLoopback' => $afterLoopback,
+        'post' => $post, 'head' => $head, 'missing' => $missing, 'status' => $status,
         'redirect' => $redirect, 'custom' => $custom, 'timeout' => $timeout, 'unsupported' => $unsupported,
         'afterTimeout' => $afterTimeout, 'failStatus' => $failStatus, 'shortWrite' => $shortWrite, 'events' => $events,
         'timeoutCode' => CURLE_OPERATION_TIMEDOUT, 'unsupportedCode' => CURLE_UNSUPPORTED_PROTOCOL,
         'statusCode' => CURLE_HTTP_RETURNED_ERROR, 'writeCode' => CURLE_WRITE_ERROR], JSON_THROW_ON_ERROR);
     `);
-    const response = await php.request({ url: '/index.php', method: 'GET', headers: { host: 'localhost' } });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = createPhpFetch(originalFetch, `${server.url}/site/`, () => true);
+    let response;
+    try { response = await php.request({ url: '/index.php', method: 'GET', headers: { host: 'localhost' } }); }
+    finally { globalThis.fetch = originalFetch; }
     const body = await response.text();
     assert.equal(response.status, 200, body);
     assert.doesNotMatch(body, /Deprecated|Warning|Fatal error/, body);
@@ -116,11 +124,16 @@ for (const version of pins.php) {
     assert.equal(result.loaded, true);
     assert.equal(result.version, version.patchVersion);
     assert.ok(result.protocols.includes('http') && result.protocols.includes('https'));
-    for (const key of ['get', 'post', 'head', 'missing', 'status', 'redirect', 'custom', 'afterTimeout']) {
+    for (const key of ['get', 'afterLoopback', 'post', 'head', 'missing', 'status', 'redirect', 'custom', 'afterTimeout']) {
       assert.equal(result[key].error, '', `${key}: ${result[key].error}`);
       assert.equal(result[key].errno, 0, key);
     }
     assert.equal(result.get.status, 200);
+    assert.equal(result.loopback.body, false);
+    assert.notEqual(result.loopback.errno, 0);
+    assert.ok(result.loopback.error.includes(NESTED_PHP_REQUEST_ERROR), result.loopback.error);
+    assert.equal(server.requests.some(request => request.path === '/site/callback'), false);
+    assert.deepEqual(Buffer.from(result.afterLoopback.body, 'base64'), payload);
     assert.deepEqual(Buffer.from(result.get.body, 'base64'), payload);
     assert.deepEqual(JSON.parse(Buffer.from(result.post.body, 'base64').toString()), {
       method: 'POST', body: payload.toString('base64'), custom: 'binary-post', authorization: null,

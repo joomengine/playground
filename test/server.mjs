@@ -13,7 +13,10 @@ const contentTypes = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
+  '.mp4': 'video/mp4',
+  '.ico': 'image/x-icon',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
   '.zip': 'application/zip',
@@ -29,7 +32,7 @@ export async function createStaticServer({ directory, prefix = '/playground/', i
     response.setHeader('Cache-Control', 'no-store');
     if (isolation) {
       response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-      response.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+      response.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
     }
     response.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     try {

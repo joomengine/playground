@@ -27,7 +27,7 @@ const server = createServer(async (request, response) => {
       'Content-Length': info.size,
       'Cache-Control': 'no-cache',
       'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
       'Cross-Origin-Resource-Policy': 'same-origin',
       'Service-Worker-Allowed': '/',
     });

@@ -10,10 +10,10 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "build:blueprints": "node scripts/build-blueprints.mjs",
+    "build:deploys": "node scripts/build-deploys.mjs",
     "serve": "node scripts/serve.mjs",
     "test": "node scripts/test.mjs",
-    "test:provisioning": "node --test test/*.integration.mjs",
+    "test:provisioning": "node --test --test-concurrency=2 test/*.integration.mjs",
     "test:browser": "node --test test/browser.test.mjs",
     "check": "node scripts/check.mjs"
   },
