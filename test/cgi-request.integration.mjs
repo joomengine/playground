@@ -15,7 +15,7 @@ const packagePath = path.join(temporary, 'php-cgi-wasm');
 await mkdir(packagePath);
 for (const name of await readdir(original)) if (name.endsWith('.mjs') || name === 'package.json') await cp(path.join(original, name), path.join(packagePath, name));
 const overlay = await applyCgiRequestOverlay(packagePath);
-assert.equal(overlay.files.length, 2);
+assert.equal(overlay.files.length, 3);
 const { PhpCgiNode } = await import(pathToFileURL(path.join(packagePath, 'PhpCgiNode.mjs')));
 const pins = JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
 const selected = process.env.PLAYGROUND_PHP_VERSIONS?.split(',');

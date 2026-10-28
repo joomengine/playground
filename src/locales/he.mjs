@@ -167,5 +167,15 @@ export default Object.freeze({
   "label.templateElement": "שם התבנית",
   "label.templateParams": "פרמטרים של התבנית",
   "label.templateUrl": "כתובת ZIP של התבנית",
-  "title.launchIdeas": "שיגור הרעיונות שלך."
+  "title.launchIdeas": "שיגור הרעיונות שלך.",
+  "a11y.skipSettings": "דילוג להגדרות סביבת ההדגמה",
+  "label.runtimeDeploy": "סביבת ריצה ופריסה",
+  "label.installationSettings": "הגדרות התקנה",
+  "label.siteSettings": "הגדרות אתר",
+  "label.setupSteps": "שלבי הגדרה נוספים",
+  "help.storageKey": "מפתח מזהה את קובצי האתר ומסד הנתונים שלו. גרסאות Joomla שונות מקבלות מפתחות נפרדים.",
+  "help.setupSteps": "השלבים פועלים אחרי הפריסה שנבחרה בהתקנה חדשה. ניתן גם להתקין הרחבות מתוך Joomla לאחר פתיחתו.",
+  "help.compatibility": "שילובי סביבות הריצה הזמינים נבדקים יחד.",
+  "license.notices": "הודעות מצורפות",
+  "confirm.temporary": "הפעולה משנה את האתר הזמני הפעיל. כדי לשמור את העבודה, יש לשמור או להוריד אותה קודם. להמשיך?"
 });

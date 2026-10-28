@@ -1,5 +1,5 @@
 import { MAX_BODY_BYTES, serializeResponse } from './http.mjs';
-import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeHealthSource, runtimeRandomValue } from './php-settings.mjs';
+import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeHealthSource, runtimeRandomValue, assertRuntimeHealth } from './php-settings.mjs';
 import { checkpointSource, restoreCheckpointSource } from './checkpoint-program.mjs';
 
 const MAX_OPERATIONS = 64;
@@ -89,6 +89,8 @@ async function request(value) {
     const diagnostics = new TextDecoder().decode(new Uint8Array(php.error || [])).trim().slice(0, 2000);
     throw new FatalRuntimeError(`PHP stopped abnormally. Restart the playground before continuing.${diagnostics ? ` ${diagnostics}` : ''}`);
   }
+  const diagnostics = new TextDecoder().decode(new Uint8Array(php.error || [])).trim();
+  if (diagnostics) console.warn(`[PHP ${php.phpVersion}] ${diagnostics.slice(0, 8000)}`);
   return serializeResponse(response);
 }
 
@@ -175,7 +177,7 @@ async function initialize(args) {
   if (!result.pdoDrivers?.includes('mysql') || !result.extensions?.includes('pdo_mariadb_wasm')) {
     throw new FatalRuntimeError('The PHP runtime did not load the MariaDB PDO extension.');
   }
-  return result;
+  return assertRuntimeHealth(result, phpSettings);
 }
 
 function filesystem(operation, args) {

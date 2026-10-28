@@ -63,7 +63,7 @@ Supported deployment parameters include:
 
 | Parameter | Example | Effect |
 | --- | --- | --- |
-| `deploy` | `heritage-demo` | Select a repository recipe; `blank` or `none` selects Joomla only |
+| `deploy` | `heritage-demo` | Select a repository recipe; `blank` selects Joomla only |
 | `joomla` | `5.4` | Select the latest tested patch release in that minor series |
 | `php` | `8.5` | Select an available compatible PHP runtime |
 | `name` | `Client demo` | Set the Joomla site name |
@@ -78,7 +78,7 @@ Supported deployment parameters include:
 
 `extensions` accepts a JSON array of `{ "url": "…", "sha256": "…" }` objects. A checksum is optional for caller-supplied URLs and mandatory for repository packages. Repeated `extension=URL` parameters provide a shorter URL-only form. External URLs must allow browser downloads through CORS.
 
-`commands` accepts JSON arrays of Joomla CLI argument arrays. Use a command such as `["cache:clean"]`, without `php`, `cli/joomla.php` or a shell prefix. Arguments are passed directly to the Joomla CLI, without shell interpolation. `startupCommands` is an alias for `commands`.
+`commands` accepts JSON arrays of Joomla CLI argument arrays. Use a command such as `["cache:clean"]`, without `php`, `cli/joomla.php` or a shell prefix. Arguments are passed directly to the Joomla CLI, without shell interpolation.
 
 Build encoded links with the URL API:
 
@@ -171,3 +171,9 @@ A template may contain a package `url` and optional `sha256`, followed by its `e
 `languageTags` requests installation of selected language packs. `language` selects the site's default language. Setting `multilingual: true` also creates content-language records and activates Joomla's language filter and switcher. A custom multilingual deployment needs one published home item per selected language. The heritage preset supplies articles, categories and associated homes for all eight languages. Interface language is a separate browser preference and does not change Joomla content.
 
 PHP settings are an allowlist of the six documented settings. The runtime reports effective values after restarting PHP, and upload/body limits are checked together. The default POST limit includes multipart overhead above the 128 MiB file limit. PHP changes preserve the site files, database and credentials.
+
+### Managed browser database
+
+Global Configuration can save normal Joomla settings. Database connection credentials and filesystem session storage are managed by Rocket while PHP uses the embedded MariaDB bridge. Changing those fields is rejected with an explanation; export the site to configure a different server. A narrowly scoped, checksum-verified adapter preserves Joomla's native configuration save flow and its original server behavior. See [the reviewed source and adapter provenance](../dependencies/joomla/README.md).
+
+Remote installation ZIPs and public prepared snapshots are limited to 128 MiB. Private saved-site transfers accept a verified bundle up to 512 MiB compressed; exported and imported bundles share a limit of 100,000 ZIP entries and 768 MiB expanded. PHP upload limits are separate and adjustable in the runtime settings.

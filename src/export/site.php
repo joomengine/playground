@@ -4,6 +4,7 @@
 const PLAYGROUND_EXPORT_LIMIT = 768 * 1024 * 1024;
 const PLAYGROUND_DOWNLOAD_LIMIT = 512 * 1024 * 1024;
 const PLAYGROUND_EXPORT_FILES = 100000;
+const PLAYGROUND_EXPORT_ENTRIES = 100000;
 
 function exportFinish(array $result): void
 {
@@ -471,6 +472,14 @@ try {
                     || !$zip->addFromString('DEPLOYMENT.md', exportInstructions($format))) throw new RuntimeException('Cannot add export metadata.');
             }
         } finally {
+            $expanded = 0;
+            if ($zip->numFiles > PLAYGROUND_EXPORT_ENTRIES) throw new RuntimeException('The export exceeds 100000 ZIP entries.');
+            for ($index = 0; $index < $zip->numFiles; $index++) {
+                $entry = $zip->statIndex($index);
+                if ($entry === false) throw new RuntimeException('Cannot verify the completed export entries.');
+                $expanded += $entry['size'];
+                if ($expanded > PLAYGROUND_EXPORT_LIMIT) throw new RuntimeException('The complete export exceeds the 768 MiB extraction limit.');
+            }
             if (!$zip->close()) throw new RuntimeException('Cannot finish the site ZIP export.');
         }
     }

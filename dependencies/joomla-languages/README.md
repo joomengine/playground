@@ -14,6 +14,11 @@ package-builder convention. A `.0` package revision identifies a locally assembl
 version where the source has no release version; it is not represented as an
 official published language-pack release.
 
+When an official manifest requests child ZIPs, the builder assembles them from
+the corresponding site, administrator and API directories. The child archives
+retain the same source bytes and use the same deterministic ZIP settings; their
+source directories and output digests are recorded in the provenance document.
+
 Each resulting archive has a pinned SHA-256 and a generated provenance document
 listing every packaged file, its digest, and every placeholder completion. The
 archive timestamp and entry ordering are deterministic. These files are served

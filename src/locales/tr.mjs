@@ -167,5 +167,15 @@ export default Object.freeze({
   "label.templateElement": "Şablon adı",
   "label.templateParams": "Şablon parametreleri",
   "label.templateUrl": "Şablon ZIP URL’si",
-  "title.launchIdeas": "Fikirlerini başlat."
+  "title.launchIdeas": "Fikirlerini başlat.",
+  "a11y.skipSettings": "Deneme alanı ayarlarına geç",
+  "label.runtimeDeploy": "Çalışma ortamı ve dağıtım",
+  "label.installationSettings": "Kurulum ayarları",
+  "label.siteSettings": "Site ayarları",
+  "label.setupSteps": "Ek kurulum adımları",
+  "help.storageKey": "Bir anahtar sitenin dosyalarını ve veritabanını tanımlar. Farklı Joomla sürümleri ayrı anahtarlar alır.",
+  "help.setupSteps": "Bu adımlar yeni kurulumda seçilen dağıtımdan sonra çalışır. Site açılınca Joomla üzerinden de eklenti kurabilirsin.",
+  "help.compatibility": "Kullanılabilir çalışma ortamı birleşimleri birlikte test edilir.",
+  "license.notices": "dağıtılan bildirimler",
+  "confirm.temporary": "Bu işlem çalışan geçici siteyi değiştirir. Korumak istediğin çalışmayı önce kaydet veya indir. Devam edilsin mi?"
 });

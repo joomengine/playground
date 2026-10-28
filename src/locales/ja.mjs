@@ -167,5 +167,15 @@ export default Object.freeze({
   "label.templateElement": "テンプレート名",
   "label.templateParams": "テンプレートのパラメーター",
   "label.templateUrl": "テンプレートZIPのURL",
-  "title.launchIdeas": "アイデアを打ち上げよう。"
+  "title.launchIdeas": "アイデアを打ち上げよう。",
+  "a11y.skipSettings": "プレイグラウンド設定へ移動",
+  "label.runtimeDeploy": "実行環境とデプロイ",
+  "label.installationSettings": "インストール設定",
+  "label.siteSettings": "サイト設定",
+  "label.setupSteps": "追加の設定手順",
+  "help.storageKey": "キーでサイトのファイルとデータベースを識別します。異なるJoomlaバージョンには別のキーが割り当てられます。",
+  "help.setupSteps": "新規インストールでは、選択したデプロイの後に実行します。起動後はJoomlaから拡張機能を追加することもできます。",
+  "help.compatibility": "利用可能な実行環境の組み合わせは一緒にテストされています。",
+  "license.notices": "同梱の通知",
+  "confirm.temporary": "実行中の一時サイトが変更されます。作業を残す場合は先に保存またはダウンロードしてください。続行しますか？"
 });

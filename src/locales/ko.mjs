@@ -167,5 +167,15 @@ export default Object.freeze({
   "label.templateElement": "템플릿 이름",
   "label.templateParams": "템플릿 매개변수",
   "label.templateUrl": "템플릿 ZIP URL",
-  "title.launchIdeas": "아이디어를 발사하세요."
+  "title.launchIdeas": "아이디어를 발사하세요.",
+  "a11y.skipSettings": "플레이그라운드 설정으로 이동",
+  "label.runtimeDeploy": "실행 환경 및 배포",
+  "label.installationSettings": "설치 설정",
+  "label.siteSettings": "사이트 설정",
+  "label.setupSteps": "추가 설정 단계",
+  "help.storageKey": "키로 사이트 파일과 데이터베이스를 식별합니다. 서로 다른 Joomla 버전에는 별도 키가 사용됩니다.",
+  "help.setupSteps": "새 설치에서 선택한 배포 후에 이 단계를 실행합니다. 사이트가 열린 뒤 Joomla에서 확장을 설치할 수도 있습니다.",
+  "help.compatibility": "사용 가능한 실행 환경 조합은 함께 테스트됩니다.",
+  "license.notices": "포함된 고지",
+  "confirm.temporary": "실행 중인 임시 사이트가 변경됩니다. 작업을 보관하려면 먼저 저장하거나 다운로드하세요. 계속할까요?"
 });

@@ -14,6 +14,9 @@ try {
         throw new RuntimeException('The configured administrator cannot change site menus or templates.');
     }
     $application->loadIdentity($administrator);
+    if (!defined('JPATH_COMPONENT')) define('JPATH_COMPONENT', $root . '/administrator/components/com_menus');
+    \Joomla\CMS\Form\Form::addFormPath($root . '/administrator/components/com_menus/forms');
+    \Joomla\CMS\Form\Form::addFormPath($root . '/administrator/components/com_templates/forms');
     $menuFactory = $application->bootComponent('com_menus')->getMVCFactory();
     $created = [];
     $homes = [];
@@ -44,6 +47,7 @@ try {
         }
         $existing = (int) $database->setQuery('SELECT id FROM #__menu WHERE client_id = 0 AND menutype = ' . $database->quote($entry['menuType'])
             . ' AND alias = ' . $database->quote($entry['alias']) . ' AND language = ' . $database->quote($entry['language']))->loadResult();
+        $currentHome = $existing ? (int) $database->setQuery('SELECT home FROM #__menu WHERE id = ' . $existing)->loadResult() : 0;
         $query = ['option' => $component, 'view' => $view] + ($entry['query'] ?? []);
         $link = 'index.php?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
         $model = $menuFactory->createModel('Item', 'Administrator', ['ignore_request' => true]);
@@ -58,7 +62,7 @@ try {
             'type' => 'component', 'link' => $link, 'component_id' => $componentId, 'parent_id' => 1,
             'menuordering' => -2, 'published' => $entry['published'] ? 1 : 0, 'language' => $entry['language'],
             'client_id' => 0, 'access' => $entry['access'], 'template_style_id' => $entry['templateStyle'],
-            'params' => $entry['params'], 'request' => $query, 'home' => 0,
+            'params' => $entry['params'], 'request' => $query, 'home' => $currentHome,
         ];
         if ($entry['templateStyle'] && !(int) $database->setQuery('SELECT id FROM #__template_styles WHERE client_id = 0 AND id = ' . (int) $entry['templateStyle'])->loadResult()) {
             throw new RuntimeException('The selected menu template style does not exist.');
@@ -128,6 +132,25 @@ try {
         foreach ($playground['languageTags'] ?? [] as $tag) {
             $homeCount = (int) $database->setQuery('SELECT COUNT(*) FROM #__menu WHERE client_id = 0 AND home = 1 AND published = 1 AND language = ' . $database->quote($tag))->loadResult();
             if ($homeCount !== 1) throw new RuntimeException('A multilingual deployment needs exactly one published home menu for ' . $tag . '.');
+        }
+    }
+    if (array_key_exists('siteName', $playground)) {
+        $name = $playground['siteName'];
+        if (!is_string($name) || $name === '' || strlen($name) > 1024 || str_contains($name, "\0")) {
+            throw new RuntimeException('The site name is invalid.');
+        }
+        $configuration = new \Joomla\Registry\Registry(new JConfig());
+        $configuration->set('sitename', $name);
+        $serialized = $configuration->toString('PHP', ['class' => 'JConfig', 'closingtag' => false]);
+        $target = $root . '/configuration.php';
+        $temporary = $root . '/configuration.rocket-' . bin2hex(random_bytes(8)) . '.php';
+        $mode = fileperms($target) & 0777;
+        try {
+            if (file_put_contents($temporary, $serialized) !== strlen($serialized) || !chmod($temporary, $mode) || !rename($temporary, $target)) {
+                throw new RuntimeException('Cannot save the site name.');
+            }
+        } finally {
+            if (is_file($temporary)) unlink($temporary);
         }
     }
     playgroundFinish(['ok' => true, 'menus' => $created, 'templateStyle' => $styleId]);

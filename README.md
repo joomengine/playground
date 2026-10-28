@@ -6,8 +6,9 @@ packages, the MariaDB bridge, and a separately compiled native PDO extension int
 a static site. PHP requests and SQL execute in browser workers.
 
 The deployment address is **https://playground.joomengine.org/**. The default
-recipe installs Joomla Component Builder (JCB); select **Joomla only** to start
-without additional extensions.
+deploy installs **JCB + MCP on Joomla 6** and **JCB only on Joomla 5**. Select
+**Joomla only** to start without additional extensions. Rocket is the compact,
+multilingual interface around the running Joomla site.
 
 ## Upstream foundations and credits
 
@@ -35,6 +36,8 @@ Thank you to these communities for the engineering and maintenance this project
 relies on. Their licenses and notices remain with the distributed assets; see
 [NOTICE](NOTICE).
 
+Reference: [Official Joomla playground](https://github.com/joomla-projects/joomla-playground/).
+
 ## What is assembled
 
 The browser loads `php-cgi-wasm` and its published extension packages. A small
@@ -43,12 +46,16 @@ passes database operations to the MariaDB bridge. The playground service worker
 routes site requests to a dedicated PHP worker and adds the isolation headers
 needed by the threaded MariaDB engine.
 
-The native build compiles the PDO, fileinfo, and cURL extensions against matching
-PHP headers. Fileinfo supplies MIME detection with its embedded magic database.
+The native build compiles the PDO, fileinfo, cURL, and Sodium extensions against
+matching PHP headers. Fileinfo supplies MIME detection with its embedded magic
+database.
 cURL uses Sean Morris’s [php-wasm-curl](https://github.com/seanmorris/php-wasm-curl)
 to connect PHP’s unchanged `ext/curl` to the host’s Fetch API. The implementation
 is pinned to [6085917954da9682c32ebcbea27a626d2308381b](https://github.com/seanmorris/php-wasm-curl/tree/6085917954da9682c32ebcbea27a626d2308381b)
-and loaded alongside the published `0.2.0` PHP runtime.
+and loaded alongside the published `0.2.0` PHP runtime. Sodium uses the official
+libsodium 1.0.22 release and Web Crypto for its random source. A checksum-verified
+JavaScript CGI input adapter preserves binary request bodies and uses indexed
+input reads for large uploads; the upstream PHP WebAssembly binary is unchanged.
 The distributed `.so`
 files are WebAssembly extensions for these specific upstream builds, not native
 Linux PHP modules.
@@ -109,6 +116,7 @@ while IFS= read -r minor; do
   bash external/bridge/native/build-upstream.sh "$minor" "$PWD/.cache/native"
   BRIDGE_SOURCE_DIR=external/bridge node scripts/build-fileinfo.mjs "$minor"
   BRIDGE_SOURCE_DIR=external/bridge node scripts/build-curl.mjs "$minor"
+  BRIDGE_SOURCE_DIR=external/bridge node scripts/build-sodium.mjs "$minor"
 done < <(node --input-type=module -e "import p from './versions.json' with {type:'json'}; for (const v of p.php) console.log(v.version)")
 
 BRIDGE_SOURCE_DIR=external/bridge MARIADB_DRIVER_DIR=.cache/native npm run build
@@ -132,12 +140,14 @@ default paths: `../mariadb-wasm-bridge` for adapter sources and
 release archive checksum, native and adapter source hashes, Joomla distributions,
 and compatible runtime combinations.
 
-The build verifies every entry in the MariaDB release inventory and retains its
-prepared database engine. It then stages the bridge JavaScript runtime and PHP
-adapter from the pinned bridge source revision, checking every source hash. The
+The build verifies every entry in the MariaDB bridge 0.1.3 release inventory and
+retains its prepared database engine. It then stages the bridge JavaScript runtime
+and PHP adapter from the pinned bridge source revision, checking every source hash. The
 PDO extension’s compiler, PHP version, source hashes, upstream revision, and
-binary hash must also match. Each Joomla archive is verified before staging. A
-missing driver or mismatched input fails the build.
+binary hash must also match. Native fileinfo, cURL and Sodium modules retain
+their matching source inventories, compiler identities and licenses. The CGI
+JavaScript adapter records original and adjusted hashes. Each Joomla archive is
+verified before staging. A missing driver or mismatched input fails the build.
 
 `dist/assets/manifest.json` records the selected runtimes, extension assets,
 preload files, source revisions, and dependency identities. Its `bridge.release`
@@ -171,55 +181,73 @@ the [upstream compatibility guide](https://github.com/seanmorris/php-wasm/blob/6
 before relying on server-specific networking behavior. The playground does not
 provide a public CORS proxy.
 
-## Using the playground
+## Using Rocket
 
-The default page automatically starts the JCB deploy. Its top bar selects
-Joomla, PHP, a deploy, language, persistence, and export format. Use `?start=0`
-to configure a site before launching it. The setup panel generates a random
-administrator password. Authentication uses Joomla's normal login form.
+The default page automatically launches the selected deploy. Use `?start=0` to
+configure it first. The slim header scrolls away with the page; its expandable
+controls and dialogs leave the Joomla site the full available width. The launch
+view shows the rocket animation and deployment progress. Activity remains
+available below the site, and the footer information button lists dependency
+credits and licenses.
 
-Persistence is enabled by default. Joomla files, session data, cookies, and the
-MariaDB database are kept in IndexedDB. A site key identifies saved data within
-this playground’s URL. Use different keys for independent sites or Joomla
-versions. Returning to the domain reopens the last saved site. Switching PHP
-keeps its files and database; switching Joomla or deploys selects a separate
-profile. A saved site cannot be opened concurrently in another tab.
+The deployment editor selects Joomla, PHP, packages, languages, the site name,
+login behavior, menus and a template. It can install a component from a public
+ZIP URL, make one of its frontend views the Home menu item, install a template,
+and set its parameters. Installed components, menu layouts and template styles
+can be discovered from the running site. See the [deploy guide](deploys/README.md)
+for the complete document format and advanced parameters.
 
-- **Save** flushes PHP files and database changes to browser storage.
-- **Restart** reopens the saved site. Restarting a temporary site creates a fresh
-  installation.
-- **Close** shuts down the workers and releases the site lock.
-- **Reset** deletes that site’s saved files and database after confirmation.
-- **New site** keeps the current saved site and starts an independent installation.
-- **Export** downloads a deployment bundle, Joomla files, or the SQL database.
+- **Use** starts an independent deployment from the editor's configuration and
+  prepares a reusable share link.
+- **Apply to this site** checkpoints the running site before installing new
+  packages or applying configuration. If an operation fails, the recovery action
+  restores that checkpoint as a separate site. Removing a package from the editor
+  does not uninstall an already installed extension.
+- **Keep my site / Save** saves both files and database. Keeping a temporary site
+  copies its current state into persistent storage, including its credentials.
+- **Restart** restarts PHP with the current settings while preserving the site,
+  including a temporary site's files and database.
+- **Close** shuts down the workers and releases the site lock. Closing a temporary
+  site discards its state after confirmation.
+- **Reset** deletes the selected site's saved data after confirmation.
+- **New site** starts an independent installation; saved sites remain selectable.
+- **Download** exports the complete site, its files, or its SQL database.
+- **Open site** transfers the running site to a standalone tab without Rocket's
+  header and footer. The original tab releases ownership; after transfer the new
+  tab runs independently.
 
-Administrator settings, extension installation, and startup commands apply when
-a site is first installed. Reopening a completed installation keeps its existing
-configuration. Changing its Joomla release requires a different site key or a
-reset. Administrator credentials are kept in private runtime metadata, outside
-the webroot and exports; they are never included in URLs or browser preferences.
-Storage is scoped to the deployment origin, so changing domains does not migrate
-saved sites. Browser storage can be evicted or cleared and is not a backup; unloading
-a tab cannot guarantee completion of an outstanding save.
+Persistence is enabled by default. Joomla files, session data, cookies and the
+MariaDB database are kept in IndexedDB. A site key identifies saved data on this
+origin. Returning to the domain reopens the last saved site; the saved-site
+selector opens others. Only one tab may own a saved site at a time. Changing PHP
+preserves its content. Changing the Joomla release or selecting another deploy
+starts a separate profile instead of upgrading an existing Joomla installation.
 
-The initial page accepts a path within the site, such as `/` or
-`/administrator/`. The extension settings accept a JSON array of objects with a
-`url` and an optional `sha256` field. URLs must use HTTPS, except localhost HTTP
-for development. The hosting server must allow browser access through CORS when
-it is on another origin. Packages are ZIP archives, limited to 128 MiB; supplied
-SHA-256 values are checked before Joomla installs them. The interface keeps
-separate extension selections while switching between Joomla releases.
+The credentials dialog shows the generated administrator login details, including
+when automatic login is disabled. Each fresh site receives new credentials;
+saved sites retain theirs. Credentials stay in private runtime metadata outside
+the webroot, exports, share links and browser preferences. Browser storage can be
+evicted or cleared and is not a backup. A save reports completion only after both
+stores flush; closing a tab cannot guarantee an unfinished save completes.
 
-Startup commands are JSON arrays of Joomla console argument arrays. They run in
-order after extension installation, without a shell. For example:
+External extension and template packages must be ZIP archives served over HTTPS
+(localhost HTTP is allowed for development). Cross-origin hosts must permit
+browser access through CORS. Packages are limited to 128 MiB. An optional SHA-256
+is verified before installation; repository packages always have pinned digests.
+When a host blocks downloads, provide a permitted URL or stage the package on the
+playground origin. There is no public download proxy.
+
+Startup commands are arrays of Joomla console arguments, executed in order after
+package installation and without a shell. For example:
 
 ```json
 [["cache:clean"]]
 ```
 
-Use command names and arguments directly; do not prepend `php`, a script path,
-or shell operators. A failed extension installation or command stops setup and
-reports the failure. An interrupted installation must be reset before retrying.
+Use command names and arguments directly, without `php`, a script path or shell
+operators. A failed installation or command stops setup and reports its details.
+An interrupted initial installation must be reset before retrying. Reopening a
+completed site does not replay its original deployment commands.
 
 A complete export contains `site/`, `database.sql`, `database.ndjson` for
 prepared-site import, `export.json`, and `DEPLOYMENT.md`. Its Joomla configuration
@@ -232,13 +260,84 @@ trigger bodies, system-versioned tables, cross-database references, and aliases
 or common table expressions matching the source database name stop export with
 an explicit error.
 
+## Interface and Joomla languages
+
+Rocket starts in English. Its independent language selector offers English,
+Afrikaans, German, French, Italian, Spanish, Simplified Chinese, Dutch, Hebrew,
+Greek, Arabic, Portuguese, Russian, Japanese, Korean, Hindi, Bengali, Turkish,
+Indonesian and Ukrainian. Hebrew and Arabic use a right-to-left interface.
+Translated interface catalogs load on selection. The preference is saved locally;
+`?uiLanguage=af` selects Afrikaans explicitly. This changes Rocket's controls,
+dialogs and footer, without changing Joomla or downloading a Joomla language pack.
+Technical details from PHP, Joomla and installed extensions retain their original
+messages in the activity log.
+
+Ordinary Joomla deployments use Joomla's English default. The multilingual
+heritage deploy installs **Afrikaans, German, French, Italian, Spanish, Simplified
+Chinese, Dutch and English**, with **Afrikaans first and default**. Selecting a
+multilingual deployment enables the corresponding content languages, language
+filtering, switcher and language-specific home pages.
+
+Language packs are separate installable ZIPs fetched only for the selected Joomla
+languages; an English-only site downloads none. The build assembles deterministic
+packages from pinned official Joomla translation sources and serves verified ZIPs
+on the playground origin when direct package-host CORS would block browser
+installation. Translations are not embedded in PHP or eagerly preloaded. Exact
+source revisions, file hashes and license details are documented in
+[the language package notes](dependencies/joomla-languages/README.md).
+
+## PHP configuration and capabilities
+
+The **PHP settings** dialog changes the running PHP configuration and restarts its
+worker while preserving files and database. It verifies the effective values
+reported by PHP and attempts to restore the previous configuration if startup
+fails. The same `phpSettings` object works in deployment documents and repository
+deploys:
+
+```json
+{
+  "upload_max_filesize": "128M",
+  "post_max_size": "160M",
+  "max_execution_time": 60,
+  "max_input_time": 60,
+  "max_input_vars": 10000,
+  "memory_limit": "512M"
+}
+```
+
+These defaults cover JCB's published guidelines with extra POST, form-variable
+and memory headroom. POST size must exceed the upload limit, and PHP memory must
+leave at least 64 MiB above POST size. The editor validates bounded values rather
+than accepting arbitrary ini directives. Deploys can request different values;
+Service Directory allows 180 seconds for its large initial geographic-data import.
+A PHP memory limit is not a guarantee that a particular browser or device can
+allocate that much memory.
+
+Runtime health checks require the real PDO MySQL bridge, cURL, fileinfo, Sodium,
+GD, Intl, mbstring, OpenSSL, DOM, SimpleXML, XML/reader/writer, JSON, ZIP and zlib
+extensions. Provisioning checks exercise image decoding, Unicode/XML, archives,
+cryptography, database access and uploads. GD supports JPEG, PNG and WebP; AVIF
+and XPM are not built into this runtime. The [official Joomla Docker image](https://github.com/joomla/docker-joomla)
+is a setup reference, while browser limitations remain explicit below.
+
+The Joomla 6 **JCB + MCP** deploy installs the real MCP package and verifies
+Sodium, administrator authentication/ACL, system information and installed
+extension reads through its native Joomla integration. This read-only diagnostic
+does not expose an external MCP endpoint or provide a native CLI process. Its
+stdio transport and process-based jobs remain unavailable in a static browser
+runtime; see [the MCP integration notes](dependencies/mcp/README.md).
+
 ## Embedding and URL configuration
 
 Repository deploys define packages, language packs, content, and console
 commands. See the [contributor guide and schemas](deploys/README.md) to add
-another recipe. The default is `jcb`; `blank` (also `none`) installs Joomla alone.
+another recipe. The default is `jcb-mcp` on Joomla 6 and `jcb` on Joomla 5;
+`blank` installs Joomla alone. Deployment documents can also be composed entirely
+in the interface without changing this repository.
 
-- [JCB](https://playground.joomengine.org/?deploy=jcb)
+- [JCB + MCP — Joomla 6](https://playground.joomengine.org/?deploy=jcb-mcp)
+- [JCB only — Joomla 5 or 6](https://playground.joomengine.org/?deploy=jcb)
+- [Service Directory — Joomla 5 or 6](https://playground.joomengine.org/?deploy=servicedirectory)
 - [Joomla only](https://playground.joomengine.org/?deploy=blank)
 - [Multilingual heritage site](https://playground.joomengine.org/?deploy=heritage-demo)
 - [Heritage built from its recipe](https://playground.joomengine.org/?deploy=heritage-demo&fresh=1)
@@ -246,7 +345,6 @@ another recipe. The default is `jcb`; `blank` (also `none`) installs Joomla alon
 - [Weblinks](https://playground.joomengine.org/?deploy=weblinks)
 - [Joomla 5.4](https://playground.joomengine.org/?joomla=5.4)
 - [PHP 8.5](https://playground.joomengine.org/?php=8.5)
-- [Dutch](https://playground.joomengine.org/?language=nl-NL)
 - [Start logged out](https://playground.joomengine.org/?login=no)
 
 `fresh=1` creates an independent site key and bypasses prepared snapshots. It
@@ -264,19 +362,22 @@ The interface recognizes these query parameters:
 
 | Parameter | Meaning |
 | --- | --- |
-| `deploy=jcb` | Choose a repository recipe; `blank` installs Joomla alone |
+| `deploy=jcb-mcp` | Choose a repository deploy; `blank` installs Joomla alone |
 | `joomla=5.4` | Resolve a minor or exact version to a tested catalog release |
 | `php=8.4` | Select the PHP minor whose patch version is pinned in the catalog |
 | `path=/administrator/` | Initial page inside Joomla |
 | `toolbar=0` | Hide the configuration toolbar |
 | `persist=0` | Use a temporary site |
-| `language=nl-NL` | Install and select a pinned language pack |
+| `language=en-GB` | Select the Joomla language; another supported tag installs its pack |
+| `uiLanguage=af` | Select Rocket's interface language independently |
+| `name=Client%20demo` | Set the Joomla site name |
 | `login=no` | Start or reopen with the administrator logged out |
 | `fresh=1` | Create an independent site from the recipe |
 | `key=example` | Reopen a saved site in this browser |
 | `extensions=[...]` | Additional objects containing `url` and optional `sha256` |
 | `commands=[["cache:clean"]]` | Additional Joomla console argument arrays |
 | `start=0` | Show setup first; the default page starts automatically |
+| `config=https://example.org/deploy.json` | Load a public deployment document, optionally verified with `sha256` |
 
 For a deployment hosted at `/playground/`, this same-origin iframe opens an
 administrator playground with the toolbar hidden:
@@ -293,13 +394,24 @@ administrator playground with the toolbar hidden:
 The embedding page must also provide the isolation policy required by the
 browser. The iframe permission alone cannot make an unisolated parent page
 cross-origin isolated. Start with same-origin embedding and matching COOP/COEP
-headers. A copied site-preview URL requires its owning playground tab to remain
-open; use the interface’s share URL to launch an independent session.
+headers. A raw site-preview URL still requires its owning playground tab. Use
+**Open site** to transfer ownership to a standalone tab, or **Share** to launch an
+independent installation from the same public deployment configuration.
 
-Share URLs contain public recipe, version, and display settings, including any
-additional package URLs or console commands. They never include administrator
-credentials and do not transfer saved files or databases to another browser.
-Review the link before sharing package locations or command arguments.
+Share includes the complete public deployment: Joomla/PHP versions, PHP settings,
+site name, packages, language selections, menus, template parameters, login choice
+and setup commands. Advanced configurations use an encoded `#deploy=` fragment.
+The Share dialog always exposes the link for manual copying if clipboard access
+is unavailable. It can download/import deployment JSON or generate a link to a
+hosted configuration. Links are limited to 16 KiB; JSON documents to 1 MiB.
+
+Public deployment documents never contain administrator credentials or local
+site keys and do not transfer saved files or database content. Known credential
+fields and secret-bearing URL parameters are rejected. Review package locations
+and command arguments before sharing. Use a complete site download to transfer
+site content. The [document schema](deploys/document.schema.json) and
+[deploy guide](deploys/README.md#compose-a-deployment-without-a-repository-change)
+describe the JSON format, menu/template fields and hosted configuration URLs.
 
 ## JavaScript API
 
@@ -377,7 +489,8 @@ provisioning completes:
 | Handle member | Result |
 | --- | --- |
 | `url`, `baseUrl` | Initial page and site root URLs |
-| `runtimeInfo` | Actual PHP version, loaded extensions, and PDO drivers |
+| `runtimeInfo` | Actual PHP version, loaded extensions, PDO drivers and effective ini settings |
+| `configuration` | A copy of the resolved current configuration |
 | `installation` | Joomla version, site name, and whether saved data was reopened |
 | `request(path, init)` | A standard `Response` for an internal site request |
 | `runPhp(source, { timeoutMs })` | CGI result with `status`, `headers`, binary `body`, and decoded `text` |
@@ -386,14 +499,23 @@ provisioning completes:
 | `fs.readFile(path)` | Read bytes; pass `{ encoding: 'utf8' }` as the second argument for text |
 | `fs.readdir(path)`, `fs.stat(path)`, `fs.unlink(path)` | Inspect or remove virtual files |
 | `flush()` | Flush both stores |
+| `keep()` | Persist a temporary site's current state; returns its replacement handle |
+| `checkpoint()` | Create a private recovery snapshot, including administrator state |
+| `updatePhpSettings(settings, phpMinor?)` | Restart PHP, validate effective values and preserve site data |
+| `switchPhpVersion(phpMinor)` | Restart on another compatible pinned PHP build |
+| `discoverConfiguration()` | Discover installed components, frontend layouts, menus and templates |
+| `applyConfiguration(configuration)` | Apply additions and site settings with a recovery checkpoint |
+| `openStandalone({ path })` | Transfer ownership to an independent tab; call from a user gesture |
 | `exportSite({ format })` | Return `{ bytes, filename, mimeType, metadata }`; format is `bundle`, `files`, or `database` |
 | `close()` | Close the instance while keeping saved data |
 | `reset()` | Close the instance and delete its saved data |
 
 `resetPlayground({ storageKey })`, exported from the same module, erases a closed
 or partially installed saved site. Call it only after the user confirms deletion.
-The filesystem document root is `/persist/www`. `runPhp` executes through CGI;
-it is not a shell or an unrestricted host command interface.
+Private checkpoints include authentication state: keep them local and do not
+use them as public deployment documents. The filesystem document root is
+`/persist/www`. `runPhp` executes through CGI; it is not a shell or an unrestricted
+host command interface.
 
 ## Hosting and GitHub Pages
 
@@ -444,7 +566,7 @@ and MariaDB packages:
 PHP_WASM_MODULE_ROOT="$PWD/node_modules" \
 PHP_WASM_EXTENSION_DIR="$PWD/.cache/native" \
 node --test external/bridge/native/tests/upstream.test.mjs
-node --test test/fileinfo.integration.mjs test/curl.integration.mjs
+node --test test/fileinfo.integration.mjs test/curl.integration.mjs test/sodium.integration.mjs
 ```
 
 Build the static site, install the browser engines, and run browser integration:
@@ -458,11 +580,21 @@ npm run test:browser
 ```
 
 The browser suite uses real PHP, native PDO, MariaDB, and Joomla. It exercises
-catalog combinations, installation, administrator access, persistence, extension
-installation, startup commands, timeout recovery, and the service-worker hosting
-path. `PLAYGROUND_BROWSERS`, `PLAYGROUND_PHP_VERSIONS`, and
-`PLAYGROUND_JOOMLA_VERSIONS` can narrow local investigations. CI runs the complete
-catalog and retains the tested distribution and browser diagnostics.
+catalog combinations, administrator access, extension installation, configuration,
+persistence, temporary-site retention, restart, PHP settings, exports, sharing,
+standalone ownership transfer, responsive controls and timeout recovery.
+`PLAYGROUND_BROWSERS`, `PLAYGROUND_PHP_VERSIONS`, `PLAYGROUND_JOOMLA_VERSIONS` and
+`PLAYGROUND_SCENARIOS` narrow local investigations.
+
+CI runs source checks and unit tests first. Documentation-only pull requests skip
+native/browser jobs. Presentation-only changes run the default Joomla 6.2.0 / PHP
+8.4 combination with deployment, lifecycle and Rocket checks. Runtime, deployment,
+configuration and unclassified changes run the full supported matrix, as do
+`main` and manual builds. Chromium and Firefox validate in parallel jobs against
+the same built artifact. Native/compiler caches require exact source and toolchain
+identities; downloads retain checksum validation. Provisioning uses bounded
+concurrency and browser scenarios fail promptly. Pages publishes only the exact
+artifact whose selected checks passed, and CI retains diagnostic output.
 
 ## Scope and limitations
 
@@ -478,13 +610,14 @@ DECIMAL values remain exact strings. `PDO::ATTR_STRINGIFY_FETCHES` requests
 numeric strings explicitly. Files and database state are separate stores; they
 are not committed together as one transaction.
 
-The selected upstream CGI release accepts request bodies for POST. The playground
-rejects bodies on other HTTP methods instead of discarding them. Request queues,
-source size, body size, and execution time are bounded. On timeout, PHP is
-terminated and the database lease is reset; uncertain writes are never replayed.
+The verified JavaScript CGI input adapter supports binary POST, PUT, PATCH and
+DELETE bodies, including large multipart uploads. Request queues, source size,
+body size and execution time remain bounded. On timeout, PHP is terminated and the database lease is reset; uncertain writes are never replayed.
 Restart the instance before continuing after a runtime failure.
 
 Host processes, system executables, arbitrary socket services, and a production
 mail server are not supplied by this static playground. Extensions that require
-those facilities need a different environment. The default recipe installs JCB;
-a complete JCB compilation workload requires its own application-level validation.
+those facilities need a different environment. Installing an extension and passing
+runtime health checks does not prove every workflow of every Joomla extension is
+browser-compatible; exercise the particular component operations you plan to
+demonstrate. Browser storage, WebAssembly memory and CORS still apply.

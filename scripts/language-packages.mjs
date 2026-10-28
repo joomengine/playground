@@ -9,6 +9,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const epoch = new Date(1980, 0, 1);
 const preparedSources = new Map();
+const archiveFiles = (files) => zipSync(Object.fromEntries(Object.entries(files).map(([name, value]) => [name, [value, { mtime: epoch }]])), { level: 9 });
 
 /** Package the official translation tree, filling only its release placeholders. */
 export function assembleLanguagePackage(sourceFiles, { major, tag, version, date, sourceCommit }) {
@@ -47,18 +48,36 @@ export function assembleLanguagePackage(sourceFiles, { major, tag, version, date
     const metadata = decoder.decode(files[`${client}/${tag}/langmetadata.xml`]);
     if (!metadata.includes(`<tag>${tag}</tag>`)) throw new Error(`Language metadata tag differs: ${major}/${tag}/${client}`);
   }
+  const nestedArchives = [];
+  for (const match of manifest.matchAll(/<file\b([^>]*)>([^<]+)<\/file>/g)) {
+    const attributes = Object.fromEntries([...match[1].matchAll(/([a-z]+)="([^"]*)"/g)].map((entry) => [entry[1], entry[2]]));
+    const filename = safeArchivePath(match[2].trim());
+    const clientDirectory = { site: 'language', administrator: 'administrator/language', api: 'api/language' }[attributes.client];
+    if (attributes.type !== 'language' || attributes.id !== tag || !clientDirectory || !/^[a-zA-Z0-9_-]+\.zip$/.test(filename)) {
+      throw new Error(`Unsupported official language archive declaration: ${major}/${tag}/${filename}`);
+    }
+    const directory = `${clientDirectory}/${tag}/`;
+    const members = Object.fromEntries(Object.entries(files).filter(([name]) => name.startsWith(directory))
+      .map(([name, bytes]) => [name.slice(directory.length), bytes]));
+    if (!members['install.xml']) throw new Error(`Language subpackage manifest is missing: ${major}/${tag}/${filename}`);
+    if (files[filename]) throw new Error(`Official language source unexpectedly supplies an archive: ${major}/${tag}/${filename}`);
+    files[filename] = archiveFiles(members);
+    nestedArchives.push({ path: filename, sourceDirectory: directory, sha256: digest(files[filename]), fileCount: Object.keys(members).length });
+  }
   const inventory = Object.entries(files).map(([name, bytes]) => ({ path: name, size: bytes.byteLength, sha256: digest(bytes) }));
-  const bytes = zipSync(Object.fromEntries(Object.entries(files).map(([name, value]) => [name, [value, { mtime: epoch }]])), { level: 9 });
+  const bytes = archiveFiles(files);
   return { bytes, sha256: digest(bytes), provenance: { schemaVersion: 1, major, tag, version, date,
     sourceCommit, sourceFilesSha256: digest(JSON.stringify(originals)), fileCount: inventory.length,
-    placeholderChanges: changes, files: inventory } };
+    placeholderChanges: changes, nestedArchives, files: inventory } };
 }
 
 export async function prepareLanguagePackage({ root, cache, major, asset }) {
   // Ordinary published language ZIPs do not need the source-assembly pin set.
   if (!/^https:\/\/codeload\.github\.com\/joomla\/core-translations\/zip\/[a-f0-9]{40}$/.test(asset.url)) return null;
   const pins = JSON.parse(await readFile(path.join(root, 'dependencies/joomla-languages/packages.json'), 'utf8'));
-  if (asset.url !== pins.source.url || asset.sha256 !== pins.source.sha256) return null;
+  if (asset.url !== pins.source.url || asset.sha256 !== pins.source.sha256) {
+    throw new Error(`Official language source differs from its reviewed pin: ${major}/${asset.tag}`);
+  }
   const pin = pins.packages.find((item) => item.major === major && item.tag === asset.tag);
   if (!pin || !/^[a-f0-9]{64}$/.test(pin.sha256)) throw new Error(`Language package pin is missing: ${major}/${asset.tag}`);
   const sourceKey = `${cache}:${pins.source.sha256}`;

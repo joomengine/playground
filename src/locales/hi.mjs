@@ -167,5 +167,15 @@ export default Object.freeze({
   "label.templateElement": "टेम्पलेट का नाम",
   "label.templateParams": "टेम्पलेट पैरामीटर",
   "label.templateUrl": "टेम्पलेट ZIP URL",
-  "title.launchIdeas": "अपने विचारों को उड़ान दें।"
+  "title.launchIdeas": "अपने विचारों को उड़ान दें।",
+  "a11y.skipSettings": "प्लेग्राउंड सेटिंग पर जाएँ",
+  "label.runtimeDeploy": "रनटाइम और परिनियोजन",
+  "label.installationSettings": "इंस्टॉलेशन सेटिंग",
+  "label.siteSettings": "साइट सेटिंग",
+  "label.setupSteps": "अतिरिक्त सेटअप चरण",
+  "help.storageKey": "कुंजी साइट की फ़ाइलों और डेटाबेस की पहचान करती है। अलग Joomla संस्करणों को अलग कुंजियाँ मिलती हैं।",
+  "help.setupSteps": "ये चरण नई स्थापना में चुने गए परिनियोजन के बाद चलते हैं। खुलने के बाद Joomla से भी एक्सटेंशन इंस्टॉल कर सकते हैं।",
+  "help.compatibility": "उपलब्ध रनटाइम संयोजनों का एक साथ परीक्षण होता है।",
+  "license.notices": "वितरित सूचनाएँ",
+  "confirm.temporary": "इससे चलती हुई अस्थायी साइट बदलती है। काम रखना हो तो पहले सहेजें या डाउनलोड करें। जारी रखें?"
 });

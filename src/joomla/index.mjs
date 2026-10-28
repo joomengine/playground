@@ -1,7 +1,9 @@
+import { ensureManagedDatabaseConfiguration } from './managed-database.mjs';
 import { parseMenus, parseTemplate, parseLanguageTags } from '../site-configuration.mjs';
 const RESULT_MARKER = '\n__JOOMENGINE_RESULT__';
 const phpSourceCache = new Map();
 const MAX_PACKAGE_BYTES = 128 * 1024 * 1024;
+const MAX_CHECKPOINT_BYTES = 512 * 1024 * 1024;
 const LANGUAGE_TAG = /^[a-z]{2,3}(?:-[A-Za-z]{4})?-[A-Z]{2}$/;
 
 function languageTag(value, name = 'Language') {
@@ -136,9 +138,13 @@ export async function sha256(bytes) {
 }
 
 export async function verifyPackage(bytes, expectedDigest) {
+  return verifyArchive(bytes, expectedDigest, MAX_PACKAGE_BYTES);
+}
+
+async function verifyArchive(bytes, expectedDigest, maximum) {
   const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  if (data.byteLength < 4 || data.byteLength > MAX_PACKAGE_BYTES || data[0] !== 0x50 || data[1] !== 0x4b) {
-    throw new Error('The package is not a supported ZIP archive or exceeds 128 MiB.');
+  if (data.byteLength < 4 || data.byteLength > maximum || data[0] !== 0x50 || data[1] !== 0x4b) {
+    throw new Error(`The package is not a supported ZIP archive or exceeds ${maximum / 1024 / 1024} MiB.`);
   }
   if (expectedDigest !== undefined) {
     if (!/^[a-f\d]{64}$/i.test(expectedDigest)) throw new TypeError('A valid SHA-256 digest is required.');
@@ -158,7 +164,7 @@ async function defaultSourceLoader(name) {
 }
 
 export async function buildPhpProgram(operation, payload, sourceLoader = defaultSourceLoader) {
-  if (!['extract', 'install', 'console', 'status', 'health', 'customize', 'administrator', 'import', 'configure', 'discover'].includes(operation)) throw new TypeError('Unknown provisioning operation.');
+  if (!['extract', 'install', 'console', 'status', 'health', 'customize', 'administrator', 'import', 'configure', 'discover', 'mcp-probe'].includes(operation)) throw new TypeError('Unknown provisioning operation.');
   const [common, script] = await Promise.all([sourceLoader('common'), sourceLoader(operation)]);
   const encoded = new TextEncoder().encode(JSON.stringify(payload));
   let binary = '';
@@ -202,6 +208,11 @@ export async function inspectJoomla(runtime, { sourceLoader } = {}) {
 
 export async function checkJoomla(runtime, { sourceLoader } = {}) {
   return execute(runtime, 'health', paths(runtime), sourceLoader);
+}
+
+/** Run the installed MCP component's fixed native read diagnostic as its administrator. */
+export async function checkMcpRuntime(runtime, { sourceLoader, admin } = {}) {
+  return execute(runtime, 'mcp-probe', { ...paths(runtime), admin }, sourceLoader);
 }
 
 export async function runStartupCommand(runtime, argv, { sourceLoader } = {}) {
@@ -367,6 +378,7 @@ export async function installJoomla(runtime, config, {
   const state = await inspectJoomla(runtime, { sourceLoader });
   if (state.marker?.state === 'complete' && state.configured && !state.installerPresent) {
     if (state.marker.joomlaVersion !== options.joomlaVersion) throw new Error('This saved site uses another Joomla release. Choose another storage key or reset it.');
+    await ensureManagedDatabaseConfiguration(runtime, options.joomlaVersion);
     let health = await checkJoomla(runtime, { sourceLoader });
     if (health.version !== options.joomlaVersion) throw new Error('The saved Joomla files do not match the selected release.');
     if (health.language !== options.language) {
@@ -392,6 +404,7 @@ export async function installJoomla(runtime, config, {
   progress({ stage: 'installing', message: 'Installing Joomla and creating the administrator…' });
   const installed = await execute(runtime, 'install', { ...location, ...options }, sourceLoader);
   if (installed.version !== options.joomlaVersion) throw new Error('Installed Joomla version does not match the verified release.');
+  await ensureManagedDatabaseConfiguration(runtime, options.joomlaVersion);
   await execute(runtime, 'administrator', { ...location, mode: 'write', admin: options.admin }, sourceLoader);
   for (const pack of options.languages) {
     progress({ stage: 'languages', message: `Installing ${pack.tag}…` });
@@ -415,6 +428,7 @@ export async function installJoomla(runtime, config, {
   const health = await checkJoomla(runtime, { sourceLoader });
   progress({ stage: 'login', message: options.autoLogin ? 'Signing in to Joomla…' : 'Starting without an administrator session…' });
   const administrator = await restoreJoomlaSession(runtime, options, { sourceLoader });
+  const mcp = options.deployId === 'jcb-mcp' ? await checkMcpRuntime(runtime, { sourceLoader, admin: administrator }) : undefined;
   const frontend = await requestJoomlaPage(runtime);
   await frontend.arrayBuffer();
   if (frontend.status !== 200) throw new Error(`The installed Joomla site returned HTTP ${frontend.status}.`);
@@ -422,7 +436,7 @@ export async function installJoomla(runtime, config, {
     state: 'complete', joomlaVersion: options.joomlaVersion, language: health.language, deployId: options.deployId, installedAt: new Date().toISOString(),
   }));
   progress({ stage: 'ready', message: 'Joomla is ready.' });
-  return { resumed: false, version: installed.version, siteName: health.siteName, language: health.language, deployId: options.deployId, administrator, output: installed.output };
+  return { resumed: false, version: installed.version, siteName: health.siteName, language: health.language, deployId: options.deployId, administrator, ...(mcp ? { mcp } : {}), output: installed.output };
 }
 
 /** Import a verified portable site bundle into an empty playground instance. */
@@ -440,6 +454,7 @@ export async function importJoomlaSnapshot(runtime, config, {
   await runtime.fs.writeFile(archive, verified);
   progress({ stage: 'importing', message: 'Restoring the verified deploy files and database…' });
   await execute(runtime, 'import', { ...location, archive, joomlaVersion: options.joomlaVersion, siteName: options.siteName, database: options.database }, sourceLoader);
+  await ensureManagedDatabaseConfiguration(runtime, options.joomlaVersion);
   const administrator = await restoreJoomlaSession(runtime, { ...options, autoLogin: false }, { sourceLoader, rotateAdministrator: true });
   await installMissingLanguages(runtime, options.languages, fetchPackage, sourceLoader);
   const additions = validateInstallOptions({
@@ -459,6 +474,7 @@ export async function importJoomlaSnapshot(runtime, config, {
   const health = await checkJoomla(runtime, { sourceLoader });
   if (health.version !== options.joomlaVersion) throw new Error('The restored Joomla version does not match the selected release.');
   await restoreJoomlaSession(runtime, options, { sourceLoader });
+  const mcp = options.deployId === 'jcb-mcp' ? await checkMcpRuntime(runtime, { sourceLoader, admin: administrator }) : undefined;
   const frontend = await requestJoomlaPage(runtime);
   await frontend.arrayBuffer();
   if (frontend.status !== 200) throw new Error(`The restored Joomla site returned HTTP ${frontend.status}.`);
@@ -467,9 +483,25 @@ export async function importJoomlaSnapshot(runtime, config, {
     deployId: options.deployId, importedAt: new Date().toISOString(),
   }));
   progress({ stage: 'ready', message: 'The prepared Joomla site is ready.' });
-  return { resumed: false, fromSnapshot: true, version: health.version, siteName: health.siteName, language: health.language, deployId: options.deployId, administrator };
+  return { resumed: false, fromSnapshot: true, version: health.version, siteName: health.siteName, language: health.language, deployId: options.deployId, administrator, ...(mcp ? { mcp } : {}) };
 }
 
+/** Restore only the verified bundle database/files; the caller restores its private filesystem next. */
+export async function importJoomlaCheckpoint(runtime, config, {
+  archiveBytes, sha256: digest, sourceLoader, progress = () => {},
+} = {}) {
+  const options = validateInstallOptions(config);
+  const location = paths(runtime);
+  const state = await inspectJoomla(runtime, { sourceLoader });
+  if (state.marker || state.configured || state.installerPresent) throw new Error('Restore a private checkpoint only into a fresh playground.');
+  if (!digest) throw new TypeError('The private checkpoint bundle SHA-256 is required.');
+  const verified = await verifyArchive(archiveBytes, digest, MAX_CHECKPOINT_BYTES);
+  const archive = `/tmp/joomla-checkpoint-${crypto.randomUUID()}.zip`;
+  await runtime.fs.writeFile(archive, verified);
+  progress({ stage: 'importing', message: 'Restoring the saved site database…' });
+  await execute(runtime, 'import', { ...location, archive, joomlaVersion: options.joomlaVersion, siteName: options.siteName, database: options.database }, sourceLoader);
+  return { resumed: true, fromCheckpoint: true, version: options.joomlaVersion, deployId: options.deployId };
+}
 
 /** Inspect actual installed menu types and site template styles for the editor. */
 export async function discoverJoomlaConfiguration(runtime, { sourceLoader } = {}) {
@@ -496,8 +528,7 @@ export async function applyJoomlaConfiguration(runtime, config, {
   progress({ stage: 'configure', message: 'Applying the site settings, menus and template…' });
   const identity = await execute(runtime, 'administrator', { ...location, mode: 'read' }, sourceLoader);
   await execute(runtime, 'customize', { ...location, language: options.language, content: null, admin: identity.administrator, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
-  if (options.siteName !== undefined) await runStartupCommand(runtime, ['config:set', 'sitename', options.siteName], { sourceLoader });
-  const configured = await execute(runtime, 'configure', { ...location, menus: options.menus, template: options.template, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
+  const configured = await execute(runtime, 'configure', { ...location, siteName: options.siteName, menus: options.menus, template: options.template, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
   for (const argv of options.startupCommands) await runStartupCommand(runtime, argv, { sourceLoader });
   const health = await checkJoomla(runtime, { sourceLoader });
   await runtime.fs.writeFile(location.marker, JSON.stringify({ ...state.marker, language: health.language, updatedAt: new Date().toISOString() }));

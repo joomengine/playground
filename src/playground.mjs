@@ -1,5 +1,5 @@
 import { normalizeConfiguration, parseCatalog, normalizeInitialPath } from './config.mjs';
-import { installJoomla, inspectJoomla, sha256, importJoomlaSnapshot, restoreJoomlaSession, applyJoomlaConfiguration, discoverJoomlaConfiguration } from './joomla/index.mjs';
+import { installJoomla, inspectJoomla, sha256, importJoomlaSnapshot, importJoomlaCheckpoint, checkJoomla, restoreJoomlaSession, applyJoomlaConfiguration, discoverJoomlaConfiguration } from './joomla/index.mjs';
 import { exportSite } from './export.mjs';
 import { serializeRequest, restoreResponse } from './http.mjs';
 import { normalizePhpSettings, phpRequestTimeoutMs } from './php-settings.mjs';
@@ -203,14 +203,15 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   if (!response.ok) throw new Error(`Cannot load the runtime catalog: HTTP ${response.status}.`);
   const manifest = await response.json();
   const config = normalizeConfiguration(input, { catalog: parseCatalog(manifest), baseURL: base.href });
-  const phpEntry = manifest.php.find(entry => entry.version === config.phpVersion);
+  let phpEntry = manifest.php.find(entry => entry.version === config.phpVersion);
   const joomlaEntry = manifest.joomla.find(entry => entry.version === config.joomlaVersion);
   const resolveAsset = value => new URL(value, manifestUrl).href;
   const identity = await storageIdentity(config.storageKey);
   const clientId = await clientIdentity();
   const release = config.persistence ? await acquireSiteLock(identity) : async () => {};
   const instanceId = crypto.randomUUID();
-  let database, session, closePromise, changing = false, lastCheckpoint;
+  let database, session, closePromise, changing = false;
+  const pausedOperation = Symbol('paused site operation');
   const prefix = `${base.pathname}__site/${clientId}/${instanceId}/`;
   const siteUrl = new URL(prefix, base).href;
   const registerSession = () => instances.set(instanceId, {
@@ -242,6 +243,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       documentRoot: '/persist/www', installMarkerPath: '/persist/meta/joomla-install.json', runtimeInfo,
       get configuration() { return structuredClone(config); },
       get closed() { return Boolean(closePromise); },
+      get healthy() { return !closePromise && !session.failure; },
       get changing() { return changing; },
       lastSavedAt: null,
       fs: Object.fromEntries(['mkdir', 'readFile', 'writeFile', 'readdir', 'stat', 'unlink'].map(method => [method,
@@ -259,13 +261,26 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       },
       exportSite: options => exportSite(handle, options),
       discoverConfiguration: () => discoverJoomlaConfiguration(handle),
-      openStandalone: options => openStandalone(handle, options),
+      async openStandalone(options) {
+        if (changing || closePromise) throw new Error('Wait for the current site operation.');
+        changing = true; instances.delete(instanceId);
+        const transfer = Object.create(handle);
+        transfer.flush = () => session.flushTogether();
+        transfer.checkpoint = () => handle.checkpoint(pausedOperation);
+        try { return await openStandalone(transfer, options); }
+        finally { changing = false; if (!closePromise) registerSession(); }
+      },
       reset: () => finish(true), close: () => finish(false),
-      async checkpoint() {
+      async checkpoint(token) {
         if (closePromise) throw new Error('Open the site before creating a checkpoint.');
-        const archive = await exportSite(handle, { format: 'bundle' });
-        const filesystem = await session.send('checkpoint', {}, 600_000);
-        return { archive: archive.bytes, sha256: await sha256(archive.bytes), filesystem, configuration: { ...structuredClone(config), admin: { ...handle.installation.administrator } } };
+        const managePause = token !== pausedOperation;
+        if (managePause && changing) throw new Error('Wait for the current site operation.');
+        if (managePause) { changing = true; instances.delete(instanceId); }
+        try {
+          const archive = await exportSite(handle, { format: 'bundle' });
+          const filesystem = await session.send('checkpoint', {}, 600_000);
+          return { archive: archive.bytes, sha256: await sha256(archive.bytes), filesystem, configuration: { ...structuredClone(config), admin: { ...handle.installation.administrator } } };
+        } finally { if (managePause) { changing = false; registerSession(); } }
       },
       async keep() {
         if (config.persistence) { await handle.flush(); return handle; }
@@ -273,7 +288,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         changing = true; instances.delete(instanceId);
         try {
           progress({ phase: 'saving', message: 'Saving the temporary site and verifying its files and database…' });
-          const saved = await handle.checkpoint();
+          const saved = await handle.checkpoint(pausedOperation);
           const replacement = await createPlayground({ ...saved.configuration, persistence: true, storageKey: `saved-${crypto.randomUUID()}`, fresh: false }, { onProgress, checkpoint: saved });
           await finish(false);
           return replacement;
@@ -286,12 +301,20 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         if (next.phpVersion !== config.phpVersion || next.joomlaVersion !== config.joomlaVersion || next.persistence !== config.persistence || next.storageKey !== config.storageKey) {
           throw new Error('Use a new deployment or the PHP settings control to change the runtime or storage.');
         }
+        if (JSON.stringify(next.phpSettings) !== JSON.stringify(config.phpSettings)) throw new Error('Apply PHP settings using the PHP settings dialog before changing site configuration.');
         changing = true; instances.delete(instanceId);
+        let recoveryCheckpoint;
         try {
           progress({ phase: 'saving', message: 'Creating a recovery checkpoint before applying deployment changes…' });
-          lastCheckpoint = await handle.checkpoint();
-          const result = await applyJoomlaConfiguration(handle, next, { progress });
+          recoveryCheckpoint = await handle.checkpoint(pausedOperation);
+          const signature = value => JSON.stringify(value);
+          const additions = next.extensions.filter(entry => !config.extensions.some(previous => previous.url === entry.url && previous.sha256 === entry.sha256));
+          const commands = next.startupCommands.filter(argv => !config.startupCommands.some(previous => signature(previous) === signature(argv)));
+          const template = next.template ? { ...next.template } : null;
+          if (template?.url && template.url === config.template?.url && template.sha256 === config.template?.sha256) { delete template.url; delete template.sha256; }
+          const result = await applyJoomlaConfiguration(handle, { ...next, extensions: additions, startupCommands: commands, template }, { progress });
           Object.assign(config, next);
+          handle.url = new URL(config.initialPath.slice(1), siteUrl).href;
           handle.installation = { ...handle.installation, ...result, administrator: handle.installation.administrator };
           await session.send('flush'); await database.flush();
           registerSession();
@@ -299,14 +322,19 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           return result;
         } catch (error) {
           registerSession();
-          if (lastCheckpoint) error.recover = () => createPlayground({ ...lastCheckpoint.configuration, storageKey: `recovery-${crypto.randomUUID()}`, fresh: false }, { onProgress, checkpoint: lastCheckpoint });
+          if (recoveryCheckpoint) error.recover = () => createPlayground({ ...recoveryCheckpoint.configuration, storageKey: `recovery-${crypto.randomUUID()}`, fresh: false }, { onProgress, checkpoint: recoveryCheckpoint });
           throw error;
         } finally { changing = false; }
       },
-      async updatePhpSettings(inputSettings) {
+      switchPhpVersion: version => handle.updatePhpSettings(config.phpSettings, version),
+      async updatePhpSettings(inputSettings, version = config.phpVersion) {
         if (changing || closePromise) throw new Error('Wait for the current site operation before restarting PHP.');
         const settings = normalizePhpSettings(inputSettings);
         const previous = config.phpSettings;
+        const previousEntry = phpEntry;
+        const previousVersion = config.phpVersion;
+        const selected = manifest.php.find(entry => entry.version === version);
+        if (!selected || !joomlaEntry.php.includes(version)) throw new Error('This PHP build is not supported by the selected Joomla release.');
         changing = true; instances.delete(instanceId);
         let filesystem;
         try {
@@ -314,6 +342,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           filesystem = await session.send('checkpoint', {}, 600_000);
           await database.flush();
           await session.close();
+          phpEntry = selected; config.phpVersion = version;
           session = new PhpSession(database, error => progress({ phase: 'failed', message: error.message }));
           handle.runtimeInfo = await initializeSession(session, settings);
           await session.send('restoreCheckpoint', { bytes: filesystem }, 600_000);
@@ -326,6 +355,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           if (filesystem) {
             try {
               await session.close().catch(() => {});
+              phpEntry = previousEntry; config.phpVersion = previousVersion;
               session = new PhpSession(database, problem => progress({ phase: 'failed', message: problem.message }));
               handle.runtimeInfo = await initializeSession(session, previous);
               await session.send('restoreCheckpoint', { bytes: filesystem }, 600_000);
@@ -343,10 +373,11 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     let installed;
     if (checkpoint) {
       if (!pristine) throw new Error('Restore a private checkpoint into a new site.');
-      installed = await importJoomlaSnapshot(handle, { ...config, addonExtensions: [], addonStartupCommands: [] }, {
+      installed = await importJoomlaCheckpoint(handle, config, {
         archiveBytes: checkpoint.archive, sha256: checkpoint.sha256, progress,
       });
       await session.send('restoreCheckpoint', { bytes: checkpoint.filesystem }, 600_000);
+      installed = { ...installed, ...await checkJoomla(handle) };
       installed.administrator = await restoreJoomlaSession(handle, config);
       installed.resumed = true;
     } else if (pristine && config.snapshot && !config.fresh) {

@@ -129,7 +129,6 @@ export function normalizeLanguage(value = 'en-GB') {
 }
 
 export function normalizeDeployId(value) {
-  if (value === 'none') return 'blank';
   if (typeof value !== 'string' || !DEPLOY_ID.test(value)) throw new TypeError('Deploy names must use lowercase letters, numbers or hyphens.');
   return value;
 }
@@ -248,9 +247,15 @@ function assertPublic(value, path = 'configuration') {
   if (!value || typeof value !== 'object') return;
   for (const [key, item] of Object.entries(value)) {
     if (['__proto__', 'constructor', 'prototype'].includes(key) || /(?:password|passwd|secret|token|authorization|api[_-]?key|credentials)/i.test(key)) throw new TypeError(`Do not include secrets in a shared deployment (${path}.${key}).`);
-    if (key === 'url' && typeof item === 'string') {
-      const url = new URL(item);
+    if (['url', 'initialPath'].includes(key) && typeof item === 'string') {
+      const url = new URL(item, 'https://playground.invalid/');
       for (const name of url.searchParams.keys()) if (/(?:password|passwd|secret|token|authorization|api[_-]?key|signature)/i.test(name)) throw new TypeError('Shared package URLs must not contain private access credentials.');
+    }
+    if (key === 'startupCommands' && Array.isArray(item)) {
+      for (const argv of item) for (const argument of argv.slice(1)) {
+        const option = argument.split('=', 1)[0];
+        if ((argument.startsWith('-') || argument.includes('=')) && /(?:password|passwd|secret|token|authorization|api[_-]?key|credentials)/i.test(option)) throw new TypeError('Do not include secrets in shared startup commands.');
+      }
     }
     assertPublic(item, `${path}.${key}`);
   }

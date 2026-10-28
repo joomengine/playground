@@ -167,5 +167,15 @@ export default Object.freeze({
   "label.templateElement": "Назва шаблону",
   "label.templateParams": "Параметри шаблону",
   "label.templateUrl": "URL ZIP-пакета шаблону",
-  "title.launchIdeas": "Запускайте свої ідеї."
+  "title.launchIdeas": "Запускайте свої ідеї.",
+  "a11y.skipSettings": "Перейти до налаштувань майданчика",
+  "label.runtimeDeploy": "Середовище та розгортання",
+  "label.installationSettings": "Налаштування встановлення",
+  "label.siteSettings": "Налаштування сайту",
+  "label.setupSteps": "Додаткові кроки",
+  "help.storageKey": "Ключ визначає файли та базу даних сайту. Різні версії Joomla отримують окремі ключі.",
+  "help.setupSteps": "Ці кроки виконуються після вибраного розгортання під час нового встановлення. Пізніше розширення можна встановити через Joomla.",
+  "help.compatibility": "Доступні поєднання середовищ виконання тестуються разом.",
+  "license.notices": "додані повідомлення",
+  "confirm.temporary": "Це змінить активний тимчасовий сайт. Спочатку збережіть або завантажте роботу, якщо хочете її залишити. Продовжити?"
 });

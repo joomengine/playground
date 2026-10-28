@@ -4,6 +4,7 @@ import { sha256 } from './assets.mjs';
 
 const originals = {
   'breakoutRequest.mjs': '7261ccd57df432cdb67b6cf0f34426a9a73b2f15f36971ea91ee5c5faf5039d9',
+  'PhpCgiWebBase.mjs': '1a39e22b5cad70d8f233844024de53460ad9d48a1e1cbdccb00ff9a348c1c81e',
   'PhpCgiBase.mjs': 'edb540f958ebd7378725a28d8b780179efa703dbf3d8e7ce74f1736561a60f9e',
 };
 
@@ -25,11 +26,15 @@ export async function applyCgiRequestOverlay(directory) {
     if (runtime.split(before).length !== 2) throw new Error('Upstream CGI input structure changed; review the bounded-byte correction.');
     runtime = runtime.replace(before, after);
   }
+  const webBefore = "stdin: () =>  this.input\n\t\t\t\t? String(this.input.shift()).charCodeAt(0)\n\t\t\t\t: null";
+  if (input['PhpCgiWebBase.mjs'].split(webBefore).length !== 2) throw new Error('Upstream browser CGI input structure changed; review the bounded-byte correction.');
+  const webRuntime = input['PhpCgiWebBase.mjs'].replace(webBefore, corrections[0][1]);
   const decoder = await readFile(new URL('../src/cgi-request.mjs', import.meta.url), 'utf8');
   const files = [];
-  for (const [file, result] of [['breakoutRequest.mjs', decoder], ['PhpCgiBase.mjs', runtime]]) {
-    await writeFile(path.join(directory, file), result);
-    files.push({ file, originalSha256: originals[file], sha256: sha256(result) });
+  for (const [file, result] of [['breakoutRequest.mjs', decoder], ['PhpCgiBase.mjs', runtime], ['PhpCgiWebBase.mjs', webRuntime]]) {
+    const modified = '/* Modified by JoomEngine: bounded binary CGI request decoding and indexed input; PHP/WASM unchanged. */\n' + result;
+    await writeFile(path.join(directory, file), modified);
+    files.push({ file, originalSha256: originals[file], sha256: sha256(modified) });
   }
   return { name: 'bounded-request-body-methods', upstreamVersion: '0.2.0', files };
 }

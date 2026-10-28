@@ -167,5 +167,15 @@ export default Object.freeze({
   "label.templateElement": "Template name",
   "label.templateParams": "Template parameters",
   "label.templateUrl": "Template ZIP URL",
-  "title.launchIdeas": "Launch your ideas."
+  "title.launchIdeas": "Launch your ideas.",
+  "a11y.skipSettings": "Skip to playground settings",
+  "label.runtimeDeploy": "Runtime and deployment",
+  "label.installationSettings": "Installation settings",
+  "label.siteSettings": "Site settings",
+  "label.setupSteps": "Additional setup steps",
+  "help.storageKey": "A key identifies this site’s files and database. Different Joomla releases get separate keys.",
+  "help.setupSteps": "These steps run after the selected deployment on a new installation. You can also install extensions through Joomla once it opens.",
+  "help.compatibility": "Available runtime combinations are tested together.",
+  "license.notices": "distributed notices",
+  "confirm.temporary": "This changes the running temporary site. Save or download your work first if you want to keep it. Continue?"
 });

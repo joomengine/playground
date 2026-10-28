@@ -167,5 +167,15 @@ export default Object.freeze({
   "label.templateElement": "اسم القالب",
   "label.templateParams": "معاملات القالب",
   "label.templateUrl": "رابط ZIP للقالب",
-  "title.launchIdeas": "أطلق أفكارك."
+  "title.launchIdeas": "أطلق أفكارك.",
+  "a11y.skipSettings": "الانتقال إلى إعدادات بيئة التجربة",
+  "label.runtimeDeploy": "بيئة التنفيذ والنشر",
+  "label.installationSettings": "إعدادات التثبيت",
+  "label.siteSettings": "إعدادات الموقع",
+  "label.setupSteps": "خطوات إعداد إضافية",
+  "help.storageKey": "يحدد المفتاح ملفات هذا الموقع وقاعدة بياناته. تحصل إصدارات Joomla المختلفة على مفاتيح منفصلة.",
+  "help.setupSteps": "تعمل هذه الخطوات بعد النشر المحدد في تثبيت جديد. يمكنك أيضًا تثبيت إضافات من داخل Joomla بعد فتحه.",
+  "help.compatibility": "تُختبر مجموعات بيئات التنفيذ المتاحة معًا.",
+  "license.notices": "الإشعارات المرفقة",
+  "confirm.temporary": "سيغيّر هذا الموقع المؤقت الجاري. احفظ عملك أو نزّله أولًا للاحتفاظ به. هل تريد المتابعة؟"
 });

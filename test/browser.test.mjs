@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { chromium, firefox } from 'playwright';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { createStaticServer } from './server.mjs';
+import { assertBrowserRequestBodies } from './browser-request-contract.mjs';
 import { inventory } from '../scripts/assets.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -98,11 +99,12 @@ async function bounded(promise, label, timeoutMs = requestTimeout) {
 
 function observePage(page) {
   let step;
+  const started = Date.now();
   Object.defineProperty(page, 'testStep', {
     get: () => step,
     set(value) {
       step = value;
-      console.log(JSON.stringify({ browser: page.context().browser().browserType().name(), step: value }));
+      console.log(JSON.stringify({ browser: page.context().browser().browserType().name(), step: value, elapsedMs: Date.now() - started }));
     },
   });
   page.errors = [];
@@ -150,7 +152,7 @@ async function saveBrowserDiagnostics(page, name, error) {
     const frame = document.getElementById('site-frame');
     return {
       url: location.href, readyState: document.readyState,
-      status: text('status-message'), loading: text('loading-message'), error: text('error-message'),
+      status: text('status-message'), loading: text('loading-message'), error: text('error-message'), feedback: text('header-feedback'), activity: text('activity-log')?.slice(-5000),
       iframe: frame ? { src: frame.getAttribute('src'), hidden: frame.hidden, connected: frame.isConnected } : null,
       progress: window.validationProgress,
     };
@@ -178,6 +180,11 @@ async function assertCleanConsole(page) {
   assert.deepEqual(page.responseErrors, [], 'AJAX responses must not contain PHP diagnostics or malformed JSON.');
 }
 
+async function setPersistence(page, enabled) {
+  if (await page.locator('#persistence').isChecked() !== enabled) await page.locator('label[for="persistence"]').click();
+  await page.waitForFunction(enabled => document.getElementById('persistence').checked === enabled, enabled, { timeout: 10_000 });
+}
+
 async function showQuickSettings(page) {
   if (!(await page.locator('#settings').isVisible())) await page.locator('#settings-toggle').click();
 }
@@ -197,7 +204,7 @@ async function showSiteActions(page) {
 
 async function openHarness(context, url, { isolation = true } = {}) {
   const page = observePage(await context.newPage());
-  page.setDefaultTimeout(requestTimeout);
+  page.setDefaultTimeout(30_000);
   await page.goto(new URL('__test__.html', url).href);
   if (!isolation) {
     assert.equal(await page.evaluate(() => crossOriginIsolated), false, 'The static host fixture must not supply isolation headers.');
@@ -271,10 +278,10 @@ async function waitForSiteFrame(frame, expectedURL) {
 
 async function renderedSiteFrame(page) {
   await page.waitForFunction(() => document.getElementById('site-frame')
-    || (document.getElementById('error-view') && !document.getElementById('error-view').hidden));
+    || (document.getElementById('error-view') && !document.getElementById('error-view').hidden), undefined, { timeout: requestTimeout });
   assert.equal(await page.locator('#error-view').isVisible(), false,
     await page.locator('#error-message').textContent());
-  await page.locator('#site-frame:not([hidden])').waitFor();
+  await page.locator('#site-frame:not([hidden])').waitFor({ timeout: requestTimeout });
   const element = await page.locator('#site-frame').elementHandle();
   const expectedURL = await element.getAttribute('src');
   assert.ok(expectedURL?.includes('/__site/'), 'The preview must point to an active playground site.');
@@ -285,9 +292,9 @@ async function renderedSiteFrame(page) {
   return frame;
 }
 
-async function previewContract(page, action = 'read') {
-  const response = await bounded(page.evaluate(async (action) => {
-    const frame = document.getElementById('site-frame');
+async function previewContract(page, action = 'read', frameId = 'site-frame') {
+  const response = await bounded(page.evaluate(async ({ action, frameId }) => {
+    const frame = document.getElementById(frameId);
     const source = new URL(frame.src);
     const prefix = source.pathname.match(/^.*\/__site\/[^/]+\/[^/]+\//)?.[0];
     if (!prefix) throw new Error('The active preview has no site route.');
@@ -295,7 +302,7 @@ async function previewContract(page, action = 'read') {
     url.searchParams.set('action', action);
     const response = await fetch(url);
     return { status: response.status, text: await response.text() };
-  }, action), `Preview data ${action}`);
+  }, { action, frameId }), `Preview data ${action}`);
   assert.equal(response.status, 200, response.text);
   return JSON.parse(response.text);
 }
@@ -421,10 +428,17 @@ async function close(page, reset = false) {
 
 for (const name of browserNames) {
   test(`${name}: real Joomla, upstream PHP and native MariaDB PDO`, { timeout: 1_800_000 }, async (t) => {
+    const runScenario = async (title, options, execute) => {
+      let failure;
+      await t.test(title, options, async context => {
+        try { await execute(context); } catch (error) { failure = error; throw error; }
+      });
+      if (failure) throw failure;
+    };
     const executablePath = process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`];
     const browser = await browsers[name].launch({ headless: true, ...(executablePath ? { executablePath } : {}),
       ...(name === 'chromium' ? { args: ['--no-sandbox'] } : {}),
-      env: { ...process.env, MOZ_DISABLE_CONTENT_SANDBOX: '1', MOZ_DISABLE_RDD_SANDBOX: '1' } });
+      env: { ...process.env } });
     const fixtures = { '__test_extension.zip': extensionArchive, '__test_curl.json': JSON.stringify(curlProof) };
     const server = await createStaticServer({ directory, prefix: '/nested/playground/', fixtures });
     const corsServer = await createStaticServer({ directory, prefix: '/cors/', corsOrigin: new URL(server.url).origin,
@@ -435,7 +449,7 @@ for (const name of browserNames) {
     const records = [];
     t.after(async () => { await browser.close(); await server.close(); await corsServer.close(); });
     for (const pair of scenarios.includes('matrix') ? combinations : []) {
-      await t.test(`Joomla ${pair.joomlaVersion}, PHP ${pair.phpVersion}: install, PDO and persisted reload`, { timeout: 900_000 }, async () => {
+      await runScenario(`Joomla ${pair.joomlaVersion}, PHP ${pair.phpVersion}: install, PDO and persisted reload`, { timeout: 900_000 }, async () => {
         const context = await browser.newContext();
         const page = await openHarness(context, server.url);
         const config = configuration(pair, {
@@ -453,6 +467,7 @@ for (const name of browserNames) {
             } finally { await competingPage.close(); }
           }
           await assertSite(page, config);
+          await assertBrowserRequestBodies(page);
           const installedExtension = await phpJSON(page, `${PDO} echo json_encode($db->query("SELECT enabled FROM jml_extensions WHERE element='mod_playground_contract' AND type='module' AND client_id=0")->fetchColumn(), JSON_THROW_ON_ERROR);`);
           assert.equal(installedExtension, 1, 'Joomla must register the configured extension through its installer.');
           const identity = await assertPDO(page, pair);
@@ -464,7 +479,7 @@ for (const name of browserNames) {
           await assertSite(page, config);
           const stored = await phpJSON(page, `${PDO} echo json_encode($db->query('SELECT big, amount FROM playground_contract WHERE id=1')->fetch(PDO::FETCH_ASSOC), JSON_THROW_ON_ERROR);`);
           assert.deepEqual(stored, { big: '18446744073709551615', amount: '123456789012345678.123456' });
-          assert.deepEqual(page.errors, [], `Uncaught browser errors: ${page.errors.join('\n')}`);
+          await assertCleanConsole(page);
           await close(page, true);
           records.push({ ...pair, php: identity.php, persistedReload: true, nativePDO: true, requestCleanup: true, iframe: true, extensionInstall: true, startupCommand: true, guidedTourModelAndAjax: true });
           console.log(JSON.stringify({ browser: name, ...pair, completed: true, resumedProgress: resumed.progress.map((item) => item.phase) }));
@@ -476,7 +491,7 @@ for (const name of browserNames) {
       });
     }
     const defaultPair = combinations.find((pair) => pair.phpVersion === manifest.defaults.phpVersion && pair.joomlaVersion === manifest.defaults.joomlaVersion) || combinations[0];
-    if (scenarios.includes('memory')) await t.test('memory-only installation closes and does not persist data', { timeout: 900_000 }, async () => {
+    if (scenarios.includes('memory')) await runScenario('memory-only installation closes and does not persist data', { timeout: 900_000 }, async () => {
       const context = await browser.newContext();
       const page = await openHarness(context, server.url);
       const config = configuration(defaultPair, { persistence: false });
@@ -505,12 +520,12 @@ for (const name of browserNames) {
         await start(page, config);
         const result = await phpJSON(page, `${PDO} echo json_encode($db->query("SHOW TABLES LIKE 'playground_contract'")->fetchAll(PDO::FETCH_COLUMN), JSON_THROW_ON_ERROR);`);
         assert.deepEqual(result, [], 'A new memory-only site must not retain the previous database.');
-        assert.deepEqual(page.errors, []);
+        await assertCleanConsole(page);
         await close(page);
         records.push({ ...defaultPair, memoryOnly: true });
       } finally { await close(page).catch(() => {}); await context.close(); }
     });
-    if (scenarios.includes('timeout')) await t.test('a timed-out PHP worker fails closed and a persisted site can reopen', { timeout: 900_000 }, async () => {
+    if (scenarios.includes('timeout')) await runScenario('a timed-out PHP worker fails closed and a persisted site can reopen', { timeout: 900_000 }, async () => {
       const context = await browser.newContext();
       const page = await openHarness(context, server.url);
       const config = configuration(defaultPair);
@@ -535,12 +550,12 @@ for (const name of browserNames) {
         const result = await phpJSON(page, `${PDO} echo json_encode($db->query('SELECT COUNT(*) FROM playground_contract')->fetchColumn(), JSON_THROW_ON_ERROR);`);
         assert.equal(result, 1, 'An abandoned uncommitted write must not appear after reopening.');
         await assertSite(page, config);
-        assert.deepEqual(page.errors, []);
+        await assertCleanConsole(page);
         await close(page, true);
         records.push({ ...defaultPair, hardTimeout: true, reopenAfterTimeout: true });
       } finally { await close(page).catch(() => {}); await context.close(); }
     });
-    if (scenarios.includes('static')) await t.test('plain static hosting gains isolation through the service worker', { timeout: 900_000 }, async () => {
+    if (scenarios.includes('static')) await runScenario('plain static hosting gains isolation through the service worker', { timeout: 900_000 }, async () => {
       const plainServer = await createStaticServer({ directory, prefix: '/pages/project/', isolation: false });
       const context = await browser.newContext();
       let page;
@@ -549,12 +564,12 @@ for (const name of browserNames) {
         const config = configuration(defaultPair, { persistence: false });
         await start(page, config);
         await assertSite(page, config);
-        assert.deepEqual(page.errors, []);
+        await assertCleanConsole(page);
         await close(page);
         records.push({ ...defaultPair, staticServiceWorkerIsolation: true });
       } finally { if (page) await close(page).catch(() => {}); await context.close(); await plainServer.close(); }
     });
-    if (scenarios.includes('deploys')) await t.test('repository and URL recipes install actual components, languages and prepared content', { timeout: 900_000 }, async () => {
+    if (scenarios.includes('deploys')) await runScenario('repository and URL recipes install actual components, languages and prepared content', { timeout: 900_000 }, async () => {
       const context = await browser.newContext();
       const page = await openHarness(context, server.url);
       const proof = [];
@@ -713,7 +728,7 @@ for (const name of browserNames) {
       } catch (error) { await saveBrowserDiagnostics(page, `deploys-${name}`, error); throw error; }
       finally { await close(page).catch(() => {}); await context.close(); }
     });
-    if (scenarios.includes('export')) await t.test('portable export restores exact files, SQL values, views and triggers in a new database', { timeout: 900_000 }, async () => {
+    if (scenarios.includes('export')) await runScenario('portable export restores exact files, SQL values, views and triggers in a new database', { timeout: 900_000 }, async () => {
       const context = await browser.newContext({ acceptDownloads: true });
       const page = await openHarness(context, server.url);
       const config = configuration(defaultPair, { persistence: false });
@@ -763,15 +778,15 @@ for (const name of browserNames) {
         const file = await page.evaluate(async () => [...await window.playground.fs.readFile('/persist/www/export-proof.bin')]);
         assert.deepEqual(file, [0, 1, 255, 92, 39, 59, 10]);
         await assertSite(page, config);
-        assert.deepEqual(page.errors, []);
+        await assertCleanConsole(page);
         records.push({ ...defaultPair, exportRoundTrip: true, exactSQL: true, files: true, dependentViews: true, trigger: true });
       } catch (error) { await saveBrowserDiagnostics(page, `export-${name}`, error); throw error; }
       finally { delete fixtures['__test_snapshot.zip']; await close(page).catch(() => {}); await context.close(); }
     });
-    if (scenarios.includes('ui')) await t.test('the interface preserves files and SQL across PHP changes and reloads, exports and resets', { timeout: 900_000 }, async () => {
+    if (scenarios.includes('ui')) await runScenario('the interface preserves files and SQL across PHP changes and reloads, exports and resets', { timeout: 900_000 }, async () => {
       const context = await browser.newContext();
       const page = observePage(await context.newPage());
-      page.setDefaultTimeout(requestTimeout);
+      page.setDefaultTimeout(30_000);
       try {
         const url = new URL(server.url);
         url.searchParams.set('joomla', defaultPair.joomlaVersion);
@@ -909,6 +924,130 @@ for (const name of browserNames) {
         await saveBrowserDiagnostics(page, `interface-${name}`, error);
         throw error;
       } finally { await context.close(); }
+    });
+    if (scenarios.includes('rocket')) await runScenario('Rocket shares, translates, saves temporary sites, changes PHP and transfers standalone ownership', { timeout: 600_000 }, async () => {
+      const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+      const page = observePage(await context.newPage());
+      page.setDefaultTimeout(30_000);
+      let standalone;
+      try {
+        const url = new URL(server.url);
+        for (const [key, value] of Object.entries({ deploy: 'blank', joomla: defaultPair.joomlaVersion, php: defaultPair.phpVersion,
+          name: 'Rocket shared demonstration', persist: '0', extension: new URL('__test_extension.zip', server.url).href })) url.searchParams.set(key, value);
+        page.testStep = 'launch temporary site in English';
+        await page.goto(url.href);
+        await renderedSiteFrame(page);
+        assert.equal(await page.locator('html').getAttribute('lang'), 'en');
+        assert.equal(await page.locator('#settings').isVisible(), false);
+        assert.equal(await page.locator('#site-header').evaluate(element => ['fixed', 'sticky'].includes(getComputedStyle(element).position)), false);
+        assert.match(await page.frameLocator('#site-frame').locator('html').getAttribute('lang'), /^en-GB$/i);
+        const marker = await previewContract(page, 'seed');
+        assert.equal(marker.database, 'saved through real MariaDB');
+        page.testStep = 'share exposes the full public configuration';
+        await page.locator('#share-button').click();
+        await page.locator('#share-dialog').waitFor({ state: 'visible' });
+        const link = await page.locator('#share-url').inputValue();
+        const shared = await page.evaluate(async link => (await import('./src/config.mjs')).readURLConfiguration(link).config, link);
+        assert.equal(shared.siteName, 'Rocket shared demonstration');
+        assert.equal(shared.deployId, 'blank');
+        assert.equal(shared.phpVersion, defaultPair.phpVersion);
+        assert.equal(shared.extensions.length, 1);
+        assert.equal(Object.hasOwn(shared, 'admin'), false);
+        assert.equal(Object.hasOwn(shared, 'storageKey'), false);
+        await page.locator('#copy-share').click();
+        await page.waitForFunction(() => document.getElementById('share-feedback').textContent.trim().length > 0);
+        await page.locator('#share-dialog [data-close-dialog]').click();
+        page.testStep = 'interface language does not change Joomla';
+        assert.ok(await page.locator('#interface-language option').count() >= 20);
+        for (const [language, direction] of [['af', 'ltr'], ['he', 'rtl'], ['en', 'ltr']]) {
+          await page.locator('#interface-language').selectOption(language);
+          await page.waitForFunction(({ language, direction }) => document.documentElement.lang === language && document.documentElement.dir === direction, { language, direction });
+          assert.match(await page.frameLocator('#site-frame').locator('html').getAttribute('lang'), /^en-GB$/i);
+        }
+        page.testStep = 'retain temporary files, SQL and credentials';
+        await showSiteActions(page);
+        await page.locator('#credentials-button').click();
+        const credentials = { username: await page.locator('#credential-username').inputValue(), password: await page.locator('#credential-password').inputValue() };
+        assert.ok(credentials.username && credentials.password.length >= 16);
+        assert.ok(!link.includes(credentials.password));
+        await page.locator('#credentials-dialog [data-close-dialog]').click();
+        await showQuickSettings(page);
+        assert.equal(await page.locator('#persistence').isChecked(), false);
+        page.testStep = 'checkpoint temporary site into browser storage';
+        await setPersistence(page, true);
+        await page.locator('#save-button:enabled').waitFor({ timeout: requestTimeout });
+        await renderedSiteFrame(page);
+        assert.equal(await page.locator('#persistence').isChecked(), true);
+        assert.deepEqual(await previewContract(page), marker);
+        await showSiteActions(page);
+        await page.locator('#credentials-button').click();
+        assert.equal(await page.locator('#credential-username').inputValue(), credentials.username);
+        assert.equal(await page.locator('#credential-password').inputValue(), credentials.password);
+        await page.locator('#credentials-dialog [data-close-dialog]').click();
+        page.testStep = 'apply and verify PHP settings without losing data';
+        await showSiteActions(page);
+        await page.locator('#php-settings-button').click();
+        const serviceDirectoryProfile = await page.evaluate(async () => {
+          const { parseCatalog } = await import('./src/config.mjs');
+          const { loadDeployCatalog, resolveDeployConfiguration } = await import('./src/deploys.mjs');
+          const catalog = parseCatalog(await (await fetch('./assets/manifest.json')).json());
+          const deployCatalog = await loadDeployCatalog();
+          return (await resolveDeployConfiguration({ deployId: 'servicedirectory' }, { catalog, deployCatalog, baseURL: location.href })).configuration.phpSettings;
+        });
+        assert.equal(serviceDirectoryProfile.max_execution_time, 180);
+        await page.locator('#ini-execution').fill(String(serviceDirectoryProfile.max_execution_time));
+        await page.locator('#ini-vars').fill('12000');
+        await page.locator('#ini-memory').fill('640M');
+        await page.locator('#php-apply-button').click();
+        await page.locator('#php-dialog').waitFor({ state: 'hidden' });
+        await renderedSiteFrame(page);
+        assert.deepEqual(await previewContract(page), marker);
+        const settings = await previewContract(page, 'settings');
+        assert.equal(settings.max_execution_time, '180');
+        assert.equal(settings.max_input_vars, '12000');
+        assert.equal(settings.memory_limit, '640M');
+        assert.equal(settings.upload_max_filesize, '128M');
+        assert.equal(settings.post_max_size, '160M');
+        page.testStep = 'full width and one scrolling document';
+        if (await page.locator('#settings').isVisible()) await page.locator('#settings-toggle').click();
+        const actualFrame = await renderedSiteFrame(page);
+        await actualFrame.locator('body').evaluate(body => { const block = document.createElement('div'); block.id = 'rocket-scroll-proof'; block.style.height = '3400px'; block.textContent = 'Long Joomla document'; body.append(block); });
+        await page.waitForFunction(() => { const frame = document.getElementById('site-frame'); return frame?.clientHeight >= 3400 && frame.contentDocument.documentElement.scrollHeight <= frame.clientHeight + 3; });
+        await page.evaluate(() => window.scrollTo(0, 1000));
+        assert.ok(await page.locator('#site-header').evaluate(header => header.getBoundingClientRect().bottom < 0));
+        assert.equal(await actualFrame.evaluate(() => scrollY), 0);
+        await actualFrame.locator('#rocket-scroll-proof').evaluate(element => element.remove());
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await mkdir(path.join(root, 'test-results'), { recursive: true });
+        for (const width of [390, 768, 1440]) {
+          await page.setViewportSize({ width, height: 900 });
+          await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth + 1);
+          assert.ok(await page.locator('#site-frame').evaluate(frame => Math.abs(frame.getBoundingClientRect().width - innerWidth) <= 2));
+          await page.screenshot({ path: path.join(root, 'test-results', `rocket-${name}-${width}.png`) });
+        }
+        await bounded(Promise.allSettled([...page.responseChecks]), 'Read embedded site responses', 10_000);
+        page.testStep = 'standalone tab survives closing its former owner';
+        const popup = context.waitForEvent('page');
+        await page.locator('#open-link').click();
+        standalone = observePage(await popup);
+        standalone.setDefaultTimeout(30_000);
+        await standalone.locator('#site:not([hidden])').waitFor({ timeout: requestTimeout });
+        const standaloneFrame = await (await standalone.locator('#site').elementHandle()).contentFrame();
+        await standaloneFrame.locator('body').waitFor();
+        await page.close();
+        assert.deepEqual(await previewContract(standalone, 'read', 'site'), marker);
+        assert.equal(await standalone.locator('#site-header').count(), 0);
+        assert.equal(await standalone.locator('#site-footer').count(), 0);
+        await standalone.reload();
+        await standalone.locator('#site:not([hidden])').waitFor({ timeout: requestTimeout });
+        assert.deepEqual(await previewContract(standalone, 'read', 'site'), marker);
+        assert.equal((await previewContract(standalone, 'settings', 'site')).memory_limit, '640M');
+        await assertCleanConsole(page);
+        await assertCleanConsole(standalone);
+        records.push({ ...defaultPair, rocket: true, shareLink: true, independentInterfaceLanguage: true, rtl: true,
+          temporaryToSaved: true, retainedCredentials: true, effectivePhpSettings: settings, singleScroll: true, standaloneOwnership: true });
+      } catch (error) { await saveBrowserDiagnostics(page.isClosed() ? standalone : page, `rocket-${name}`, error); throw error; }
+      finally { await context.close(); }
     });
     assert.equal(records.length, (scenarios.includes('matrix') ? combinations.length : 0) + scenarios.filter((scenario) => scenario !== 'matrix').length,
       'Every selected runtime scenario must pass before writing a receipt.');

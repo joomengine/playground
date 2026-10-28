@@ -83,8 +83,9 @@ jobs:
             .cache/jcb-dependency-archives
             .cache/jcb-banners
             .cache/language-sources
+            .cache/language-packages
             .cache/tools
-          key: archives-${{ runner.os }}-${{ hashFiles('versions.json', 'deploys/*.json', 'dependencies/**/*.json') }}
+          key: archives-${{ runner.os }}-${{ hashFiles('versions.json', 'deploys/*.json', 'dependencies/**/*.json', 'scripts/language-packages.mjs') }}
           restore-keys: archives-${{ runner.os }}-
       - name: Install build prerequisites
         run: |
@@ -98,6 +99,14 @@ jobs:
           repository: emscripten-core/emsdk
           ref: ${{ needs.checks.outputs.emsdk }}
           path: external/emsdk
+      - name: Restore pinned compiler tools
+        if: steps.native.outputs.cache-hit != 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            external/emsdk/upstream
+            external/emsdk/node
+          key: emsdk-${{ runner.os }}-${{ runner.arch }}-${{ needs.checks.outputs.emsdk }}-${{ needs.checks.outputs.emscripten }}
       - name: Configure pinned Emscripten compiler
         if: steps.native.outputs.cache-hit != 'true'
         env:

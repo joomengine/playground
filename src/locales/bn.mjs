@@ -167,5 +167,15 @@ export default Object.freeze({
   "label.templateElement": "টেমপ্লেটের নাম",
   "label.templateParams": "টেমপ্লেট প্যারামিটার",
   "label.templateUrl": "টেমপ্লেট ZIP URL",
-  "title.launchIdeas": "আপনার ভাবনাকে উড়তে দিন।"
+  "title.launchIdeas": "আপনার ভাবনাকে উড়তে দিন।",
+  "a11y.skipSettings": "প্লেগ্রাউন্ড সেটিংসে যান",
+  "label.runtimeDeploy": "রানটাইম ও স্থাপনা",
+  "label.installationSettings": "ইনস্টলেশনের সেটিংস",
+  "label.siteSettings": "সাইটের সেটিংস",
+  "label.setupSteps": "অতিরিক্ত সেটআপ ধাপ",
+  "help.storageKey": "একটি চাবি সাইটের ফাইল ও ডেটাবেস শনাক্ত করে। ভিন্ন Joomla সংস্করণে পৃথক চাবি থাকে।",
+  "help.setupSteps": "নতুন ইনস্টলেশনে নির্বাচিত স্থাপনার পরে এই ধাপগুলো চলে। সাইট খোলার পর Joomla থেকেও এক্সটেনশন ইনস্টল করা যায়।",
+  "help.compatibility": "উপলব্ধ রানটাইমের সমন্বয় একসঙ্গে পরীক্ষা করা হয়।",
+  "license.notices": "বিতরণ করা বিজ্ঞপ্তি",
+  "confirm.temporary": "এতে চলমান অস্থায়ী সাইট বদলাবে। কাজ রাখতে চাইলে আগে সংরক্ষণ বা ডাউনলোড করুন। চালিয়ে যাবেন?"
 });

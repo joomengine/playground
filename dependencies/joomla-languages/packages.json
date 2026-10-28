@@ -19,7 +19,7 @@
       "major": "5",
       "tag": "de-DE",
       "version": "5.4.9.1",
-      "sha256": "800d973e03c843181f6f31537db92119aca9ab04397008723656a4a834f390bf"
+      "sha256": "451000f82d46639f5bc4a20e9ccfce42faf247ab7fd8190a26c4a11883eb468a"
     },
     {
       "major": "5",
@@ -61,7 +61,7 @@
       "major": "6",
       "tag": "de-DE",
       "version": "6.2.0.1",
-      "sha256": "43a0f5fa73ecb9247deabcaea7408cff1a484439a5bc276d43ec5de0abd083c8"
+      "sha256": "1eb7d9affe19499b54659e76038d7986b7716f97d850961bc6515a16feff277c"
     },
     {
       "major": "6",

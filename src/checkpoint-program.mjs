@@ -50,7 +50,7 @@ if (($manifest['format'] ?? '') !== 'joomengine-private-checkpoint' || ($manifes
 $seen = []; $total = 0;
 foreach ($manifest['entries'] as $entry) {
     $name = $entry['path'] ?? '';
-    if (!is_string($name) || !preg_match('~^(persist|config)/[^\\\\\\x00]+$~D', $name) || array_intersect(explode('/', $name), ['', '.', '..']) || isset($seen[$name])) throw new RuntimeException('The private checkpoint contains an unsafe or duplicate path.');
+    if (!is_string($name) || !(str_starts_with($name, 'persist/') || str_starts_with($name, 'config/')) || str_contains($name, chr(92)) || str_contains($name, chr(0)) || array_intersect(explode('/', $name), ['', '.', '..']) || isset($seen[$name])) throw new RuntimeException('The private checkpoint contains an unsafe or duplicate path.');
     $seen[$name] = true;
     $directory = ($entry['directory'] ?? null) === true;
     $stat = $zip->statName($name . ($directory ? '/' : ''));

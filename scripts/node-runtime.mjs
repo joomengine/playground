@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeHealthSource, runtimeRandomValue } from '../src/php-settings.mjs';
+import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeHealthSource, runtimeRandomValue, assertRuntimeHealth } from '../src/php-settings.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -89,6 +89,8 @@ export async function createNodeRuntime({ directory = path.join(root, 'dist'), p
         throw failed;
       }
       if (!(response instanceof Response)) throw new Error('The upstream PHP runtime did not return a response.');
+      const diagnostics = new TextDecoder().decode(new Uint8Array(php.error || [])).trim();
+      if (diagnostics) console.warn(`[PHP ${entry.version}] ${diagnostics.slice(0, 8000)}`);
       return response;
     } finally {
       await databaseRuntime.reset();
@@ -169,7 +171,7 @@ export async function createNodeRuntime({ directory = path.join(root, 'dist'), p
     const result = await handle.runPhp(runtimeHealthSource());
     const identity = JSON.parse(result.text);
     if (!identity.extensions.includes('pdo_mariadb_wasm') || !identity.pdoDrivers.includes('mysql') || identity.phpVersion !== entry.patchVersion) throw new Error(`Build runtime identity differs from its manifest: ${result.text}`);
-    handle.runtimeInfo = identity;
+    handle.runtimeInfo = assertRuntimeHealth(identity, phpSettings);
     return handle;
   } catch (error) {
     await handle.close();

@@ -80,3 +80,16 @@ export function runtimeRandomValue() {
   if (typeof globalThis.crypto?.getRandomValues !== 'function') throw new Error('A cryptographically secure random generator is required.');
   return globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
 }
+
+export function assertRuntimeHealth(info, settings = {}) {
+  const requested = normalizePhpSettings(settings);
+  const loaded = new Set((info?.extensions || []).map(name => name.toLowerCase()));
+  const required = ['pdo_mariadb_wasm', 'curl', 'fileinfo', 'sodium', 'gd', 'intl', 'mbstring', 'openssl',
+    'dom', 'simplexml', 'xml', 'xmlreader', 'xmlwriter', 'json', 'zip', 'zlib'];
+  const missing = required.filter(name => !loaded.has(name));
+  if (missing.length || !info?.pdoDrivers?.includes('mysql')) throw new Error(`The PHP runtime is missing required Joomla capabilities: ${missing.join(', ') || 'PDO mysql'}.`);
+  for (const [name, value] of Object.entries(requested)) {
+    if (String(info.effectivePhpSettings?.[name]) !== String(value)) throw new Error(`PHP did not apply ${name}: expected ${value}, received ${info.effectivePhpSettings?.[name] ?? 'unknown'}.`);
+  }
+  return info;
+}

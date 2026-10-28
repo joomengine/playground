@@ -4,7 +4,7 @@ try {
     if (is_file($root . '/configuration.php') || (is_dir($root) && count(scandir($root)) > 2)) {
         throw new RuntimeException('The destination must be empty before importing a prebuilt site.');
     }
-    $zip = playgroundValidateArchive($playground['archive']);
+    $zip = playgroundValidateArchive($playground['archive'], 100000);
     foreach (['export.json', 'database.ndjson', 'site/configuration.php', 'site/index.php', 'site/libraries/vendor/autoload.php', 'site/administrator/manifests/files/joomla.xml'] as $required) {
         if ($zip->locateName($required) === false) {
             throw new RuntimeException('The prebuilt site is missing ' . $required . '.');

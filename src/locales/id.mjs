@@ -167,5 +167,15 @@ export default Object.freeze({
   "label.templateElement": "Nama templat",
   "label.templateParams": "Parameter templat",
   "label.templateUrl": "URL ZIP templat",
-  "title.launchIdeas": "Luncurkan ide Anda."
+  "title.launchIdeas": "Luncurkan ide Anda.",
+  "a11y.skipSettings": "Lewati ke pengaturan playground",
+  "label.runtimeDeploy": "Runtime dan penerapan",
+  "label.installationSettings": "Pengaturan instalasi",
+  "label.siteSettings": "Pengaturan situs",
+  "label.setupSteps": "Langkah penyiapan tambahan",
+  "help.storageKey": "Kunci mengidentifikasi berkas dan basis data situs ini. Versi Joomla yang berbeda memiliki kunci terpisah.",
+  "help.setupSteps": "Langkah ini berjalan setelah penerapan yang dipilih pada instalasi baru. Ekstensi juga dapat dipasang melalui Joomla setelah dibuka.",
+  "help.compatibility": "Kombinasi runtime yang tersedia diuji bersama.",
+  "license.notices": "pemberitahuan yang disertakan",
+  "confirm.temporary": "Ini mengubah situs sementara yang berjalan. Simpan atau unduh pekerjaan lebih dahulu jika ingin menyimpannya. Lanjutkan?"
 });

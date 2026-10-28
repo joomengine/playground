@@ -167,5 +167,15 @@ export default Object.freeze({
   "label.templateElement": "模板名称",
   "label.templateParams": "模板参数",
   "label.templateUrl": "模板 ZIP URL",
-  "title.launchIdeas": "让创意启航。"
+  "title.launchIdeas": "让创意启航。",
+  "a11y.skipSettings": "跳转到运行环境设置",
+  "label.runtimeDeploy": "运行环境与部署",
+  "label.installationSettings": "安装设置",
+  "label.siteSettings": "站点设置",
+  "label.setupSteps": "附加设置步骤",
+  "help.storageKey": "标识用于区分此站点的文件和数据库。不同 Joomla 版本使用不同标识。",
+  "help.setupSteps": "这些步骤在新安装中于所选部署之后执行。站点打开后，也可通过 Joomla 安装扩展。",
+  "help.compatibility": "可用的运行环境组合均经过联合测试。",
+  "license.notices": "随附声明",
+  "confirm.temporary": "此操作会更改正在运行的临时站点。如需保留，请先保存或下载您的工作。继续吗？"
 });

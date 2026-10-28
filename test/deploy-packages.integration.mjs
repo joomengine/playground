@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { createNodeRuntime } from '../scripts/node-runtime.mjs';
 import { parseCatalog } from '../src/config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
-import { discoverJoomlaConfiguration, installJoomla, requestJoomlaPage } from '../src/joomla/index.mjs';
+import { checkMcpRuntime, discoverJoomlaConfiguration, installJoomla, requestJoomlaPage } from '../src/joomla/index.mjs';
 
 const sourceLoader = (name) => readFile(new URL(`../src/joomla/php/${name}.php`, import.meta.url), 'utf8');
 const pairs = [ ['servicedirectory', '5'], ['servicedirectory', '6'], ['jcb-mcp', '6'] ];
@@ -13,7 +13,9 @@ for (const [deployId, major] of pairs) {
   test(`${deployId}: real Joomla ${major} installation and administrator/frontend health`, { timeout: 300_000 }, async () => {
     let runtime;
     try {
-      runtime = await createNodeRuntime({ directory: process.env.PLAYGROUND_DIST, phpVersion: '8.4' });
+      const recipe = JSON.parse(await readFile(new URL(`../deploys/${deployId}.json`, import.meta.url), 'utf8'));
+      runtime = await createNodeRuntime({ directory: process.env.PLAYGROUND_DIST, phpVersion: '8.4',
+        phpSettings: recipe.configuration.phpSettings });
       const catalog = parseCatalog(runtime.manifest);
       const release = catalog.joomla.find((item) => item.version.startsWith(`${major}.`));
       const manifestURL = new URL('assets/manifest.json', runtime.assetBaseUrl);
@@ -23,9 +25,10 @@ for (const [deployId, major] of pairs) {
         admin: { name: 'Package Administrator', username: 'admin', email: 'admin@example.test', password: `Package-${crypto.randomUUID()}!` },
       }, { catalog, deployCatalog, baseURL: runtime.assetBaseUrl, fetcher: runtime.fetchAsset });
       assert.equal(configuration.language, 'en-GB');
+      assert.deepEqual(configuration.phpSettings, runtime.phpSettings);
       assert.deepEqual(configuration.languages, [], 'Ordinary deployments must not fetch Joomla language packs.');
       const archive = await runtime.fetchAsset(new URL(release.url, manifestURL));
-      await installJoomla(runtime, configuration, { archiveBytes: await archive.arrayBuffer(), sha256: release.sha256,
+      const installed = await installJoomla(runtime, configuration, { archiveBytes: await archive.arrayBuffer(), sha256: release.sha256,
         sourceLoader, fetchPackage: runtime.fetchAsset });
       const component = deployId === 'servicedirectory' ? 'com_servicedirectory' : 'com_joomengine_mcp';
       const response = await requestJoomlaPage(runtime, `administrator/index.php?option=${component}`);
@@ -43,6 +46,15 @@ for (const [deployId, major] of pairs) {
       } else {
         const health = await runtime.runPhp('<?php echo json_encode(["sodium" => extension_loaded("sodium"), "sodiumRoundTrip" => sodium_bin2hex(sodium_hex2bin("00ff80"))], JSON_THROW_ON_ERROR);');
         assert.deepEqual(JSON.parse(health.text), { sodium: true, sodiumRoundTrip: '00ff80' });
+        assert.equal(installed.mcp?.installed, true);
+        assert.equal(installed.mcp.version, '1.0.10');
+        assert.equal(installed.mcp.nativeReads.systemInfo.joomlaVersion, release.version);
+        assert.match(installed.mcp.nativeReads.systemInfo.phpVersion, /^8\.4\./);
+        assert.ok(installed.mcp.nativeReads.extensions.items.some((entry) => entry.element === 'com_joomengine_mcp' && entry.enabled));
+        assert.ok(installed.mcp.nativeReads.extensions.items.some((entry) => entry.element === 'com_componentbuilder' && entry.enabled));
+        assert.deepEqual(installed.mcp.capabilities, { browserNativeReadProbe: true, externalMcpEndpoint: false, nativeProcessJobs: false, stdio: false });
+        await assert.rejects(checkMcpRuntime(runtime, { sourceLoader,
+          admin: { ...configuration.admin, password: `Wrong-${crypto.randomUUID()}!` } }), /authentication failed/i);
       }
     } finally { await runtime?.close(); }
   });

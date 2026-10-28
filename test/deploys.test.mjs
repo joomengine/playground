@@ -44,9 +44,9 @@ test('defaults select JCB on Joomla 5 and JCB with MCP on Joomla 6', async () =>
   }
 });
 
-test('blank and none select Joomla without JCB; explicit URL additions stay separate', async () => {
+test('blank selects Joomla without JCB; explicit URL additions stay separate', async () => {
   const additions = [{ url: 'https://example.test/extension.zip' }];
-  const { configuration } = await resolveDeployConfiguration({ admin, deployId: 'none', extensions: additions, startupCommands: [['cache:clean']], autoLogin: false }, options);
+  const { configuration } = await resolveDeployConfiguration({ admin, deployId: 'blank', extensions: additions, startupCommands: [['cache:clean']], autoLogin: false }, options);
   assert.equal(configuration.deployId, 'blank');
   assert.equal(configuration.autoLogin, false);
   assert.deepEqual(configuration.extensions, additions);

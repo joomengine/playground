@@ -37,3 +37,19 @@ test('language assembly refuses incomplete, mismatched and unsafe upstream input
   differentRelease[`${prefix}pkg_af-ZA.xml`] = encode('<extension><packagename>af-ZA</packagename><version>6.3.0.1</version></extension>');
   assert.throws(() => assembleLanguagePackage(differentRelease, identity), /identity differs/);
 });
+
+test('language assembly creates deterministic child ZIPs requested by an official package manifest', () => {
+  const input = fixture();
+  input[`${prefix}pkg_af-ZA.xml`] = encode('<extension><packagename>af-ZA</packagename><version/><files><file type="language" client="site" id="af-ZA">site_af-ZA.zip</file></files></extension>');
+  input[`${prefix}language/af-ZA/install.xml`] = encode('<extension type="language" client="site"><tag>af-ZA</tag><version/></extension>');
+  const first = assembleLanguagePackage(input, identity);
+  const second = assembleLanguagePackage(Object.fromEntries(Object.entries(input).reverse()), identity);
+  assert.deepEqual(first.bytes, second.bytes);
+  const files = unzipSync(first.bytes);
+  const site = unzipSync(files['site_af-ZA.zip']);
+  assert.deepEqual(site['joomla.ini'], input[`${prefix}language/af-ZA/joomla.ini`]);
+  assert.match(new TextDecoder().decode(site['install.xml']), /<version>6\.2\.0\.0<\/version>/);
+  assert.deepEqual(first.provenance.nestedArchives.map(({ path, fileCount }) => ({ path, fileCount })), [{ path: 'site_af-ZA.zip', fileCount: 3 }]);
+  delete input[`${prefix}language/af-ZA/install.xml`];
+  assert.throws(() => assembleLanguagePackage(input, identity), /subpackage manifest is missing/);
+});

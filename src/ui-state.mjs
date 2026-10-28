@@ -1,3 +1,4 @@
+import { createShareURL } from './config.mjs';
 const SITE_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 const PUBLIC_FIELDS = ['deployId', 'joomlaVersion', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'phpSettings', 'menus', 'template', 'languageTags', 'multilingual', 'content'];
 
@@ -56,7 +57,21 @@ export function forgetSite(state, storageKey) {
 /** Reflect selected controls without newly exposing manually entered setup steps. */
 export function runtimeLocation(currentURL, config) {
   const url = new URL(currentURL);
+  const inbound = url.hash.startsWith('#deploy=') || url.searchParams.has('config');
+  if (inbound) {
+    url.hash = '';
+    url.searchParams.delete('config');
+    url.searchParams.delete('sha256');
+    if (!config.persistence) {
+      try {
+        const refreshed = new URL(createShareURL(currentURL, config));
+        url.search = refreshed.search; url.hash = refreshed.hash;
+      } catch { /* Local operation succeeds even when the updated setup cannot be put in a public link. */ }
+    }
+  }
   const params = url.searchParams;
+  if (config.siteName) params.set('name', config.siteName);
+  else params.delete('name');
   for (const [parameter, name] of [['deploy', 'deployId'], ['joomla', 'joomlaVersion'], ['php', 'phpVersion'], ['language', 'language'], ['key', 'storageKey']]) {
     if (config[name]) params.set(parameter, config[name]);
   }

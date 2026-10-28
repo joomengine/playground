@@ -12,6 +12,9 @@
     "siteName": "Service Directory Playground",
     "initialPath": "/",
     "language": "en-GB",
+    "phpSettings": {
+      "max_execution_time": 180
+    },
     "menus": [
       {
         "key": "directory",

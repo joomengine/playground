@@ -14,3 +14,16 @@ body.embedded .site-header,body.embedded .settings-panel,body.embedded .site-foo
 @media(forced-colors:active){.starfield{display:none}.button,.tool-button{border:1px solid ButtonText}.status-dot{outline:1px solid CanvasText}.rocket-dialog{border:2px solid CanvasText}}
 
 .rocket-icon{display:block;width:19px;height:19px;flex:none;border-radius:4px}.footer-tools svg{width:15px;height:15px}
+.action-menu:not([open]) .action-menu-panel{display:none}
+@media(max-width:760px){.header-actions .tool-button{padding-inline:5px}.header-actions .compact-label{min-width:29px}.header-actions .expand-button{padding-inline-start:9px}.action-menu-panel{inset-inline-end:0}.header-actions{min-width:0}.header-actions .accent{gap:4px}}
+@media(max-width:380px){.header-actions .accent>span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.header-actions .accent{min-width:35px}}
+
+input[type=url],input[type=email],input[type=password],input[type=number],textarea,code,#storage-key,#template-name,#menu-component,#menu-view,#deploy-languages,#share-url,#credential-username,#credential-password,#php-settings-form input,#php-effective{direction:ltr;text-align:start}input[type=password],#credential-password{unicode-bidi:plaintext}
+
+@media(max-width:760px){.header-actions>#save-button>span:not([aria-hidden]),.header-actions>#share-button>span:not([aria-hidden]),.header-actions .action-menu>summary>span:not([aria-hidden]){position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.header-actions>.tool-button,.header-actions .action-menu>summary{min-width:34px;min-height:40px}.header-actions .action-menu>summary{padding-inline:8px}}
+
+.flight-status #save-state{overflow:hidden;text-overflow:ellipsis}
+[dir=rtl] .launch-scene:after{background:linear-gradient(260deg,#080927 15%,#080927ab 40%,transparent 70%)}
+@media(max-width:760px){[dir=rtl] .launch-scene:after{background:linear-gradient(270deg,#080927f5,#080927c4 45%,#08092730),linear-gradient(0deg,#08092770,transparent)}}
+
+.toggle-row .toggle{pointer-events:none}

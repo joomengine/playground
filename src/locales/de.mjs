@@ -167,5 +167,15 @@ export default Object.freeze({
   "label.templateElement": "Templatename",
   "label.templateParams": "Templateparameter",
   "label.templateUrl": "ZIP-URL des Templates",
-  "title.launchIdeas": "Starten Sie Ihre Ideen."
+  "title.launchIdeas": "Starten Sie Ihre Ideen.",
+  "a11y.skipSettings": "Zu den Playground-Einstellungen springen",
+  "label.runtimeDeploy": "Laufzeit und Bereitstellung",
+  "label.installationSettings": "Installationseinstellungen",
+  "label.siteSettings": "Website-Einstellungen",
+  "label.setupSteps": "Zusätzliche Einrichtungsschritte",
+  "help.storageKey": "Ein Schlüssel kennzeichnet Dateien und Datenbank dieser Website. Verschiedene Joomla-Versionen erhalten getrennte Schlüssel.",
+  "help.setupSteps": "Diese Schritte folgen der ausgewählten Bereitstellung bei einer Neuinstallation. Erweiterungen können anschließend auch über Joomla installiert werden.",
+  "help.compatibility": "Verfügbare Laufzeitkombinationen werden gemeinsam getestet.",
+  "license.notices": "mitgelieferte Hinweise",
+  "confirm.temporary": "Dies ändert die laufende temporäre Website. Speichern oder laden Sie Ihre Arbeit zuerst herunter, wenn Sie sie behalten möchten. Fortfahren?"
 });

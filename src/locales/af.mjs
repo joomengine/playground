@@ -167,5 +167,15 @@ export default Object.freeze({
   "label.templateElement": "Sjabloonnaam",
   "label.templateParams": "Sjabloonparameters",
   "label.templateUrl": "Sjabloon se ZIP-URL",
-  "title.launchIdeas": "Lanseer jou idees."
+  "title.launchIdeas": "Lanseer jou idees.",
+  "a11y.skipSettings": "Spring na speelgrondinstellings",
+  "label.runtimeDeploy": "Loopomgewing en ontplooiing",
+  "label.installationSettings": "Installasie-instellings",
+  "label.siteSettings": "Webwerfinstellings",
+  "label.setupSteps": "Bykomende opstellingstappe",
+  "help.storageKey": "’n Sleutel identifiseer hierdie webwerf se lêers en databasis. Verskillende Joomla-weergawes kry aparte sleutels.",
+  "help.setupSteps": "Hierdie stappe loop ná die gekose ontplooiing op ’n nuwe installasie. Jy kan ook uitbreidings deur Joomla installeer nadat dit oopgemaak het.",
+  "help.compatibility": "Beskikbare loopomgewingkombinasies word saam getoets.",
+  "license.notices": "verspreide kennisgewings",
+  "confirm.temporary": "Dit verander die lopende tydelike webwerf. Stoor of laai eers jou werk af as jy dit wil behou. Gaan voort?"
 });

@@ -27,7 +27,9 @@ export function getDirection(locale = current) {
 }
 
 export function t(key, values = {}) {
-  const message = loaded.get(current)?.[key] ?? english[key] ?? key;
+  const messages = loaded.get(current);
+  const message = messages && Object.hasOwn(messages, key) ? messages[key]
+    : Object.hasOwn(english, key) ? english[key] : key;
   return String(message).replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (token, name) =>
     Object.hasOwn(values, name) ? String(values[name]) : token);
 }

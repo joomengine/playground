@@ -167,5 +167,15 @@ export default Object.freeze({
   "label.templateElement": "Nome del template",
   "label.templateParams": "Parametri del template",
   "label.templateUrl": "URL ZIP del template",
-  "title.launchIdeas": "Lancia le tue idee."
+  "title.launchIdeas": "Lancia le tue idee.",
+  "a11y.skipSettings": "Vai alle impostazioni del playground",
+  "label.runtimeDeploy": "Ambiente e distribuzione",
+  "label.installationSettings": "Impostazioni di installazione",
+  "label.siteSettings": "Impostazioni del sito",
+  "label.setupSteps": "Passaggi aggiuntivi",
+  "help.storageKey": "Una chiave identifica file e database del sito. Le diverse versioni di Joomla ricevono chiavi separate.",
+  "help.setupSteps": "Questi passaggi seguono la distribuzione scelta su una nuova installazione. Puoi anche installare estensioni da Joomla dopo l’apertura.",
+  "help.compatibility": "Le combinazioni disponibili degli ambienti vengono testate insieme.",
+  "license.notices": "avvisi distribuiti",
+  "confirm.temporary": "Questo modifica il sito temporaneo in esecuzione. Salva o scarica il lavoro per conservarlo. Continuare?"
 });

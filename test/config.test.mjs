@@ -110,6 +110,8 @@ test('a portable deploy round-trips Unicode names, menus, templates and PHP sett
   assert.doesNotMatch(JSON.stringify(document), /private-secret|private@example|local-private-key/);
   assert.throws(() => parseDeploymentDocument({ schemaVersion: 1, configuration: { admin: { password: 'secret' } } }), /unsupported property admin/);
   assert.throws(() => createDeploymentDocument({ template: { element: 'cassiopeia', params: { api_token: 'private' } } }), /secrets/);
+  assert.throws(() => createDeploymentDocument({ startupCommands: [['user:add', '--password=private']] }), /secrets/);
+  assert.throws(() => createDeploymentDocument({ initialPath: '/index.php?access_token=private' }), /credentials/);
 });
 
 test('large deployment JSON can be fetched with verified integrity and never silently truncated', async () => {

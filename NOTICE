@@ -56,3 +56,38 @@ Sean Morris, offered under Apache-2.0 or GPL-2.0-only. Its vendored curl 8.22.0 
 headers are copyright 1996-2026 Daniel Stenberg and contributors under the curl
 license. PHP's license and the implementation's LICENSE, LICENSE-GPL, NOTICE,
 and COPYING.curl notices accompany the compiled modules and their provenance.
+
+The Sodium modules compile PHP's ext/sodium against the official libsodium
+1.0.22-RELEASE sources from https://github.com/jedisct1/libsodium . The libsodium
+contributors' ISC license and the matching PHP license are shipped beside each
+module. The verified source archive digest, source inventories, compiler identity,
+and binary digest are recorded in the module's build provenance.
+
+The published php-cgi-wasm 0.2.0 JavaScript CGI adapter is supplied by Sean Morris
+and contributors under its preserved Apache-2.0 license. JoomEngine applies a
+reviewed request-input correction to breakoutRequest.mjs, PhpCgiBase.mjs, and
+PhpCgiWebBase.mjs: bounded byte decoding and indexed input reads preserve binary
+request bodies without repeated array shifts. The PHP WebAssembly binary is not
+modified. scripts/cgi-request-overlay.mjs verifies each original source digest;
+the generated manifest records both original and adjusted source digests.
+
+The JoomEngine MCP package is provided by Llewellyn van der Merwe and Vast
+Development Method through https://github.com/joomengine/mcp_package . Version 1.0.10 and its bundled
+component and plugins retain their GNU GPL version 3 or later notices. Its pinned
+package URL and digest are recorded in deploys/jcb-mcp.json. The playground's
+private native read diagnostic does not modify the installed package's license,
+authentication requirements, or CLI transport guards.
+
+Service Directory is provided by Lemuel van der Merwe and Vast Development Method
+through https://github.com/joomengine/pkg-servicedirectory . Its Joomla 5 and
+Joomla 6 packages retain the GNU GPL version 2 or later license and copyright
+notices included by their authors. Exact package source revisions and digests
+are recorded in deploys/servicedirectory.json.
+
+Joomla language packages are derived from the official translation teams' sources
+at https://github.com/joomla/core-translations under GNU GPL version 2 or later.
+Their translations, manifests, localise classes, update identities and notices
+are preserved. Deterministic assembly completes only empty package version/date
+placeholders and builds any declared child archives. The pinned source revision,
+archive checksum and resulting file provenance are recorded in
+dependencies/joomla-languages/packages.json and the generated package inventories.
