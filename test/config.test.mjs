@@ -82,6 +82,7 @@ test('URL deployment options validate packages and commands while excluding cred
 });
 
 test('share URLs preserve public setup directives without administrator credentials or saved data', () => {
+  assert.deepEqual(readURLConfiguration(createShareURL('https://example.test/', { deployId: 'blank' })).config, { deployId: 'blank' });
   const url = new URL(createShareURL('https://example.test/play/?secret=old#credentials', {
     phpVersion: '8.4', joomlaVersion: '6.2.0', initialPath: '/administrator/', hideToolbar: true,
     persistence: false, admin: { password: 'secret' }, storageKey: 'private-key',

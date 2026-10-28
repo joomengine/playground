@@ -73,7 +73,7 @@ export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || 
         let runtime;
         let exported;
         try {
-          runtime = await createNodeRuntime({ directory: distribution, phpVersion });
+          runtime = await createNodeRuntime({ directory: distribution, phpVersion, phpSettings: configuration.phpSettings });
           const archive = await fetchAsset(new URL(release.url, manifestURL));
           const installed = await installJoomla(runtime, configuration, {
             archiveBytes: await archive.arrayBuffer(), sha256: release.sha256,
@@ -93,7 +93,7 @@ export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || 
         assert.notEqual(restoredConfig.admin.username, configuration.admin.username);
         assert.notEqual(restoredConfig.admin.password, configuration.admin.password);
         try {
-          runtime = await createNodeRuntime({ directory: distribution, phpVersion });
+          runtime = await createNodeRuntime({ directory: distribution, phpVersion, phpSettings: restoredConfig.phpSettings });
           const imported = await importJoomlaSnapshot(runtime, restoredConfig, {
             archiveBytes: exported.bytes, sha256,
             sourceLoader: runtime.sourceLoader, fetchPackage: fetchAsset,

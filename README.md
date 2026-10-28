@@ -598,6 +598,17 @@ the same built artifact. Native/compiler caches require exact source and toolcha
 identities; downloads retain checksum validation. Provisioning uses bounded
 concurrency and browser scenarios fail promptly. Pages publishes only the exact
 artifact whose selected checks passed, and CI retains diagnostic output.
+Warm-cache presentation changes reuse already validated native extensions and skip
+the duplicate complete provisioning suite; runtime changes and native cache misses
+still execute those contracts.
+
+Firefox 157 emits an empty-URL service-worker diagnostic for some successful native
+redirects, including a minimal `Response.redirect()` with no playground runtime.
+The browser suite reproduces that behavior independently, then records it separately
+only for verified Joomla form and language redirects with the same exact diagnostic.
+Receipts retain the complete messages and HTTP proof. Other console errors still
+fail validation, and production console output is not suppressed. The isolated
+reproduction is in [test/firefox-redirect-probe.mjs](test/firefox-redirect-probe.mjs).
 
 ## Scope and limitations
 

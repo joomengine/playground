@@ -140,6 +140,7 @@ jobs:
           npm ci --ignore-scripts
           npm run prepare:engine
       - name: Validate upstream PHP and native MariaDB PDO
+        if: needs.checks.outputs.full == 'true' || steps.native.outputs.cache-hit != 'true'
         run: |
           PHP_WASM_MODULE_ROOT="$PWD/node_modules" \
           PHP_WASM_EXTENSION_DIR="$PWD/.cache/native" \
@@ -175,6 +176,7 @@ jobs:
             .cache/tools
           key: ${{ steps.archives.outputs.cache-primary-key }}
       - name: Validate provisioning and runtime capabilities
+        if: needs.checks.outputs.full == 'true' || steps.native.outputs.cache-hit != 'true'
         env:
           PLAYGROUND_LARGE_UPLOAD: '1'
         run: npm run test:provisioning

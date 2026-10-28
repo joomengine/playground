@@ -232,11 +232,11 @@ export function createShareURL(location, config) {
   url.hash = '';
   if (config.siteName && config.siteName !== DEFAULTS.siteName) url.searchParams.set('name', requireText(config.siteName, 'Site name', 100));
   if (config.deployId) url.searchParams.set('deploy', normalizeDeployId(config.deployId));
-  url.searchParams.set('joomla', config.joomlaVersion);
-  url.searchParams.set('php', config.phpVersion);
-  if (config.initialPath !== '/') url.searchParams.set('path', config.initialPath);
+  if (config.joomlaVersion) url.searchParams.set('joomla', config.joomlaVersion);
+  if (config.phpVersion) url.searchParams.set('php', config.phpVersion);
+  if (config.initialPath && config.initialPath !== '/') url.searchParams.set('path', config.initialPath);
   if (config.hideToolbar) url.searchParams.set('toolbar', '0');
-  if (!config.persistence) url.searchParams.set('persist', '0');
+  if (config.persistence === false) url.searchParams.set('persist', '0');
   if (config.language && config.language !== 'en-GB') url.searchParams.set('language', normalizeLanguage(config.language));
   if (config.autoLogin === false) url.searchParams.set('login', 'no');
   if (config.fresh) url.searchParams.set('fresh', '1');

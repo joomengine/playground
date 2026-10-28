@@ -8,6 +8,7 @@ import { chromium, firefox } from 'playwright';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { createStaticServer } from './server.mjs';
 import { assertBrowserRequestBodies } from './browser-request-contract.mjs';
+import { probeSyntheticRedirect, startRedirectTrace, recordVerifiedRedirectDiagnostic } from './firefox-redirect-probe.mjs';
 import { inventory } from '../scripts/assets.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -110,8 +111,10 @@ function observePage(page) {
   page.errors = [];
   page.logs = [];
   page.consoleErrors = [];
+  page.knownBrowserDiagnostics = [];
   page.expectedConsoleURLs = new Set();
   page.failedSiteRequests = [];
+  page.failedRequests = [];
   page.responseErrors = [];
   page.pendingSiteRequests = new Map();
   page.responseChecks = new Set();
@@ -129,7 +132,11 @@ function observePage(page) {
       url: request.url(), method: request.method(), type: request.resourceType(), started: Date.now(),
     });
   });
-  for (const event of ['requestfinished', 'requestfailed']) page.on(event, (request) => page.pendingSiteRequests.delete(request));
+  page.on('requestfinished', (request) => page.pendingSiteRequests.delete(request));
+  page.on('requestfailed', (request) => {
+    page.pendingSiteRequests.delete(request);
+    page.failedRequests.push({ url: request.url(), method: request.method(), type: request.resourceType(), error: request.failure()?.errorText, step: page.testStep });
+  });
   page.on('response', (response) => {
     if (!response.url().includes('/__site/')) return;
     if (response.status() >= 400) page.failedSiteRequests.push({ url: response.url(), status: response.status() });
@@ -149,10 +156,10 @@ function observePage(page) {
 async function saveBrowserDiagnostics(page, name, error) {
   const state = await page.evaluate(() => {
     const text = (id) => document.getElementById(id)?.textContent;
-    const frame = document.getElementById('site-frame');
+    const frame = document.getElementById('site-frame') || document.getElementById('site');
     return {
       url: location.href, readyState: document.readyState,
-      status: text('status-message'), loading: text('loading-message'), error: text('error-message'), feedback: text('header-feedback'), activity: text('activity-log')?.slice(-5000),
+      status: text('status-message') || text('message'), loading: text('loading-message'), error: text('error-message'), feedback: text('header-feedback'), activity: text('activity-log')?.slice(-5000),
       iframe: frame ? { src: frame.getAttribute('src'), hidden: frame.hidden, connected: frame.isConnected } : null,
       progress: window.validationProgress,
     };
@@ -164,7 +171,7 @@ async function saveBrowserDiagnostics(page, name, error) {
   })));
   const diagnostics = {
     message: error.stack || error.message, step: page.testStep, state, frames,
-    errors: page.errors, logs: page.logs?.slice(-30), consoleErrors: page.consoleErrors, failedSiteRequests: page.failedSiteRequests,
+    errors: page.errors, logs: page.logs?.slice(-30), consoleErrors: page.consoleErrors, knownBrowserDiagnostics: page.knownBrowserDiagnostics, failedSiteRequests: page.failedSiteRequests, failedRequests: page.failedRequests,
     responseErrors: page.responseErrors, pendingSiteRequests: [...(page.pendingSiteRequests?.values() || [])],
   };
   await mkdir(path.join(root, 'test-results'), { recursive: true });
@@ -405,9 +412,25 @@ async function assertPDO(page, pair) {
 }
 
 async function assertAbnormalShutdown(page, config) {
-  for (const ending of ['exit(17);', "trigger_error('Expected request failure', E_USER_ERROR);"]) {
+  const failure = `Expected request failure ${randomUUID()}`;
+  for (const ending of ['exit(17);', `throw new RuntimeException('${failure}');`]) {
+    const fatal = ending.startsWith('throw');
+    const step = fatal ? 'intentional PHP fatal request cleanup' : 'intentional PHP exit request cleanup';
+    page.testStep = step;
+    const source = new URL('assets/php-cgi-wasm/PhpCgiBase.mjs', page.url()).href;
+    const expectedMessage = fatal
+      ? new RegExp(`^\\[[^\\]\\r\\n]+\\] PHP Fatal error:  Uncaught RuntimeException: ${failure} in (/internal/operation-[a-f0-9-]+\\.php):1\\nStack trace:\\n#0 \\{main\\}\\n  thrown in \\1 on line 1\\n$`)
+      : /^$/;
+    const before = page.consoleErrors.length;
+    const diagnostic = page.waitForEvent('console', { predicate: message => message.type() === 'error'
+      && message.location().url === source && expectedMessage.test(message.text()), timeout: 10_000 });
     await assert.rejects(() => php(page, `<?php ${PDO} $db->beginTransaction(); $db->exec('INSERT INTO playground_contract (id) VALUES (2)'); ${ending}`),
       'An abnormal PHP termination must fail the session explicitly.');
+    await diagnostic;
+    const expected = page.consoleErrors.slice(before).filter(record => record.step === step && record.url === source && expectedMessage.test(record.message));
+    assert.equal(expected.length, 1, 'The deliberate termination must emit exactly its own upstream stderr diagnostic.');
+    page.consoleErrors.splice(page.consoleErrors.indexOf(expected[0]), 1);
+    page.testStep = 'recover after deliberate PHP termination';
     await close(page);
     await start(page, config);
     const state = await phpJSON(page, `${PDO} echo json_encode(['count' => $db->query('SELECT COUNT(*) FROM playground_contract')->fetchColumn(), 'transaction' => $db->inTransaction()], JSON_THROW_ON_ERROR);`);
@@ -439,6 +462,7 @@ for (const name of browserNames) {
     const browser = await browsers[name].launch({ headless: true, ...(executablePath ? { executablePath } : {}),
       ...(name === 'chromium' ? { args: ['--no-sandbox'] } : {}),
       env: { ...process.env } });
+    const syntheticRedirectProbe = scenarios.some(value => ['rocket', 'deploys'].includes(value)) ? await probeSyntheticRedirect(browser) : null;
     const fixtures = { '__test_extension.zip': extensionArchive, '__test_curl.json': JSON.stringify(curlProof) };
     const server = await createStaticServer({ directory, prefix: '/nested/playground/', fixtures });
     const corsServer = await createStaticServer({ directory, prefix: '/cors/', corsOrigin: new URL(server.url).origin,
@@ -688,6 +712,10 @@ for (const name of browserNames) {
           for (const language of ['af-ZA', 'de-DE', 'fr-FR', 'it-IT', 'es-ES', 'zh-CN', 'nl-NL', 'en-GB']) {
             assert.ok(content.some((entry) => entry.language === language && entry.articles > 0), `${language} needs published multilingual content.`);
           }
+          const consoleStart = page.consoleErrors.length;
+          const traceFrom = await startRedirectTrace(page);
+          const documentResponse = page.waitForResponse(response => response.status() === 200
+            && response.request().resourceType() === 'document' && response.url().includes('/__site/'));
           const siteURL = await page.evaluate(() => {
             const frame = document.createElement('iframe');
             frame.id = 'site-frame'; frame.src = window.playground.url;
@@ -699,6 +727,9 @@ for (const name of browserNames) {
           assert.match(await frame.locator('html').getAttribute('lang'), /^af-ZA$/i);
           assert.match(await frame.locator('body').innerText(), /Erfenis/);
           assert.ok(await frame.locator('.mod-languages').count() > 0, 'The actual multilingual home page must offer its language switcher.');
+          const loadedDocument = await documentResponse;
+          await recordVerifiedRedirectDiagnostic(page, { probe: syntheticRedirectProbe, kind: 'get301', from: consoleStart, traceFrom,
+            sourceURL: new URL('service-worker.mjs', server.url).href, step: page.testStep, finalURL: frame.url(), responseStatus: loadedDocument.status(), methodAfterRedirect: loadedDocument.request().method() });
           await page.locator('#site-frame').evaluate((frame) => frame.remove());
           proof.push({ id: 'heritage-demo', fresh, fromSnapshot: Boolean(result.installation.fromSnapshot), content });
           await close(page);
@@ -724,7 +755,7 @@ for (const name of browserNames) {
         await page.locator('#launch-button:enabled').waitFor();
         proof.push({ id: 'jcb-mcp', defaultDomainAutostart: true });
         await assertCleanConsole(page);
-        records.push({ ...defaultPair, deploys: proof });
+        records.push({ ...defaultPair, deploys: proof, knownBrowserDiagnostics: page.knownBrowserDiagnostics });
       } catch (error) { await saveBrowserDiagnostics(page, `deploys-${name}`, error); throw error; }
       finally { await close(page).catch(() => {}); await context.close(); }
     });
@@ -822,11 +853,10 @@ for (const name of browserNames) {
         const originalFrame = await page.locator('#site-frame').getAttribute('src');
         await showQuickSettings(page);
         await page.locator('#php-version').selectOption(changedPHP);
-        await page.waitForFunction((previous) => {
-          const frame = document.getElementById('site-frame');
-          return frame && frame.getAttribute('src') !== previous;
-        }, originalFrame);
+        await page.locator('#status-message').filter({ hasText: 'PHP settings applied.' }).waitFor({ timeout: requestTimeout });
         await renderedSiteFrame(page);
+        assert.equal(await page.locator('#site-frame').getAttribute('src'), originalFrame,
+          'Restarting PHP must retain the active Joomla route.');
         const afterSwitch = await previewContract(page);
         assert.deepEqual(afterSwitch, { ...marker, php: manifest.php.find((entry) => entry.version === changedPHP).patchVersion });
         page.testStep = 'reopen saved site from origin';
@@ -938,6 +968,10 @@ for (const name of browserNames) {
           name: 'Rocket shared demonstration', persist: '0', extension: new URL('__test_extension.zip', server.url).href })) url.searchParams.set(key, value);
         page.testStep = 'launch temporary site in English';
         await page.goto(url.href);
+        await page.locator('#loading-view:not([hidden])').waitFor();
+        await page.locator('#loading-message').filter({ hasText: /Starting MariaDB|Loading PHP|Loading Joomla|Extracting Joomla/ }).waitFor();
+        await mkdir(path.join(root, 'test-results'), { recursive: true });
+        await page.screenshot({ path: path.join(root, 'test-results', `rocket-deploy-${name}.png`) });
         await renderedSiteFrame(page);
         assert.equal(await page.locator('html').getAttribute('lang'), 'en');
         assert.equal(await page.locator('#settings').isVisible(), false);
@@ -1040,12 +1074,17 @@ for (const name of browserNames) {
         const originalName = await configurationFrame.locator('#jform_sitename').inputValue();
         for (const name of ['Rocket configuration form proof', originalName]) {
           await configurationFrame.locator('#jform_sitename').fill(name);
-          await Promise.all([
+          const consoleStart = page.consoleErrors.length;
+          const traceFrom = await startRedirectTrace(page);
+          const [savedResponse] = await Promise.all([
             configurationFrame.waitForNavigation({ waitUntil: 'load' }),
             configurationFrame.locator('joomla-toolbar-button[task="application.apply"] button').click(),
           ]);
           assert.equal(await configurationFrame.locator('#jform_sitename').inputValue(), name);
           assert.match(await configurationFrame.locator('body').innerText(), /Configuration saved/i);
+          await recordVerifiedRedirectDiagnostic(page, { probe: syntheticRedirectProbe, kind: 'post303', from: consoleStart, traceFrom, finalURL: configurationFrame.url(),
+            sourceURL: new URL('service-worker.mjs', server.url).href, step: page.testStep,
+            responseStatus: savedResponse.status(), methodAfterRedirect: savedResponse.request().method() });
         }
         await configurationFrame.goto(frontendURL);
         assert.deepEqual(await previewContract(page), marker);
@@ -1064,7 +1103,7 @@ for (const name of browserNames) {
           await page.setViewportSize({ width, height: 900 });
           await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth + 1);
           assert.ok(await page.locator('#site-frame').evaluate(frame => Math.abs(frame.getBoundingClientRect().width - innerWidth) <= 2));
-          await page.screenshot({ path: path.join(root, 'test-results', `rocket-${name}-${width}.png`) });
+          await page.screenshot({ path: path.join(root, 'test-results', `rocket-${name}-${width}.png`), fullPage: true });
         }
         page.testStep = 'component parent reload preserves the Rocket shell and runtime';
         const shellIdentity = randomUUID();
@@ -1091,7 +1130,16 @@ for (const name of browserNames) {
         standalone.setDefaultTimeout(30_000);
         await standalone.locator('#site:not([hidden])').waitFor({ timeout: requestTimeout });
         const standaloneFrame = await (await standalone.locator('#site').elementHandle()).contentFrame();
+        await waitForSiteFrame(standaloneFrame, await standalone.locator('#site').getAttribute('src'));
         await standaloneFrame.locator('body').waitFor();
+        assert.equal(await standaloneFrame.evaluate(() => parent === window), true);
+        const standaloneIdentity = randomUUID();
+        await standalone.evaluate(value => { window.__rocketIdentity = value; }, standaloneIdentity);
+        const standaloneReload = standaloneFrame.waitForNavigation({ waitUntil: 'load' });
+        await standaloneFrame.evaluate(() => { setTimeout(() => parent.location.reload(), 0); });
+        await standaloneReload;
+        assert.equal(await standalone.evaluate(() => window.__rocketIdentity), standaloneIdentity);
+        assert.deepEqual(await previewContract(standalone, 'read', 'site'), marker);
         await page.close();
         assert.deepEqual(await previewContract(standalone, 'read', 'site'), marker);
         assert.equal(await standalone.locator('#site-header').count(), 0);
@@ -1103,14 +1151,19 @@ for (const name of browserNames) {
         await assertCleanConsole(page);
         await assertCleanConsole(standalone);
         records.push({ ...defaultPair, rocket: true, shareLink: true, independentInterfaceLanguage: true, rtl: true,
-          temporaryToSaved: true, retainedCredentials: true, effectivePhpSettings: settings, singleScroll: true, standaloneOwnership: true });
-      } catch (error) { await saveBrowserDiagnostics(page.isClosed() ? standalone : page, `rocket-${name}`, error); throw error; }
+          temporaryToSaved: true, retainedCredentials: true, effectivePhpSettings: settings, singleScroll: true, standaloneOwnership: true,
+          knownBrowserDiagnostics: page.knownBrowserDiagnostics });
+      } catch (error) {
+        if (!page.isClosed()) await saveBrowserDiagnostics(page, `rocket-${name}`, error);
+        if (standalone && !standalone.isClosed()) await saveBrowserDiagnostics(standalone, `rocket-${name}-standalone`, error);
+        throw error;
+      }
       finally { await context.close(); }
     });
     assert.equal(records.length, (scenarios.includes('matrix') ? combinations.length : 0) + scenarios.filter((scenario) => scenario !== 'matrix').length,
       'Every selected runtime scenario must pass before writing a receipt.');
     await checkedInventory();
     await mkdir(path.join(root, 'test-results'), { recursive: true });
-    await writeFile(path.join(root, 'test-results', `browser-${name}.json`), `${JSON.stringify({ browser: name, version: browser.version(), manifestSha256, inventorySha256, scenarios, records }, null, 2)}\n`);
+    await writeFile(path.join(root, 'test-results', `browser-${name}.json`), `${JSON.stringify({ browser: name, version: browser.version(), manifestSha256, inventorySha256, scenarios, syntheticRedirectProbe, records }, null, 2)}\n`);
   });
 }

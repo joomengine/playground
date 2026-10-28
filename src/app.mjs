@@ -100,7 +100,6 @@ function mountPreview(url) {
   frame.id = 'site-frame';
   frame.title = t('a11y.site');
   frame.referrerPolicy = 'same-origin';
-  frame.allow = 'clipboard-write';
   // Set the destination before attachment so a newly inserted blank document is never reused.
   frame.src = url;
   disconnectFrame();
