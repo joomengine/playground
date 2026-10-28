@@ -614,6 +614,15 @@ Warm-cache presentation changes reuse already validated native extensions and sk
 the duplicate complete provisioning suite; runtime changes and native cache misses
 still execute those contracts.
 
+An installed fixture extension must render its own nested image, stylesheet and
+script; a separate fixture verifies external resources alongside native database
+queries. Third-party image 404 responses are retained as content diagnostics,
+including any exactly correlated browser message. Scripts, styles, fonts, other
+image failures and unrelated console errors still fail validation. The pinned JCB
+packages contain a rotating banner filename mismatch, so that optional image can
+be missing on ordinary hosting too. Its package and URLs remain unchanged; the
+playground does not replace artwork or hide production errors.
+
 Firefox 157 emits an empty-URL service-worker diagnostic for some successful native
 redirects, including a minimal `Response.redirect()` with no playground runtime.
 The browser suite reproduces that behavior independently, then records it separately

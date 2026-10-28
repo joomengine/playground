@@ -9,6 +9,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { createStaticServer } from './server.mjs';
 import { assertBrowserRequestBodies } from './browser-request-contract.mjs';
 import { assertExternalAssets } from './external-assets-contract.mjs';
+import { classifyAssetDiagnostics } from './asset-diagnostics.mjs';
 import { assertMcpHttp } from './mcp-http.mjs';
 import { probeSyntheticRedirect, startRedirectTrace, recordVerifiedRedirectDiagnostic } from './firefox-redirect-probe.mjs';
 import { inventory } from '../scripts/assets.mjs';
@@ -47,9 +48,14 @@ for (const joomla of joomlaVersions) assert.ok(manifest.joomla.some((entry) => e
 
 const PDO = "$db = new PDO('mysql:dbname=joomla;charset=utf8mb4', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);";
 const requestTimeout = 240_000;
+const installedAssetNonce = randomUUID();
 const extensionArchive = zipSync({
-  'mod_playground_contract.xml': strToU8('<?xml version="1.0" encoding="utf-8"?><extension type="module" client="site" method="upgrade"><name>mod_playground_contract</name><author>JoomEngine</author><version>1.0.0</version><description>Browser integration fixture</description><files><filename module="mod_playground_contract">mod_playground_contract.php</filename><filename>contract.php</filename></files></extension>'),
+  'mod_playground_contract.xml': strToU8('<?xml version="1.0" encoding="utf-8"?><extension type="module" client="site" method="upgrade"><name>mod_playground_contract</name><author>JoomEngine</author><version>1.0.0</version><description>Browser integration fixture</description><files><filename module="mod_playground_contract">mod_playground_contract.php</filename><filename>contract.php</filename><filename>asset-proof.html</filename><folder>assets</folder></files></extension>'),
   'mod_playground_contract.php': strToU8("<?php defined('_JEXEC') or die; echo 'Playground extension fixture';"),
+  'asset-proof.html': strToU8('<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Installed extension assets</title><link rel="stylesheet" href="assets/proof.css"><script src="assets/proof.js"></script></head><body><img id="installed-image" src="assets/proof.svg" alt="Installed image"></body></html>'),
+  'assets/proof.svg': strToU8('<svg xmlns="http://www.w3.org/2000/svg" width="13" height="17"><path fill="#123456" d="M0 0h13v17H0z"/></svg>'),
+  'assets/proof.css': strToU8('#installed-image { border-top: 3px solid rgb(18, 52, 86); }'),
+  'assets/proof.js': strToU8(`window.installedAssetProof = ${JSON.stringify(installedAssetNonce)};`),
   'contract.php': strToU8(`<?php
 header('Content-Type: application/json');
 $db = new PDO('mysql:dbname=joomla;charset=utf8mb4', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
@@ -112,6 +118,7 @@ function observePage(page) {
   page.logs = [];
   page.consoleErrors = [];
   page.knownBrowserDiagnostics = [];
+  page.contentDiagnostics = [];
   page.expectedConsoleURLs = new Set();
   page.failedSiteRequests = [];
   page.failedRequests = [];
@@ -139,7 +146,7 @@ function observePage(page) {
   });
   page.on('response', (response) => {
     if (!response.url().includes('/__site/')) return;
-    if (response.status() >= 400) page.failedSiteRequests.push({ url: response.url(), status: response.status() });
+    if (response.status() >= 400) page.failedSiteRequests.push({ url: response.url(), status: response.status(), resourceType: response.request().resourceType() });
     if (!['fetch', 'xhr'].includes(response.request().resourceType())) return;
     const checked = (async () => {
       const text = await response.text().catch(() => '');
@@ -171,7 +178,7 @@ async function saveBrowserDiagnostics(page, name, error) {
   })));
   const diagnostics = {
     message: error.stack || error.message, step: page.testStep, state, frames,
-    errors: page.errors, logs: page.logs?.slice(-30), consoleErrors: page.consoleErrors, knownBrowserDiagnostics: page.knownBrowserDiagnostics, failedSiteRequests: page.failedSiteRequests, failedRequests: page.failedRequests,
+    errors: page.errors, logs: page.logs?.slice(-30), consoleErrors: page.consoleErrors, knownBrowserDiagnostics: page.knownBrowserDiagnostics, contentDiagnostics: page.contentDiagnostics, failedSiteRequests: page.failedSiteRequests, failedRequests: page.failedRequests,
     responseErrors: page.responseErrors, pendingSiteRequests: [...(page.pendingSiteRequests?.values() || [])],
   };
   await mkdir(path.join(root, 'test-results'), { recursive: true });
@@ -180,10 +187,17 @@ async function saveBrowserDiagnostics(page, name, error) {
   console.error(JSON.stringify({ diagnostic: name, ...diagnostics }));
 }
 
-async function assertCleanConsole(page) {
+async function assertCleanConsole(page, { contentImages = false } = {}) {
   await bounded(Promise.allSettled([...page.responseChecks]), 'Read browser responses', 10_000);
+  let consoleErrors = page.consoleErrors;
+  if (contentImages) {
+    const diagnostics = classifyAssetDiagnostics(page.failedSiteRequests, page.consoleErrors);
+    page.contentDiagnostics = diagnostics.missingImages;
+    assert.deepEqual(diagnostics.unexpectedAssets, [], 'Installed scripts, styles and fonts must load; image failures other than missing content remain errors.');
+    consoleErrors = diagnostics.consoleErrors;
+  }
   assert.deepEqual(page.errors, [], 'The application must not produce uncaught browser exceptions.');
-  assert.deepEqual(page.consoleErrors, [], 'Unexpected browser console errors must be fixed at their source.');
+  assert.deepEqual(consoleErrors, [], 'Unexpected browser console errors must be fixed at their source.');
   assert.deepEqual(page.responseErrors, [], 'AJAX responses must not contain PHP diagnostics or malformed JSON.');
 }
 
@@ -691,7 +705,26 @@ for (const name of browserNames) {
         const admin = await request(page, '/administrator/');
         assert.match(admin.text, /name\s*=\s*["']passwd["']/i, 'login=no must leave the actual administrator unauthenticated.');
         assert.equal(await phpJSON(page, `${PDO} echo json_encode($db->query("SELECT enabled FROM jml_extensions WHERE element='mod_playground_contract'")->fetchColumn());`), 1);
-        proof.push({ id: 'blank', language: 'nl-NL', autoLogin: false, urlExtension: true, urlCommand: true });
+        const installedAssetURL = await page.evaluate(() => new URL('modules/mod_playground_contract/asset-proof.html', window.playground.baseUrl).href);
+        const installedAssetDocument = page.waitForResponse(response => response.url() === installedAssetURL);
+        await page.evaluate(url => {
+          const frame = document.createElement('iframe');
+          frame.id = 'installed-asset-frame'; frame.src = url; document.body.append(frame);
+        }, installedAssetURL);
+        const installedAssetFrame = await (await page.locator('#installed-asset-frame').elementHandle()).contentFrame();
+        await installedAssetFrame.waitForURL(installedAssetURL, { waitUntil: 'load' });
+        assert.equal((await installedAssetDocument).status(), 200, 'Joomla must install and serve the extension proof document.');
+        await installedAssetFrame.waitForFunction(() => document.querySelector('#installed-image')?.complete && window.installedAssetProof);
+        const installedAssets = await installedAssetFrame.evaluate(() => {
+          const image = document.querySelector('#installed-image');
+          const style = getComputedStyle(image);
+          return { image: [image.naturalWidth, image.naturalHeight], border: style.borderTopWidth,
+            color: style.borderTopColor, script: window.installedAssetProof };
+        });
+        assert.deepEqual(installedAssets, { image: [13, 17], border: '3px', color: 'rgb(18, 52, 86)', script: installedAssetNonce },
+          'Installed extension images, styles and classic scripts must load through their actual nested site paths.');
+        await page.locator('#installed-asset-frame').evaluate(frame => frame.remove());
+        proof.push({ id: 'blank', language: 'nl-NL', autoLogin: false, urlExtension: true, urlCommand: true, installedAssets });
         await close(page);
         for (const fresh of [false, true]) {
           page.testStep = `heritage ${fresh ? 'fresh recipe' : 'prepared snapshot'}`;
@@ -732,8 +765,6 @@ for (const name of browserNames) {
         assert.equal(await page.frameLocator('#site-frame').locator('input[name="passwd"]').count(), 0);
         assert.deepEqual(dashboardErrors(await page.frameLocator('#site-frame').locator('html').innerHTML()), [],
           'The default JCB dashboard must be free of missing-runtime requirement alerts.');
-        assert.deepEqual(page.failedSiteRequests.filter((item) => /\.(?:css|m?js|svg|png|gif|jpe?g|webp|woff2?|ttf)$/i.test(new URL(item.url).pathname)), [],
-          'The actual JCB interface and heritage pages must load their local scripts, styles, fonts and images.');
         if (name === 'chromium') {
           await mkdir(path.join(root, 'test-results'), { recursive: true });
           await page.screenshot({ path: path.join(root, 'test-results/jcb-desktop.png'), fullPage: true });
@@ -743,8 +774,8 @@ for (const name of browserNames) {
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         proof.push({ id: 'jcb-mcp', defaultDomainAutostart: true });
-        await assertCleanConsole(page);
-        records.push({ ...defaultPair, deploys: proof, knownBrowserDiagnostics: page.knownBrowserDiagnostics });
+        await assertCleanConsole(page, { contentImages: true });
+        records.push({ ...defaultPair, deploys: proof, knownBrowserDiagnostics: page.knownBrowserDiagnostics, contentDiagnostics: page.contentDiagnostics });
       } catch (error) { await saveBrowserDiagnostics(page, `deploys-${name}`, error); throw error; }
       finally { await close(page).catch(() => {}); await context.close(); }
     });
