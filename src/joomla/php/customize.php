@@ -4,7 +4,8 @@ try {
     [$application, $container, $database] = playgroundApplication($root, true);
     $selected = $playground['language'] ?? 'en-GB';
     $content = $playground['content'] ?? null;
-    $tags = [$selected];
+    $multilingual = $playground['multilingual'] ?? $content['multilingual'] ?? false;
+    $tags = [$selected, ...($playground['languageTags'] ?? [])];
     foreach ($content['categories'] ?? [] as $entry) {
         $tags[] = $entry['language'];
     }
@@ -26,8 +27,8 @@ try {
     playgroundStoreTable($languageComponent, ['params' => (string) $parameters]);
 
     $created = ['categories' => [], 'articles' => [], 'menus' => []];
-    if ($content !== null) {
-        foreach ($tags as $tag) {
+    if ($content !== null || $multilingual) {
+        foreach ($tags as $languageOrder => $tag) {
             $metadata = $siteLanguages[$tag]->metadata;
             $table = new \Joomla\CMS\Table\Language($database);
             $exists = $table->load(['lang_code' => $tag]);
@@ -44,10 +45,10 @@ try {
                 'title_native' => $metadata['nativeName'] ?? $metadata['name'],
                 'sef' => $sef, 'image' => strtolower(str_replace('-', '_', $tag)),
                 'description' => '', 'published' => 1, 'access' => 1,
-                'ordering' => $exists ? $table->ordering : 0,
+                'ordering' => $languageOrder + 1,
             ]);
         }
-        if ($content['multilingual']) {
+        if ($multilingual) {
             foreach (['languagefilter', 'languagecode'] as $element) {
                 $plugin = new \Joomla\CMS\Table\Extension($database);
                 if (!$plugin->load(['type' => 'plugin', 'folder' => 'system', 'element' => $element])) {
@@ -69,10 +70,10 @@ try {
         )->loadResult();
         $administrator = $container->get(\Joomla\CMS\User\UserFactoryInterface::class)->loadUserById($administratorId);
         if (!$administrator->authorise('core.admin')) {
-            throw new RuntimeException('The configured administrator cannot provision blueprint content.');
+            throw new RuntimeException('The configured administrator cannot provision deploy content.');
         }
         $application->loadIdentity($administrator);
-        foreach ($content['categories'] as $entry) {
+        foreach ($content['categories'] ?? [] as $entry) {
             $category = new \Joomla\CMS\Table\Category($database);
             $category->setCurrentUser($administrator);
             $category->setLocation(1, 'last-child');
@@ -88,7 +89,7 @@ try {
         define('JPATH_COMPONENT', JPATH_ADMINISTRATOR . '/components/com_content');
         define('JPATH_COMPONENT_ADMINISTRATOR', JPATH_COMPONENT);
         define('JPATH_COMPONENT_SITE', JPATH_SITE . '/components/com_content');
-        foreach ($content['articles'] as $entry) {
+        foreach ($content['articles'] ?? [] as $entry) {
             $model = $application->bootComponent('com_content')->getMVCFactory()->createModel('Article', 'Administrator', ['ignore_request' => true]);
             $model->setCurrentUser($administrator);
             if (!$model->save([
@@ -99,7 +100,7 @@ try {
                 'featured' => $entry['featured'] ? 1 : 0, 'images' => '{}', 'urls' => '{}',
                 'attribs' => '{}', 'metadata' => '{}',
             ])) {
-                throw new RuntimeException('Cannot create blueprint article: ' . $model->getError());
+                throw new RuntimeException('Cannot create deploy article: ' . $model->getError());
             }
             $articleId = (int) $model->getState('article.id');
             $created['articles'][$entry['key']] = $articleId;
@@ -109,7 +110,7 @@ try {
                 if (!$type->load(['menutype' => $menuType])) {
                     playgroundStoreTable($type, [
                         'menutype' => $menuType, 'title' => $entry['title'],
-                        'description' => 'Blueprint navigation', 'client_id' => 0,
+                        'description' => 'Deploy navigation', 'client_id' => 0,
                     ]);
                 }
                 $menu = new \Joomla\CMS\Table\Menu($database);
@@ -118,14 +119,25 @@ try {
                     'menutype' => $menuType, 'title' => $entry['title'], 'alias' => $entry['alias'],
                     'type' => 'component', 'link' => 'index.php?option=com_content&view=article&id=' . $articleId,
                     'component_id' => $componentId, 'published' => 1, 'parent_id' => 1,
-                    'home' => 1, 'language' => $content['multilingual'] ? $entry['language'] : '*',
+                    'home' => 1, 'language' => $multilingual ? $entry['language'] : '*',
                     'client_id' => 0, 'access' => 1, 'params' => '{}',
                 ]);
                 $created['menus'][$entry['language']] = (int) $menu->id;
             }
         }
-        if ($content['multilingual']) {
+        if ($multilingual && count($created['menus']) > 1) {
+            foreach ($created['menus'] as $tag => $id) {
+                $model = $application->bootComponent('com_menus')->getMVCFactory()->createModel('Item', 'Administrator', ['ignore_request' => true]);
+                $model->setCurrentUser($administrator);
+                $data = (array) $model->getItem($id);
+                $data['menuordering'] = 0;
+                $data['associations'] = array_diff_key($created['menus'], [$tag => true]);
+                if (!$model->save($data)) throw new RuntimeException('Cannot associate language home pages: ' . $model->getError());
+            }
+        }
+        if ($multilingual) {
             $module = new \Joomla\CMS\Table\Module($database);
+            $module->load(['module' => 'mod_languages', 'client_id' => 0, 'language' => '*']);
             playgroundStoreTable($module, [
                 'title' => 'Languages', 'module' => 'mod_languages', 'position' => 'topbar',
                 'content' => '', 'published' => 1, 'showtitle' => 0, 'access' => 1,
@@ -133,7 +145,8 @@ try {
                 'params' => ['cache' => 0, 'dropdown' => 0, 'full_name' => 1, 'images' => 0, 'inline' => 1, 'show_active' => 1],
             ]);
             $assignment = (object) ['moduleid' => (int) $module->id, 'menuid' => 0];
-            if (!$database->insertObject('#__modules_menu', $assignment)) {
+            $assigned = (int) $database->setQuery('SELECT COUNT(*) FROM #__modules_menu WHERE moduleid = ' . (int) $module->id . ' AND menuid = 0')->loadResult();
+            if (!$assigned && !$database->insertObject('#__modules_menu', $assignment)) {
                 throw new RuntimeException('Cannot publish the language switcher module.');
             }
         }

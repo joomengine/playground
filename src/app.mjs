@@ -1,20 +1,30 @@
-import { createShareURL, normalizeConfiguration, parseCatalog, readURLConfiguration } from './config.mjs';
-import { loadBlueprintCatalog, resolveBlueprintConfiguration } from './blueprints.mjs';
+import { createShareURL, createDeploymentDocument, parseDeploymentDocument, loadDeploymentDocument, normalizeConfiguration, parseCatalog, readURLConfiguration } from './config.mjs';
+import { loadDeployCatalog, resolveDeployConfiguration } from './deploys.mjs';
 import { createPlayground, prepareEnvironment, resetPlayground } from './playground.mjs';
 import { defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from './ui-state.mjs';
+
+import { connectFrame } from './frame-view.mjs';
+import { DEFAULT_PHP_SETTINGS, normalizePhpSettings } from './php-settings.mjs';
+import { UI_LANGUAGES, getLocale, initializeLocale, setLocale, t, applyTranslations } from './i18n.mjs';
 
 const $ = (id) => document.getElementById(id);
 const deploymentURL = new URL('../', import.meta.url).href;
 const preferenceKey = savedStateKey(deploymentURL);
 const fields = {
-  blueprintId: $('blueprint'), phpVersion: $('php-version'), joomlaVersion: $('joomla-version'),
+  deployId: $('deploy'), phpVersion: $('php-version'), joomlaVersion: $('joomla-version'),
   language: $('language'), siteName: $('site-name'), initialPath: $('initial-path'), storageKey: $('storage-key'),
   persistence: $('persistence'), autoLogin: $('auto-login'), extensions: $('extensions'), startupCommands: $('startup-commands'),
 };
 const controls = ['save-button', 'restart-button', 'close-button', 'reset-button', 'share-button', 'export-button', 'export-format'];
 const drafts = new Map();
-let catalog, blueprintCatalog, runtime, currentConfig, currentInput;
+let catalog, deployCatalog, runtime, currentConfig, currentInput;
 let busy = false;
+let disconnectFrame = () => {};
+let phpSettings = { ...DEFAULT_PHP_SETTINGS };
+let lastSavedAt;
+let feedbackTimer;
+let sharedConfiguration;
+let currentSitePath = '/';
 let closing = false;
 let selectedProfile;
 let hideToolbar = false;
@@ -49,8 +59,35 @@ function activity(message) {
 }
 function show(view) {
   for (const name of ['welcome', 'loading-view', 'error-view', 'site-mount']) $(name).hidden = name !== view;
+  document.querySelector('.preview-panel').classList.toggle('launching', view === 'loading-view');
+  const video = $('launch-video');
+  if (view === 'loading-view' && !matchMedia('(prefers-reduced-motion: reduce)').matches) video.play().catch(() => {});
+  else video.pause();
 }
+function feedback(message, { error = false, persistent = false } = {}) {
+  clearTimeout(feedbackTimer);
+  const node = $('header-feedback');
+  node.textContent = messageOf(message); node.dataset.error = String(error); node.hidden = false;
+  if (!persistent) feedbackTimer = setTimeout(() => { node.hidden = true; }, 7000);
+}
+function openDialog(id) {
+  $('site-actions').open = false;
+  const dialog = $(id);
+  if (!dialog.open) dialog.showModal();
+}
+function setDrawer(open) {
+  $('settings').hidden = !open;
+  $('settings-toggle').setAttribute('aria-expanded', String(open));
+  $('settings-toggle').setAttribute('aria-label', t(open ? 'action.collapse' : 'action.expand'));
+}
+function updateSaveState() {
+  $('save-state').textContent = runtime ? currentConfig?.persistence
+    ? lastSavedAt ? t('status.savedAt', { time: lastSavedAt.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) }) : t('status.saved')
+    : t('status.temporary') : t('help.local');
+}
+
 function destroyPreview() {
+  disconnectFrame();
   // Removing the old document avoids both late requests and transitions to a blank page.
   $('site-mount').replaceChildren();
   $('site-mount').hidden = true;
@@ -59,42 +96,48 @@ function destroyPreview() {
 function mountPreview(url) {
   const frame = document.createElement('iframe');
   frame.id = 'site-frame';
-  frame.title = 'Your Joomla playground';
+  frame.title = t('a11y.site');
   frame.referrerPolicy = 'same-origin';
   frame.allow = 'clipboard-write';
   // Set the destination before attachment so a newly inserted blank document is never reused.
   frame.src = url;
+  disconnectFrame();
+  disconnectFrame = connectFrame(frame, { onNavigate: ({ url, signedOut }) => {
+    if (runtime && url.startsWith(runtime.baseUrl)) currentSitePath = `/${url.slice(runtime.baseUrl.length)}`;
+    $('credentials-button').dataset.signedOut = String(signedOut);
+    $('credentials-button').textContent = `${t('title.credentials')}${signedOut ? ` · ${t('status.signedOut')}` : ''}`;
+  } });
   $('site-mount').replaceChildren(frame);
   $('open-link').href = url;
   show('site-mount');
 }
 function setBusy(value) {
   busy = value;
-  const unavailable = !catalog || !blueprintCatalog;
+  const unavailable = !catalog || !deployCatalog;
   $('configuration-fields').disabled = busy || unavailable;
   $('installation-fields').disabled = busy || unavailable;
-  for (const input of $('installation-fields').querySelectorAll('input:not([type="checkbox"]),textarea')) input.readOnly = Boolean(runtime);
-  fields.autoLogin.disabled = busy || Boolean(runtime) || unavailable;
-  fields.language.disabled = busy || Boolean(runtime) || unavailable;
-  fields.persistence.disabled = busy || Boolean(runtime) || unavailable;
+  fields.persistence.disabled = busy || unavailable;
   $('launch-button').disabled = busy || Boolean(runtime) || unavailable;
   $('embedded-launch').disabled = busy || Boolean(runtime) || unavailable;
   $('retry-button').disabled = busy || unavailable;
   $('new-site-button').disabled = busy || unavailable;
   $('saved-site').disabled = busy || unavailable || Object.keys(savedState.sites).length === 0;
   for (const id of controls) $(id).disabled = busy || !runtime;
+  $('share-button').disabled = busy || unavailable;
   $('reset-button').disabled = busy || (!runtime && (unavailable || !fields.persistence.checked));
-  $('save-button').disabled = busy || !runtime || !currentConfig?.persistence;
+  $('save-button').disabled = busy || !runtime;
+  $('download-dialog-button').disabled = busy || !runtime;
+  $('credentials-button').disabled = busy || !runtime;
+  $('php-settings-button').disabled = busy || unavailable;
+  $('use-deploy').disabled = busy || unavailable;
+  $('apply-deploy').disabled = busy || !runtime;
   $('open-link').setAttribute('aria-disabled', String(busy || !runtime));
   $('preview-dot').className = `status-dot${busy ? ' busy' : runtime ? '' : ' muted'}`;
-  $('launch-button').querySelector('span').textContent = busy ? 'Working…' : runtime ? 'Site is running' : 'Launch playground';
-  $('launch-hint').textContent = runtime
-    ? 'Change PHP to restart this site with another runtime. Selecting Joomla or a blueprint opens a separate site.'
-    : 'The first launch downloads the runtime and installs your selected blueprint.';
-  $('storage-note').textContent = fields.persistence.checked
-    ? 'Files and database stay in this browser. Download a backup to keep a separate copy.'
-    : 'This is a temporary site. Download your work before closing or changing its runtime.';
+  $('launch-button').querySelector('span').textContent = t(busy ? 'status.working' : runtime ? 'status.running' : 'action.launch');
+  $('launch-hint').textContent = t('help.firstLaunch');
+  $('storage-note').textContent = t(fields.persistence.checked ? 'help.storage' : 'help.temporary');
   document.body.classList.toggle('running', Boolean(runtime));
+  updateSaveState();
 }
 function progress(event) {
   const details = typeof event === 'string' ? { message: event } : event;
@@ -115,6 +158,7 @@ function displayError(error, title = 'The playground couldn’t start') {
   $('error-title').textContent = title;
   $('error-message').textContent = messageOf(error);
   $('preview-dot').className = 'status-dot failed';
+  feedback(error, { error: true, persistent: true });
   show('error-view');
   activity(error);
   $('error-view').focus();
@@ -133,17 +177,19 @@ function applyAdministrator(value) {
 }
 function formInput(overrides = {}) {
   return normalizeConfiguration({
-    blueprintId: fields.blueprintId.value,
+    deployId: fields.deployId.value,
     phpVersion: fields.phpVersion.value, joomlaVersion: fields.joomlaVersion.value,
     language: fields.language.value, siteName: fields.siteName.value,
     initialPath: fields.initialPath.value, storageKey: fields.storageKey.value,
     persistence: fields.persistence.checked, autoLogin: fields.autoLogin.checked,
     hideToolbar, fresh: pendingFresh, admin: administrator(),
-    extensions: fields.extensions.value, startupCommands: fields.startupCommands.value, ...overrides,
+    extensions: fields.extensions.value, startupCommands: fields.startupCommands.value,
+    phpSettings, multilingual: $('multilingual').checked, languageTags: $('deploy-languages').value.split(',').map(value => value.trim()).filter(Boolean),
+    menus: parseEditorJSON('deploy-menus', []), template: templateInput(), ...overrides,
   }, { catalog, baseURL: deploymentURL });
 }
 async function resolve(input) {
-  return resolveBlueprintConfiguration(input, { catalog, blueprintCatalog, baseURL: deploymentURL });
+  return resolveDeployConfiguration(input, { catalog, deployCatalog, baseURL: deploymentURL });
 }
 function fillOptions(select, items) {
   select.replaceChildren(...items.map((item) => {
@@ -163,28 +209,38 @@ function updateCompatibility({ preserve = false } = {}) {
   }
   $('compatibility-note').textContent = `${joomla.label} · PHP ${joomla.php.join(', ')}`;
   const major = joomla.version.split('.')[0];
-  const tags = [...new Set(['en-GB', ...(blueprintCatalog.languages?.[major] || []).map((item) => item.tag)])];
+  for (const option of fields.deployId.options) { const descriptor = deployCatalog.deploys.find(item => item.id === option.value); option.disabled = Boolean(descriptor?.joomla && !descriptor.joomla.includes(major)); }
+  const tags = [...new Set(['en-GB', ...(deployCatalog.languages?.[major] || []).map((item) => item.tag)])];
   $('language-options').replaceChildren(...tags.map((tag) => {
     const option = document.createElement('option');
     option.value = tag;
     return option;
   }));
 }
-function applyConfiguration(config, input = config, blueprint) {
-  for (const name of ['blueprintId', 'joomlaVersion', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language']) {
+function applyConfiguration(config, input = config, deploy) {
+  for (const name of ['deployId', 'joomlaVersion', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language']) {
     if (config[name] !== undefined) fields[name].value = config[name];
   }
   fields.persistence.checked = config.persistence;
   fields.autoLogin.checked = config.autoLogin;
   fields.extensions.value = JSON.stringify(input.extensions || [], null, 2);
+  phpSettings = normalizePhpSettings(input.phpSettings || config.phpSettings || DEFAULT_PHP_SETTINGS);
+  $('deploy-languages').value = (input.languageTags || config.languageTags || []).join(', ');
+  $('deploy-menus').value = JSON.stringify(input.menus || config.menus || [], null, 2);
+  $('template-url').value = (input.template || config.template)?.url || '';
+  $('template-name').value = (input.template || config.template)?.element || '';
+  $('template-params').value = JSON.stringify((input.template || config.template)?.params || {}, null, 2);
+  $('multilingual').checked = config.multilingual === true || config.content?.multilingual === true;
+  renderEditorLists();
   fields.startupCommands.value = JSON.stringify(input.startupCommands || [], null, 2);
   pendingFresh = Boolean(config.fresh);
   hideToolbar = Boolean(config.hideToolbar);
   document.body.classList.toggle('embedded', hideToolbar);
-  $('embedded-launch').hidden = !hideToolbar;
-  selectedProfile = { blueprintId: config.blueprintId, joomlaVersion: config.joomlaVersion };
-  const description = blueprint?.description ?? blueprintCatalog.blueprints.find((item) => item.id === config.blueprintId)?.description;
-  $('blueprint-description').textContent = description || 'A verified Joomla installation with the selected setup steps.';
+  $('embedded-launch').hidden = false;
+  $('editor-runtime-summary').textContent = `${config.deployId} · Joomla ${config.joomlaVersion} · PHP ${config.phpVersion}`;
+  selectedProfile = { deployId: config.deployId, joomlaVersion: config.joomlaVersion };
+  const description = deploy?.description ?? deployCatalog.deploys.find((item) => item.id === config.deployId)?.description;
+  $('deploy-description').textContent = description || 'A verified Joomla installation with the selected setup steps.';
   updateCompatibility({ preserve: true });
 }
 function writePreferences() {
@@ -203,7 +259,7 @@ function renderSavedSites(selectedKey = runtime && currentConfig?.persistence ? 
   const entries = Object.values(savedState.sites).reverse();
   const empty = document.createElement('option');
   empty.value = '';
-  empty.textContent = entries.length ? 'Choose a saved site…' : 'No saved sites yet';
+  empty.textContent = t(entries.length ? 'status.chooseSavedSite' : 'status.noSavedSites');
   select.replaceChildren(empty, ...entries.map((entry) => {
     const option = document.createElement('option');
     option.value = entry.storageKey;
@@ -214,7 +270,7 @@ function renderSavedSites(selectedKey = runtime && currentConfig?.persistence ? 
 }
 function rememberCurrentSite() {
   if (currentConfig?.persistence) {
-    savedState = rememberSite(savedState, { ...currentInput, ...Object.fromEntries(['blueprintId', 'joomlaVersion', 'phpVersion', 'siteName', 'storageKey', 'persistence', 'language'].map((name) => [name, currentConfig[name]])) });
+    savedState = rememberSite(savedState, { ...currentInput, ...Object.fromEntries(['deployId', 'joomlaVersion', 'phpVersion', 'siteName', 'storageKey', 'persistence', 'language'].map((name) => [name, currentConfig[name]])) });
   } else {
     savedState = { ...savedState, active: null };
     if (!preferences) return true;
@@ -223,23 +279,23 @@ function rememberCurrentSite() {
 }
 function rememberDraft(profile = selectedProfile) {
   if (!profile) return;
-  try { drafts.set(`${profile.blueprintId}:${profile.joomlaVersion}`, publicConfiguration(formInput(profile))); } catch { /* Invalid unfinished fields stay visible until the user corrects them. */ }
+  try { drafts.set(`${profile.deployId}:${profile.joomlaVersion}`, publicConfiguration(formInput(profile))); } catch { /* Invalid unfinished fields stay visible until the user corrects them. */ }
 }
-function findProfile(blueprintId, joomlaVersion) {
-  return drafts.get(`${blueprintId}:${joomlaVersion}`)
-    || Object.values(savedState.sites).reverse().find((item) => item.blueprintId === blueprintId && item.joomlaVersion === joomlaVersion);
+function findProfile(deployId, joomlaVersion) {
+  return drafts.get(`${deployId}:${joomlaVersion}`)
+    || Object.values(savedState.sites).reverse().find((item) => item.deployId === deployId && item.joomlaVersion === joomlaVersion);
 }
 async function launch() {
-  if (busy || runtime || !catalog || !blueprintCatalog) return;
+  if (busy || runtime || !catalog || !deployCatalog) return;
   try {
-    if (!$('launch-form').reportValidity()) return;
+    if (!$('launch-form').checkValidity()) { setDrawer(true); openDialog('deploy-dialog'); $('advanced-settings').open = true; $('launch-form').reportValidity(); return; }
     setBusy(true);
     show('loading-view');
-    $('loading-title').textContent = 'Preparing your playground';
+    $('loading-title').textContent = t('title.loading');
     $('loading-progress').removeAttribute('value');
     let input = formInput();
     if (freshKeyPending) {
-      input.storageKey = `${defaultSiteKey(input.blueprintId, input.joomlaVersion).slice(0, 44)}-fresh-${crypto.randomUUID().slice(0, 8)}`;
+      input.storageKey = `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-fresh-${crypto.randomUUID().slice(0, 8)}`;
       fields.storageKey.value = input.storageKey;
     }
     const recipe = await isolateSetup(savedState, input);
@@ -252,7 +308,7 @@ async function launch() {
     currentInput = input;
     currentConfig = resolved.configuration;
     $('preview-label').textContent = currentConfig.siteName;
-    activity(`Starting ${resolved.blueprint?.title || currentConfig.blueprintId} with Joomla ${currentConfig.joomlaVersion} and PHP ${currentConfig.phpVersion}.`);
+    activity(`Starting ${resolved.deploy?.title || currentConfig.deployId} with Joomla ${currentConfig.joomlaVersion} and PHP ${currentConfig.phpVersion}.`);
     runtime = await createPlayground(currentConfig, { onProgress: progress });
     const siteURL = new URL(runtime.url, location.href);
     if (siteURL.origin !== location.origin) throw new Error('The playground returned an unexpected site origin.');
@@ -265,20 +321,23 @@ async function launch() {
       currentInput.language = currentConfig.language;
       fields.language.value = currentConfig.language;
     }
-    if (runtime.installation?.blueprintId && blueprintCatalog.blueprints.some((item) => item.id === runtime.installation.blueprintId)) {
-      currentConfig.blueprintId = runtime.installation.blueprintId;
-      currentInput.blueprintId = currentConfig.blueprintId;
-      fields.blueprintId.value = currentConfig.blueprintId;
+    if (runtime.installation?.deployId && deployCatalog.deploys.some((item) => item.id === runtime.installation.deployId)) {
+      currentConfig.deployId = runtime.installation.deployId;
+      currentInput.deployId = currentConfig.deployId;
+      fields.deployId.value = currentConfig.deployId;
     }
     $('preview-label').textContent = currentConfig.siteName;
     mountPreview(siteURL.href);
+    lastSavedAt = currentConfig.persistence ? new Date() : undefined;
+    setDrawer(false);
+    $('deploy-dialog').close();
     history.replaceState(null, '', runtimeLocation(location.href, currentInput));
     pendingFresh = false;
     freshKeyPending = false;
     currentInput.fresh = false;
     const resumeSaved = rememberCurrentSite();
-    selectedProfile = { blueprintId: currentConfig.blueprintId, joomlaVersion: currentConfig.joomlaVersion };
-    rememberDraft({ blueprintId: currentConfig.blueprintId, joomlaVersion: currentConfig.joomlaVersion });
+    selectedProfile = { deployId: currentConfig.deployId, joomlaVersion: currentConfig.joomlaVersion };
+    rememberDraft({ deployId: currentConfig.deployId, joomlaVersion: currentConfig.joomlaVersion });
     activity(recipe.changed ? `Site ready under “${currentConfig.storageKey}”. Your previous site is available in Saved sites.` : currentConfig.persistence
       ? resumeSaved ? 'Site ready. Reopening this playground will resume your saved site.' : `Site ready. Keep saved site key “${currentConfig.storageKey}” to reopen it.`
       : 'Temporary site ready. Download your work before closing.');
@@ -313,7 +372,7 @@ async function closeSite({ reset = false, save = false } = {}) {
     }
     $('preview-label').textContent = 'Your playground';
     show('welcome');
-    activity(reset ? 'Site files and database deleted. Launch to build a fresh site from its blueprint.' : 'Site closed. Its saved data remains available.');
+    activity(reset ? 'Site files and database deleted. Launch to build a fresh site from its deploy.' : 'Site closed. Its saved data remains available.');
     return true;
   } catch (error) {
     runtime = undefined;
@@ -323,12 +382,12 @@ async function closeSite({ reset = false, save = false } = {}) {
 }
 
 async function newSite() {
-  if (busy || !catalog || !blueprintCatalog) return;
+  if (busy || !catalog || !deployCatalog) return;
   if (runtime && !currentConfig.persistence && !confirm('Starting another site closes this temporary site. Download your work first if you want to keep it. Continue?')) return;
   rememberDraft();
   if (runtime && !await closeSite({ save: currentConfig.persistence })) return;
-  const label = blueprintCatalog.blueprints.find((entry) => entry.id === fields.blueprintId.value)?.title || 'Joomla site';
-  fields.storageKey.value = `${defaultSiteKey(fields.blueprintId.value, fields.joomlaVersion.value).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`;
+  const label = deployCatalog.deploys.find((entry) => entry.id === fields.deployId.value)?.title || 'Joomla site';
+  fields.storageKey.value = `${defaultSiteKey(fields.deployId.value, fields.joomlaVersion.value).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`;
   fields.siteName.value = `${label.slice(0, 88)} ${Object.keys(savedState.sites).length + 1}`;
   $('admin-password').value = password();
   pendingFresh = true;
@@ -337,6 +396,7 @@ async function newSite() {
   show('welcome');
   setBusy(false);
   activity(`Choose settings for new site “${fields.storageKey.value}”, then Launch. Your saved sites are preserved.`);
+  openDialog('deploy-dialog');
   fields.siteName.focus();
 }
 
@@ -351,7 +411,7 @@ async function openSavedSite(key) {
   try {
     const input = { ...savedState.sites[key], hideToolbar, admin: administrator() };
     const resolved = await resolve(input);
-    applyConfiguration(resolved.configuration, input, resolved.blueprint);
+    applyConfiguration(resolved.configuration, input, resolved.deploy);
     freshKeyPending = false;
     show('welcome');
     $('retry-button').hidden = false;
@@ -362,11 +422,14 @@ async function openSavedSite(key) {
 }
 async function changeProfile() {
   if (busy || !catalog) return;
-  const target = { blueprintId: fields.blueprintId.value, joomlaVersion: fields.joomlaVersion.value };
+  const major = fields.joomlaVersion.value.split('.')[0];
+  const descriptor = deployCatalog.deploys.find(item => item.id === fields.deployId.value);
+  if (descriptor?.joomla && !descriptor.joomla.includes(major)) fields.deployId.value = deployCatalog.defaultsByJoomla?.[major] || deployCatalog.default;
+  const target = { deployId: fields.deployId.value, joomlaVersion: fields.joomlaVersion.value };
   const previous = selectedProfile;
   const wasRunning = Boolean(runtime);
   if (wasRunning && !currentConfig.persistence && !confirm('Changing the starting point creates a fresh temporary site. Download your work first if you want to keep it. Continue?')) {
-    fields.blueprintId.value = previous.blueprintId;
+    fields.deployId.value = previous.deployId;
     fields.joomlaVersion.value = previous.joomlaVersion;
     return;
   }
@@ -374,14 +437,14 @@ async function changeProfile() {
   if (wasRunning && !await closeSite()) return;
   setBusy(true);
   try {
-    const stored = findProfile(target.blueprintId, target.joomlaVersion);
+    const stored = findProfile(target.deployId, target.joomlaVersion);
     const input = {
       ...(stored || {}), ...target,
       phpVersion: fields.phpVersion.value,
       persistence: stored?.persistence ?? fields.persistence.checked,
       hideToolbar,
-      ...(!stored && target.blueprintId === previous?.blueprintId ? { language: fields.language.value } : {}),
-      storageKey: stored?.storageKey || defaultSiteKey(target.blueprintId, target.joomlaVersion),
+      ...(!stored && target.deployId === previous?.deployId ? { language: fields.language.value } : {}),
+      storageKey: stored?.storageKey || defaultSiteKey(target.deployId, target.joomlaVersion),
       admin: administrator(),
     };
     fields.storageKey.value = input.storageKey;
@@ -389,10 +452,10 @@ async function changeProfile() {
     if (!compatible?.includes(input.phpVersion)) input.phpVersion = compatible?.includes(catalog.defaults.phpVersion) ? catalog.defaults.phpVersion : compatible?.[0];
     const resolved = await resolve(input);
     freshKeyPending = false;
-    applyConfiguration(resolved.configuration, input, resolved.blueprint);
+    applyConfiguration(resolved.configuration, input, resolved.deploy);
     show('welcome');
     $('retry-button').hidden = false;
-    activity(`Selected ${resolved.blueprint?.title || target.blueprintId}. Saved site key: ${resolved.configuration.storageKey}.`);
+    activity(`Selected ${resolved.deploy?.title || target.deployId}. Saved site key: ${resolved.configuration.storageKey}.`);
   } catch (error) { displayError(error, 'This starting point is not available'); }
   finally { setBusy(false); }
   if (wasRunning && $('error-view').hidden) await launch();
@@ -421,17 +484,11 @@ $('reset-button').addEventListener('click', async () => {
     pendingFresh = true;
     freshKeyPending = false;
     show('welcome');
-    activity('Saved data deleted. Launch to build a fresh site from its blueprint.');
+    activity('Saved data deleted. Launch to build a fresh site from its deploy.');
   } catch (error) { displayError(error, 'The saved site could not be reset'); }
   finally { setBusy(false); }
 });
-$('save-button').addEventListener('click', async () => {
-  if (!runtime || busy) return;
-  setBusy(true);
-  try { await runtime.flush(); rememberCurrentSite(); activity('Files and database saved to browser storage.'); }
-  catch (error) { activity(`Save failed: ${messageOf(error)}`); }
-  finally { setBusy(false); }
-});
+$('save-button').addEventListener('click', () => void saveSite());
 $('export-button').addEventListener('click', async () => {
   if (!runtime || busy) return;
   setBusy(true);
@@ -456,19 +513,12 @@ $('export-button').addEventListener('click', async () => {
   } catch (error) { activity(`Download failed: ${messageOf(error)}`); }
   finally { setBusy(false); }
 });
-$('share-button').addEventListener('click', async () => {
-  if (!currentInput) return;
-  const url = createShareURL(location.href, currentInput);
-  try {
-    await navigator.clipboard.writeText(url);
-    activity('Link copied with the blueprint and setup options. Site data and administrator credentials are not shared.');
-  } catch { prompt('Copy this blueprint link. It includes setup options, but no site data or administrator credentials.', url); }
-});
+$('share-button').addEventListener('click', () => showShare());
 $('show-password').addEventListener('click', () => {
   const visible = $('admin-password').type === 'password';
   $('admin-password').type = visible ? 'text' : 'password';
-  $('show-password').textContent = visible ? 'Hide' : 'Show';
-  $('show-password').setAttribute('aria-label', visible ? 'Hide password' : 'Show password');
+  $('show-password').textContent = t(visible ? 'action.hide' : 'action.show');
+  $('show-password').setAttribute('aria-label', t(visible ? 'a11y.hidePassword' : 'a11y.showPassword'));
   $('show-password').setAttribute('aria-pressed', String(visible));
 });
 $('log-toggle').addEventListener('click', () => {
@@ -476,7 +526,7 @@ $('log-toggle').addEventListener('click', () => {
   $('activity-log').hidden = !expanded;
   $('log-toggle').setAttribute('aria-expanded', String(expanded));
 });
-fields.blueprintId.addEventListener('change', () => void changeProfile());
+fields.deployId.addEventListener('change', () => void changeProfile());
 fields.joomlaVersion.addEventListener('change', () => void changeProfile());
 fields.phpVersion.addEventListener('change', async () => {
   if (busy || !runtime) return;
@@ -486,7 +536,14 @@ fields.phpVersion.addEventListener('change', async () => {
   }
   if (await closeSite()) await launch();
 });
-fields.persistence.addEventListener('change', () => setBusy(busy));
+fields.persistence.addEventListener('change', async () => {
+  if (!runtime) { setBusy(busy); return; }
+  if (fields.persistence.checked && !currentConfig.persistence) await saveSite();
+  else if (!fields.persistence.checked && currentConfig.persistence) {
+    fields.persistence.checked = true;
+    feedback(t('help.savedSites'));
+  }
+});
 fields.storageKey.addEventListener('change', async () => {
   if (runtime || busy) return;
   const saved = Object.hasOwn(savedState.sites, fields.storageKey.value) ? savedState.sites[fields.storageKey.value] : undefined;
@@ -494,20 +551,223 @@ fields.storageKey.addEventListener('change', async () => {
   setBusy(true);
   try {
     const resolved = await resolve({ ...saved, admin: administrator() });
-    applyConfiguration(resolved.configuration, saved, resolved.blueprint);
+    applyConfiguration(resolved.configuration, saved, resolved.deploy);
     show('welcome');
     activity(`Selected saved site “${saved.siteName}”. Launch to resume it.`);
   } catch (error) { displayError(error, 'This saved configuration is unavailable'); }
   finally { setBusy(false); }
 });
 
+function parseEditorJSON(id, fallback) {
+  try { return JSON.parse($(id).value.trim() || JSON.stringify(fallback)); }
+  catch { throw new TypeError(`${$(id).labels?.[0]?.textContent || id}: ${t('error.configuration')}`); }
+}
+function templateInput() {
+  const element = $('template-name').value.trim(), url = $('template-url').value.trim();
+  if (!element && !url) return undefined;
+  return { ...(url ? { url } : {}), ...(element ? { element } : {}), params: parseEditorJSON('template-params', {}) };
+}
+function renderEditorLists() {
+  for (const [field, target, label] of [
+    ['extensions', 'package-list', item => item.url],
+    ['deploy-menus', 'menu-list', item => `${item.title} · ${item.component || ''}${item.view ? ` / ${item.view}` : ''}${item.home ? ' ★' : ''}`],
+  ]) {
+    let items;
+    try { items = parseEditorJSON(field, []); } catch { continue; }
+    if (!Array.isArray(items)) continue;
+    $(target).replaceChildren(...items.map((item, index) => {
+      const row = document.createElement('div'); row.className = 'package-row';
+      const text = document.createElement('span'); text.textContent = label(item);
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = '×';
+      button.setAttribute('aria-label', `${t('action.remove')}: ${label(item)}`);
+      button.addEventListener('click', () => { items.splice(index, 1); $(field).value = JSON.stringify(items, null, 2); renderEditorLists(); });
+      row.append(text, button); return row;
+    }));
+  }
+}
+function openEditor() {
+  $('deploy-error').hidden = true;
+  $('advanced-settings').open = true;
+  $('editor-runtime-summary').textContent = `${fields.deployId.value} · Joomla ${fields.joomlaVersion.value} · PHP ${fields.phpVersion.value}`;
+  renderEditorLists(); openDialog('deploy-dialog');
+  if (runtime?.discoverConfiguration && !busy) void runtime.discoverConfiguration().then(discovered => {
+    $('component-options').replaceChildren(...[...new Set(discovered.menuTypes.map(item => item.component))].map(value => { const option = document.createElement('option'); option.value = value; return option; }));
+    $('template-options').replaceChildren(...[...new Set(discovered.templates.map(item => item.template))].map(value => { const option = document.createElement('option'); option.value = value; return option; }));
+    const empty = document.createElement('option'); empty.value = ''; empty.textContent = '—';
+    $('menu-preset').replaceChildren(empty, ...discovered.menuTypes.map(item => { const option = document.createElement('option'); option.value = JSON.stringify({component:item.component,view:item.view,layout:item.layout}); option.textContent = `${item.component} / ${item.view} · ${item.layout}`; return option; }));
+  }).catch(error => activity(error));
+}
+function editorError(error) { $('deploy-error').textContent = messageOf(error); $('deploy-error').hidden = false; }
+async function saveSite({ quiet = false } = {}) {
+  if (!runtime || busy) return false;
+  setBusy(true); $('save-state').textContent = t('status.saving');
+  try {
+    if (!currentConfig.persistence) {
+      runtime = await runtime.keep();
+      currentConfig = runtime.configuration;
+      currentInput = { ...currentInput, persistence: true, storageKey: currentConfig.storageKey };
+      fields.storageKey.value = currentConfig.storageKey; fields.persistence.checked = true;
+      mountPreview(new URL(currentSitePath.replace(/^\//, ''), runtime.baseUrl).href);
+    } else await runtime.flush();
+    lastSavedAt = new Date(); rememberCurrentSite();
+    history.replaceState(null, '', runtimeLocation(location.href, currentInput));
+    if (!quiet) { activity('Files and database saved to browser storage.'); feedback(t('status.savedAt', { time: lastSavedAt.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) })); }
+    return true;
+  } catch (error) { activity(`Save failed: ${messageOf(error)}`); feedback(`${t('status.saveFailed')}: ${messageOf(error)}`, { error: true, persistent: true }); return false; }
+  finally { setBusy(false); }
+}
+function showShare(input) {
+  try {
+    input ||= currentInput || formInput();
+    sharedConfiguration = input;
+    $('share-url').value = createShareURL(location.href, input);
+    $('share-summary').textContent = `${input.siteName || fields.siteName.value} · Joomla ${input.joomlaVersion || fields.joomlaVersion.value} · PHP ${input.phpVersion || fields.phpVersion.value}`;
+    $('share-feedback').textContent = '';
+    $('native-share').hidden = typeof navigator.share !== 'function';
+    openDialog('share-dialog');
+  } catch (error) { feedback(`${t('error.share')} ${messageOf(error)}`, { error: true, persistent: true }); }
+}
+function downloadConfiguration() {
+  const input = formInput();
+  const body = JSON.stringify(createDeploymentDocument(input), null, 2);
+  const url = URL.createObjectURL(new Blob([`${body}\n`], { type: 'application/json' }));
+  const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'joomengine-deploy.json';
+  document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+async function useDeployment() {
+  if (busy || !catalog) return;
+  $('deploy-error').hidden = true;
+  try {
+    let input = formInput();
+    if (input.extensions.length && !confirm(t('confirm.customPackages'))) return;
+    const wasRunning = Boolean(runtime);
+    if (wasRunning) {
+      if (!await saveSite()) return;
+      if (!await closeSite()) return;
+      input = { ...input, storageKey: `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`, fresh: true, admin: { ...input.admin, password: password() } };
+    }
+    const resolved = await resolve(input);
+    applyConfiguration(resolved.configuration, input, resolved.deploy); applyAdministrator(input.admin);
+    $('deploy-dialog').close();
+    await launch();
+    if (runtime) showShare(currentInput);
+  } catch (error) { editorError(error); }
+}
+async function applyDeployment() {
+  if (busy || !runtime) return;
+  $('deploy-error').hidden = true;
+  try {
+    const input = formInput({ storageKey: currentConfig.storageKey, persistence: currentConfig.persistence, fresh: false });
+    if (input.extensions.length && !confirm(t('confirm.customPackages'))) return;
+    const resolved = await resolve(input);
+    setBusy(true); destroyPreview(); show('loading-view');
+    await runtime.applyConfiguration(resolved.configuration);
+    currentConfig = runtime.configuration; currentInput = input;
+    applyAdministrator(runtime.installation?.administrator);
+    lastSavedAt = currentConfig.persistence ? new Date() : undefined;
+    rememberCurrentSite();
+    mountPreview(new URL(currentConfig.initialPath.replace(/^\//, ''), runtime.baseUrl).href);
+    $('deploy-dialog').close(); feedback(t('status.ready'));
+    history.replaceState(null, '', runtimeLocation(location.href, currentInput));
+  } catch (error) {
+    if (typeof error.recover === 'function') {
+      try { runtime = await error.recover(); currentConfig = runtime.configuration; currentInput = { ...currentInput, storageKey: currentConfig.storageKey }; rememberCurrentSite(); }
+      catch (recoveryError) { feedback(recoveryError, { error: true, persistent: true }); }
+    }
+    editorError(error); if (runtime) mountPreview(runtime.url);
+  }
+  finally { setBusy(false); }
+}
+function populatePhpSettings(settings = phpSettings) {
+  const form = $('php-settings-form');
+  for (const [name, value] of Object.entries(settings)) if (form.elements.namedItem(name)) form.elements.namedItem(name).value = value;
+  const effective = runtime?.runtimeInfo?.effectivePhpSettings;
+  $('php-effective').textContent = effective ? `${t('label.effectiveSettings')}: ${Object.entries(effective).map(([key, value]) => `${key}=${value}`).join(' · ')}` : '';
+  $('php-error').hidden = true;
+}
+function setupInterface() {
+  $('interface-language').replaceChildren(...UI_LANGUAGES.map(({ code, label }) => { const option = document.createElement('option'); option.value = code; option.textContent = label; return option; }));
+  $('interface-language').addEventListener('change', async event => { try { await setLocale(event.target.value); } catch (error) { feedback(error, { error: true }); } });
+  document.addEventListener('rocket:languagechange', () => { $('interface-language').value = getLocale(); if (catalog) setBusy(busy); renderSavedSites(); });
+  $('settings-toggle').addEventListener('click', () => setDrawer($('settings').hidden));
+  for (const id of ['deploy-editor-button', 'welcome-configure', 'error-configure']) $(id).addEventListener('click', openEditor);
+  $('editor-runtime-button').addEventListener('click', () => { $('deploy-dialog').close(); setDrawer(true); fields.deployId.focus(); });
+  for (const dialog of document.querySelectorAll('dialog')) {
+    dialog.querySelector('[data-close-dialog]').addEventListener('click', () => dialog.close());
+    dialog.addEventListener('click', event => { if (event.target === dialog) { const bounds = dialog.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dialog.close(); } });
+  }
+  document.addEventListener('click', event => { if (!$('site-actions').contains(event.target)) $('site-actions').open = false; });
+  $('information-button').addEventListener('click', () => openDialog('information-dialog'));
+  $('download-dialog-button').addEventListener('click', () => openDialog('download-dialog'));
+  $('credentials-button').addEventListener('click', () => {
+    $('credential-username').value = $('admin-username').value; $('credential-password').value = $('admin-password').value;
+    $('credential-password').type = 'password'; $('reveal-credentials').textContent = t('action.show'); openDialog('credentials-dialog');
+  });
+  $('reveal-credentials').addEventListener('click', () => { const show = $('credential-password').type === 'password'; $('credential-password').type = show ? 'text' : 'password'; $('reveal-credentials').textContent = t(show ? 'action.hide' : 'action.show'); });
+  $('copy-credentials').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('credential-password').value); feedback(t('status.passwordCopied')); } catch { $('credential-password').type = 'text'; $('credential-password').select(); feedback(t('error.clipboard'), { error: true }); } });
+  $('go-administrator').addEventListener('click', () => { if (runtime) mountPreview(new URL('administrator/', runtime.baseUrl).href); $('credentials-dialog').close(); });
+  $('copy-share').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('share-url').value); $('share-feedback').textContent = t('status.copied'); } catch { $('share-url').focus(); $('share-url').select(); $('share-feedback').textContent = t('help.clipboard'); } });
+  $('native-share').addEventListener('click', async () => { try { await navigator.share({ title: sharedConfiguration?.siteName || 'JoomEngine Rocket', url: $('share-url').value }); } catch (error) { if (error.name !== 'AbortError') $('share-feedback').textContent = messageOf(error); } });
+  $('add-package').addEventListener('click', () => { try { const url = $('package-url').value.trim(); if (!url) return; const items = parseEditorJSON('extensions', []); items.push({ url }); fields.extensions.value = JSON.stringify(items, null, 2); formInput(); $('package-url').value = ''; renderEditorLists(); } catch (error) { editorError(error); } });
+  $('menu-preset').addEventListener('change', event => { if (event.target.value) { const item = JSON.parse(event.target.value); $('menu-component').value = item.component; $('menu-view').value = item.view; } });
+  $('add-menu').addEventListener('click', () => { try {
+    const title = $('menu-title').value.trim(), component = $('menu-component').value.trim(), view = $('menu-view').value.trim();
+    if (!title || !component || !view) throw new TypeError(t('error.configuration'));
+    const menus = parseEditorJSON('deploy-menus', []);
+    const home = $('menu-home').checked;
+    if (home) for (const item of menus) if ((item.language || '*') === '*') item.home = false;
+    menus.push({ key: `menu-${crypto.randomUUID().slice(0, 8)}`, title, component, view, home, menuType: 'mainmenu', language: '*', published: true });
+    $('deploy-menus').value = JSON.stringify(menus, null, 2); formInput();
+    $('menu-title').value = ''; $('menu-component').value = ''; $('menu-view').value = ''; $('menu-home').checked = false; renderEditorLists();
+  } catch (error) { editorError(error); } });
+  for (const id of ['extensions', 'deploy-menus']) $(id).addEventListener('change', renderEditorLists);
+  $('use-deploy').addEventListener('click', () => void useDeployment());
+  $('apply-deploy').addEventListener('click', () => void applyDeployment());
+  $('export-config').addEventListener('click', () => { try { downloadConfiguration(); } catch (error) { editorError(error); } });
+  $('import-config').addEventListener('change', async event => { try {
+    const file = event.target.files[0]; if (!file) return; if (file.size > 1024 * 1024) throw new RangeError('The deployment document exceeds 1 MiB.');
+    const input = { ...parseDeploymentDocument(await file.text()), admin: administrator() };
+    const resolved = await resolve(input); applyConfiguration(resolved.configuration, input, resolved.deploy); openEditor();
+  } catch (error) { editorError(error); } finally { event.target.value = ''; } });
+  $('php-settings-button').addEventListener('click', () => { populatePhpSettings(); openDialog('php-dialog'); });
+  $('reset-php').addEventListener('click', () => populatePhpSettings(DEFAULT_PHP_SETTINGS));
+  $('php-settings-form').addEventListener('submit', async event => {
+    event.preventDefault(); if (busy) return;
+    $('php-error').hidden = true;
+    try {
+      const settings = normalizePhpSettings(Object.fromEntries(new FormData(event.target)));
+      if (runtime) {
+        setBusy(true); destroyPreview(); show('loading-view');
+        await runtime.updatePhpSettings(settings);
+        currentConfig = runtime.configuration; currentInput = { ...currentInput, phpSettings: settings };
+        rememberCurrentSite(); mountPreview(new URL(currentSitePath.replace(/^\//, ''), runtime.baseUrl).href);
+        history.replaceState(null, '', runtimeLocation(location.href, currentInput));
+      }
+      phpSettings = settings; $('php-dialog').close(); feedback(t('status.ready'));
+    } catch (error) { $('php-error').textContent = messageOf(error); $('php-error').hidden = false; if (runtime) mountPreview(runtime.url); }
+    finally { setBusy(false); }
+  });
+  $('open-link').addEventListener('click', async event => {
+    event.preventDefault(); if (!runtime || busy) return;
+    try {
+      setBusy(true); await runtime.openStandalone({ path: currentSitePath });
+      destroyPreview(); runtime = undefined; show('welcome'); feedback(t('status.closed'));
+    } catch (error) { feedback(error, { error: true }); }
+    finally { setBusy(false); }
+  });
+  setInterval(() => { if (runtime && currentConfig?.persistence && !busy && document.visibilityState === 'visible') void saveSite({ quiet: true }); }, 60000);
+}
+
 async function initialize() {
   try {
+    await initializeLocale();
+    $('interface-language').value = getLocale();
     const parsed = readURLConfiguration(location.href);
+    if (parsed.document) parsed.config = { ...await loadDeploymentDocument(parsed.document.url, { ...parsed.document, baseURL: deploymentURL }), ...parsed.config };
     const params = new URL(location.href).searchParams;
     hideToolbar = Boolean(parsed.config.hideToolbar);
     document.body.classList.toggle('embedded', hideToolbar);
-    $('embedded-launch').hidden = !hideToolbar;
+    $('embedded-launch').hidden = false;
     activity('Preparing browser support for PHP and MariaDB…');
     const environment = await prepareEnvironment();
     const reloadMarker = `joomengine:environment-reload:${deploymentURL}`;
@@ -525,27 +785,27 @@ async function initialize() {
       fetch(new URL('../assets/manifest.json', import.meta.url), { cache: 'no-cache' }).then(async (response) => {
         if (!response.ok) throw new Error(`The runtime catalog is unavailable (HTTP ${response.status}).`);
         return response.json();
-      }), loadBlueprintCatalog(),
+      }), loadDeployCatalog(),
     ]);
     catalog = parseCatalog(manifest);
-    blueprintCatalog = recipes;
+    deployCatalog = recipes;
     renderSavedSites();
     fillOptions(fields.joomlaVersion, catalog.joomla);
     fillOptions(fields.phpVersion, catalog.php);
-    fillOptions(fields.blueprintId, blueprintCatalog.blueprints);
-    const hasOptions = ['blueprint', 'joomla', 'php', 'language', 'login', 'fresh', 'key', 'persist', 'path', 'initialPath', 'extensions', 'extension', 'commands', 'startupCommands'].some((name) => params.has(name));
+    fillOptions(fields.deployId, deployCatalog.deploys);
+    const hasOptions = Boolean(parsed.document) || new URL(location.href).hash.startsWith('#deploy=') || ['deploy', 'joomla', 'php', 'language', 'login', 'fresh', 'key', 'persist', 'path', 'initialPath', 'extensions', 'extension', 'commands', 'startupCommands', 'siteName', 'phpSettings', 'languageTags', 'menus', 'template'].some((name) => params.has(name));
     const keyed = parsed.config.storageKey && Object.hasOwn(savedState.sites, parsed.config.storageKey)
       ? savedState.sites[parsed.config.storageKey] : null;
     const previous = keyed || (!hasOptions && savedState.active ? savedState.sites[savedState.active] : null);
-    let input = { ...(previous || {}), blueprintId: previous?.blueprintId || blueprintCatalog.default, ...parsed.config, admin: administrator() };
+    let input = { ...(previous || {}), ...(previous?.deployId ? { deployId: previous.deployId } : {}), ...parsed.config, admin: administrator() };
     let resolved = await resolve(input);
-    input.storageKey ||= defaultSiteKey(resolved.configuration.blueprintId, resolved.configuration.joomlaVersion);
+    input.storageKey ||= defaultSiteKey(resolved.configuration.deployId, resolved.configuration.joomlaVersion);
     if (!previous && !parsed.config.storageKey && !parsed.config.fresh) {
-      const saved = findProfile(resolved.configuration.blueprintId, resolved.configuration.joomlaVersion);
+      const saved = findProfile(resolved.configuration.deployId, resolved.configuration.joomlaVersion);
       if (saved) input = { ...saved, ...parsed.config, admin: administrator() };
     }
     resolved = await resolve(input);
-    applyConfiguration(resolved.configuration, input, resolved.blueprint);
+    applyConfiguration(resolved.configuration, input, resolved.deploy);
     freshKeyPending = Boolean(parsed.config.fresh);
     setBusy(false);
     const shouldResume = Boolean(previous) && (!params.has('start') || parsed.autostart);
@@ -558,4 +818,5 @@ async function initialize() {
   }
 }
 
+setupInterface();
 void initialize();

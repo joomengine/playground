@@ -1,0 +1,156 @@
+{
+  "$schema": "./catalog.schema.json",
+  "schemaVersion": 1,
+  "default": "jcb-mcp",
+  "deploys": [
+    {
+      "id": "jcb-mcp",
+      "title": "JCB + MCP",
+      "description": "Joomla 6 with Joomla Component Builder and the JoomEngine MCP package.",
+      "joomla": [
+        "6"
+      ],
+      "file": "./jcb-mcp.json"
+    },
+    {
+      "id": "jcb",
+      "title": "Joomla Component Builder",
+      "description": "Joomla with the complete JCB component and plugin package.",
+      "file": "./jcb.json",
+      "joomla": [
+        "5",
+        "6"
+      ]
+    },
+    {
+      "id": "servicedirectory",
+      "title": "Service Directory",
+      "description": "A Joomla service directory with its public directory as the home page.",
+      "joomla": [
+        "5",
+        "6"
+      ],
+      "file": "./servicedirectory.json"
+    },
+    {
+      "id": "blank",
+      "title": "Joomla only",
+      "description": "A clean Joomla installation without additional extensions.",
+      "file": "./blank.json",
+      "joomla": [
+        "5",
+        "6"
+      ]
+    },
+    {
+      "id": "heritage-demo",
+      "title": "Multilingual heritage site",
+      "description": "An Afrikaans-first heritage site with eight languages, home pages and a language switcher.",
+      "file": "./heritage-demo.json",
+      "joomla": [
+        "5",
+        "6"
+      ]
+    },
+    {
+      "id": "patchtester",
+      "title": "Patch Tester",
+      "description": "Joomla with the official Patch Tester component.",
+      "file": "./patchtester.json",
+      "joomla": [
+        "5",
+        "6"
+      ]
+    },
+    {
+      "id": "weblinks",
+      "title": "Weblinks",
+      "description": "Joomla with the official Weblinks package.",
+      "file": "./weblinks.json",
+      "joomla": [
+        "5",
+        "6"
+      ]
+    }
+  ],
+  "languages": {
+    "5": [
+      {
+        "tag": "af-ZA",
+        "url": "https://codeload.github.com/joomla/core-translations/zip/35a99d4751d1e8809f928159f862c910834e6eb5",
+        "sha256": "caa77813b2d9b63b0cee9ba55ec135be40a00ed8c623ead739acdcb7f8c1e91f"
+      },
+      {
+        "tag": "de-DE",
+        "url": "https://codeload.github.com/joomla/core-translations/zip/35a99d4751d1e8809f928159f862c910834e6eb5",
+        "sha256": "caa77813b2d9b63b0cee9ba55ec135be40a00ed8c623ead739acdcb7f8c1e91f"
+      },
+      {
+        "tag": "fr-FR",
+        "url": "https://codeload.github.com/joomla/core-translations/zip/35a99d4751d1e8809f928159f862c910834e6eb5",
+        "sha256": "caa77813b2d9b63b0cee9ba55ec135be40a00ed8c623ead739acdcb7f8c1e91f"
+      },
+      {
+        "tag": "it-IT",
+        "url": "https://codeload.github.com/joomla/core-translations/zip/35a99d4751d1e8809f928159f862c910834e6eb5",
+        "sha256": "caa77813b2d9b63b0cee9ba55ec135be40a00ed8c623ead739acdcb7f8c1e91f"
+      },
+      {
+        "tag": "es-ES",
+        "url": "https://codeload.github.com/joomla/core-translations/zip/35a99d4751d1e8809f928159f862c910834e6eb5",
+        "sha256": "caa77813b2d9b63b0cee9ba55ec135be40a00ed8c623ead739acdcb7f8c1e91f"
+      },
+      {
+        "tag": "zh-CN",
+        "url": "https://codeload.github.com/joomla/core-translations/zip/35a99d4751d1e8809f928159f862c910834e6eb5",
+        "sha256": "caa77813b2d9b63b0cee9ba55ec135be40a00ed8c623ead739acdcb7f8c1e91f"
+      },
+      {
+        "tag": "nl-NL",
+        "url": "https://codeload.github.com/joomla/core-translations/zip/35a99d4751d1e8809f928159f862c910834e6eb5",
+        "sha256": "caa77813b2d9b63b0cee9ba55ec135be40a00ed8c623ead739acdcb7f8c1e91f"
+      }
+    ],
+    "6": [
+      {
+        "tag": "af-ZA",
+        "url": "https://codeload.github.com/joomla/core-translations/zip/35a99d4751d1e8809f928159f862c910834e6eb5",
+        "sha256": "caa77813b2d9b63b0cee9ba55ec135be40a00ed8c623ead739acdcb7f8c1e91f"
+      },
+      {
+        "tag": "de-DE",
+        "url": "https://codeload.github.com/joomla/core-translations/zip/35a99d4751d1e8809f928159f862c910834e6eb5",
+        "sha256": "caa77813b2d9b63b0cee9ba55ec135be40a00ed8c623ead739acdcb7f8c1e91f"
+      },
+      {
+        "tag": "fr-FR",
+        "url": "https://codeload.github.com/joomla/core-translations/zip/35a99d4751d1e8809f928159f862c910834e6eb5",
+        "sha256": "caa77813b2d9b63b0cee9ba55ec135be40a00ed8c623ead739acdcb7f8c1e91f"
+      },
+      {
+        "tag": "it-IT",
+        "url": "https://codeload.github.com/joomla/core-translations/zip/35a99d4751d1e8809f928159f862c910834e6eb5",
+        "sha256": "caa77813b2d9b63b0cee9ba55ec135be40a00ed8c623ead739acdcb7f8c1e91f"
+      },
+      {
+        "tag": "es-ES",
+        "url": "https://codeload.github.com/joomla/core-translations/zip/35a99d4751d1e8809f928159f862c910834e6eb5",
+        "sha256": "caa77813b2d9b63b0cee9ba55ec135be40a00ed8c623ead739acdcb7f8c1e91f"
+      },
+      {
+        "tag": "zh-CN",
+        "url": "https://codeload.github.com/joomla/core-translations/zip/35a99d4751d1e8809f928159f862c910834e6eb5",
+        "sha256": "caa77813b2d9b63b0cee9ba55ec135be40a00ed8c623ead739acdcb7f8c1e91f"
+      },
+      {
+        "tag": "nl-NL",
+        "url": "https://codeload.github.com/joomla/core-translations/zip/35a99d4751d1e8809f928159f862c910834e6eb5",
+        "sha256": "caa77813b2d9b63b0cee9ba55ec135be40a00ed8c623ead739acdcb7f8c1e91f"
+      }
+    ]
+  },
+  "defaultsByJoomla": {
+    "5": "jcb",
+    "6": "jcb-mcp"
+  }
+}

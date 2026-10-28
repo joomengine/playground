@@ -3,9 +3,9 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { createNodeRuntime } from '../scripts/node-runtime.mjs';
 import { parseCatalog } from '../src/config.mjs';
-import { loadBlueprintCatalog, resolveBlueprintConfiguration } from '../src/blueprints.mjs';
+import { loadDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
 import { exportSite } from '../src/export.mjs';
-import { checkJoomla, importJoomlaSnapshot, inspectJoomla, installJoomla, requestJoomlaPage, sha256 } from '../src/joomla/index.mjs';
+import { applyJoomlaConfiguration, discoverJoomlaConfiguration, checkJoomla, importJoomlaSnapshot, inspectJoomla, installJoomla, requestJoomlaPage, sha256 } from '../src/joomla/index.mjs';
 
 const sourceLoader = (name) => readFile(new URL(`../src/joomla/php/${name}.php`, import.meta.url), 'utf8');
 const exportSource = () => readFile(new URL('../src/export/site.php', import.meta.url), 'utf8');
@@ -40,14 +40,14 @@ for (const major of ['5', '6']) {
       const release = catalog.joomla.find((item) => item.version.startsWith(`${major}.`));
       assert.ok(release, `The built artifact must stage Joomla ${major}.`);
       const manifestURL = new URL('assets/manifest.json', runtime.assetBaseUrl);
-      const blueprintCatalog = await loadBlueprintCatalog({
-        url: new URL(runtime.manifest.blueprints.url, manifestURL), fetcher: runtime.fetchAsset,
+      const deployCatalog = await loadDeployCatalog({
+        url: new URL(runtime.manifest.deploys.url, manifestURL), fetcher: runtime.fetchAsset,
       });
-      const { configuration } = await resolveBlueprintConfiguration({
-        blueprintId: 'heritage-demo', joomlaVersion: release.version,
+      const { configuration } = await resolveDeployConfiguration({
+        deployId: 'heritage-demo', joomlaVersion: release.version,
         phpVersion: runtime.phpVersion, fresh: true, persistence: false,
         admin: { name: 'Integration Administrator', username: 'admin', email: 'admin@example.test', password: `Integration-${crypto.randomUUID()}!` },
-      }, { catalog, blueprintCatalog, baseURL: runtime.assetBaseUrl, fetcher: runtime.fetchAsset });
+      }, { catalog, deployCatalog, baseURL: runtime.assetBaseUrl, fetcher: runtime.fetchAsset });
       const archive = await runtime.fetchAsset(new URL(release.url, manifestURL));
       assert.equal(archive.status, 200);
       const options = { sourceLoader, fetchPackage: runtime.fetchAsset };
@@ -55,9 +55,9 @@ for (const major of ['5', '6']) {
         ...options, archiveBytes: await archive.arrayBuffer(), sha256: release.sha256,
       });
       assert.equal(installed.resumed, false);
-      assert.equal(installed.blueprintId, 'heritage-demo');
-      assert.equal(installed.language, 'en-GB');
-      assert.match(await page(runtime, 'index.php'), /Stories connect generations/);
+      assert.equal(installed.deployId, 'heritage-demo');
+      assert.equal(installed.language, 'af-ZA');
+      assert.match(await page(runtime, 'index.php?lang=en'), /Stories connect generations/);
       assert.match(await page(runtime, 'index.php'), /mod-languages/);
       assert.match(await page(runtime, 'index.php?lang=nl'), /Verhalen verbinden generaties/);
       assert.ok(await runtime.fs.stat('/persist/meta/administrator.json'));
@@ -77,6 +77,24 @@ for (const major of ['5', '6']) {
       assert.doesNotMatch(administratorPage, /name="passwd"/);
       assert.match(administratorPage, /lang="nl-nl"/i);
       await assert.rejects(installJoomla(runtime, { ...configuration, joomlaVersion: major === '5' ? '6.2.0' : '5.4.10' }, options), /another Joomla release/);
+
+      const discovered = await discoverJoomlaConfiguration(runtime, options);
+      assert.ok(discovered.menuTypes.some((item) => item.component === 'com_content' && item.view === 'featured'));
+      const cassiopeia = discovered.templates.find((item) => item.template === 'cassiopeia');
+      assert.ok(cassiopeia);
+      const changes = { ...configuration, language: 'nl-NL', siteName: 'Configured heritage', extensions: [], startupCommands: [],
+        menus: [{ key: 'featured-demo', title: 'Featured demo', alias: 'featured-demo', component: 'com_content', view: 'featured', home: true }],
+        template: { element: 'cassiopeia', params: { fluidContainer: 1 } } };
+      const configured = await applyJoomlaConfiguration(runtime, changes, options);
+      assert.equal(configured.siteName, 'Configured heritage');
+      assert.ok(configured.menus['featured-demo'] > 0);
+      const again = await applyJoomlaConfiguration(runtime, changes, { ...options, installPackages: false });
+      assert.equal(again.menus['featured-demo'], configured.menus['featured-demo'], 'Applying the same menu updates it rather than duplicating it.');
+      const after = await discoverJoomlaConfiguration(runtime, options);
+      assert.equal(after.menus.filter((item) => item.alias === 'featured-demo').length, 1);
+      assert.equal(Number(after.menus.find((item) => item.alias === 'featured-demo').home), 1);
+      assert.equal(after.templates.filter((item) => String(item.home) === '1').length, 1);
+      await page(runtime, `index.php?option=com_content&view=featured&Itemid=${configured.menus['featured-demo']}`);
 
       const exported = await runtime.withExclusive((raw) => exportSite(raw, {}, { sourceLoader: exportSource }));
       assert.equal(exported.metadata.joomlaVersion, release.version);

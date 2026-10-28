@@ -1,0 +1,49 @@
+{
+  "$schema": "./schema.json",
+  "schemaVersion": 1,
+  "id": "servicedirectory",
+  "title": "Service Directory",
+  "description": "Install the Service Directory component, privacy and webservices plugins, and open the directory on the site home page.",
+  "joomla": [
+    "5",
+    "6"
+  ],
+  "configuration": {
+    "siteName": "Service Directory Playground",
+    "initialPath": "/",
+    "language": "en-GB",
+    "menus": [
+      {
+        "key": "directory",
+        "title": "Service Directory",
+        "alias": "directory",
+        "menuType": "mainmenu",
+        "component": "com_servicedirectory",
+        "view": "directory",
+        "query": {},
+        "params": {},
+        "language": "*",
+        "home": true,
+        "published": true
+      }
+    ]
+  },
+  "variants": {
+    "5": {
+      "extensions": [
+        {
+          "url": "https://codeload.github.com/joomengine/pkg-servicedirectory/zip/a366b35d2f9b0ad5b7ebc8281bea6862ec4cd747",
+          "sha256": "3c508ec1612d1bba54ed6529d582f27c949ec09c742ef0302b1ccf51bba4ee43"
+        }
+      ]
+    },
+    "6": {
+      "extensions": [
+        {
+          "url": "https://codeload.github.com/joomengine/pkg-servicedirectory/zip/b2cf7f889ca564daa834176078d4c363fc068efa",
+          "sha256": "a129fb490f1960309877cda52753db24217b8f0f194fd6f21d65773f3162a4ec"
+        }
+      ]
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import { parseMenus, parseTemplate, parseLanguageTags } from '../site-configuration.mjs';
 const RESULT_MARKER = '\n__JOOMENGINE_RESULT__';
 const phpSourceCache = new Map();
 const MAX_PACKAGE_BYTES = 128 * 1024 * 1024;
@@ -10,10 +11,10 @@ function languageTag(value, name = 'Language') {
 
 export function validateContent(input) {
   if (input === undefined || input === null) return null;
-  if (typeof input !== 'object' || Array.isArray(input)) throw new TypeError('Blueprint content must contain category and article arrays.');
+  if (typeof input !== 'object' || Array.isArray(input)) throw new TypeError('Deploy content must contain category and article arrays.');
   const result = { multilingual: input.multilingual === true, categories: [], articles: [] };
   for (const kind of ['categories', 'articles']) {
-    if (!Array.isArray(input[kind]) || input[kind].length > 50) throw new TypeError(`Blueprint ${kind} must contain at most 50 entries.`);
+    if (!Array.isArray(input[kind]) || input[kind].length > 50) throw new TypeError(`Deploy ${kind} must contain at most 50 entries.`);
     const keys = new Set();
     result[kind] = input[kind].map(entry => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new TypeError('Each content entry must be an object.');
@@ -43,9 +44,9 @@ export function validateContent(input) {
     if (article.home) homes.add(article.language);
   }
   if (result.multilingual && (homes.size < 2 || result.articles.some(article => !homes.has(article.language)))) {
-    throw new TypeError('A multilingual blueprint needs a home article for each of at least two languages.');
+    throw new TypeError('A multilingual deploy needs a home article for each of at least two languages.');
   }
-  if (new TextEncoder().encode(JSON.stringify(result)).length > 1024 * 1024) throw new TypeError('Blueprint content exceeds 1 MiB.');
+  if (new TextEncoder().encode(JSON.stringify(result)).length > 1024 * 1024) throw new TypeError('Deploy content exceeds 1 MiB.');
   return result;
 }
 
@@ -86,12 +87,17 @@ export function validateInstallOptions(config) {
     extensions: config.extensions ?? [],
     language: languageTag(config.language ?? 'en-GB'),
     languages: config.languages ?? [],
+    languageTags: parseLanguageTags(config.languageTags ?? []),
+    multilingual: config.content?.multilingual === true ? true : (config.multilingual ?? false),
     content: validateContent(config.content),
+    menus: parseMenus(config.menus ?? []),
+    template: parseTemplate(config.template),
     autoLogin: config.autoLogin !== false,
-    blueprintId: config.blueprintId,
+    deployId: config.deployId,
   };
+  if (typeof result.multilingual !== 'boolean') throw new TypeError('multilingual must be true or false.');
   if (!/^[a-zA-Z0-9_]+$/.test(result.database)) throw new TypeError('Database names may contain letters, numbers and underscores.');
-  if (result.blueprintId !== undefined && (typeof result.blueprintId !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(result.blueprintId))) throw new TypeError('Blueprint identity must be a named repository recipe.');
+  if (result.deployId !== undefined && (typeof result.deployId !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(result.deployId))) throw new TypeError('Deploy identity must be a named repository recipe.');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.admin.email)) throw new TypeError('Enter a valid administrator email address.');
   if (/[<>"'%;()&\\]/.test(result.admin.username) || result.admin.username.includes('../')
       || result.admin.username.trim() !== result.admin.username) {
@@ -152,7 +158,7 @@ async function defaultSourceLoader(name) {
 }
 
 export async function buildPhpProgram(operation, payload, sourceLoader = defaultSourceLoader) {
-  if (!['extract', 'install', 'console', 'status', 'health', 'customize', 'administrator', 'import'].includes(operation)) throw new TypeError('Unknown provisioning operation.');
+  if (!['extract', 'install', 'console', 'status', 'health', 'customize', 'administrator', 'import', 'configure', 'discover'].includes(operation)) throw new TypeError('Unknown provisioning operation.');
   const [common, script] = await Promise.all([sourceLoader('common'), sourceLoader(operation)]);
   const encoded = new TextEncoder().encode(JSON.stringify(payload));
   let binary = '';
@@ -373,7 +379,7 @@ export async function installJoomla(runtime, config, {
     }
     const administrator = await restoreJoomlaSession(runtime, options, { sourceLoader });
     progress({ stage: 'ready', message: 'Opened the saved Joomla site.' });
-    return { resumed: true, version: health.version, siteName: health.siteName, language: health.language, blueprintId: state.marker.blueprintId, administrator };
+    return { resumed: true, version: health.version, siteName: health.siteName, language: health.language, deployId: state.marker.deployId, administrator };
   }
   if (state.marker || state.configured || state.installerPresent) throw new Error('A previous installation is incomplete. Reset this site before trying again.');
   if (!digest) throw new TypeError('The Joomla release SHA-256 is required.');
@@ -395,8 +401,13 @@ export async function installJoomla(runtime, config, {
     progress({ stage: 'extensions', message: `Installing extension ${index + 1} of ${options.extensions.length}…` });
     await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader);
   }
-  progress({ stage: 'configure', message: options.content ? 'Preparing the blueprint content and languages…' : 'Applying the site language…' });
-  await execute(runtime, 'customize', { ...location, language: options.language, content: options.content, admin: options.admin }, sourceLoader);
+  if (options.template?.url) {
+    progress({ stage: 'extensions', message: 'Installing the site template…' });
+    await downloadAndInstall(runtime, options.template, fetchPackage, sourceLoader);
+  }
+  progress({ stage: 'configure', message: options.content ? 'Preparing the deploy content and languages…' : 'Applying the site language…' });
+  await execute(runtime, 'customize', { ...location, language: options.language, content: options.content, admin: options.admin, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
+  if (options.menus.length || options.template) await execute(runtime, 'configure', { ...location, menus: options.menus, template: options.template, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
   for (const argv of options.startupCommands) {
     progress({ stage: 'commands', message: `Running ${argv[0]}…` });
     await runStartupCommand(runtime, argv, { sourceLoader });
@@ -408,10 +419,10 @@ export async function installJoomla(runtime, config, {
   await frontend.arrayBuffer();
   if (frontend.status !== 200) throw new Error(`The installed Joomla site returned HTTP ${frontend.status}.`);
   await runtime.fs.writeFile(location.marker, JSON.stringify({
-    state: 'complete', joomlaVersion: options.joomlaVersion, language: health.language, blueprintId: options.blueprintId, installedAt: new Date().toISOString(),
+    state: 'complete', joomlaVersion: options.joomlaVersion, language: health.language, deployId: options.deployId, installedAt: new Date().toISOString(),
   }));
   progress({ stage: 'ready', message: 'Joomla is ready.' });
-  return { resumed: false, version: installed.version, siteName: health.siteName, language: health.language, blueprintId: options.blueprintId, administrator, output: installed.output };
+  return { resumed: false, version: installed.version, siteName: health.siteName, language: health.language, deployId: options.deployId, administrator, output: installed.output };
 }
 
 /** Import a verified portable site bundle into an empty playground instance. */
@@ -424,10 +435,10 @@ export async function importJoomlaSnapshot(runtime, config, {
   if (state.marker || state.configured || state.installerPresent) throw new Error('Import a prebuilt site only into a fresh playground. Reset this site or choose another key.');
   if (!digest) throw new TypeError('The prebuilt site SHA-256 is required.');
   const verified = await verifyPackage(archiveBytes, digest);
-  await runtime.fs.writeFile(location.marker, JSON.stringify({ state: 'importing', joomlaVersion: options.joomlaVersion, blueprintId: options.blueprintId }));
+  await runtime.fs.writeFile(location.marker, JSON.stringify({ state: 'importing', joomlaVersion: options.joomlaVersion, deployId: options.deployId }));
   const archive = `/tmp/joomla-snapshot-${crypto.randomUUID()}.zip`;
   await runtime.fs.writeFile(archive, verified);
-  progress({ stage: 'importing', message: 'Restoring the verified blueprint files and database…' });
+  progress({ stage: 'importing', message: 'Restoring the verified deploy files and database…' });
   await execute(runtime, 'import', { ...location, archive, joomlaVersion: options.joomlaVersion, siteName: options.siteName, database: options.database }, sourceLoader);
   const administrator = await restoreJoomlaSession(runtime, { ...options, autoLogin: false }, { sourceLoader, rotateAdministrator: true });
   await installMissingLanguages(runtime, options.languages, fetchPackage, sourceLoader);
@@ -438,7 +449,9 @@ export async function importJoomlaSnapshot(runtime, config, {
     progress({ stage: 'extensions', message: 'Installing an additional extension…' });
     await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader);
   }
-  await execute(runtime, 'customize', { ...location, language: options.language, content: null, admin: administrator }, sourceLoader);
+  if (options.template?.url) await downloadAndInstall(runtime, options.template, fetchPackage, sourceLoader);
+  await execute(runtime, 'customize', { ...location, language: options.language, content: null, admin: administrator, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
+  if (options.menus.length || options.template) await execute(runtime, 'configure', { ...location, menus: options.menus, template: options.template, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
   for (const argv of additions.startupCommands) {
     progress({ stage: 'commands', message: `Running ${argv[0]}…` });
     await runStartupCommand(runtime, argv, { sourceLoader });
@@ -451,8 +464,44 @@ export async function importJoomlaSnapshot(runtime, config, {
   if (frontend.status !== 200) throw new Error(`The restored Joomla site returned HTTP ${frontend.status}.`);
   await runtime.fs.writeFile(location.marker, JSON.stringify({
     state: 'complete', joomlaVersion: options.joomlaVersion, language: health.language,
-    blueprintId: options.blueprintId, importedAt: new Date().toISOString(),
+    deployId: options.deployId, importedAt: new Date().toISOString(),
   }));
   progress({ stage: 'ready', message: 'The prepared Joomla site is ready.' });
-  return { resumed: false, fromSnapshot: true, version: health.version, siteName: health.siteName, language: health.language, blueprintId: options.blueprintId, administrator };
+  return { resumed: false, fromSnapshot: true, version: health.version, siteName: health.siteName, language: health.language, deployId: options.deployId, administrator };
+}
+
+
+/** Inspect actual installed menu types and site template styles for the editor. */
+export async function discoverJoomlaConfiguration(runtime, { sourceLoader } = {}) {
+  return execute(runtime, 'discover', paths(runtime), sourceLoader);
+}
+
+/** Apply explicitly selected changes to a running installation after a caller checkpoint. */
+export async function applyJoomlaConfiguration(runtime, config, {
+  sourceLoader, fetchPackage = fetch, progress = () => {}, installPackages = true,
+} = {}) {
+  const options = validateInstallOptions(config);
+  const location = paths(runtime);
+  const state = await inspectJoomla(runtime, { sourceLoader });
+  if (state.marker?.state !== 'complete' || !state.configured || state.installerPresent) throw new Error('Open a completed Joomla installation before applying deployment changes.');
+  if (state.marker.joomlaVersion !== options.joomlaVersion) throw new Error('Changing Joomla releases requires a new installation.');
+  await installMissingLanguages(runtime, options.languages, fetchPackage, sourceLoader);
+  if (installPackages) {
+    for (const extension of options.extensions) {
+      progress({ stage: 'extensions', message: 'Installing the selected extension…' });
+      await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader);
+    }
+    if (options.template?.url) await downloadAndInstall(runtime, options.template, fetchPackage, sourceLoader);
+  }
+  progress({ stage: 'configure', message: 'Applying the site settings, menus and template…' });
+  const identity = await execute(runtime, 'administrator', { ...location, mode: 'read' }, sourceLoader);
+  await execute(runtime, 'customize', { ...location, language: options.language, content: null, admin: identity.administrator, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
+  if (options.siteName !== undefined) await runStartupCommand(runtime, ['config:set', 'sitename', options.siteName], { sourceLoader });
+  const configured = await execute(runtime, 'configure', { ...location, menus: options.menus, template: options.template, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
+  for (const argv of options.startupCommands) await runStartupCommand(runtime, argv, { sourceLoader });
+  const health = await checkJoomla(runtime, { sourceLoader });
+  await runtime.fs.writeFile(location.marker, JSON.stringify({ ...state.marker, language: health.language, updatedAt: new Date().toISOString() }));
+  const administrator = await restoreJoomlaSession(runtime, { ...options, admin: identity.administrator ?? options.admin }, { sourceLoader });
+  progress({ stage: 'ready', message: 'The site changes have been applied.' });
+  return { ...configured, ...health, administrator };
 }

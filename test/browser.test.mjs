@@ -25,13 +25,16 @@ const checkedInventory = async () => assert.deepEqual(
   'The complete static artifact must match its build inventory.',
 );
 await checkedInventory();
-const selection = (name) => process.env[name]?.split(',').map((part) => part.trim()).filter(Boolean);
+const selection = (name) => {
+  const values = process.env[name]?.split(',').map((part) => part.trim()).filter(Boolean);
+  return values?.length ? values : undefined;
+};
 const browserNames = selection('PLAYGROUND_BROWSERS') || ['chromium', 'firefox'];
 const phpVersions = selection('PLAYGROUND_PHP_VERSIONS') || manifest.php.map((entry) => entry.version);
 const joomlaVersions = selection('PLAYGROUND_JOOMLA_VERSIONS') || manifest.joomla.map((entry) => entry.version);
 const browsers = { chromium, firefox };
-const scenarios = selection('PLAYGROUND_SCENARIOS') || ['matrix', 'memory', 'timeout', 'static', 'ui', 'blueprints', 'export'];
-for (const scenario of scenarios) assert.ok(['matrix', 'memory', 'timeout', 'static', 'ui', 'blueprints', 'export'].includes(scenario), `Unknown scenario: ${scenario}`);
+const scenarios = selection('PLAYGROUND_SCENARIOS') || ['matrix', 'memory', 'timeout', 'static', 'ui', 'deploys', 'export', 'rocket'];
+for (const scenario of scenarios) assert.ok(['matrix', 'memory', 'timeout', 'static', 'ui', 'deploys', 'export', 'rocket'].includes(scenario), `Unknown scenario: ${scenario}`);
 const combinations = manifest.joomla.flatMap((joomla) => joomlaVersions.includes(joomla.version)
   ? joomla.php.filter((php) => phpVersions.includes(php)).map((phpVersion) => ({ phpVersion, joomlaVersion: joomla.version })) : []);
 assert.ok(combinations.length, 'Select at least one compatible Joomla/PHP pair from the built manifest.');
@@ -49,6 +52,10 @@ const extensionArchive = zipSync({
 header('Content-Type: application/json');
 $db = new PDO('mysql:dbname=joomla;charset=utf8mb4', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
 $path = __DIR__ . '/saved-marker.txt';
+if (($_GET['action'] ?? '') === 'settings') {
+    echo json_encode(array_combine(['upload_max_filesize', 'post_max_size', 'max_execution_time', 'max_input_vars', 'max_input_time', 'memory_limit'], array_map('ini_get', ['upload_max_filesize', 'post_max_size', 'max_execution_time', 'max_input_vars', 'max_input_time', 'memory_limit'])), JSON_THROW_ON_ERROR);
+    return;
+}
 if (($_GET['action'] ?? '') === 'seed') {
     $db->exec('CREATE TABLE IF NOT EXISTS playground_ui_contract (id INT PRIMARY KEY, marker VARCHAR(100)) ENGINE=InnoDB');
     $db->exec("REPLACE INTO playground_ui_contract VALUES (1, 'saved through real MariaDB')");
@@ -100,6 +107,8 @@ function observePage(page) {
   });
   page.errors = [];
   page.logs = [];
+  page.consoleErrors = [];
+  page.expectedConsoleURLs = new Set();
   page.failedSiteRequests = [];
   page.responseErrors = [];
   page.pendingSiteRequests = new Map();
@@ -107,6 +116,11 @@ function observePage(page) {
   page.on('pageerror', (error) => page.errors.push(error.stack || error.message));
   page.on('console', (message) => {
     if (['warning', 'error'].includes(message.type())) page.logs.push(message.text());
+    if (message.type() === 'error') {
+      const location = message.location();
+      const expected = [...page.expectedConsoleURLs].some((url) => location.url === url || message.text().includes(url));
+      if (!expected) page.consoleErrors.push({ message: message.text(), url: location.url, step: page.testStep });
+    }
   });
   page.on('request', (request) => {
     if (request.url().includes('/__site/')) page.pendingSiteRequests.set(request, {
@@ -148,13 +162,37 @@ async function saveBrowserDiagnostics(page, name, error) {
   })));
   const diagnostics = {
     message: error.stack || error.message, step: page.testStep, state, frames,
-    errors: page.errors, logs: page.logs?.slice(-30), failedSiteRequests: page.failedSiteRequests,
+    errors: page.errors, logs: page.logs?.slice(-30), consoleErrors: page.consoleErrors, failedSiteRequests: page.failedSiteRequests,
     responseErrors: page.responseErrors, pendingSiteRequests: [...(page.pendingSiteRequests?.values() || [])],
   };
   await mkdir(path.join(root, 'test-results'), { recursive: true });
   await writeFile(path.join(root, 'test-results', `${name}-failure.json`), `${JSON.stringify(diagnostics, null, 2)}\n`);
   await page.screenshot({ path: path.join(root, 'test-results', `${name}-failure.png`), fullPage: true }).catch(() => {});
   console.error(JSON.stringify({ diagnostic: name, ...diagnostics }));
+}
+
+async function assertCleanConsole(page) {
+  await bounded(Promise.allSettled([...page.responseChecks]), 'Read browser responses', 10_000);
+  assert.deepEqual(page.errors, [], 'The application must not produce uncaught browser exceptions.');
+  assert.deepEqual(page.consoleErrors, [], 'Unexpected browser console errors must be fixed at their source.');
+  assert.deepEqual(page.responseErrors, [], 'AJAX responses must not contain PHP diagnostics or malformed JSON.');
+}
+
+async function showQuickSettings(page) {
+  if (!(await page.locator('#settings').isVisible())) await page.locator('#settings-toggle').click();
+}
+
+async function showDeployEditor(page, { advanced = false } = {}) {
+  if (!(await page.locator('#deploy-dialog').isVisible())) await page.locator('#deploy-editor-button').click();
+  if (advanced && await page.locator('#advanced-settings').getAttribute('open') === null) await page.locator('#advanced-settings > summary').click();
+}
+
+async function closeDeployEditor(page) {
+  if (await page.locator('#deploy-dialog').isVisible()) await page.locator('#deploy-dialog [data-close-dialog]').click();
+}
+
+async function showSiteActions(page) {
+  if (await page.locator('#site-actions').getAttribute('open') === null) await page.locator('#site-actions > summary').click();
 }
 
 async function openHarness(context, url, { isolation = true } = {}) {
@@ -184,19 +222,19 @@ async function start(page, config) {
   }, config), 'Joomla installation');
 }
 
-async function startBlueprint(page, query, extra = {}) {
+async function startDeploy(page, query, extra = {}) {
   return bounded(page.evaluate(async ({ query, extra }) => {
     const { readURLConfiguration, parseCatalog } = await import('./src/config.mjs');
-    const { loadBlueprintCatalog, resolveBlueprintConfiguration } = await import('./src/blueprints.mjs');
+    const { loadDeployCatalog, resolveDeployConfiguration } = await import('./src/deploys.mjs');
     const { createPlayground } = await import('./src/playground.mjs');
     const catalog = parseCatalog(await (await fetch('./assets/manifest.json')).json());
-    const blueprintCatalog = await loadBlueprintCatalog();
+    const deployCatalog = await loadDeployCatalog();
     const input = { ...readURLConfiguration(new URL(`?${query}`, location.href)).config, ...extra };
-    const resolved = await resolveBlueprintConfiguration(input, { catalog, blueprintCatalog, baseURL: location.href });
+    const resolved = await resolveDeployConfiguration(input, { catalog, deployCatalog, baseURL: location.href });
     window.validationProgress = [];
     window.playground = await createPlayground(resolved.configuration, { onProgress(progress) { window.validationProgress.push(progress); } });
     return { configuration: { ...resolved.configuration, admin: undefined }, installation: { ...window.playground.installation, administrator: undefined }, progress: window.validationProgress };
-  }, { query, extra }), 'Blueprint installation');
+  }, { query, extra }), 'Deploy installation');
 }
 
 async function php(page, code, options = {}) {
@@ -382,7 +420,7 @@ async function close(page, reset = false) {
 }
 
 for (const name of browserNames) {
-  test(`${name}: real Joomla, upstream PHP and native MariaDB PDO`, { timeout: 7_200_000 }, async (t) => {
+  test(`${name}: real Joomla, upstream PHP and native MariaDB PDO`, { timeout: 1_800_000 }, async (t) => {
     const executablePath = process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`];
     const browser = await browsers[name].launch({ headless: true, ...(executablePath ? { executablePath } : {}),
       ...(name === 'chromium' ? { args: ['--no-sandbox'] } : {}),
@@ -516,20 +554,21 @@ for (const name of browserNames) {
         records.push({ ...defaultPair, staticServiceWorkerIsolation: true });
       } finally { if (page) await close(page).catch(() => {}); await context.close(); await plainServer.close(); }
     });
-    if (scenarios.includes('blueprints')) await t.test('repository and URL recipes install actual components, languages and prepared content', { timeout: 900_000 }, async () => {
+    if (scenarios.includes('deploys')) await t.test('repository and URL recipes install actual components, languages and prepared content', { timeout: 900_000 }, async () => {
       const context = await browser.newContext();
       const page = await openHarness(context, server.url);
       const proof = [];
-      const setup = () => ({ admin: configuration(defaultPair).admin, persistence: false, storageKey: `blueprint-${randomUUID()}` });
+      const setup = () => ({ admin: configuration(defaultPair).admin, persistence: false, storageKey: `deploy-${randomUUID()}` });
       try {
         const componentCases = [
-          ...combinations.map((pair) => ({ id: 'jcb', version: pair.joomlaVersion, phpVersion: pair.phpVersion, element: 'com_componentbuilder' })),
+          ...combinations.map((pair) => ({ id: pair.joomlaVersion.startsWith('6.') ? 'jcb-mcp' : 'jcb', version: pair.joomlaVersion, phpVersion: pair.phpVersion, element: 'com_componentbuilder' })),
+          { id: 'jcb', version: manifest.defaults.joomlaVersion, phpVersion: manifest.defaults.phpVersion, element: 'com_componentbuilder' },
           { id: 'patchtester', version: defaultPair.joomlaVersion, element: 'com_patchtester' },
           { id: 'weblinks', version: defaultPair.joomlaVersion, element: 'com_weblinks' },
         ];
         for (const item of componentCases) {
           page.testStep = `${item.id} on Joomla ${item.version}, PHP ${item.phpVersion ?? defaultPair.phpVersion}`;
-          const result = await startBlueprint(page, new URLSearchParams({ blueprint: item.id, joomla: item.version, php: item.phpVersion ?? defaultPair.phpVersion }).toString(), setup());
+          const result = await startDeploy(page, new URLSearchParams({ deploy: item.id, joomla: item.version, php: item.phpVersion ?? defaultPair.phpVersion }).toString(), setup());
           const registered = await phpJSON(page, `${PDO} echo json_encode($db->query("SELECT enabled FROM jml_extensions WHERE type='component' AND element='${item.element}'")->fetchColumn(), JSON_THROW_ON_ERROR);`);
           assert.equal(registered, 1, `${item.id} must be installed and enabled by Joomla.`);
           const component = await request(page, `/administrator/index.php?option=${item.element}`);
@@ -537,7 +576,11 @@ for (const name of browserNames) {
           assert.doesNotMatch(component.text, /name\s*=\s*["']passwd["']|Fatal error|Class .* not found|Call to undefined/i, 'The installed component must render in an authenticated administrator session.');
           assert.match(component.text, new RegExp(item.element));
           assert.ok(result.configuration.extensions.length > 0);
-          if (item.id === 'jcb') {
+          if (item.id === 'jcb' || item.id === 'jcb-mcp') {
+            if (item.id === 'jcb-mcp') {
+              assert.equal(await phpJSON(page, `${PDO} echo json_encode($db->query("SELECT enabled FROM jml_extensions WHERE element='com_joomengine_mcp' AND type='component'")->fetchColumn());`), 1);
+              assert.equal(await phpJSON(page, `echo json_encode(extension_loaded('sodium'));`), true);
+            }
             assert.deepEqual(dashboardErrors(component.text), [], 'JCB must not report missing requirements or fatal configuration errors.');
             const installedArtwork = await bounded(page.evaluate(async (assets) => {
               const results = [];
@@ -579,7 +622,9 @@ for (const name of browserNames) {
             assert.equal(cors.status, 200, cors.error);
             assert.equal(cors.error, '');
             assert.deepEqual(JSON.parse(cors.body), { ...curlCorsProof, header: 'cors-check' }, 'PHP cURL must honor a real CORS preflight and preserve its request headers.');
-            const deniedURL = Buffer.from(new URL('denied.json', corsServer.url).href).toString('base64');
+            const deniedHref = new URL('denied.json', corsServer.url).href;
+            page.expectedConsoleURLs.add(deniedHref);
+            const deniedURL = Buffer.from(deniedHref).toString('base64');
             const denied = await phpJSON(page, `
               $http = curl_init(base64_decode('${deniedURL}'));
               curl_setopt_array($http, [CURLOPT_RETURNTRANSFER=>true, CURLOPT_TIMEOUT=>15]);
@@ -607,8 +652,8 @@ for (const name of browserNames) {
           await close(page);
         }
         page.testStep = 'Dutch URL recipe with explicit logged-out session and extension command';
-        const dutch = await startBlueprint(page, new URLSearchParams({
-          blueprint: 'blank', joomla: '5.4', php: defaultPair.phpVersion, language: 'nl-NL', login: 'no',
+        const dutch = await startDeploy(page, new URLSearchParams({
+          deploy: 'blank', joomla: '5.4', php: defaultPair.phpVersion, language: 'nl-NL', login: 'no',
           extension: new URL('__test_extension.zip', server.url).href, commands: JSON.stringify([['list']]),
         }).toString(), setup());
         assert.equal(dutch.configuration.joomlaVersion, manifest.joomla.find((entry) => entry.version.startsWith('5.4.')).version);
@@ -622,11 +667,12 @@ for (const name of browserNames) {
         await close(page);
         for (const fresh of [false, true]) {
           page.testStep = `heritage ${fresh ? 'fresh recipe' : 'prepared snapshot'}`;
-          const result = await startBlueprint(page, new URLSearchParams({ blueprint: 'heritage-demo', php: defaultPair.phpVersion, ...(fresh ? { fresh: '1' } : {}) }).toString(), setup());
+          const result = await startDeploy(page, new URLSearchParams({ deploy: 'heritage-demo', php: defaultPair.phpVersion, ...(fresh ? { fresh: '1' } : {}) }).toString(), setup());
           assert.equal(Boolean(result.installation.fromSnapshot), !fresh, 'fresh=1 must bypass the verified prepared archive.');
           const content = await phpJSON(page, `${PDO} echo json_encode($db->query("SELECT language, COUNT(*) AS articles FROM jml_content WHERE state=1 GROUP BY language ORDER BY language")->fetchAll(PDO::FETCH_ASSOC), JSON_THROW_ON_ERROR);`);
-          assert.ok(content.some((entry) => entry.language === 'en-GB' && entry.articles > 0));
-          assert.ok(content.some((entry) => entry.language === 'nl-NL' && entry.articles > 0));
+          for (const language of ['af-ZA', 'de-DE', 'fr-FR', 'it-IT', 'es-ES', 'zh-CN', 'nl-NL', 'en-GB']) {
+            assert.ok(content.some((entry) => entry.language === language && entry.articles > 0), `${language} needs published multilingual content.`);
+          }
           const siteURL = await page.evaluate(() => {
             const frame = document.createElement('iframe');
             frame.id = 'site-frame'; frame.src = window.playground.url;
@@ -635,17 +681,18 @@ for (const name of browserNames) {
           });
           const frame = await (await page.locator('#site-frame').elementHandle()).contentFrame();
           await waitForSiteFrame(frame, siteURL);
-          assert.match(await frame.locator('body').innerText(), /Stories connect generations/);
+          assert.match(await frame.locator('html').getAttribute('lang'), /^af-ZA$/i);
+          assert.match(await frame.locator('body').innerText(), /Erfenis/);
           assert.ok(await frame.locator('.mod-languages').count() > 0, 'The actual multilingual home page must offer its language switcher.');
           await page.locator('#site-frame').evaluate((frame) => frame.remove());
           proof.push({ id: 'heritage-demo', fresh, fromSnapshot: Boolean(result.installation.fromSnapshot), content });
           await close(page);
         }
-        page.testStep = 'default domain automatically opens JCB';
+        page.testStep = 'default domain automatically opens JCB and MCP in English';
         await page.setViewportSize({ width: 1440, height: 1000 });
         await page.goto(server.url);
         await renderedSiteFrame(page);
-        assert.equal(await page.locator('#blueprint').inputValue(), 'jcb');
+        assert.equal(await page.locator('#deploy').inputValue(), 'jcb-mcp');
         assert.match(await page.frameLocator('#site-frame').locator('html').innerHTML(), /com_componentbuilder/);
         assert.equal(await page.frameLocator('#site-frame').locator('input[name="passwd"]').count(), 0);
         assert.deepEqual(dashboardErrors(await page.frameLocator('#site-frame').locator('html').innerHTML()), [],
@@ -656,12 +703,14 @@ for (const name of browserNames) {
           await mkdir(path.join(root, 'test-results'), { recursive: true });
           await page.screenshot({ path: path.join(root, 'test-results/jcb-desktop.png'), fullPage: true });
         }
+        await showSiteActions(page);
         await page.locator('#close-button').click();
+        await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
-        proof.push({ id: 'jcb', defaultDomainAutostart: true });
-        assert.deepEqual(page.errors, []);
-        records.push({ ...defaultPair, blueprints: proof });
-      } catch (error) { await saveBrowserDiagnostics(page, `blueprints-${name}`, error); throw error; }
+        proof.push({ id: 'jcb-mcp', defaultDomainAutostart: true });
+        await assertCleanConsole(page);
+        records.push({ ...defaultPair, deploys: proof });
+      } catch (error) { await saveBrowserDiagnostics(page, `deploys-${name}`, error); throw error; }
       finally { await close(page).catch(() => {}); await context.close(); }
     });
     if (scenarios.includes('export')) await t.test('portable export restores exact files, SQL values, views and triggers in a new database', { timeout: 900_000 }, async () => {
@@ -727,16 +776,19 @@ for (const name of browserNames) {
         const url = new URL(server.url);
         url.searchParams.set('joomla', defaultPair.joomlaVersion);
         url.searchParams.set('php', defaultPair.phpVersion);
-        url.searchParams.set('blueprint', 'blank');
+        url.searchParams.set('deploy', 'blank');
         url.searchParams.set('start', '0');
         await page.goto(url.href);
+        await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
+        await showDeployEditor(page, { advanced: true });
         await page.locator('#site-name').fill('Interface installation');
-        await page.locator('#advanced-settings > summary').click();
         await page.locator('#storage-key').fill(`ui-${randomUUID()}`);
         await page.locator('#initial-path').fill('/administrator/');
         await page.locator('#extensions').fill(JSON.stringify([{ url: new URL('__test_extension.zip', server.url).href, sha256: extensionSha256 }]));
         await page.locator('#startup-commands').fill(JSON.stringify([['list']]));
+        await closeDeployEditor(page);
+        await showQuickSettings(page);
         page.testStep = 'launch administrator';
         await page.locator('#launch-button').click();
         await renderedSiteFrame(page);
@@ -753,6 +805,7 @@ for (const name of browserNames) {
         assert.ok(changedPHP, 'The interface contract needs two compatible PHP versions.');
         page.testStep = 'switch PHP with saved files and database';
         const originalFrame = await page.locator('#site-frame').getAttribute('src');
+        await showQuickSettings(page);
         await page.locator('#php-version').selectOption(changedPHP);
         await page.waitForFunction((previous) => {
           const frame = document.getElementById('site-frame');
@@ -762,16 +815,19 @@ for (const name of browserNames) {
         const afterSwitch = await previewContract(page);
         assert.deepEqual(afterSwitch, { ...marker, php: manifest.php.find((entry) => entry.version === changedPHP).patchVersion });
         page.testStep = 'reopen saved site from origin';
+        await showSiteActions(page);
         await page.locator('#close-button').click();
+        await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         await page.goto(server.url);
         await renderedSiteFrame(page);
         assert.equal(await page.locator('#php-version').inputValue(), changedPHP);
-        assert.equal(await page.locator('#blueprint').inputValue(), 'blank');
+        assert.equal(await page.locator('#deploy').inputValue(), 'blank');
         assert.deepEqual(await previewContract(page), afterSwitch);
         const publicPreferences = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith('joomengine:launch:'))));
         assert.doesNotMatch(JSON.stringify(publicPreferences), /"(?:password|admin|administrator)"\s*:/, 'Automatic-resume preferences must not expose administrator credentials.');
         page.testStep = 'download portable files and database';
+        await page.locator('#download-dialog-button').click();
         await page.locator('#export-format').selectOption('bundle');
         const downloaded = page.waitForEvent('download');
         await page.locator('#export-button').click();
@@ -783,19 +839,24 @@ for (const name of browserNames) {
         assert.equal(JSON.parse(strFromU8(exported['export.json'])).joomlaVersion, defaultPair.joomlaVersion);
         assert.ok(!Object.keys(exported).some((filename) => /(?:^|\/)administrator\.json$/.test(filename)), 'Private browser administrator metadata must stay out of the deployment bundle.');
         await page.locator('#export-button:enabled').waitFor();
+        if (await page.locator('#download-dialog').isVisible()) await page.locator('#download-dialog [data-close-dialog]').click();
         page.testStep = 'fresh URL creates an independent saved site';
         const savedKey = await page.locator('#storage-key').inputValue();
+        await showSiteActions(page);
         await page.locator('#close-button').click();
+        await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         const freshURL = new URL(server.url);
-        for (const [key, value] of Object.entries({ blueprint: 'blank', joomla: defaultPair.joomlaVersion, php: changedPHP, key: savedKey, fresh: '1', extension: new URL('__test_extension.zip', server.url).href })) freshURL.searchParams.set(key, value);
+        for (const [key, value] of Object.entries({ deploy: 'blank', joomla: defaultPair.joomlaVersion, php: changedPHP, key: savedKey, fresh: '1', extension: new URL('__test_extension.zip', server.url).href })) freshURL.searchParams.set(key, value);
         await page.goto(freshURL.href);
         await renderedSiteFrame(page);
         const freshKey = await page.locator('#storage-key').inputValue();
         assert.notEqual(freshKey, savedKey, 'fresh=1 must give the new saved site its own storage key.');
         assert.equal(new URL(page.url()).searchParams.has('fresh'), false, 'Reloading the new site must resume it instead of repeatedly creating sites.');
         assert.equal((await previewContract(page)).database, null);
+        await showSiteActions(page);
         await page.locator('#close-button').click();
+        await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         const savedURL = new URL(server.url);
         savedURL.searchParams.set('key', savedKey);
@@ -804,24 +865,31 @@ for (const name of browserNames) {
         assert.equal(await page.locator('#storage-key').inputValue(), savedKey);
         assert.deepEqual(await previewContract(page), afterSwitch, 'A fresh URL must leave the original saved site intact.');
         page.testStep = 'new site control preserves saved sites';
+        await showSiteActions(page);
         await page.locator('#new-site-button').click();
+        await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         assert.notEqual(await page.locator('#storage-key').inputValue(), savedKey);
         assert.equal(await page.locator('#site-frame').count(), 0);
         await page.locator('#launch-button').click();
         await renderedSiteFrame(page);
         assert.equal((await previewContract(page)).database, null, 'New site must install an independent database.');
+        await showQuickSettings(page);
         await page.locator('#saved-site').selectOption(savedKey);
         await renderedSiteFrame(page);
         assert.deepEqual(await previewContract(page), afterSwitch, 'The saved-site selector must reopen the original files and database.');
         page.testStep = 'reset site';
         page.once('dialog', (dialog) => dialog.accept());
+        await showSiteActions(page);
         await page.locator('#reset-button').click();
+        await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         assert.equal(await page.locator('#site-frame').isVisible(), false);
+        await showDeployEditor(page, { advanced: true });
         await page.locator('#site-name').fill('Interface installation after reset');
-        if (await page.locator('#advanced-settings').getAttribute('open') === null) await page.locator('#advanced-settings > summary').click();
         await page.locator('#initial-path').fill('/');
+        await closeDeployEditor(page);
+        await showQuickSettings(page);
         page.testStep = 'launch site after reset';
         await page.locator('#launch-button').click();
         await renderedSiteFrame(page);
@@ -830,11 +898,12 @@ for (const name of browserNames) {
         assert.equal(afterReset.database, null, 'Reset must remove the previous MariaDB data.');
         assert.equal(afterReset.file, null, 'Reset must remove the previous site files.');
         page.testStep = 'close site';
+        await showSiteActions(page);
         await page.locator('#close-button').click();
+        await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         await bounded(Promise.allSettled([...page.responseChecks]), 'Read dashboard responses', 10_000);
-        assert.deepEqual(page.errors, [], JSON.stringify(page.responseErrors));
-        assert.deepEqual(page.responseErrors, [], 'Dashboard AJAX must not contain PHP diagnostics or malformed JSON.');
+        await assertCleanConsole(page);
         records.push({ ...defaultPair, interfaceLaunch: true, interfaceReset: true, phpSwitch: changedPHP, persistedAutomaticResume: true, portableDownload: true, freshPreservesOriginal: true, savedSiteSelector: true });
       } catch (error) {
         await saveBrowserDiagnostics(page, `interface-${name}`, error);

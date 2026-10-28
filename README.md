@@ -112,7 +112,7 @@ while IFS= read -r minor; do
 done < <(node --input-type=module -e "import p from './versions.json' with {type:'json'}; for (const v of p.php) console.log(v.version)")
 
 BRIDGE_SOURCE_DIR=external/bridge MARIADB_DRIVER_DIR=.cache/native npm run build
-npm run build:blueprints
+npm run build:deploys
 npm run serve
 ```
 
@@ -173,8 +173,8 @@ provide a public CORS proxy.
 
 ## Using the playground
 
-The default page automatically starts the JCB blueprint. Its top bar selects
-Joomla, PHP, a blueprint, language, persistence, and export format. Use `?start=0`
+The default page automatically starts the JCB deploy. Its top bar selects
+Joomla, PHP, a deploy, language, persistence, and export format. Use `?start=0`
 to configure a site before launching it. The setup panel generates a random
 administrator password. Authentication uses Joomla's normal login form.
 
@@ -182,7 +182,7 @@ Persistence is enabled by default. Joomla files, session data, cookies, and the
 MariaDB database are kept in IndexedDB. A site key identifies saved data within
 this playground’s URL. Use different keys for independent sites or Joomla
 versions. Returning to the domain reopens the last saved site. Switching PHP
-keeps its files and database; switching Joomla or blueprints selects a separate
+keeps its files and database; switching Joomla or deploys selects a separate
 profile. A saved site cannot be opened concurrently in another tab.
 
 - **Save** flushes PHP files and database changes to browser storage.
@@ -234,16 +234,16 @@ an explicit error.
 
 ## Embedding and URL configuration
 
-Repository blueprints define packages, language packs, content, and console
-commands. See the [contributor guide and schemas](blueprints/README.md) to add
+Repository deploys define packages, language packs, content, and console
+commands. See the [contributor guide and schemas](deploys/README.md) to add
 another recipe. The default is `jcb`; `blank` (also `none`) installs Joomla alone.
 
-- [JCB](https://playground.joomengine.org/?blueprint=jcb)
-- [Joomla only](https://playground.joomengine.org/?blueprint=blank)
-- [Multilingual heritage site](https://playground.joomengine.org/?blueprint=heritage-demo)
-- [Heritage built from its recipe](https://playground.joomengine.org/?blueprint=heritage-demo&fresh=1)
-- [Patch Tester](https://playground.joomengine.org/?blueprint=patchtester)
-- [Weblinks](https://playground.joomengine.org/?blueprint=weblinks)
+- [JCB](https://playground.joomengine.org/?deploy=jcb)
+- [Joomla only](https://playground.joomengine.org/?deploy=blank)
+- [Multilingual heritage site](https://playground.joomengine.org/?deploy=heritage-demo)
+- [Heritage built from its recipe](https://playground.joomengine.org/?deploy=heritage-demo&fresh=1)
+- [Patch Tester](https://playground.joomengine.org/?deploy=patchtester)
+- [Weblinks](https://playground.joomengine.org/?deploy=weblinks)
 - [Joomla 5.4](https://playground.joomengine.org/?joomla=5.4)
 - [PHP 8.5](https://playground.joomengine.org/?php=8.5)
 - [Dutch](https://playground.joomengine.org/?language=nl-NL)
@@ -255,7 +255,7 @@ key stays in the address for subsequent reloads. Use Reset to erase the current
 site explicitly.
 
 The build stages verified packages on the same origin. For `prebuild: true`
-recipes, `npm run build:blueprints` installs real Joomla, exports it, and imports
+recipes, `npm run build:deploys` installs real Joomla, exports it, and imports
 the archive into a second runtime with new credentials before publishing it.
 Prepared copies match an exact Joomla release. The heritage demonstration is
 prepared for both catalog releases; `fresh=1` builds its original recipe instead.
@@ -264,7 +264,7 @@ The interface recognizes these query parameters:
 
 | Parameter | Meaning |
 | --- | --- |
-| `blueprint=jcb` | Choose a repository recipe; `blank` installs Joomla alone |
+| `deploy=jcb` | Choose a repository recipe; `blank` installs Joomla alone |
 | `joomla=5.4` | Resolve a minor or exact version to a tested catalog release |
 | `php=8.4` | Select the PHP minor whose patch version is pinned in the catalog |
 | `path=/administrator/` | Initial page inside Joomla |
@@ -453,7 +453,7 @@ Build the static site, install the browser engines, and run browser integration:
 BRIDGE_SOURCE_DIR=external/bridge MARIADB_DRIVER_DIR=.cache/native npm run build
 npx playwright install --with-deps chromium firefox
 npm run test:provisioning
-npm run build:blueprints
+npm run build:deploys
 npm run test:browser
 ```
 

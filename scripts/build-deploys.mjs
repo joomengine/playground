@@ -15,50 +15,50 @@ function administrator(prefix) {
 }
 
 /** Publish a prepared recipe only after a separate runtime restores its export. */
-export async function buildBlueprints({ directory = process.env.PLAYGROUND_DIST || path.join(root, 'dist') } = {}) {
+export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || path.join(root, 'dist') } = {}) {
   const distribution = path.resolve(directory);
   const inventoryPath = path.join(distribution, 'asset-inventory.json');
   const inventoryBytes = await readFile(inventoryPath);
   const declared = JSON.parse(inventoryBytes);
   assert.deepEqual((await inventory(distribution)).filter((entry) => entry.path !== 'asset-inventory.json'), declared,
-    'The input static artifact must match its build inventory before generating prepared blueprints.');
+    'The input static artifact must match its build inventory before generating prepared deploys.');
   const declaredPaths = new Set(declared.map((entry) => entry.path));
   const manifestPath = path.join(distribution, 'assets/manifest.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   const canonicalURL = new URL(manifest.deployment.canonicalUrl);
   const manifestURL = new URL('assets/manifest.json', canonicalURL);
-  const [{ parseCatalog }, { loadBlueprintCatalog, normalizeBlueprint, resolveBlueprintConfiguration }, { installJoomla, importJoomlaSnapshot, requestJoomlaPage }] = await Promise.all([
+  const [{ parseCatalog }, { loadDeployCatalog, normalizeDeploy, resolveDeployConfiguration }, { installJoomla, importJoomlaSnapshot, requestJoomlaPage }] = await Promise.all([
     import(pathToFileURL(path.join(distribution, 'src/config.mjs'))),
-    import(pathToFileURL(path.join(distribution, 'src/blueprints.mjs'))),
+    import(pathToFileURL(path.join(distribution, 'src/deploys.mjs'))),
     import(pathToFileURL(path.join(distribution, 'src/joomla/index.mjs'))),
   ]);
   const fetchAsset = async (value) => {
     const url = new URL(value instanceof Request ? value.url : value, canonicalURL);
     if (url.origin !== canonicalURL.origin || !url.pathname.startsWith(canonicalURL.pathname) || url.search || url.hash) {
-      throw new Error(`Prepared blueprints must use verified staged assets: ${url.href}`);
+      throw new Error(`Prepared deploys must use verified staged assets: ${url.href}`);
     }
     const relative = decodeURIComponent(url.pathname.slice(canonicalURL.pathname.length));
     const filename = path.resolve(distribution, relative);
     if (!filename.startsWith(`${distribution}${path.sep}`) || !declaredPaths.has(relative)) {
-      throw new Error(`The blueprint asset is absent from the verified inventory: ${relative}`);
+      throw new Error(`The deploy asset is absent from the verified inventory: ${relative}`);
     }
     return new Response(await readFile(filename));
   };
   const catalog = parseCatalog(manifest);
-  const blueprintCatalog = await loadBlueprintCatalog({ url: new URL(manifest.blueprints.url, manifestURL), fetcher: fetchAsset });
+  const deployCatalog = await loadDeployCatalog({ url: new URL(manifest.deploys.url, manifestURL), fetcher: fetchAsset });
   const recipes = [];
-  for (const descriptor of blueprintCatalog.blueprints) {
+  for (const descriptor of deployCatalog.deploys) {
     const bytes = await (await fetchAsset(descriptor.url)).arrayBuffer();
     const recipe = JSON.parse(new TextDecoder().decode(bytes));
-    const normalized = normalizeBlueprint(recipe, { baseURL: descriptor.url });
+    const normalized = normalizeDeploy(recipe, { baseURL: descriptor.url });
     if (normalized.prebuild) recipes.push({ descriptor, recipe, normalized, sourceSha256: digest(new Uint8Array(bytes)) });
   }
   if (!recipes.length) {
-    console.log('No repository blueprints request a prepared copy.');
+    console.log('No repository deploys request a prepared copy.');
     return [];
   }
   await mkdir(path.join(root, '.cache'), { recursive: true });
-  const staging = await mkdtemp(path.join(root, '.cache', 'blueprint-snapshots-'));
+  const staging = await mkdtemp(path.join(root, '.cache', 'deploy-snapshots-'));
   const prepared = [];
   try {
     for (const { descriptor, recipe, normalized, sourceSha256 } of recipes) {
@@ -66,10 +66,10 @@ export async function buildBlueprints({ directory = process.env.PLAYGROUND_DIST 
         const phpVersion = release.php.includes(catalog.defaults.phpVersion) ? catalog.defaults.phpVersion : release.php[0];
         const label = `${descriptor.id} / Joomla ${release.version} / PHP ${phpVersion}`;
         console.log(`Preparing ${label}…`);
-        const { configuration } = await resolveBlueprintConfiguration({
-          blueprintId: descriptor.id, joomlaVersion: release.version, phpVersion,
+        const { configuration } = await resolveDeployConfiguration({
+          deployId: descriptor.id, joomlaVersion: release.version, phpVersion,
           fresh: true, persistence: false, autoLogin: false, admin: administrator('build'),
-        }, { catalog, blueprintCatalog, baseURL: canonicalURL.href, fetcher: fetchAsset });
+        }, { catalog, deployCatalog, baseURL: canonicalURL.href, fetcher: fetchAsset });
         let runtime;
         let exported;
         try {
@@ -124,21 +124,21 @@ export async function buildBlueprints({ directory = process.env.PLAYGROUND_DIST 
           sourceSha256, sourceInventorySha256: digest(inventoryBytes), verifiedImport: true });
         console.log(`Verified independent import of ${label} (${exported.bytes.byteLength} bytes).`);
       }
-      normalizeBlueprint(recipe, { baseURL: descriptor.url });
+      normalizeDeploy(recipe, { baseURL: descriptor.url });
     }
     assert.deepEqual((await inventory(distribution)).filter((entry) => entry.path !== 'asset-inventory.json'), declared,
-      'The input artifact changed while prepared blueprints were being generated.');
+      'The input artifact changed while prepared deploys were being generated.');
     await mkdir(path.join(distribution, 'assets/snapshots'), { recursive: true });
     for (const item of prepared) await cp(path.join(staging, path.basename(item.url)), path.join(distribution, 'assets', item.url));
     for (const { descriptor, recipe } of recipes) {
-      await writeFile(path.join(distribution, 'blueprints', `${descriptor.id}.json`), `${JSON.stringify(recipe, null, 2)}\n`);
+      await writeFile(path.join(distribution, 'deploys', `${descriptor.id}.json`), `${JSON.stringify(recipe, null, 2)}\n`);
     }
-    manifest.prebuiltBlueprints = prepared;
+    manifest.prebuiltDeploys = prepared;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     await writeFile(inventoryPath, `${JSON.stringify((await inventory(distribution)).filter((entry) => entry.path !== 'asset-inventory.json'), null, 2)}\n`);
-    console.log(`Published ${prepared.length} verified prepared blueprints.`);
+    console.log(`Published ${prepared.length} verified prepared deploys.`);
     return prepared;
   } finally { await rm(staging, { recursive: true, force: true }); }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await buildBlueprints();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await buildDeploys();

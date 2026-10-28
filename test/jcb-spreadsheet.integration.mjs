@@ -7,7 +7,7 @@ import { createNodeRuntime } from '../scripts/node-runtime.mjs';
 import { JCB_SOURCE_OVERLAY } from '../scripts/jcb-platform-overlay.mjs';
 import { JCB_VENDOR_OVERLAYS } from '../scripts/jcb-vendor-overlay.mjs';
 import { parseCatalog } from '../src/config.mjs';
-import { loadBlueprintCatalog, resolveBlueprintConfiguration } from '../src/blueprints.mjs';
+import { loadDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
 
 async function spreadsheetArchive(runtime) {
   let packageBytes;
@@ -15,11 +15,11 @@ async function spreadsheetArchive(runtime) {
   else {
     const catalog = parseCatalog(runtime.manifest);
     const manifestURL = new URL('assets/manifest.json', runtime.assetBaseUrl);
-    const blueprintCatalog = await loadBlueprintCatalog({ url: new URL(runtime.manifest.blueprints.url, manifestURL), fetcher: runtime.fetchAsset });
+    const deployCatalog = await loadDeployCatalog({ url: new URL(runtime.manifest.deploys.url, manifestURL), fetcher: runtime.fetchAsset });
     const release = catalog.joomla.find((entry) => entry.version.startsWith('6.'));
-    const { configuration } = await resolveBlueprintConfiguration({ blueprintId: 'jcb', joomlaVersion: release.version,
+    const { configuration } = await resolveDeployConfiguration({ deployId: 'jcb', joomlaVersion: release.version,
       phpVersion: runtime.phpVersion, admin: { password: `Unused-${crypto.randomUUID()}!` } },
-    { catalog, blueprintCatalog, baseURL: runtime.assetBaseUrl, fetcher: runtime.fetchAsset });
+    { catalog, deployCatalog, baseURL: runtime.assetBaseUrl, fetcher: runtime.fetchAsset });
     assert.equal(configuration.extensions.length, 1, 'The JCB recipe must identify its complete extension package.');
     const response = await runtime.fetchAsset(configuration.extensions[0].url);
     assert.equal(response.status, 200);

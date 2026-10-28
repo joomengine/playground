@@ -36,14 +36,14 @@ test('extension URLs and optional checksums are validated', () => {
 
 test('language packages require exact tags and pinned download integrity', () => {
   const language = { tag: 'nl-NL', url: '/packages/nl-NL.zip', sha256: 'A'.repeat(64) };
-  const options = validateInstallOptions({ ...configuration, language: 'nl-NL', languages: [language], blueprintId: 'heritage-demo' });
+  const options = validateInstallOptions({ ...configuration, language: 'nl-NL', languages: [language], deployId: 'heritage-demo' });
   assert.equal(options.language, 'nl-NL');
   assert.equal(options.languages[0].sha256, 'a'.repeat(64));
-  assert.equal(options.blueprintId, 'heritage-demo');
+  assert.equal(options.deployId, 'heritage-demo');
   assert.throws(() => validateInstallOptions({ ...configuration, language: '../nl-NL' }), /language tag/);
   assert.throws(() => validateInstallOptions({ ...configuration, languages: [{ ...language, sha256: undefined }] }), /checksum/);
   assert.throws(() => validateInstallOptions({ ...configuration, languages: [{ ...language, url: 'javascript:alert(1)' }] }), /HTTP/);
-  assert.throws(() => validateInstallOptions({ ...configuration, blueprintId: '../demo' }), /identity/);
+  assert.throws(() => validateInstallOptions({ ...configuration, deployId: '../demo' }), /identity/);
 });
 
 test('multilingual content requires real categories and a unique home in each language', () => {

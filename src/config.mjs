@@ -1,8 +1,12 @@
+import { normalizePhpSettings } from './php-settings.mjs';
+import { parseMenus, parseTemplate, parseLanguageTags } from './site-configuration.mjs';
+export { parseMenus, parseTemplate, parseLanguageTags } from './site-configuration.mjs';
+
 const VERSION = /^\d+\.\d+(?:\.\d+)?(?:-[A-Za-z0-9.-]+)?$/;
 const SHA256 = /^[a-f\d]{64}$/i;
 const STORAGE_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 const LANGUAGE = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?-[A-Z]{2}$/;
-const BLUEPRINT_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const DEPLOY_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export const DEFAULTS = Object.freeze({
   phpVersion: '8.4',
@@ -124,9 +128,9 @@ export function normalizeLanguage(value = 'en-GB') {
   return value;
 }
 
-export function normalizeBlueprintId(value) {
+export function normalizeDeployId(value) {
   if (value === 'none') return 'blank';
-  if (typeof value !== 'string' || !BLUEPRINT_ID.test(value)) throw new TypeError('Blueprint names must use lowercase letters, numbers or hyphens.');
+  if (typeof value !== 'string' || !DEPLOY_ID.test(value)) throw new TypeError('Deploy names must use lowercase letters, numbers or hyphens.');
   return value;
 }
 
@@ -155,13 +159,18 @@ export function normalizeConfiguration(input = {}, { catalog, baseURL = 'https:/
   if (typeof config.storageKey !== 'string' || !STORAGE_KEY.test(config.storageKey)) throw new TypeError('Site key must use 1–64 letters, numbers, dots, underscores or hyphens.');
   for (const key of ['persistence', 'autoLogin', 'hideToolbar', 'fresh']) config[key] = requireBoolean(config[key], key);
   config.language = normalizeLanguage(config.language);
-  if (config.blueprintId !== undefined) config.blueprintId = normalizeBlueprintId(config.blueprintId);
+  if (config.deployId !== undefined) config.deployId = normalizeDeployId(config.deployId);
   config.admin.name = requireText(config.admin.name, 'Administrator name', 100);
   config.admin.username = requireText(config.admin.username, 'Administrator username', 100);
   config.admin.email = requireText(config.admin.email, 'Administrator email', 254);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.admin.email)) throw new TypeError('Enter a valid administrator email address.');
   config.admin.password = requireText(config.admin.password ?? '', 'Administrator password', 128);
   if (config.admin.password.length < 12) throw new TypeError('Administrator password must contain at least 12 characters.');
+  config.phpSettings = normalizePhpSettings(config.phpSettings ?? {});
+  config.menus = parseMenus(config.menus ?? []);
+  config.template = parseTemplate(config.template, baseURL);
+  config.languageTags = parseLanguageTags(config.languageTags ?? []);
+  config.multilingual = requireBoolean(config.content?.multilingual === true ? true : (config.multilingual ?? false), 'multilingual');
   config.extensions = parseExtensions(config.extensions ?? [], baseURL);
   config.startupCommands = parseStartupCommands(config.startupCommands ?? []);
   if (!Array.isArray(config.languages ?? []) || (config.languages ?? []).length > 30) throw new TypeError('Language packages must be an array of at most 30 entries.');
@@ -173,16 +182,18 @@ export function readURLConfiguration(url) {
   const location = new URL(url);
   if (location.href.length > 65_536) throw new TypeError('The playground configuration link is too long.');
   const params = location.searchParams;
-  const config = {};
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  const config = fragment.has('deploy') ? parseDeploymentDocument(decodeDocument(fragment.get('deploy')), { baseURL: location.href }) : {};
   const boolean = (name) => {
     const value = params.get(name).toLowerCase();
     if (['1', 'true', 'yes'].includes(value)) return true;
     if (['0', 'false', 'no'].includes(value)) return false;
     throw new TypeError(`${name} must be yes/no, true/false or 1/0.`);
   };
-  if (params.has('blueprint')) config.blueprintId = normalizeBlueprintId(params.get('blueprint'));
+  if (params.has('deploy')) config.deployId = normalizeDeployId(params.get('deploy'));
   if (params.has('php')) config.phpVersion = params.get('php');
   if (params.has('joomla')) config.joomlaVersion = params.get('joomla');
+  if (params.has('name')) config.siteName = requireText(params.get('name'), 'Site name', 100);
   if (params.has('language')) config.language = normalizeLanguage(params.get('language'));
   if (params.has('login')) config.autoLogin = boolean('login');
   if (params.has('fresh')) config.fresh = boolean('fresh');
@@ -197,15 +208,18 @@ export function readURLConfiguration(url) {
   if (params.has('extensions')) config.extensions = parseExtensions(params.get('extensions'), location.href);
   if (params.has('extension')) config.extensions = parseExtensions([...(config.extensions ?? []), ...params.getAll('extension').map((value) => ({ url: value }))], location.href);
   if (params.has('commands') || params.has('startupCommands')) config.startupCommands = parseStartupCommands(params.get('commands') ?? params.get('startupCommands'));
-  const deploymentOptions = ['blueprint', 'php', 'joomla', 'language', 'login', 'fresh', 'extensions', 'extension', 'commands', 'startupCommands'];
-  return { config, autostart: params.has('start') ? boolean('start') : deploymentOptions.some((name) => params.has(name)) };
+  const deploymentOptions = ['name', 'deploy', 'php', 'joomla', 'language', 'login', 'fresh', 'extensions', 'extension', 'commands', 'startupCommands'];
+  const document = params.has('config') ? parseExtensions([{ url: params.get('config'), ...(params.has('sha256') ? { sha256: params.get('sha256') } : {}) }], location.href)[0] : null;
+  return { config, autostart: params.has('start') ? boolean('start') : !!document || fragment.has('deploy') || deploymentOptions.some((name) => params.has(name)), ...(document ? { document } : {}) };
 }
 
 export function createShareURL(location, config) {
   const url = new URL(location);
+  createDeploymentDocument(config, { baseURL: url.href });
   url.search = '';
   url.hash = '';
-  if (config.blueprintId) url.searchParams.set('blueprint', normalizeBlueprintId(config.blueprintId));
+  if (config.siteName && config.siteName !== DEFAULTS.siteName) url.searchParams.set('name', requireText(config.siteName, 'Site name', 100));
+  if (config.deployId) url.searchParams.set('deploy', normalizeDeployId(config.deployId));
   url.searchParams.set('joomla', config.joomlaVersion);
   url.searchParams.set('php', config.phpVersion);
   if (config.initialPath !== '/') url.searchParams.set('path', config.initialPath);
@@ -216,6 +230,146 @@ export function createShareURL(location, config) {
   if (config.fresh) url.searchParams.set('fresh', '1');
   if (config.extensions?.length) url.searchParams.set('extensions', JSON.stringify(parseExtensions(config.extensions, url.href)));
   if (config.startupCommands?.length) url.searchParams.set('commands', JSON.stringify(parseStartupCommands(config.startupCommands)));
+  const advanced = config.template || config.menus?.length || config.languageTags?.length || config.multilingual || config.content || config.phpSettings;
+  if (advanced) {
+    url.search = '';
+    url.searchParams.set('start', '1');
+    url.hash = `deploy=${encodeDocument(createDeploymentDocument(config, { baseURL: url.href }))}`;
+  } else url.searchParams.set('start', '1');
+  if (url.href.length > MAX_SHARE_URL_LENGTH) throw new RangeError('This deployment is too large for a reliable share link. Export the deployment JSON, or host it and share its configuration URL.');
+  return url.href;
+}
+
+export const MAX_DEPLOYMENT_BYTES = 1_048_576;
+export const MAX_SHARE_URL_LENGTH = 16_384;
+const DEPLOYMENT_FIELDS = ['deployId', 'joomlaVersion', 'phpVersion', 'siteName', 'initialPath', 'language', 'languageTags', 'multilingual', 'autoLogin', 'hideToolbar', 'persistence', 'fresh', 'extensions', 'startupCommands', 'languages', 'menus', 'template', 'phpSettings', 'content'];
+
+function assertPublic(value, path = 'configuration') {
+  if (!value || typeof value !== 'object') return;
+  for (const [key, item] of Object.entries(value)) {
+    if (['__proto__', 'constructor', 'prototype'].includes(key) || /(?:password|passwd|secret|token|authorization|api[_-]?key|credentials)/i.test(key)) throw new TypeError(`Do not include secrets in a shared deployment (${path}.${key}).`);
+    if (key === 'url' && typeof item === 'string') {
+      const url = new URL(item);
+      for (const name of url.searchParams.keys()) if (/(?:password|passwd|secret|token|authorization|api[_-]?key|signature)/i.test(name)) throw new TypeError('Shared package URLs must not contain private access credentials.');
+    }
+    assertPublic(item, `${path}.${key}`);
+  }
+}
+
+/** Public deployment instructions never contain a local site key or administrator. */
+export function createDeploymentDocument(config, { baseURL = 'https://playground.joomengine.org/' } = {}) {
+  const selected = Object.fromEntries(DEPLOYMENT_FIELDS.filter((key) => config[key] !== undefined).map((key) => [key, config[key]]));
+  // Resolved packages from a named preset are not user-added instructions.
+  if (config.addonExtensions !== undefined) selected.extensions = config.addonExtensions;
+  if (config.addonStartupCommands !== undefined) selected.startupCommands = config.addonStartupCommands;
+  if (config.addonLanguages !== undefined) selected.languages = config.addonLanguages;
+  const configuration = parseDeploymentDocument({ schemaVersion: 1, configuration: selected }, { baseURL });
+  assertPublic(configuration);
+  const document = { schemaVersion: 1, configuration };
+  if (new TextEncoder().encode(JSON.stringify(document)).byteLength > MAX_DEPLOYMENT_BYTES) throw new RangeError('Deployment JSON exceeds 1 MiB.');
+  return document;
+}
+
+export function parseDeploymentDocument(input, { baseURL = 'https://playground.joomengine.org/' } = {}) {
+  if (typeof input === 'string') {
+    if (new TextEncoder().encode(input).byteLength > MAX_DEPLOYMENT_BYTES) throw new RangeError('Deployment JSON exceeds 1 MiB.');
+    try { input = JSON.parse(input); } catch { throw new TypeError('Deployment JSON is invalid.'); }
+  }
+  if (!input || typeof input !== 'object' || Array.isArray(input) || input.schemaVersion !== 1 || !input.configuration || typeof input.configuration !== 'object' || Array.isArray(input.configuration)) throw new TypeError('Use a deployment document with schemaVersion 1 and a configuration object.');
+  for (const key of Object.keys(input)) if (!['$schema', 'schemaVersion', 'configuration'].includes(key)) throw new TypeError(`Deployment document contains unsupported property ${key}.`);
+  const value = input.configuration;
+  for (const key of Object.keys(value)) if (!DEPLOYMENT_FIELDS.includes(key)) throw new TypeError(`Deployment configuration contains unsupported property ${key}.`);
+  const result = {};
+  for (const key of ['joomlaVersion', 'phpVersion']) if (value[key] !== undefined) {
+    if (typeof value[key] !== 'string' || !VERSION.test(value[key])) throw new TypeError(`Deployment ${key} is invalid.`);
+    result[key] = value[key];
+  }
+  if (value.deployId !== undefined) result.deployId = normalizeDeployId(value.deployId);
+  if (value.siteName !== undefined) result.siteName = requireText(value.siteName, 'Site name', 100);
+  if (value.initialPath !== undefined) result.initialPath = normalizeInitialPath(value.initialPath);
+  if (value.language !== undefined) result.language = normalizeLanguage(value.language);
+  if (value.languageTags !== undefined) result.languageTags = parseLanguageTags(value.languageTags);
+  for (const key of ['autoLogin', 'hideToolbar', 'persistence', 'fresh', 'multilingual']) if (value[key] !== undefined) result[key] = requireBoolean(value[key], key);
+  if (value.extensions !== undefined) result.extensions = parseExtensions(value.extensions, baseURL);
+  if (value.startupCommands !== undefined) result.startupCommands = parseStartupCommands(value.startupCommands);
+  if (value.languages !== undefined) {
+    if (!Array.isArray(value.languages) || value.languages.length > 30) throw new TypeError('Language packages must be an array of at most 30 entries.');
+    result.languages = value.languages.map((entry) => ({ ...parseExtensions([entry], baseURL)[0], tag: normalizeLanguage(entry.tag) }));
+  }
+  if (value.menus !== undefined) result.menus = parseMenus(value.menus);
+  if (value.template !== undefined) result.template = parseTemplate(value.template, baseURL);
+  if (value.phpSettings !== undefined) result.phpSettings = normalizePhpSettings(value.phpSettings);
+  if (value.content !== undefined) {
+    // Detailed category/article validation occurs when resolving the selected deploy.
+    if (!value.content || typeof value.content !== 'object' || Array.isArray(value.content)) throw new TypeError('Deployment content must be an object.');
+    result.content = JSON.parse(JSON.stringify(value.content));
+  }
+  assertPublic(result);
+  if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_DEPLOYMENT_BYTES) throw new RangeError('Deployment JSON exceeds 1 MiB.');
+  return result;
+}
+
+function encodeDocument(document) {
+  const bytes = new TextEncoder().encode(JSON.stringify(document));
+  let data = '';
+  for (const byte of bytes) data += String.fromCharCode(byte);
+  return btoa(data).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function decodeDocument(encoded) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(encoded) || encoded.length > MAX_SHARE_URL_LENGTH) throw new TypeError('The encoded deployment is invalid or too large.');
+  try {
+    const raw = atob(encoded.replace(/-/g, '+').replace(/_/g, '/'));
+    return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(raw, (character) => character.charCodeAt(0)));
+  } catch { throw new TypeError('The encoded deployment is invalid.'); }
+}
+
+/** Fetch public setup JSON when it is too large to place directly in a link. */
+export async function loadDeploymentDocument(url, { sha256, fetcher = fetch, baseURL = 'https://playground.joomengine.org/' } = {}) {
+  const source = parseExtensions([{ url, ...(sha256 ? { sha256 } : {}) }], baseURL)[0];
+  const response = await fetcher(source.url, { credentials: 'omit', redirect: 'follow', signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) throw new Error(`Deployment configuration download failed: HTTP ${response.status}.`);
+  if (Number(response.headers.get('Content-Length')) > MAX_DEPLOYMENT_BYTES) throw new RangeError('Deployment JSON exceeds 1 MiB.');
+  const bytes = await readDeploymentBytes(response);
+  if (source.sha256) {
+    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    if (digest !== source.sha256) throw new Error('Deployment configuration checksum does not match.');
+  }
+  return parseDeploymentDocument(new TextDecoder('utf-8', { fatal: true }).decode(bytes), { baseURL: source.url });
+}
+
+export function createDeploymentSourceURL(location, source) {
+  const url = new URL(location); const item = parseExtensions([source], url.href)[0];
+  assertPublic(item);
+  url.search = ''; url.hash = ''; url.searchParams.set('config', item.url);
+  if (item.sha256) url.searchParams.set('sha256', item.sha256);
   url.searchParams.set('start', '1');
   return url.href;
+}
+
+
+export async function readDeploymentBytes(response) {
+  if (!response.body?.getReader) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > MAX_DEPLOYMENT_BYTES) throw new RangeError('Deployment JSON exceeds 1 MiB.');
+    return bytes;
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > MAX_DEPLOYMENT_BYTES) {
+        await reader.cancel();
+        throw new RangeError('Deployment JSON exceeds 1 MiB.');
+      }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return bytes;
 }

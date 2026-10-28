@@ -31,8 +31,8 @@ async function routeToPlayground(request) {
   const result = new Promise((resolve, reject) => {
     timer = setTimeout(() => {
       channel.port1.close();
-      reject(new Error('The playground did not answer the request within 180 seconds'));
-    }, 180_000);
+      reject(new Error('The playground did not answer the request within 600 seconds'));
+    }, 600_000);
     channel.port1.onmessage = event => {
       clearTimeout(timer);
       channel.port1.close();

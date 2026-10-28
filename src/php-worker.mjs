@@ -1,4 +1,6 @@
 import { MAX_BODY_BYTES, serializeResponse } from './http.mjs';
+import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeHealthSource, runtimeRandomValue } from './php-settings.mjs';
+import { checkpointSource, restoreCheckpointSource } from './checkpoint-program.mjs';
 
 const MAX_OPERATIONS = 64;
 const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
@@ -13,6 +15,8 @@ let persistent = false;
 let terminal = false;
 let routePrefix;
 let mountPath;
+let phpSettings;
+let requestBodyLimit = MAX_BODY_BYTES;
 
 class FatalRuntimeError extends Error {
   fatal = true;
@@ -67,8 +71,8 @@ async function request(value) {
   }
   const method = String(value.method || 'GET').toUpperCase();
   const body = value.body == null ? null : value.body instanceof Uint8Array ? value.body : new Uint8Array(value.body);
-  if (body?.byteLength > MAX_BODY_BYTES) throw new RangeError('The HTTP request exceeds 64 MiB.');
-  if (body?.byteLength && method !== 'POST') throw new TypeError('This upstream CGI release supports request bodies for POST only.');
+  if (body?.byteLength > requestBodyLimit) throw new RangeError(`The HTTP request exceeds post_max_size (${phpSettings.post_max_size}).`);
+  if (body?.byteLength && !['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) throw new TypeError(`Request bodies are not supported for ${method}.`);
   const headers = new Headers(value.headers || []);
   clearHeaders();
   for (const [name, content] of headers) {
@@ -116,6 +120,8 @@ async function initialize(args) {
     throw new TypeError('The site route prefix must be an absolute URL path.');
   }
   routePrefix = `${args.prefix.replace(/\/+$/, '')}/`;
+  phpSettings = normalizePhpSettings(args.phpSettings);
+  requestBodyLimit = phpRequestBodyLimit(phpSettings);
   persistent = args.persistence === true;
   mountPath = args.mountPath;
   if (persistent && (typeof mountPath !== 'string' || !/^\/[a-zA-Z0-9_-]+$/.test(mountPath) || ['/persist', '/config', '/internal', '/tmp'].includes(mountPath))) {
@@ -127,6 +133,7 @@ async function initialize(args) {
   const adapter = createPhpWasmAdapter({ 'mariadb.v1': databaseCall });
   php = new PhpCgiWorker({
     ...adapter,
+    phpArgs: { ...adapter.phpArgs, getRandomValue: runtimeRandomValue },
     version: args.phpVersion,
     prefix: routePrefix,
     docroot: '/persist/www',
@@ -135,7 +142,7 @@ async function initialize(args) {
     files: [...(args.files || []), ...adapter.files],
     staticFS: !persistent,
     autoTransaction: false,
-    ini: `${adapter.ini}memory_limit=512M\nmax_execution_time=0\nmax_input_time=0\nsession.save_path=/persist/sessions\nupload_max_filesize=64M\npost_max_size=64M\nmax_input_vars=10000\ndisplay_errors=stderr\nhtml_errors=0\nlog_errors=1\n`,
+    ini: `${adapter.ini}${phpIni(phpSettings)}`,
     types: {
       css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8',
       json: 'application/json', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
@@ -161,7 +168,7 @@ async function initialize(args) {
   php.initialized = true;
   php.staticCacheTime = 0;
   php.dynamicCacheTime = 0;
-  const health = await runPhp('<?php header("Content-Type: application/json"); echo json_encode(["phpVersion" => PHP_VERSION, "extensions" => get_loaded_extensions(), "pdoDrivers" => PDO::getAvailableDrivers()], JSON_THROW_ON_ERROR);');
+  const health = await runPhp(runtimeHealthSource());
   let result;
   try { result = JSON.parse(health.text); }
   catch { throw new FatalRuntimeError(`PHP initialization did not return valid runtime metadata: ${health.text.slice(0, 2000)}`); }
@@ -202,6 +209,33 @@ async function operation(name, args = {}) {
     case 'request': return request(args);
     case 'runPhp': return runPhp(args.source ?? args.code);
     case 'flush': await flush(); return null;
+    case 'checkpoint': {
+      binary.FS.writeFile('/config/.cookies', php.cookieJar.dump());
+      await flush();
+      const archive = `/tmp/rocket-checkpoint-${crypto.randomUUID()}.zip`;
+      try {
+        const response = await runPhp(checkpointSource(archive));
+        const result = JSON.parse(response.text);
+        if (response.status !== 200 || result.ok !== true) throw new Error('The private runtime checkpoint failed.');
+        return binary.FS.readFile(archive, { encoding: 'binary' });
+      } finally { if (exists(archive)) binary.FS.unlink(archive); }
+    }
+    case 'restoreCheckpoint': {
+      const bytes = args.bytes instanceof Uint8Array ? args.bytes : args.bytes instanceof ArrayBuffer ? new Uint8Array(args.bytes) : null;
+      if (!bytes || bytes.byteLength === 0 || bytes.byteLength > 512 * 1024 * 1024) throw new RangeError('The private runtime checkpoint must contain at most 512 MiB.');
+      const archive = `/tmp/rocket-checkpoint-${crypto.randomUUID()}.zip`;
+      binary.FS.writeFile(archive, bytes);
+      try {
+        const response = await runPhp(restoreCheckpointSource(archive));
+        const result = JSON.parse(response.text);
+        if (response.status !== 200 || result.ok !== true) throw new Error('The private runtime checkpoint could not be restored.');
+        php.cookieJar.cookies.clear();
+        if (typeof result.restoredCookies === 'string') php.cookieJar.load(result.restoredCookies);
+        binary.FS.writeFile('/config/.cookies', php.cookieJar.dump());
+        await flush();
+        return { ok: true, entries: result.entries };
+      } finally { if (exists(archive)) binary.FS.unlink(archive); }
+    }
     case 'close': await flush(); terminal = true; return null;
     case 'reset': {
       for (const root of ['/persist', '/config']) {

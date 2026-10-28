@@ -3,9 +3,11 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { downloadVerified, extractTarGzip, hashFile, inventory, verifyBridgeBundle } from './assets.mjs';
-import { stageBlueprintCatalog } from './blueprints.mjs';
+import { stageDeployCatalog } from './deploys.mjs';
 import { stageFileinfo } from './fileinfo.mjs';
 import { stageCurl } from './curl.mjs';
+import { stageSodium } from './sodium.mjs';
+import { applyCgiRequestOverlay } from './cgi-request-overlay.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const versions = JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
@@ -19,8 +21,8 @@ const canonicalUrl = `https://${domain}/`;
 const cache = path.join(root, '.cache');
 const destination = path.join(root, 'dist');
 const driverDirectory = path.resolve(root, process.env.MARIADB_DRIVER_DIR || '../mariadb-wasm-bridge/.native-build/upstream');
-const bridgeSourceDirectory = path.resolve(root, process.env.BRIDGE_SOURCE_DIR || '../mariadb-wasm-bridge');
 const fileinfoDirectory = path.resolve(root, process.env.FILEINFO_EXTENSION_DIR || '.cache/fileinfo');
+const sodiumDirectory = path.resolve(root, process.env.SODIUM_EXTENSION_DIR || '.cache/sodium');
 const curlDirectory = path.resolve(root, process.env.CURL_EXTENSION_DIR || '.cache/curl');
 const extensionPackages = [
   'php-wasm-zlib', 'php-wasm-libxml', 'php-wasm-xml', 'php-wasm-dom',
@@ -64,6 +66,7 @@ try {
   await mkdir(assets, { recursive: true });
   const packages = [];
   for (const name of ['php-cgi-wasm', ...extensionPackages]) packages.push(await copyPackage(name));
+  const cgiRequestOverlay = await applyCgiRequestOverlay(path.join(assets, 'php-cgi-wasm'));
   const fflatePin = lock.packages['node_modules/fflate'];
   if (fflatePin?.version !== pkg.dependencies.fflate) throw new Error('fflate lock mismatch');
   await mkdir(path.join(assets, 'fflate'));
@@ -84,24 +87,13 @@ try {
     await cp(path.join(bridgeDirectory, filename), path.join(bridgeTarget, filename), { recursive: true });
   }
   await cp(path.join(bridgeDirectory, 'bridge-manifest.json'), path.join(bridgeTarget, 'release-manifest.json'));
-  const runtimeFiles = await inventory(path.join(bridgeSourceDirectory, 'src'));
-  const runtimePins = versions.nativeDriver.runtimeSources;
-  if (!runtimePins || Object.keys(runtimePins).length !== runtimeFiles.length) {
-    throw new Error('Bridge runtime source inventory differs from its pinned source');
-  }
-  for (const file of runtimeFiles) {
-    if (runtimePins[file.path] !== file.sha256) throw new Error(`Bridge runtime differs from its pinned source: ${file.path}`);
-    const target = path.join(bridgeTarget, 'src', file.path);
-    await mkdir(path.dirname(target), { recursive: true });
-    await cp(path.join(bridgeSourceDirectory, 'src', file.path), target);
-  }
-  await mkdir(path.join(bridgeTarget, 'adapters'));
-  for (const filename of ['php-wasm.mjs', 'php-wasm.php']) {
-    const source = path.join(bridgeSourceDirectory, 'adapters', filename);
-    if (await hashFile(source) !== versions.nativeDriver.adapterSources?.[filename]) {
-      throw new Error(`Bridge adapter differs from its pinned source: ${filename}`);
+  for (const [directory, sourcePins] of [['src', versions.nativeDriver.runtimeSources], ['adapters', versions.nativeDriver.adapterSources]]) {
+    for (const [filename, expected] of Object.entries(sourcePins)) {
+      if (bridgeManifest.files[`${directory}/${filename}`]?.sha256 !== expected) {
+        throw new Error(`Bridge release source differs from the native adapter pin: ${directory}/${filename}`);
+      }
     }
-    await cp(source, path.join(bridgeTarget, 'adapters', filename));
+    await cp(path.join(bridgeDirectory, directory), path.join(bridgeTarget, directory), { recursive: true });
   }
   await rm(bridgeStaging, { recursive: true });
 
@@ -145,8 +137,10 @@ try {
     sharedLibs.push({ name: `php${version.version}-fileinfo.so`, url: fileinfo.url, ini: true });
     const curl = await stageCurl({ directory: curlDirectory, destination: path.join(assets, 'extensions'), version, upstream: versions.upstream });
     sharedLibs.push({ name: `php${version.version}-curl.so`, url: curl.url, ini: true });
+    const sodium = await stageSodium({ directory: sodiumDirectory, destination: path.join(assets, 'extensions'), version, upstream: versions.upstream });
+    sharedLibs.push({ name: `php${version.version}-sodium.so`, url: sodium.url, ini: true });
     php.push({ ...version, label: `PHP ${version.patchVersion}`, moduleUrl: 'php-cgi-wasm/PhpCgiWorker.mjs', sharedLibs, files,
-      fileinfo, curl,
+      fileinfo, curl, sodium,
       driver: { url: `extensions/${basename}.so`, sha256: driverHash, provenance } });
   }
 
@@ -159,8 +153,8 @@ try {
     await cp(archive, path.join(assets, 'joomla', filename));
     joomla.push({ ...release, sourceUrl: release.url, url: `joomla/${filename}` });
   }
-  const blueprints = await stageBlueprintCatalog({ root, staging, assets, cache, canonicalUrl });
-  for (const name of ['index.html', 'src', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
+  const deploys = await stageDeployCatalog({ root, staging, assets, cache, canonicalUrl });
+  for (const name of ['index.html', 'standalone.html', 'src', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
     await cp(path.join(root, name), path.join(staging, name), { recursive: true });
   }
   await writeFile(path.join(staging, '.nojekyll'), '');
@@ -170,18 +164,13 @@ try {
   const manifest = {
     schemaVersion: 1, projectVersion: pkg.version, sourceCommit,
     deployment: { canonicalUrl, domain },
-    upstream: versions.upstream, nativeDriver: versions.nativeDriver, packages, php, joomla, blueprints,
+    upstream: { ...versions.upstream, cgiRequestOverlay }, nativeDriver: versions.nativeDriver, packages, php, joomla, deploys,
     bridge: {
       protocolVersion: versions.bridge.protocolVersion,
       sourceCommit: versions.nativeDriver.sourceCommit,
       moduleUrl: 'mariadb/src/index.mjs',
       adapterUrl: 'mariadb/adapters/php-wasm.mjs',
       release: { ...versions.bridge, manifestUrl: 'mariadb/release-manifest.json' },
-      overlay: {
-        sourceCommit: versions.nativeDriver.sourceCommit,
-        runtimeSources: versions.nativeDriver.runtimeSources,
-        adapterSources: versions.nativeDriver.adapterSources,
-      },
       engine: bridgeManifest.engine,
     },
     defaults: versions.defaults,

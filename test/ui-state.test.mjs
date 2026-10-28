@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from '../src/ui-state.mjs';
 
 const configuration = {
-  blueprintId: 'jcb', joomlaVersion: '6.2.0', phpVersion: '8.4', siteName: 'Saved work',
+  deployId: 'jcb', joomlaVersion: '6.2.0', phpVersion: '8.4', siteName: 'Saved work',
   initialPath: '/administrator/', storageKey: 'work', language: 'en-GB', autoLogin: true,
   persistence: true, hideToolbar: false, fresh: true,
   extensions: [{ url: 'https://example.test/extension.zip', sha256: 'a'.repeat(64) }],
@@ -15,7 +15,7 @@ const empty = () => readSavedState({ getItem() { return null; } }, 'settings');
 
 test('saved launch preferences whitelist public settings and consume fresh requests', () => {
   const value = publicConfiguration(configuration);
-  assert.equal(value.blueprintId, 'jcb');
+  assert.equal(value.deployId, 'jcb');
   assert.equal(value.fresh, false);
   assert.equal(Object.hasOwn(value, 'admin'), false);
   assert.equal(Object.hasOwn(value, 'runtime'), false);
@@ -27,7 +27,7 @@ test('saved launch preferences whitelist public settings and consume fresh reque
 
 test('persistent sites remember the active key while reset preserves other sites', () => {
   const first = rememberSite(empty(), configuration);
-  const both = rememberSite(first, { ...configuration, blueprintId: 'blank', storageKey: 'second' });
+  const both = rememberSite(first, { ...configuration, deployId: 'blank', storageKey: 'second' });
   assert.equal(both.active, 'second');
   assert.deepEqual(Object.keys(both.sites), ['work', 'second']);
   const restored = readSavedState({ getItem() { return JSON.stringify(both); } }, 'settings');
