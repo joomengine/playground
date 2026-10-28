@@ -85,16 +85,18 @@ export async function startRedirectTrace(page) {
   return page.evaluate(() => {
     if (!window.__redirectProof) {
       window.__redirectProof = [];
+      const requests = new WeakMap();
+      const post = MessagePort.prototype.postMessage;
+      MessagePort.prototype.postMessage = function (response, ...options) {
+        const request = requests.get(this);
+        if (request && [301, 303].includes(response?.status)) window.__redirectProof.push({
+          url: request.url, method: request.method, status: response.status,
+          location: new Headers(response.headers).get('Location'),
+        });
+        return Reflect.apply(post, this, [response, ...options]);
+      };
       navigator.serviceWorker.addEventListener('message', event => {
-        if (event.data?.type !== 'playground-request' || !event.ports[0]) return;
-        const { request } = event.data, port = event.ports[0], post = port.postMessage.bind(port);
-        port.postMessage = function (response, ...options) {
-          if ([301, 303].includes(response?.status)) window.__redirectProof.push({
-            url: request.url, method: request.method, status: response.status,
-            location: new Headers(response.headers).get('Location'),
-          });
-          return post(response, ...options);
-        };
+        if (event.data?.type === 'playground-request' && event.ports[0]) requests.set(event.ports[0], event.data.request);
       });
     }
     return window.__redirectProof.length;

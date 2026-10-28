@@ -1103,6 +1103,7 @@ for (const name of browserNames) {
           await page.setViewportSize({ width, height: 900 });
           await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth + 1);
           assert.ok(await page.locator('#site-frame').evaluate(frame => Math.abs(frame.getBoundingClientRect().width - innerWidth) <= 2));
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
           await page.screenshot({ path: path.join(root, 'test-results', `rocket-${name}-${width}.png`), fullPage: true });
         }
         page.testStep = 'component parent reload preserves the Rocket shell and runtime';
