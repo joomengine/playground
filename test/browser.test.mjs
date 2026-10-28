@@ -839,7 +839,10 @@ for (const name of browserNames) {
         const changedPHP = manifest.joomla.find((entry) => entry.version === defaultPair.joomlaVersion).php.find((version) => version !== defaultPair.phpVersion);
         assert.ok(changedPHP, 'The interface contract needs two compatible PHP versions.');
         page.testStep = 'switch PHP with saved files and database';
-        const originalFrameURL = (await renderedSiteFrame(page)).url();
+        const activeFrame = await renderedSiteFrame(page);
+        const originalFrameURL = new URL('index.php?option=com_content&view=articles', activeFrame.url()).href;
+        await activeFrame.goto(originalFrameURL, { waitUntil: 'load' });
+        assert.equal(activeFrame.url(), originalFrameURL);
         await showQuickSettings(page);
         await page.locator('#php-version').selectOption(changedPHP);
         await page.locator('#status-message').filter({ hasText: 'PHP settings applied.' }).waitFor({ timeout: requestTimeout });
