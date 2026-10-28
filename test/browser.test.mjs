@@ -1114,11 +1114,26 @@ for (const name of browserNames) {
         page.testStep = 'full width and one scrolling document';
         if (await page.locator('#settings').isVisible()) await page.locator('#settings-toggle').click();
         const actualFrame = await renderedSiteFrame(page);
-        await actualFrame.locator('body').evaluate(body => { const block = document.createElement('div'); block.id = 'rocket-scroll-proof'; block.style.height = '3400px'; block.textContent = 'Long Joomla document'; body.append(block); });
+        await actualFrame.locator('body').evaluate(body => {
+          const block = document.createElement('div'); block.id = 'rocket-scroll-proof'; block.style.cssText = 'height:3400px;position:relative'; block.textContent = 'Long Joomla document';
+          const button = document.createElement('button'); button.id = 'rocket-focus-proof'; button.textContent = 'Focus at the end of the Joomla document'; button.style.cssText = 'position:absolute;bottom:0'; block.append(button); body.append(block);
+        });
         await page.waitForFunction(() => { const frame = document.getElementById('site-frame'); return frame?.clientHeight >= 3400 && frame.contentDocument.documentElement.scrollHeight <= frame.clientHeight + 3; });
         await page.evaluate(() => window.scrollTo(0, 1000));
         assert.ok(await page.locator('#site-header').evaluate(header => header.getBoundingClientRect().bottom < 0));
         assert.equal(await actualFrame.evaluate(() => scrollY), 0);
+        page.testStep = 'embedded focus respects preventScroll and keyboard navigation';
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await actualFrame.locator('#rocket-focus-proof').evaluate(button => button.focus({ preventScroll: true }));
+        assert.equal(await page.evaluate(() => scrollY), 0, 'An extension that requests focus without scrolling must not move the Rocket header.');
+        await actualFrame.locator('#rocket-focus-proof').evaluate(button => { button.blur(); button.focus(); });
+        await page.waitForFunction(() => scrollY > 1000);
+        assert.equal(await actualFrame.evaluate(() => scrollY), 0, 'Native focus must scroll the outer document, not the embedded site.');
+        await actualFrame.locator('#rocket-focus-proof').press('Shift+Tab');
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await page.keyboard.press('Tab');
+        await page.waitForFunction(() => scrollY > 1000);
+        assert.equal(await actualFrame.locator('#rocket-focus-proof').evaluate(button => button === document.activeElement), true);
         await actualFrame.locator('#rocket-scroll-proof').evaluate(element => element.remove());
         await page.evaluate(() => window.scrollTo(0, 0));
         await mkdir(path.join(root, 'test-results'), { recursive: true });
