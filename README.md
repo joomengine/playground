@@ -151,7 +151,7 @@ directory; all bridge JavaScript and engine assets come from the verified releas
 release archive checksum, native and adapter source hashes, Joomla distributions,
 and compatible runtime combinations.
 
-The build verifies every entry in the MariaDB bridge 0.1.7 release inventory and
+The build verifies every entry in the MariaDB bridge 0.1.8 release inventory and
 stages its runtime, PHP adapter, engine JavaScript and WebAssembly directly from
 that release. Native driver source hashes must match the same release. The
 PDO extension’s compiler, PHP version, source hashes, upstream revision, and
@@ -251,8 +251,10 @@ origin. Returning to the domain reopens the last saved site; the saved-site
 selector opens others. Only one tab may own a saved site at a time. Changing PHP
 preserves its content. Changing the Joomla release or selecting another deploy
 starts a separate profile instead of upgrading an existing Joomla installation.
-Save checkpoints InnoDB before flushing its filesystem to browser storage, while
-PHP requests remain paused. A successful Save can therefore be reopened after a
+MariaDB bridge 0.1.8 checkpoints InnoDB before flushing its filesystem to browser
+storage. Playground reserves the PHP request queue until both the site files and
+database finish saving, including during configuration changes and PHP restarts.
+A successful Save can therefore be reopened after a
 whole-page reload without using Close first. Checkpoint or storage errors remain
 visible save failures; they do not advance the saved-state indicator.
 

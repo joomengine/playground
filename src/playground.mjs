@@ -4,7 +4,6 @@ import { exportSite } from './export.mjs';
 import { serializeRequest, restoreResponse } from './http.mjs';
 import { normalizePhpSettings, phpRequestTimeoutMs } from './php-settings.mjs';
 import { openSiteDatabase } from './saved-site-recovery.mjs';
-import { checkpointAndPersist } from './database-persistence.mjs';
 
 const base = new URL('../', import.meta.url);
 const manifestUrl = new URL('assets/manifest.json', base);
@@ -59,9 +58,8 @@ async function clientIdentity() {
 }
 
 class PhpSession {
-  constructor(database, onFailure, onDiagnostic, persistent = false) {
+  constructor(database, onFailure, onDiagnostic) {
     this.database = database;
-    this.persistent = persistent;
     this.onFailure = onFailure;
     this.onDiagnostic = onDiagnostic;
     this.worker = new Worker(new URL('./php-worker.mjs', import.meta.url), { type: 'module' });
@@ -146,7 +144,7 @@ class PhpSession {
         try { this.worker.postMessage({ type: 'operation', id, operation: 'flush', args: {} }); }
         catch (error) { this.fail(error); }
       });
-      if (this.database) await checkpointAndPersist(this.database, { persistent: this.persistent });
+      await this.database?.flush();
     } finally { release(); }
   }
   fail(error) {
@@ -258,7 +256,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     };
     const createSession = () => new PhpSession(database,
       error => progress({ phase: 'failed', message: error.message }),
-      message => progress({ phase: 'warning', message }), config.persistence);
+      message => progress({ phase: 'warning', message }));
     session = createSession();
     progress({ phase: 'php', message: `Loading PHP ${phpEntry.patchVersion ?? config.phpVersion} and its extensions…` });
     const initializeSession = (target, settings = config.phpSettings) => target.send('initialize', {
