@@ -9,7 +9,7 @@ const LANGUAGE = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?-[A-Z]{2}$/;
 const DEPLOY_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export const DEFAULTS = Object.freeze({
-  phpVersion: '8.5',
+  phpVersion: '8.4',
   joomlaVersion: '6.2.0',
   siteName: 'Joomla Playground',
   initialPath: '/',
