@@ -1271,7 +1271,9 @@ for (const name of browserNames) {
       }
       finally { await context.close(); }
     });
-    assert.equal(records.length, (scenarios.includes('matrix') ? combinations.length : 0) + scenarios.filter((scenario) => scenario !== 'matrix').length,
+    const expectedRecords = (scenarios.includes('matrix') ? combinations.length : 0)
+      + scenarios.filter((scenario) => scenario !== 'matrix').length + (scenarios.includes('rocket') ? 1 : 0);
+    assert.equal(records.length, expectedRecords,
       'Every selected runtime scenario must pass before writing a receipt.');
     await checkedInventory();
     await mkdir(path.join(root, 'test-results'), { recursive: true });

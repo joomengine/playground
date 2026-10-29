@@ -1,5 +1,32 @@
 import assert from 'node:assert/strict';
 
+/** Component selection loads details and applies its preferred Joomla version asynchronously. */
+export async function selectJcbCompilerComponent(page, frame, { timeoutMs = 30_000 } = {}) {
+  const id = await frame.locator('#component_id').evaluate(select =>
+    [...select.options].find(option => option.label.trim() === 'Demo J6')?.value);
+  assert.ok(id, 'The installed JCB must include Demo J6.');
+  const pending = page.waitForResponse(response => {
+    const url = new URL(response.url());
+    return url.origin === new URL(frame.url()).origin
+      && url.searchParams.get('option') === 'com_componentbuilder'
+      && url.searchParams.get('task') === 'ajax.getComponentDetails'
+      && url.searchParams.get('id') === id;
+  }, { timeout: timeoutMs });
+  const [response] = await Promise.all([pending, frame.locator('#component_id').selectOption(id)]);
+  assert.equal(response.status(), 200, 'The selected component details must load before compilation.');
+  const details = await response.json();
+  assert.equal(details.error, undefined, details.error);
+  assert.ok(typeof details.html === 'string' && details.html.length > 0);
+  assert.equal(String(details.preferred_joomla_version), '6');
+  await frame.waitForFunction(({ id, version }) => {
+    const applied = [...document.querySelectorAll('#component-details a[href]')].some(link => {
+      const url = new URL(link.href);
+      return url.searchParams.get('task') === 'joomla_component.edit' && url.searchParams.get('id') === id;
+    });
+    return applied && document.querySelector('#joomla_version')?.value === version;
+  }, { id, version: String(details.preferred_joomla_version) }, { timeout: timeoutMs });
+}
+
 /** Exercise the real compiler form and its downloadable, independently readable package. */
 export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, compileTimeoutMs = 180_000 } = {}) {
   const site = await page.evaluate(() => window.playground.baseUrl);
@@ -26,7 +53,7 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
       const image = document.querySelector('#compiler-spinner img');
       return image?.complete && image.naturalWidth > 0;
     }, null, { timeout: Math.min(navigationTimeoutMs, 30_000) });
-    await frame.locator('#component_id').selectOption({ label: 'Demo J6' });
+    await selectJcbCompilerComponent(page, frame);
     const started = Date.now();
     page.testStep = 'compile Demo J6 through the administrator form';
     const [compiled] = await Promise.all([
