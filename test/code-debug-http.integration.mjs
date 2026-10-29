@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import { PhpDbgNode } from 'php-dbg-wasm/PhpDbgNode';
 import { PhpDebugRuntime } from '../src/code/debug-runtime.mjs';
 
@@ -65,6 +64,10 @@ inspect_request($object);
   assert.ok(argument?.variablesReference);
   const properties = await runtime.variables(argument.variablesReference);
   assert.ok(properties.some(variable => variable.name === 'label' && variable.value === '"inspected"'), JSON.stringify(properties));
+  assert.equal((await runtime.evaluate('$local + 8', frames[0].id)).result, '50');
+  assert.equal((await runtime.evaluate('$object->label', frames[1].id)).result, '"inspected"');
+  await assert.rejects(runtime.evaluate('this is not PHP', frames[0].id), /evaluation failed/);
+  assert.equal((await runtime.evaluate('$local', frames[0].id)).result, '42');
   await runtime.setBreakpoints('/persist/www/index.php', []);
   await runtime.continue();
   const response = await execution;

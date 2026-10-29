@@ -68,7 +68,13 @@ function applySnapshot(fs, previous, next) {
       fs.mkdirTree(path.slice(0, path.lastIndexOf('/')));
       if (value.link !== undefined) {
         if (!fs.analyzePath(path, true).exists) fs.symlink(value.link, path);
-      } else fs.writeFile(path, value.bytes);
+      } else {
+        // Emscripten preloads native bridge PHP files as read-only. The owner
+        // snapshot is authoritative, and its permissions are restored below.
+        if (fs.analyzePath(path, true).exists) fs.chmod(path, value.mode | 0o200);
+        try { fs.writeFile(path, value.bytes); }
+        catch (error) { throw new Error(`Could not restore PHP debug file ${path}: ${error?.message || `filesystem error ${error?.errno ?? String(error)}`}`); }
+      }
     }
     if (value.link === undefined) { fs.chmod(path, value.mode); fs.utime(path, value.atime, value.mtime); }
   }
@@ -148,11 +154,13 @@ export class PhpDebugRuntime {
     let processPromise;
     let processSettled = false;
     let commandFailure;
+    const checkStopped = () => { if (this.stopped) throw new Error('PHP debugging was stopped. The request was not replayed.'); };
     try {
       const filename = this.options.resolveScript ? await this.options.resolveScript(request) : this.options.filename || '/persist/www/index.php';
       const { env, body } = debugRequestEnvironment(request, { ...this.options, filename,
         cookieHeader: typeof this.options.cookieHeader === 'function' ? this.options.cookieHeader() : this.options.cookieHeader });
       const { PhpDbgWeb } = this.options.Runtime ? {} : await import(this.options.moduleUrl);
+      checkStopped();
       const Runtime = this.options.Runtime || PhpDbgWeb;
       const adapter = this.options.adapter || {};
       this.php = new Runtime({ ...adapter, version: this.options.phpVersion, ENV: env,
@@ -162,6 +170,12 @@ export class PhpDebugRuntime {
       this.php.addEventListener('output', event => this.emit('output', { category: 'console', output: event.detail.join('') }));
       this.php.addEventListener('error', event => this.emit('output', { category: 'stderr', output: event.detail.join('') }));
       this.binary = await this.php.binary;
+      checkStopped();
+      this.binary.jecDebugError = (message, filename, line) => this.emit('output', {
+        category: 'stderr', output: `${message}\n`,
+        ...(filename.startsWith('/persist/www/') && Number.isInteger(line) && line > 0
+          ? { source: { path: filename }, line, column: 1 } : {}),
+      });
       applySnapshot(this.binary.FS, new Map(), before);
       this.binary.FS.mkdirTree('/internal');
       // Native libc caches environ independently of the Emscripten ENV object.
@@ -179,10 +193,14 @@ export class PhpDebugRuntime {
       processPromise = this.php.run().finally(() => { processSettled = true; });
       processPromise.catch(error => this.rejectPrompts(error));
       await ready;
+      checkStopped();
       await this.send('set pagination off');
+      checkStopped();
       await this.send('set colors off');
+      checkStopped();
       await this.send('exec /internal/jec-request.php');
-      for (const [path, points] of this.breakpoints) await this.installBreakpoints(path, points);
+      checkStopped();
+      for (const [path, points] of this.breakpoints) { await this.installBreakpoints(path, points); checkStopped(); }
       this.phase = 'running';
       callbacks.started?.();
       this.emit('continued', { threadId: 1, allThreadsContinued: true });
@@ -205,6 +223,13 @@ export class PhpDebugRuntime {
       const response = this.binary.FS.readFile('/internal/jec-response-body.bin', { encoding: 'binary' });
       if (response.byteLength > MAX_RESPONSE_BYTES) throw new Error('PHP debug response exceeds the transport limit.');
       return { status, statusText: '', headers, body: response, databaseUsed: true };
+    } catch (error) {
+      if (processPromise && !processSettled) {
+        this.phase = 'stopped';
+        await this.php.provideInput('quit');
+        await processPromise.catch(() => {});
+      }
+      throw error;
     } finally {
       // Even stopped requests can already have changed files and database rows.
       // Their filesystem delta is retained; there is deliberately no replay.
@@ -308,15 +333,21 @@ export class PhpDebugRuntime {
   continue() { return this.resume('continue'); }
   next() { return this.resume('next'); }
   stepIn() { return this.resume('step'); }
-  stepOut() { return this.resume('finish'); }
+  async stepOut() {
+    await this.inspectionQueue;
+    this.requirePaused();
+    await this.send('ev jec_debug_step_out()');
+    return this.resume('finish');
+  }
   async pause() {
     if (!this.binary || this.phase !== 'running') throw new Error('PHP is not executing.');
     this.pauseRequested = true; this.binary.jecDebugControl = 1;
   }
   async stop() {
-    if (!this.php) return;
+    if (this.phase === 'idle') return;
     this.stopped = true;
-    if (this.phase === 'paused' || this.phase === 'starting') {
+    if (this.phase === 'starting') return;
+    if (this.phase === 'paused') {
       this.phase = 'stopped'; await this.php.provideInput('quit');
     } else { this.phase = 'stopping'; this.binary.jecDebugControl = 2; }
   }
@@ -366,12 +397,14 @@ export class PhpDebugRuntime {
       // phpdbg eval executes in the selected frame. A unique temporary captures
       // the value without requiring console-output parsing or JSON conversion.
       const name = `__jec_eval_${crypto.randomUUID().replaceAll('-', '')}`;
-      await this.send(`ev $${name} = ${encodedExpression(expression)};`);
+      // phpdbg prints its eval return value recursively. Return null while
+      // retaining the value in the selected frame for progressive inspection.
+      await this.send(`ev ($${name} = ${encodedExpression(expression)}) ? null : null;`);
       const values = await this.php.dumpVars();
       if (!Object.prototype.hasOwnProperty.call(values || {}, name)) throw new Error('PHP expression evaluation failed. See the debug console for the PHP error.');
       const value = values[name];
       const result = this.describe('', value);
-      await this.send(`ev unset($${name});`);
+      await this.send(`ev eval(${phpString(`unset($${name});`)});`);
       return { result: result.value, type: result.type, variablesReference: result.variablesReference, indexedVariables: result.indexedVariables };
     });
   }
