@@ -7,7 +7,7 @@ playground assembles published upstream PHP packages, the MariaDB bridge, and a 
 a static site. PHP requests and SQL execute in browser workers.
 
 The deployment address is **https://playground.joomengine.org/**. The default
-deploy opens the **JCB dashboard on Joomla 6 with PHP 8.5**. JCB is also the
+deploy opens the **JCB dashboard on Joomla 6 with PHP 8.4**. JCB is also the
 default on Joomla 5; **JCB + MCP** remains an optional Joomla 6 deployment. Select
 **Joomla only** to start without additional extensions. Rocket is the compact,
 multilingual interface around the running Joomla site.
@@ -75,7 +75,8 @@ The current pinned catalog is:
 These are the patch versions contained in the selected upstream `0.2.0`
 packages. They are recorded explicitly for ABI compatibility; the minor-version
 selector does not imply a newer PHP patch release. Defaults are Joomla 6.2.0 and
-PHP 8.5.2. [versions.json](versions.json) is the authoritative build catalog.
+PHP 8.4.1. PHP 8.5 remains selectable, and existing saved sites retain their selected
+runtime. [versions.json](versions.json) is the authoritative build catalog.
 
 ## Build and run locally
 
@@ -233,12 +234,16 @@ for the complete document format and advanced parameters.
 - **Reset** deletes the selected site's saved data after confirmation.
 - **Recover saved site** opens storage without booting Joomla. Download a backup,
   then restore safe error settings if needed; the original configuration is kept
-  privately. **Reset and launch** provides an explicit fresh start from the failure screen.
+  privately. If MariaDB cannot start, recovery opens the saved PHP files read-only
+  so they can be downloaded without changing either saved store. That recovery
+  ZIP contains files and private settings, but no SQL database; it does not repair
+  a failed database. **Reset and launch** provides an explicit fresh start from the failure screen.
 - **New site** starts an independent installation; saved sites remain selectable.
 - **Download** exports the complete site, its files, or its SQL database.
-- **Open site** transfers the running site to a standalone tab without Rocket's
-  header and footer. The original tab releases ownership; after transfer the new
-  tab runs independently.
+- **Hide controls** in either the header or footer hides both bars, settings and
+  activity together. Joomla keeps the same running iframe, current page and
+  unsaved work. Small restore tabs remain at the top and bottom edges; either
+  restores the controls without restarting or transferring the site.
 
 Persistence is enabled by default. Joomla files, session data, cookies and the
 MariaDB database are kept in IndexedDB. A site key identifies saved data on this
@@ -246,6 +251,10 @@ origin. Returning to the domain reopens the last saved site; the saved-site
 selector opens others. Only one tab may own a saved site at a time. Changing PHP
 preserves its content. Changing the Joomla release or selecting another deploy
 starts a separate profile instead of upgrading an existing Joomla installation.
+Save checkpoints InnoDB before flushing its filesystem to browser storage, while
+PHP requests remain paused. A successful Save can therefore be reopened after a
+whole-page reload without using Close first. Checkpoint or storage errors remain
+visible save failures; they do not advance the saved-state indicator.
 
 The credentials dialog shows the generated administrator login details, including
 when automatic login is disabled. Each fresh site receives new credentials;
@@ -413,7 +422,7 @@ The interface recognizes these query parameters:
 | `joomla=5.4` | Resolve a minor or exact version to a tested catalog release |
 | `php=8.5` | Select the PHP minor whose patch version is pinned in the catalog |
 | `path=/administrator/` | Initial page inside Joomla |
-| `toolbar=0` | Hide the configuration toolbar |
+| `toolbar=0` | Hide the header and footer together, with edge tabs to restore them |
 | `persist=0` | Use a temporary site |
 | `language=en-GB` | Select the Joomla language; another supported tag installs its pack |
 | `uiLanguage=af` | Select Rocket's interface language independently |
@@ -427,11 +436,11 @@ The interface recognizes these query parameters:
 | `config=https://example.org/deploy.json` | Load a public deployment document, optionally verified with `sha256` |
 
 For a deployment hosted at `/playground/`, this same-origin iframe opens an
-administrator playground with the toolbar hidden:
+administrator playground with the header and footer hidden:
 
 ```html
 <iframe
-  src="/playground/?joomla=6.2.0&php=8.5&path=%2Fadministrator%2F&toolbar=0&start=1"
+  src="/playground/?joomla=6.2.0&php=8.4&path=%2Fadministrator%2F&toolbar=0&start=1"
   title="Joomla Playground"
   allow="cross-origin-isolated"
   style="width:100%;height:800px;border:0"
@@ -441,9 +450,10 @@ administrator playground with the toolbar hidden:
 The embedding page must also provide the isolation policy required by the
 browser. The iframe permission alone cannot make an unisolated parent page
 cross-origin isolated. Start with same-origin embedding and matching COOP/COEP
-headers. A raw site-preview URL still requires its owning playground tab. Use
-**Open site** to transfer ownership to a standalone tab, or **Share** to launch an
-independent installation from the same public deployment configuration.
+headers. `toolbar=0` starts with both bars hidden and the same restore tabs
+available. A raw site-preview URL still requires its owning playground tab.
+**Share** launches an independent installation from the same public deployment
+configuration; hiding controls keeps the current site running in its original tab.
 
 Share includes the complete public deployment: Joomla/PHP versions, PHP settings,
 site name, packages, language selections, menus, template parameters, login choice
@@ -552,7 +562,6 @@ provisioning completes:
 | `switchPhpVersion(phpMinor)` | Restart on another compatible pinned PHP build |
 | `discoverConfiguration()` | Discover installed components, frontend layouts, menus and templates |
 | `applyConfiguration(configuration)` | Apply additions and site settings with a recovery checkpoint |
-| `openStandalone({ path })` | Transfer ownership to an independent tab; call from a user gesture |
 | `exportSite({ format })` | Return `{ bytes, filename, mimeType, metadata }`; format is `bundle`, `files`, or `database` |
 | `recovery` | Recovery metadata when opened with `createPlayground(config, { recovery: true })` |
 | `repairConfiguration()` | Back up configuration and restore safe Joomla debugging/error settings |
@@ -647,13 +656,17 @@ npm run test:browser
 The browser suite uses real PHP, native PDO, MariaDB, and Joomla. It exercises
 catalog combinations, administrator access, extension installation, configuration,
 persistence, temporary-site retention, restart, PHP settings, exports, sharing,
-standalone ownership transfer, responsive controls and timeout recovery.
+live header/footer hide-and-restore controls, responsive layout and timeout recovery.
+The prepared JCB regression creates a Joomla record and changes its configuration
+file, then verifies both and administrator access after two Save → whole-page
+reload cycles without Close. Recovery checks verify that exporting files after
+a database startup failure leaves the saved file and database stores unchanged.
 `PLAYGROUND_BROWSERS`, `PLAYGROUND_PHP_VERSIONS`, `PLAYGROUND_JOOMLA_VERSIONS` and
 `PLAYGROUND_SCENARIOS` narrow local investigations.
 
 CI runs source checks and unit tests first. Documentation-only pull requests skip
 native/browser jobs. Presentation-only changes run the default Joomla 6.2.0 / PHP
-8.5 combination with deployment, lifecycle and Rocket checks. Runtime, deployment,
+8.4 combination with deployment, lifecycle and Rocket checks. Runtime, deployment,
 configuration and unclassified changes run the full supported matrix, as do
 `main` and manual builds. Chromium and Firefox validate in parallel jobs against
 the same built artifact. Native/compiler caches require exact source and toolchain

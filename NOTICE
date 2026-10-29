@@ -1,6 +1,13 @@
 JoomEngine Playground
 Copyright 2026 JoomEngine contributors
 
+The rocket emoji artwork in src/brand/rocket.svg is from Google Noto Emoji,
+copyright Google Inc., licensed under Apache License 2.0. The unmodified SVG
+is pinned to revision 9a5261d871451f9b5183c93483cbd68ed916b1e9 (v2.034):
+https://github.com/googlefonts/noto-emoji/blob/9a5261d871451f9b5183c93483cbd68ed916b1e9/svg/emoji_u1f680.svg
+Its license is preserved in src/brand/LICENSE.noto-emoji.txt. A bundled vector
+keeps the favicon and small rocket icons visible without an installed emoji font.
+
 PHP execution is provided by Sean Morris and the contributors to
 https://github.com/seanmorris/php-wasm . This project consumes their published
 runtime and extension packages. Their copyright, licenses and notices are

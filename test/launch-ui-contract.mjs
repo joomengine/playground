@@ -11,7 +11,7 @@ export async function assertLaunchCountdown(page, url) {
     const seconds = Number(await page.locator('#countdown-value').textContent());
     assert.ok(seconds > 0 && seconds <= 10, 'The visitor must have a visible ten-second launch window.');
     assert.equal(await page.locator('#deploy').inputValue(), 'jcb');
-    assert.equal(await page.locator('#php-version').inputValue(), '8.5');
+    assert.equal(await page.locator('#php-version').inputValue(), '8.4');
     await page.locator('#welcome-configure').click();
     assert.equal(await page.locator('#deploy-dialog').evaluate(dialog => dialog.open), true);
     // Cross the real countdown deadline: opening configuration must cancel it.
@@ -61,7 +61,7 @@ export async function assertFailedDeploymentRecovery(page, url) {
   await page.locator('#repair-button:not([hidden]):enabled').waitFor({ timeout: 60_000 });
   assert.equal(await page.locator('#error-title').innerText(), 'Your saved site is open for recovery');
   assert.equal(await page.locator('#download-dialog-button').isEnabled(), true);
-  assert.equal(await page.locator('#open-link').getAttribute('aria-disabled'), 'true');
+  assert.equal(await page.locator('#open-link').count(), 0);
   await page.locator('#repair-button').click();
   await page.waitForFunction(() => document.getElementById('error-message').textContent.includes('original configuration was backed up'));
 

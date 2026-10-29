@@ -172,7 +172,7 @@ try {
     joomla.push({ ...release, sourceUrl: release.url, url: `joomla/${filename}` });
   }
   const deploys = await stageDeployCatalog({ root, staging, assets, cache, canonicalUrl });
-  for (const name of ['index.html', 'standalone.html', 'src', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
+  for (const name of ['index.html', 'src', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
     await cp(path.join(root, name), path.join(staging, name), { recursive: true });
   }
   await writeFile(path.join(staging, '.nojekyll'), '');
