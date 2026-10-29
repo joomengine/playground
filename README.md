@@ -58,8 +58,9 @@ to connect PHP’s `ext/curl` to the host’s Fetch API. The implementation
 is pinned to [6085917954da9682c32ebcbea27a626d2308381b](https://github.com/seanmorris/php-wasm-curl/tree/6085917954da9682c32ebcbea27a626d2308381b)
 and loaded alongside the published `0.2.0` PHP runtime. Sodium uses the official
 libsodium 1.0.22 release and Web Crypto for its random source. A checksum-verified
-JavaScript CGI input adapter preserves binary request bodies and uses indexed
-input reads for large uploads; the upstream PHP WebAssembly binary is unchanged.
+JavaScript CGI adapter preserves binary request bodies, uses indexed input reads
+for large uploads, and waits for preloaded files before starting or restoring PHP.
+The upstream PHP WebAssembly binary is unchanged.
 The distributed `.so`
 files are WebAssembly extensions for these specific upstream builds, not native
 Linux PHP modules.
@@ -691,8 +692,9 @@ DECIMAL values remain exact strings. `PDO::ATTR_STRINGIFY_FETCHES` requests
 numeric strings explicitly. Files and database state are separate stores; they
 are not committed together as one transaction.
 
-The verified JavaScript CGI input adapter supports binary POST, PUT, PATCH and
-DELETE bodies, including large multipart uploads. Request queues, source size,
+The verified JavaScript CGI adapter supports binary POST, PUT, PATCH and
+DELETE bodies, including large multipart uploads. It awaits preload completion
+before restoring a restarted runtime’s files. Request queues, source size,
 body size and execution time remain bounded. A recoverable PHP application error
 preserves its HTTP error response and files, resets abandoned database sessions,
 and prepares PHP for the next request without replaying uncertain writes. On a

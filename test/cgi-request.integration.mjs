@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { cp, mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -19,14 +19,20 @@ assert.equal(overlay.files.length, 3);
 const { PhpCgiNode } = await import(pathToFileURL(path.join(packagePath, 'PhpCgiNode.mjs')));
 const pins = JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
 const selected = process.env.PLAYGROUND_PHP_VERSIONS?.split(',');
+const preload = path.join(temporary, 'preload-ready.php');
+await writeFile(preload, '<?php return "preload complete";');
 
 test('actual upstream CGI carries binary API bodies and multipart uploads', { timeout: 180_000 }, async t => {
   t.after(() => rm(temporary, { recursive: true, force: true }));
   for (const version of pins.php.filter(value => !selected || selected.includes(value.version))) {
     await t.test(`PHP ${version.version} request methods and effective settings`, async () => {
       const php = new PhpCgiNode({ version: version.version, persist: [], docroot: '/www', prefix: '/',
-        locateFile: name => path.join(original, path.basename(name)), ini: phpIni(),
+        locateFile: name => name === preload ? name : path.join(original, path.basename(name)), ini: phpIni(),
+        files: [{ parent: '/internal', name: 'preload-ready.php', url: preload }],
       });
+      const initialized = await php.binary;
+      assert.equal(initialized.FS.readFile('/internal/preload-ready.php', { encoding: 'utf8' }), '<?php return "preload complete";',
+        'Initialization must wait until asynchronous preload files exist.');
       await php.mkdir('/config'); await php.mkdir('/www'); await php.mkdir('/persist'); await php.mkdir('/persist/sessions');
       await php.writeFile('/www/index.php', `<?php
         header('Content-Type: application/json'); $body = file_get_contents('php://input');
@@ -63,4 +69,12 @@ test('actual upstream CGI carries binary API bodies and multipart uploads', { ti
       }
     });
   }
+  await t.test('a missing preload rejects initialization with its file context', async () => {
+    const missing = path.join(temporary, 'missing-preload.php');
+    const php = new PhpCgiNode({ version: '8.5', persist: [],
+      locateFile: name => name === missing ? name : path.join(original, path.basename(name)),
+      files: [{ parent: '/internal', name: 'missing-preload.php', url: missing }],
+    });
+    await assert.rejects(php.binary, /Unable to preload \/internal\/missing-preload\.php:/);
+  });
 });

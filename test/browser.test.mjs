@@ -718,7 +718,7 @@ for (const name of browserNames) {
             assert.equal(spreadsheet.number, 42);
             assert.ok(spreadsheet.bytes > 0);
             assert.equal(spreadsheet.integerSize, 4, 'The official dependency solution must actually operate on upstream wasm32 PHP.');
-            if (item.id === 'jcb' && item.version === manifest.defaults.joomlaVersion && item.phpVersion === manifest.defaults.phpVersion) {
+            if (item.id === 'jcb' && item.phpVersion === manifest.defaults.phpVersion) {
               proof.push({ id: 'jcb-compiler', ...(await assertJcbCompiler(page)) });
             }
           }
@@ -799,7 +799,7 @@ for (const name of browserNames) {
         assert.equal(await page.frameLocator('#site-frame').locator('input[name="passwd"]').count(), 0);
         assert.deepEqual(dashboardErrors(await page.frameLocator('#site-frame').locator('html').innerHTML()), [],
           'The default JCB dashboard must be free of missing-runtime requirement alerts.');
-        proof.push({ id: 'joomla-diagnostics', ...(await assertJoomlaDebugConfiguration(page)) });
+        proof.push({ id: 'joomla-diagnostics', ...(await assertJoomlaDebugConfiguration(page, { redirectProbe: syntheticRedirectProbe })) });
         if (name === 'chromium') {
           await mkdir(path.join(root, 'test-results'), { recursive: true });
           await page.screenshot({ path: path.join(root, 'test-results/jcb-desktop.png'), fullPage: true });

@@ -7,9 +7,15 @@ import { repairJoomlaConfiguration } from '../src/joomla/index.mjs';
 test('PHP application failure preserves its response and files, then accepts another request', { timeout: 90_000 }, async t => {
   const runtime = await createNodeRuntime({ directory: process.env.PLAYGROUND_DIST, phpVersion: '8.5' });
   t.after(() => runtime.close());
+  const preloads = ['/internal/mariadb.php', '/internal/rocket-http.php'];
+  const originalPreloads = await Promise.all(preloads.map(async path => new TextDecoder().decode(await runtime.fs.readFile(path))));
   await runtime.fs.writeFile('/persist/www/failure.php', `<?php
     ini_set('display_errors', '1');
     file_put_contents('/persist/www/saved.txt', 'saved before failure');
+    foreach (['/internal/mariadb.php', '/internal/rocket-http.php'] as $preload) {
+      chmod($preload, 0600);
+      file_put_contents($preload, "\\n// retained local preload configuration\\n", FILE_APPEND);
+    }
     throw new RuntimeException('Recoverable application failure');
   `);
   await runtime.fs.writeFile('/persist/www/next.php', `<?php
@@ -24,6 +30,10 @@ test('PHP application failure preserves its response and files, then accepts ano
   assert.equal(next.status, 200);
   assert.deepEqual(await next.json(), { saved: 'saved before failure', answer: 42 });
   assert.equal(new TextDecoder().decode(await runtime.fs.readFile('/persist/www/saved.txt')), 'saved before failure');
+  for (const [index, path] of preloads.entries()) {
+    assert.equal(new TextDecoder().decode(await runtime.fs.readFile(path)), `${originalPreloads[index]}\n// retained local preload configuration\n`,
+      'A late preload must not overwrite the recovered runtime file.');
+  }
 
   const original = `<?php class JConfig {
     public $debug = 1;
