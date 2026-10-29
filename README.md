@@ -182,8 +182,9 @@ response-header metadata and caller-local `$http_response_header`, using the sam
 browser transport. The upstream PHP binary remains unchanged. A version-independent
 JCB compatibility guard skips unavailable image-format identifiers instead of
 claiming support for decoders absent from the runtime. If JCB cannot cache a public
-image, its image helper can display the original HTTPS URL directly. This fallback
-uses the installed component’s own metadata; no artwork copies or host lists are
+image, its image helper can display the original HTTPS URL directly. A missing
+cache reference can use the existing file verified against its metadata checksum.
+These corrections use the installed component’s own metadata; no artwork copies or host lists are
 maintained, and PHP reads still require CORS permission.
 
 In a browser, remote servers must permit the playground origin through CORS.

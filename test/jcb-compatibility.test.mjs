@@ -51,6 +51,21 @@ test('missing image caches use only the original HTTPS image source after an unr
   assert.equal(guardJcbImageCache(cache.replaceAll('\n', '\r\n')).replaceAll('\r\n', '\n'), patched);
 });
 
+test('a mismatched cache filename is corrected only for one missing image backed by verified bytes', () => {
+  const patched = guardJcbImageCache(cache);
+  assert.match(patched, /preg_match_all\([^\n]+\) === 1/);
+  assert.match(patched, /\$referenced_path !== \$path && !file_exists\(\$referenced_path\)/);
+  assert.match(patched, /\$image_data !== false && md5\(\$image_data\) === \$target\['hash'\]/);
+  assert.match(patched, /is_file\(\$path\) && md5_file\(\$path\) === \$target\['hash'\]/);
+  assert.match(patched, /substr_replace\(\$target\['html'\]/);
+  assert.match(patched, /\$cache_directory \. basename\(\$path\)/);
+  assert.doesNotMatch(patched, /\$target\['(?:url|hash|html)'\]\s*=/);
+  const previous = patched.replace(/\/\/ Rocket: use the verified cache filename[\s\S]*?(?=return str_replace\('\[\[\[ROOT-URL\]\]\]', Uri::root\(\), \$target\['html'\]\);)/, '');
+  assert.notEqual(previous, patched);
+  assert.equal(guardJcbImageCache(previous), patched, 'Saved helpers with the previous read guard must gain the cache correction once.');
+  assert.equal((guardJcbImageCache(previous).match(/\/\/ Rocket: a failed image read/g) ?? []).length, 1);
+});
+
 test('unknown image cache structures are never rewritten', () => {
   for (const source of [cache.replace('getDynamicContent', 'otherMethod'), cache.replace("md5($image_data)", 'customCheck($image_data)'),
     cache.replace("$target['url']", "$other['url']"), cache.replace('$path = JPATH_ROOT', '$path = OTHER_ROOT'),
