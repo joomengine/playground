@@ -26,6 +26,28 @@ let phpSettings;
 let requestBodyLimit = MAX_BODY_BYTES;
 let requestActive = false;
 let issuedDatabaseCalls = 0;
+let workspaceFiles;
+let workspaceFilesystem;
+
+async function workspaceOperation(name, args) {
+  // Initialize only when the editor is used. Recovery can replace the entire
+  // Emscripten module, so never keep a provider attached to its old filesystem.
+  if (workspaceFilesystem !== binary.FS) {
+    const { createWorkspaceFileService } = await import('./code/workspace-files.mjs');
+    workspaceFilesystem = binary.FS;
+    workspaceFiles = createWorkspaceFileService(binary.FS, '/persist/www', {
+      readOnly,
+      onChange: changes => self.postMessage({ type: 'workspace-change', changes }),
+    });
+  }
+  const result = await workspaceFiles.handle(name, args);
+  if (!['write', 'batch', 'mkdir', 'copy', 'rename', 'delete', 'recover'].includes(name)) return result;
+  // These files already changed in the active runtime. A quota/durability error
+  // must not masquerade as a failed live write, or cause a caller to replay it.
+  let storageError;
+  try { await flush(); } catch (error) { storageError = error.message; }
+  return { ...result, persistence: { enabled: persistent, saved: persistent && !storageError, error: storageError } };
+}
 
 class FatalRuntimeError extends Error {
   fatal = true;
@@ -89,6 +111,7 @@ function clearHeaders() {
 async function request(value) {
   try { return await requestResponse(value); }
   finally {
+    if (workspaceFiles) self.postMessage({ type: 'workspace-invalidated' });
     if (readOnly && binary) {
       // A failed CGI request may have replaced the PHP module asynchronously.
       await php.binary;
@@ -284,6 +307,7 @@ async function operation(name, args = {}) {
   if (name === 'initialize') return initialize(args);
   if (!php || !binary) throw new Error('Initialize PHP before using the worker.');
   if (name.startsWith('fs.')) return filesystem(name.slice(3), args);
+  if (name.startsWith('workspace.')) return workspaceOperation(name.slice('workspace.'.length), args);
   switch (name) {
     case 'request': return request(args);
     case 'runPhp': return runPhp(args.source ?? args.code);
@@ -356,7 +380,7 @@ self.addEventListener('message', (event) => {
     } catch (error) {
       const fatal = error?.fatal === true || message.operation === 'initialize';
       if (fatal) terminal = true;
-      self.postMessage({ type: 'result', id: message.id, error: error instanceof Error ? error.message : String(error), fatal });
+      self.postMessage({ type: 'result', id: message.id, error: error instanceof Error ? error.message : String(error), code: error?.code, fatal });
     } finally { queued--; }
   });
 });

@@ -68,11 +68,18 @@ class PhpSession {
     this.queue = Promise.resolve();
     this.queued = 0;
     this.failure = null;
+    this.workspaceListeners = new Set();
     this.worker.addEventListener('error', event => this.fail(new Error(event.message || 'The PHP worker failed.')));
     this.worker.addEventListener('messageerror', () => this.fail(new Error('The PHP worker sent an unreadable message.')));
     this.worker.addEventListener('message', event => this.receive(event.data));
   }
   async receive(message) {
+    if (message?.type === 'workspace-change' || message?.type === 'workspace-invalidated') {
+      for (const listener of this.workspaceListeners) {
+        try { listener(message); } catch { /* A view cannot fail the site owner. */ }
+      }
+      return;
+    }
     if (message?.type === 'database-call') {
       try {
         if (!this.database) throw new Error('The database is unavailable in files-only recovery.');
@@ -101,7 +108,7 @@ class PhpSession {
         // Joomla can retain PDO in its container until late PHP shutdown.
         // The completed CGI request is the definitive connection boundary.
         if (['request', 'runPhp'].includes(pending.operation) && message.value?.databaseUsed !== false) await this.database?.reset();
-        if (message.error) pending.reject(new Error(message.error));
+        if (message.error) pending.reject(Object.assign(new Error(message.error), { code: message.code }));
         else pending.resolve(message.value);
       } catch (error) { await this.fail(error); pending.reject(error); }
     }
@@ -159,7 +166,7 @@ class PhpSession {
   }
   async close() {
     try { if (!this.failure) await this.send('close'); }
-    finally { this.worker.terminate(); this.failure ??= new Error('This PHP session is closed.'); await this.recovery; }
+    finally { this.workspaceListeners.clear(); this.worker.terminate(); this.failure ??= new Error('This PHP session is closed.'); await this.recovery; }
   }
 }
 
@@ -216,6 +223,12 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   const release = config.persistence ? await acquireSiteLock(identity) : async () => {};
   const instanceId = crypto.randomUUID();
   let database, session, closePromise, changing = false, databaseError = null;
+  const workspaceListeners = new Set();
+  const workspaceEvent = event => {
+    for (const listener of workspaceListeners) {
+      try { listener(event); } catch { /* Listener errors must not stop the runtime. */ }
+    }
+  };
   const pausedOperation = Symbol('paused site operation');
   const prefix = `${base.pathname}__site/${clientId}/${instanceId}/`;
   const siteUrl = new URL(prefix, base).href;
@@ -224,6 +237,8 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   });
   const finish = erase => closePromise ??= (async () => {
     instances.delete(instanceId);
+    workspaceEvent({ type: 'workspace-closed', erased: Boolean(erase) });
+    workspaceListeners.clear();
     try {
       try { await session?.close(); } finally { await database?.close(); }
       if (erase && config.persistence) await eraseStoredSite(identity);
@@ -254,9 +269,13 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     const requireDatabase = () => {
       if (filesOnly) throw new Error('Only file recovery is available. The database could not start; download the recovery files or close and retry.');
     };
-    const createSession = () => new PhpSession(database,
-      error => progress({ phase: 'failed', message: error.message }),
-      message => progress({ phase: 'warning', message }));
+    const createSession = () => {
+      const created = new PhpSession(database,
+        error => { workspaceEvent({ type: 'workspace-failed', message: error.message }); progress({ phase: 'failed', message: error.message }); },
+        message => progress({ phase: 'warning', message }));
+      created.workspaceListeners.add(workspaceEvent);
+      return created;
+    };
     session = createSession();
     progress({ phase: 'php', message: `Loading PHP ${phpEntry.patchVersion ?? config.phpVersion} and its extensions…` });
     const initializeSession = (target, settings = config.phpSettings) => target.send('initialize', {
@@ -276,6 +295,22 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       get changing() { return changing; },
       recovery: null,
       lastSavedAt: null,
+      workspace: {
+        id: instanceId,
+        storageId: config.persistence ? identity : null,
+        root: '/',
+        async request(operation, args = {}) {
+          if (closePromise) throw new Error('This JoomEngine Code workspace is closed.');
+          if (changing) throw new Error('Wait for the current site operation before using JoomEngine Code.');
+          if (!/^[a-zA-Z]+$/.test(operation)) throw new TypeError('Invalid workspace operation.');
+          return session.send(`workspace.${operation}`, args);
+        },
+        subscribe(listener) {
+          if (typeof listener !== 'function') throw new TypeError('A workspace listener is required.');
+          workspaceListeners.add(listener);
+          return () => workspaceListeners.delete(listener);
+        },
+      },
       fs: Object.fromEntries(['mkdir', 'readFile', 'writeFile', 'readdir', 'stat', 'unlink'].map(method => [method,
         (path, data) => session.send(`fs.${method}`, { path, data })])),
       runPhp: (source, options = {}) => session.send('runPhp', { source }, options.timeoutMs ?? 180_000),
@@ -398,6 +433,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           await session.flushTogether();
           await session.send('enablePersistence');
           registerSession();
+          workspaceEvent({ type: 'workspace-invalidated' });
           progress({ phase: 'ready', message: 'PHP settings applied. Your site files and database are unchanged.' });
           return handle.runtimeInfo;
         } catch (error) {
