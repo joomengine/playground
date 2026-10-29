@@ -14,6 +14,9 @@ import { assertFrameLayoutStable } from './frame-layout-contract.mjs';
 import { assertJoomlaDebugConfiguration } from './joomla-debug-contract.mjs';
 import { assertJcbCompiler } from './jcb-compiler-contract.mjs';
 import { assertLaunchCountdown, assertFailedDeploymentRecovery } from './launch-ui-contract.mjs';
+import { assertLiveFocusMode, assertInitialFocusMode } from './focus-ui-contract.mjs';
+import { assertJcbHardReload } from './jcb-hard-reload-contract.mjs';
+import { assertSavedSiteRecovery } from './saved-site-recovery-contract.mjs';
 import { classifyAssetDiagnostics } from './asset-diagnostics.mjs';
 import { assertMcpHttp } from './mcp-http.mjs';
 import { probeSyntheticRedirect, startRedirectTrace, recordVerifiedRedirectDiagnostic } from './firefox-redirect-probe.mjs';
@@ -788,17 +791,18 @@ for (const name of browserNames) {
           proof.push({ id: 'heritage-demo', fresh, fromSnapshot: Boolean(result.installation.fromSnapshot), content });
           await close(page);
         }
-        page.testStep = 'default domain counts down and opens prepared JCB on PHP 8.5 in English';
+        page.testStep = 'default domain counts down and opens prepared JCB on PHP 8.4 in English';
         await page.setViewportSize({ width: 1440, height: 1000 });
         const defaultLaunchStarted = await assertLaunchCountdown(page, server.url);
         await renderedSiteFrame(page);
         const preparedLaunchMs = Date.now() - defaultLaunchStarted;
         assert.equal(await page.locator('#deploy').inputValue(), 'jcb');
-        assert.equal(await page.locator('#php-version').inputValue(), '8.5');
+        assert.equal(await page.locator('#php-version').inputValue(), '8.4');
         assert.match(await page.frameLocator('#site-frame').locator('html').innerHTML(), /com_componentbuilder/);
         assert.equal(await page.frameLocator('#site-frame').locator('input[name="passwd"]').count(), 0);
         assert.deepEqual(dashboardErrors(await page.frameLocator('#site-frame').locator('html').innerHTML()), [],
           'The default JCB dashboard must be free of missing-runtime requirement alerts.');
+        proof.push({ id: 'jcb-save-hard-reload', ...(await assertJcbHardReload(page, { redirectProbe: syntheticRedirectProbe })) });
         proof.push({ id: 'joomla-diagnostics', ...(await assertJoomlaDebugConfiguration(page, { redirectProbe: syntheticRedirectProbe })) });
         if (name === 'chromium') {
           await mkdir(path.join(root, 'test-results'), { recursive: true });
@@ -814,15 +818,25 @@ for (const name of browserNames) {
       } catch (error) { await saveBrowserDiagnostics(page, `deploys-${name}`, error); throw error; }
       finally { await close(page).catch(() => {}); await context.close(); }
     });
-    if (scenarios.includes('rocket')) await runScenario('failed installations retain recovery and reset access', { timeout: 240_000 }, async () => {
+    if (scenarios.includes('rocket')) await runScenario('failed installations and database startup retain recovery access', { timeout: 600_000 }, async () => {
       const context = await browser.newContext({ acceptDownloads: true });
       const page = await context.newPage();
       try {
         const errors = [];
         page.on('pageerror', error => errors.push(error.message));
+        const focus = await assertInitialFocusMode(page, server.url);
         const recovery = await assertFailedDeploymentRecovery(page, server.url);
+        const recoveryPage = await openHarness(context, server.url);
+        recoveryPage.testStep = 'saved files remain recoverable after MariaDB initialization failure';
+        const recoveryConfig = configuration(defaultPair);
+        await start(recoveryPage, recoveryConfig);
+        const filesRecovery = await assertSavedSiteRecovery(recoveryPage, {
+          serverURL: server.url, configuration: recoveryConfig, manifest, fixtures,
+        });
+        await close(recoveryPage);
+        await assertCleanConsole(recoveryPage);
         assert.deepEqual(errors, [], 'Recovery controls must not produce JavaScript exceptions.');
-        records.push({ ...defaultPair, recovery });
+        records.push({ ...defaultPair, recovery, filesRecovery, focus });
       } finally { await context.close(); }
     });
     if (scenarios.includes('export')) await runScenario('portable export restores exact files, SQL values, views and triggers in a new database', { timeout: 900_000 }, async () => {
@@ -1042,11 +1056,10 @@ for (const name of browserNames) {
         throw error;
       } finally { await context.close(); }
     });
-    if (scenarios.includes('rocket')) await runScenario('Rocket shares, translates, saves temporary sites, changes PHP and transfers standalone ownership', { timeout: 600_000 }, async () => {
+    if (scenarios.includes('rocket')) await runScenario('Rocket shares, translates, saves temporary sites, changes PHP and preserves its live site while hiding controls', { timeout: 600_000 }, async () => {
       const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
       const page = observePage(await context.newPage());
       page.setDefaultTimeout(30_000);
-      let standalone;
       try {
         const url = new URL(server.url);
         for (const [key, value] of Object.entries({ deploy: 'blank', joomla: defaultPair.joomlaVersion, php: defaultPair.phpVersion,
@@ -1206,6 +1219,9 @@ for (const name of browserNames) {
         await page.keyboard.press('Tab');
         await page.waitForFunction(() => scrollY > 1000);
         assert.equal(await actualFrame.locator('#rocket-focus-proof').evaluate(button => button === document.activeElement), true);
+        page.testStep = 'header and footer hide together without replacing the live site';
+        const focus = await assertLiveFocusMode(page, actualFrame);
+        assert.deepEqual(await previewContract(page), marker);
         await actualFrame.locator('#rocket-scroll-proof').evaluate(element => element.remove());
         await page.evaluate(() => window.scrollTo(0, 0));
         await mkdir(path.join(root, 'test-results'), { recursive: true });
@@ -1234,39 +1250,12 @@ for (const name of browserNames) {
         assert.equal(await page.locator('#site-frame').getAttribute('src'), frameURL);
         assert.deepEqual(await previewContract(page), marker);
         await bounded(Promise.allSettled([...page.responseChecks]), 'Read embedded site responses', 10_000);
-        page.testStep = 'standalone tab survives closing its former owner';
-        const popup = context.waitForEvent('page');
-        await page.locator('#open-link').click();
-        standalone = observePage(await popup);
-        standalone.setDefaultTimeout(30_000);
-        await standalone.locator('#site:not([hidden])').waitFor({ timeout: requestTimeout });
-        const standaloneFrame = await (await standalone.locator('#site').elementHandle()).contentFrame();
-        await waitForSiteFrame(standaloneFrame, await standalone.locator('#site').getAttribute('src'));
-        await standaloneFrame.locator('body').waitFor();
-        assert.equal(await standaloneFrame.evaluate(() => parent === window), true);
-        const standaloneIdentity = randomUUID();
-        await standalone.evaluate(value => { window.__rocketIdentity = value; }, standaloneIdentity);
-        const standaloneReload = standaloneFrame.waitForNavigation({ waitUntil: 'load' });
-        await standaloneFrame.evaluate(() => { setTimeout(() => parent.location.reload(), 0); });
-        await standaloneReload;
-        assert.equal(await standalone.evaluate(() => window.__rocketIdentity), standaloneIdentity);
-        assert.deepEqual(await previewContract(standalone, 'read', 'site'), marker);
-        await page.close();
-        assert.deepEqual(await previewContract(standalone, 'read', 'site'), marker);
-        assert.equal(await standalone.locator('#site-header').count(), 0);
-        assert.equal(await standalone.locator('#site-footer').count(), 0);
-        await standalone.reload();
-        await standalone.locator('#site:not([hidden])').waitFor({ timeout: requestTimeout });
-        assert.deepEqual(await previewContract(standalone, 'read', 'site'), marker);
-        assert.equal((await previewContract(standalone, 'settings', 'site')).memory_limit, '640M');
         await assertCleanConsole(page);
-        await assertCleanConsole(standalone);
         records.push({ ...defaultPair, rocket: true, shareLink: true, independentInterfaceLanguage: true, rtl: true,
-          temporaryToSaved: true, retainedCredentials: true, effectivePhpSettings: settings, singleScroll: true, standaloneOwnership: true,
+          temporaryToSaved: true, retainedCredentials: true, effectivePhpSettings: settings, singleScroll: true, focus,
           knownBrowserDiagnostics: page.knownBrowserDiagnostics });
       } catch (error) {
         if (!page.isClosed()) await saveBrowserDiagnostics(page, `rocket-${name}`, error);
-        if (standalone && !standalone.isClosed()) await saveBrowserDiagnostics(standalone, `rocket-${name}-standalone`, error);
         throw error;
       }
       finally { await context.close(); }

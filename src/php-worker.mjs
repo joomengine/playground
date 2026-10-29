@@ -17,6 +17,8 @@ let queued = 0;
 let php;
 let binary;
 let persistent = false;
+let readOnly = false;
+let recoveryCookies = null;
 let terminal = false;
 let routePrefix;
 let mountPath;
@@ -61,9 +63,22 @@ function removeTree(path) {
 }
 
 async function flush() {
-  if (persistent && binary) {
+  if (persistent && binary && !readOnly) {
     await new Promise((resolve, reject) => binary.FS.syncfs(false, (error) => error ? reject(error) : resolve()));
   }
+}
+
+function restoreRecoveryCookies() {
+  if (!readOnly) return;
+  // Upstream rewrites this file after every CGI request, even with staticFS.
+  // Recovery downloads must contain the original saved cookie file verbatim.
+  const path = '/config/.cookies';
+  if (recoveryCookies) {
+    if (exists(path)) binary.FS.chmod(path, recoveryCookies.mode | 0o200);
+    binary.FS.writeFile(path, recoveryCookies.bytes);
+    binary.FS.chmod(path, recoveryCookies.mode);
+    binary.FS.utime(path, recoveryCookies.atime, recoveryCookies.mtime);
+  } else if (exists(path)) binary.FS.unlink(path);
 }
 
 function clearHeaders() {
@@ -72,6 +87,17 @@ function clearHeaders() {
 }
 
 async function request(value) {
+  try { return await requestResponse(value); }
+  finally {
+    if (readOnly && binary) {
+      // A failed CGI request may have replaced the PHP module asynchronously.
+      await php.binary;
+      restoreRecoveryCookies();
+    }
+  }
+}
+
+async function requestResponse(value) {
   if (!value || typeof value.url !== 'string') throw new TypeError('A serialized HTTP request is required.');
   const url = new URL(value.url, self.location.href);
   if (url.origin !== self.location.origin || !url.pathname.startsWith(routePrefix)) {
@@ -94,7 +120,7 @@ async function request(value) {
   const executionsBeforeRequest = php.count;
   const callsBeforeRequest = issuedDatabaseCalls;
   let recoveryMessage = '';
-  applyJcbRuntimeCompatibility(binary, php.docroot);
+  if (!readOnly) applyJcbRuntimeCompatibility(binary, php.docroot);
   let response;
   requestActive = true;
   try {
@@ -154,6 +180,8 @@ async function initialize(args) {
   phpSettings = normalizePhpSettings(args.phpSettings);
   requestBodyLimit = phpRequestBodyLimit(phpSettings);
   persistent = args.persistence === true;
+  readOnly = args.readOnly === true;
+  if (readOnly && !persistent) throw new TypeError('Read-only recovery requires saved browser storage.');
   mountPath = args.mountPath;
   if (persistent && (typeof mountPath !== 'string' || !/^\/[a-zA-Z0-9_-]+$/.test(mountPath) || ['/persist', '/config', '/internal', '/tmp'].includes(mountPath))) {
     throw new TypeError('Persistent storage requires a unique top-level mount path.');
@@ -201,6 +229,10 @@ async function initialize(args) {
   };
   binary = await php.binary;
   prepareFilesystem(binary);
+  if (readOnly && exists('/config/.cookies')) {
+    const { mode, atime, mtime } = binary.FS.stat('/config/.cookies');
+    recoveryCookies = { bytes: binary.FS.readFile('/config/.cookies', { encoding: 'binary' }), mode, atime, mtime };
+  }
   configurePhpRouting(php, binary);
   installPhpRecovery(php, {
     currentBinary: () => binary,
@@ -226,6 +258,7 @@ async function initialize(args) {
 
 function filesystem(operation, args) {
   const path = virtualPath(args.path);
+  if (readOnly && ['mkdir', 'writeFile', 'unlink'].includes(operation)) throw new Error('Saved files cannot be modified in read-only recovery.');
   switch (operation) {
     case 'mkdir': mkdir(path); return null;
     case 'writeFile': {
@@ -255,19 +288,20 @@ async function operation(name, args = {}) {
     case 'request': return request(args);
     case 'runPhp': return runPhp(args.source ?? args.code);
     case 'flush': await flush(); return null;
-    case 'enablePersistence': php.phpArgs.staticFS = !persistent; return null;
+    case 'enablePersistence': php.phpArgs.staticFS = !persistent || readOnly; return null;
     case 'checkpoint': {
-      binary.FS.writeFile('/config/.cookies', php.cookieJar.dump());
+      if (!readOnly) binary.FS.writeFile('/config/.cookies', php.cookieJar.dump());
       await flush();
       const archive = `/tmp/rocket-checkpoint-${crypto.randomUUID()}.zip`;
       try {
-        const response = await runPhp(checkpointSource(archive));
+        const response = await runPhp(checkpointSource(archive, { filesOnlyRecovery: readOnly }));
         const result = JSON.parse(response.text);
         if (response.status !== 200 || result.ok !== true) throw new Error('The private runtime checkpoint failed.');
         return binary.FS.readFile(archive, { encoding: 'binary' });
       } finally { if (exists(archive)) binary.FS.unlink(archive); }
     }
     case 'restoreCheckpoint': {
+      if (readOnly) throw new Error('Saved files cannot be replaced in read-only recovery.');
       const bytes = args.bytes instanceof Uint8Array ? args.bytes : args.bytes instanceof ArrayBuffer ? new Uint8Array(args.bytes) : null;
       if (!bytes || bytes.byteLength === 0 || bytes.byteLength > 512 * 1024 * 1024) throw new RangeError('The private runtime checkpoint must contain at most 512 MiB.');
       const archive = `/tmp/rocket-checkpoint-${crypto.randomUUID()}.zip`;
@@ -285,6 +319,7 @@ async function operation(name, args = {}) {
     }
     case 'close': await flush(); terminal = true; return null;
     case 'reset': {
+      if (readOnly) throw new Error('Saved files cannot be modified in read-only recovery.');
       for (const root of ['/persist', '/config']) {
         for (const name of binary.FS.readdir(root)) if (name !== '.' && name !== '..') removeTree(`${root}/${name}`);
       }

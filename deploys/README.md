@@ -1,6 +1,6 @@
 # Playground deploys
 
-Deploys describe a reproducible Joomla installation: extension packages, languages, sample content and Joomla CLI commands. The application defaults to **JCB on Joomla 5 and Joomla 6**, using **PHP 8.5** and opening the JCB dashboard. **JCB + MCP** is an optional Joomla 6 deployment. Ordinary deployments start in English. Choose **Joomla only** or `?deploy=blank` to start without additional extensions. The low-level `createPlayground()` API installs only the configuration supplied by its caller.
+Deploys describe a reproducible Joomla installation: extension packages, languages, sample content and Joomla CLI commands. The application defaults to **JCB on Joomla 5 and Joomla 6**, using **PHP 8.4** and opening the JCB dashboard. PHP 8.5 remains selectable. **JCB + MCP** is an optional Joomla 6 deployment. Ordinary deployments start in English. Choose **Joomla only** or `?deploy=blank` to start without additional extensions. The low-level `createPlayground()` API installs only the configuration supplied by its caller.
 
 | Deploy | Open the playground | Contents |
 | --- | --- | --- |
@@ -73,7 +73,7 @@ Supported deployment parameters include:
 | `path` | `/administrator/` | Select the first Joomla page |
 | `persist` | `1` | Save changes in this browser |
 | `key` | `my-demo` | Select a local saved-site key |
-| `toolbar` | `0` | Hide the playground toolbar |
+| `toolbar` | `0` | Hide the header and footer together; edge tabs restore them without restarting Joomla |
 | `start` | `0` | Load the configuration without starting automatically |
 
 `extensions` accepts a JSON array of `{ "url": "…", "sha256": "…" }` objects. A checksum is optional for caller-supplied URLs and mandatory for repository packages. Repeated `extension=URL` parameters provide a shorter URL-only form. External URLs must allow browser downloads through CORS.

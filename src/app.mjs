@@ -117,6 +117,30 @@ function setDrawer(open) {
   $('settings-toggle').setAttribute('aria-expanded', String(open));
   $('settings-toggle').setAttribute('aria-label', t(open ? 'action.collapse' : 'action.expand'));
 }
+function setFocusMode(hidden, { focus = false, edge = 'top' } = {}) {
+  const frame = $('site-frame');
+  const previousTop = frame ? frame.getBoundingClientRect().top + window.scrollY : 0;
+  const previousScroll = window.scrollY;
+  hideToolbar = Boolean(hidden);
+  document.body.classList.toggle('embedded', hideToolbar);
+  $('site-actions').open = false;
+  for (const id of ['focus-header-button', 'focus-footer-button']) $(id).setAttribute('aria-expanded', String(!hideToolbar));
+  for (const id of ['focus-restore-top', 'focus-restore-bottom']) {
+    $(id).hidden = !hideToolbar;
+    $(id).setAttribute('aria-expanded', String(!hideToolbar));
+  }
+  // Only the surrounding controls change: keep the live frame and its document.
+  // Notify its layout observer and keep the same site content in view.
+  window.dispatchEvent(new Event('resize'));
+  if (frame) {
+    const nextTop = frame.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: Math.max(0, previousScroll + nextTop - previousTop), behavior: 'instant' });
+  }
+  if (focus) {
+    const target = hidden ? `focus-restore-${edge}` : `focus-${edge === 'top' ? 'header' : 'footer'}-button`;
+    $(target).focus({ preventScroll: true });
+  }
+}
 function updateSaveState() {
   $('save-state').textContent = runtime ? currentConfig?.persistence
     ? lastSavedAt ? t('status.savedAt', { time: lastSavedAt.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) }) : t('status.saved')
@@ -128,7 +152,6 @@ function destroyPreview() {
   // Removing the old document avoids both late requests and transitions to a blank page.
   $('site-mount').replaceChildren();
   $('site-mount').hidden = true;
-  $('open-link').removeAttribute('href');
 }
 function mountPreview(url) {
   const frame = document.createElement('iframe');
@@ -144,7 +167,6 @@ function mountPreview(url) {
     $('credentials-button').textContent = `${t('title.credentials')}${signedOut ? ` · ${t('status.signedOut')}` : ''}`;
   } });
   $('site-mount').replaceChildren(frame);
-  $('open-link').href = url;
   show('site-mount');
 }
 function updateMcpPreview() {
@@ -154,33 +176,41 @@ function updateMcpPreview() {
 function setBusy(value) {
   busy = value;
   const unavailable = !initialized || !catalog || !deployCatalog;
+  const filesOnly = Boolean(runtime?.recovery?.filesOnly);
   $('configuration-fields').disabled = busy || unavailable;
   $('installation-fields').disabled = busy || unavailable;
-  fields.persistence.disabled = busy || unavailable;
+  fields.persistence.disabled = busy || unavailable || filesOnly;
+  fields.phpVersion.disabled = busy || unavailable || filesOnly;
   $('launch-button').disabled = busy || Boolean(runtime) || unavailable;
   $('embedded-launch').disabled = busy || Boolean(runtime) || unavailable;
   $('retry-button').disabled = busy || unavailable;
   $('recover-button').disabled = busy || unavailable || !fields.persistence.checked;
-  $('repair-button').hidden = !runtime?.recovery?.configured;
-  $('repair-button').disabled = busy;
+  $('repair-button').hidden = filesOnly || !runtime?.recovery?.configured;
+  $('repair-button').disabled = busy || filesOnly;
   $('error-reset-button').disabled = busy || unavailable || !fields.persistence.checked;
   $('new-site-button').disabled = busy || unavailable;
   $('saved-site').disabled = busy || unavailable || Object.keys(savedState.sites).length === 0;
   for (const id of controls) $(id).disabled = busy || !runtime;
   $('share-button').disabled = busy || unavailable;
   $('reset-button').disabled = busy || (!runtime && (unavailable || !fields.persistence.checked));
-  $('save-button').disabled = busy || !runtime;
+  $('save-button').disabled = busy || !runtime || filesOnly;
+  $('restart-button').disabled = busy || !runtime || filesOnly;
   $('download-dialog-button').disabled = busy || !runtime;
   const recoveryFormat = $('export-format').querySelector('[value="recovery"]');
   recoveryFormat.hidden = !runtime?.recovery;
   recoveryFormat.disabled = !runtime?.recovery;
-  if (runtime?.recovery && !runtime.recovery.configured) $('export-format').value = 'recovery';
+  for (const option of $('export-format').options) {
+    if (option.value !== 'recovery') { option.hidden = filesOnly; option.disabled = filesOnly; }
+  }
+  if (filesOnly || (runtime?.recovery && !runtime.recovery.configured)) $('export-format').value = 'recovery';
   else if (!runtime?.recovery && $('export-format').value === 'recovery') $('export-format').value = 'bundle';
+  $('recovery-files-notice').hidden = !filesOnly;
+  $('download-files-notice').hidden = !filesOnly;
+  $('download-help').hidden = filesOnly;
   $('credentials-button').disabled = busy || !runtime || Boolean(runtime.recovery);
-  $('php-settings-button').disabled = busy || unavailable;
+  $('php-settings-button').disabled = busy || unavailable || filesOnly;
   $('use-deploy').disabled = busy || unavailable;
   $('apply-deploy').disabled = busy || !runtime || Boolean(runtime.recovery);
-  $('open-link').setAttribute('aria-disabled', String(Boolean(busy || !runtime || runtime.recovery)));
   $('preview-dot').className = `status-dot${busy ? ' busy' : runtime ? '' : ' muted'}`;
   $('launch-button').querySelector('span').textContent = t(busy ? 'status.working' : runtime ? 'status.running' : 'action.launch');
   $('launch-hint').textContent = t('help.firstLaunch');
@@ -234,9 +264,9 @@ async function recoverSite() {
     runtime = await createPlayground(currentConfig, { recovery: true, onProgress: progress });
     clearFeedback();
     $('error-title').textContent = t('title.recovery');
-    $('error-message').textContent = t('help.recovery');
+    $('error-message').textContent = runtime.recovery.filesOnly ? messageOf(runtime.recovery.databaseError) : t('help.recovery');
     show('error-view');
-    activity(t('help.recovery'));
+    activity(t(runtime.recovery.filesOnly ? 'help.filesOnlyRecovery' : 'help.recovery'));
   } catch (error) { displayError(error); }
   finally { setBusy(false); }
 }
@@ -314,8 +344,7 @@ function applyConfiguration(config, input = config, deploy) {
   renderEditorLists();
   fields.startupCommands.value = JSON.stringify(input.startupCommands || [], null, 2);
   pendingFresh = Boolean(config.fresh);
-  hideToolbar = Boolean(config.hideToolbar);
-  document.body.classList.toggle('embedded', hideToolbar);
+  setFocusMode(config.hideToolbar);
   $('embedded-launch').hidden = false;
   $('editor-runtime-summary').textContent = `${config.deployId} · Joomla ${config.joomlaVersion} · PHP ${config.phpVersion}`;
   selectedProfile = { deployId: config.deployId, joomlaVersion: config.joomlaVersion };
@@ -444,7 +473,7 @@ async function closeSite({ reset = false, save = false } = {}) {
   const handle = runtime;
   destroyPreview();
   try {
-    if (save) { activity('Saving the current site before closing…'); await handle.flush(); }
+    if (save && !handle.recovery?.filesOnly) { activity('Saving the current site before closing…'); await handle.flush(); }
     if (reset) await handle.reset();
     else await handle.close();
     runtime = undefined;
@@ -555,7 +584,7 @@ $('close-button').addEventListener('click', () => { if (runtime && !currentConfi
 $('new-site-button').addEventListener('click', () => void newSite());
 $('saved-site').addEventListener('change', (event) => void openSavedSite(event.target.value));
 $('restart-button').addEventListener('click', async () => {
-  if (busy || !runtime) return;
+  if (busy || !runtime || runtime.recovery?.filesOnly) return;
   setBusy(true); destroyPreview(); show('loading-view');
   try { await runtime.updatePhpSettings(phpSettings); mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl)); feedback(t('status.ready')); }
   catch (error) { if (runtime?.healthy) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl)); else displayError(error); feedback(error, { error: true }); }
@@ -565,7 +594,7 @@ $('reset-button').addEventListener('click', () => void resetSite());
 $('error-reset-button').addEventListener('click', () => void resetSite({ start: true }));
 $('recover-button').addEventListener('click', () => void recoverSite());
 $('repair-button').addEventListener('click', async () => {
-  if (busy || !runtime?.recovery) return;
+  if (busy || !runtime?.recovery || runtime.recovery.filesOnly) return;
   setBusy(true);
   try {
     await runtime.repairConfiguration();
@@ -606,7 +635,7 @@ $('export-button').addEventListener('click', async () => {
   const format = $('export-format').value;
   activity('Preparing your download…');
   try {
-    const result = format === 'recovery' || (runtime.recovery && !runtime.recovery.configured)
+    const result = format === 'recovery' || runtime.recovery?.filesOnly || (runtime.recovery && !runtime.recovery.configured)
       ? await runtime.exportRecoveryFiles()
       : await runtime.exportSite({ format, onProgress: (event) => activity(event.message || event) });
     if (!result || typeof result.filename !== 'string' || !result.filename
@@ -642,7 +671,7 @@ $('log-toggle').addEventListener('click', () => {
 fields.deployId.addEventListener('change', () => void changeProfile());
 fields.joomlaVersion.addEventListener('change', () => void changeProfile());
 fields.phpVersion.addEventListener('change', async () => {
-  if (busy || !runtime) return;
+  if (busy || !runtime || runtime.recovery?.filesOnly) return;
   const previous = currentConfig.phpVersion;
   setBusy(true); destroyPreview(); show('loading-view');
   try {
@@ -716,7 +745,7 @@ function openEditor() {
   $('editor-runtime-summary').textContent = `${fields.deployId.value} · Joomla ${fields.joomlaVersion.value} · PHP ${fields.phpVersion.value}`;
   updateMcpPreview();
   renderEditorLists(); openDialog('deploy-dialog');
-  if (runtime?.discoverConfiguration && !busy) void runtime.discoverConfiguration().then(discovered => {
+  if (runtime?.discoverConfiguration && !runtime.recovery && !busy) void runtime.discoverConfiguration().then(discovered => {
     $('component-options').replaceChildren(...[...new Set(discovered.menuTypes.map(item => item.component))].map(value => { const option = document.createElement('option'); option.value = value; return option; }));
     $('template-options').replaceChildren(...[...new Set(discovered.templates.map(item => item.template))].map(value => { const option = document.createElement('option'); option.value = value; return option; }));
     const empty = document.createElement('option'); empty.value = ''; empty.textContent = '—';
@@ -725,7 +754,7 @@ function openEditor() {
 }
 function editorError(error) { $('deploy-error').textContent = messageOf(error); $('deploy-error').hidden = false; }
 async function saveSite({ quiet = false } = {}) {
-  if (!runtime || busy) return false;
+  if (!runtime || busy || runtime.recovery?.filesOnly) return false;
   const wasTemporary = !currentConfig.persistence;
   setBusy(true); $('save-state').textContent = t('status.saving');
   if (wasTemporary) { destroyPreview(); show('loading-view'); }
@@ -781,7 +810,9 @@ async function useDeployment() {
     if (!approveCustomSetup(input)) return;
     const wasRunning = Boolean(runtime);
     if (wasRunning) {
-      if (!await saveSite()) return;
+      // Files-only recovery is read-only. Leave that saved site untouched while
+      // closing its recovery session before creating the independent deployment.
+      if (!runtime.recovery?.filesOnly && !await saveSite()) return;
       if (!await closeSite()) return;
       input = { ...input, storageKey: `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`, admin: { ...input.admin, password: password() } };
     }
@@ -847,6 +878,10 @@ function setupInterface() {
     renderSavedSites(); renderEditorLists();
   });
   $('settings-toggle').addEventListener('click', () => setDrawer($('settings').hidden));
+  for (const [id, hidden, edge] of [
+    ['focus-header-button', true, 'top'], ['focus-footer-button', true, 'bottom'],
+    ['focus-restore-top', false, 'top'], ['focus-restore-bottom', false, 'bottom'],
+  ]) $(id).addEventListener('click', () => setFocusMode(hidden, { focus: true, edge }));
   for (const id of ['deploy-editor-button', 'welcome-configure', 'error-configure']) $(id).addEventListener('click', openEditor);
   $('editor-runtime-button').addEventListener('click', () => { $('deploy-dialog').close(); setDrawer(true); fields.deployId.focus(); });
   for (const dialog of document.querySelectorAll('dialog')) {
@@ -893,7 +928,7 @@ function setupInterface() {
   $('php-settings-button').addEventListener('click', () => { populatePhpSettings(); openDialog('php-dialog'); });
   $('reset-php').addEventListener('click', () => populatePhpSettings(DEFAULT_PHP_SETTINGS));
   $('php-settings-form').addEventListener('submit', async event => {
-    event.preventDefault(); if (busy) return;
+    event.preventDefault(); if (busy || runtime?.recovery?.filesOnly) return;
     $('php-error').hidden = true;
     try {
       const settings = normalizePhpSettings(Object.fromEntries(new FormData(event.target)));
@@ -908,26 +943,6 @@ function setupInterface() {
     } catch (error) { $('php-error').textContent = messageOf(error); $('php-error').hidden = false; if (runtime?.healthy) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl)); else if (runtime) displayError(error); }
     finally { setBusy(false); }
   });
-  $('open-link').addEventListener('click', async event => {
-    event.preventDefault(); if (!runtime || runtime.recovery || busy) return;
-    try {
-      setBusy(true); destroyPreview(); show('loading-view'); await runtime.openStandalone({ path: currentSitePath });
-      destroyPreview(); runtime = undefined; show('welcome'); feedback(t('status.closed'));
-    } catch (error) {
-      if (error.recovery) {
-        try {
-          runtime = await createPlayground(error.recovery.configuration, { checkpoint: error.recovery.checkpoint, onProgress: progress });
-          currentConfig = runtime.configuration; currentInput = { ...currentInput, storageKey: currentConfig.storageKey, persistence: currentConfig.persistence };
-          applyConfiguration(currentConfig, currentInput); rememberCurrentSite();
-          history.replaceState(null, '', runtimeLocation(location.href, currentInput));
-        } catch (recoveryError) { runtime = undefined; displayError(recoveryError); }
-      }
-      if (runtime?.healthy) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
-      else if (runtime?.closed) runtime = undefined;
-      feedback(error, { error: true, persistent: true });
-    }
-    finally { setBusy(false); }
-  });
   for (const event of ['input', 'change']) $('launch-form').addEventListener(event, pauseAutomaticLaunch);
   document.addEventListener('visibilitychange', () => { if (document.hidden) pauseAutomaticLaunch(); });
   setInterval(() => { if (runtime && !runtime.recovery && !runtime.changing && currentConfig?.persistence && !busy && document.visibilityState === 'visible') void saveSite({ quiet: true }); }, 60000);
@@ -940,8 +955,7 @@ async function initialize() {
     const parsed = readURLConfiguration(location.href);
     if (parsed.document) parsed.config = { ...await loadDeploymentDocument(parsed.document.url, { ...parsed.document, baseURL: deploymentURL }), ...parsed.config };
     const params = new URL(location.href).searchParams;
-    hideToolbar = Boolean(parsed.config.hideToolbar);
-    document.body.classList.toggle('embedded', hideToolbar);
+    setFocusMode(parsed.config.hideToolbar);
     $('embedded-launch').hidden = false;
     activity('Preparing browser support for PHP and MariaDB…');
     const environment = await prepareEnvironment();

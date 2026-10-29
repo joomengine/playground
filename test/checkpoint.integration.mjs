@@ -18,6 +18,15 @@ test('private checkpoints restore exact files and credentials and reject damaged
   assert.equal(created.status, 200, created.text);
   assert.equal(JSON.parse(created.text).ok, true);
   const original = await runtime.fs.readFile(archive);
+  const recoveryArchive = '/tmp/rocket-checkpoint-recovery.zip';
+  const recoveryCreated = await runtime.runPhp(checkpointSource(recoveryArchive, { filesOnlyRecovery: true }));
+  assert.equal(recoveryCreated.status, 200, recoveryCreated.text);
+  const recoveryFiles = unzipSync(await runtime.fs.readFile(recoveryArchive));
+  assert.match(new TextDecoder().decode(recoveryFiles['RECOVERY.txt']), /No database data is included/);
+  assert.equal(recoveryFiles['database.sql'], undefined);
+  assert.deepEqual(recoveryFiles['persist/www/proof.bin'], binary);
+  assert.equal(new TextDecoder().decode(recoveryFiles['persist/meta/administrator.json']), privateMetadata);
+  assert.equal(unzipSync(original)['RECOVERY.txt'], undefined, 'Ordinary private checkpoints keep their existing format.');
   await runtime.fs.writeFile('/persist/www/proof.bin', 'changed');
   await runtime.fs.writeFile('/persist/www/extra.txt', 'extra');
   await runtime.fs.writeFile('/persist/meta/administrator.json', '{}');

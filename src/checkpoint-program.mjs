@@ -6,7 +6,7 @@ function parameter(value) {
 }
 
 /** Private checkpoints preserve sessions and metadata; they are never deployment exports. */
-export function checkpointSource(destination) {
+export function checkpointSource(destination, { filesOnlyRecovery = false } = {}) {
   return `<?php
 $target = ${parameter(destination)};
 $zip = new ZipArchive();
@@ -30,6 +30,7 @@ foreach (['persist', 'config'] as $root) {
     }
 }
 $zip->addFromString('checkpoint.json', json_encode(['format' => 'joomengine-private-checkpoint', 'version' => 1, 'entries' => $entries], JSON_THROW_ON_ERROR));
+${filesOnlyRecovery ? "$zip->addFromString('RECOVERY.txt', 'This archive contains saved Joomla files, sessions and private configuration only. MariaDB could not start. No database data is included. Keep the original browser storage for database recovery. This is not a complete deployable site backup.');" : ''}
 if (!$zip->close()) throw new RuntimeException('The private checkpoint could not be completed.');
 clearstatcache(true, $target);
 if (filesize($target) > 536870912) { unlink($target); throw new RuntimeException('The compressed checkpoint exceeds 512 MiB.'); }
