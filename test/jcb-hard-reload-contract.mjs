@@ -42,7 +42,7 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
   page.testStep = 'prepared JCB creates a committed Joomla record before saving';
   const administrator = await credentials();
   assert.ok(administrator.username && administrator.password.length >= 16);
-  await frame.goto(adminPage('option=com_content&view=article&layout=edit'), { waitUntil: 'load' });
+  await frame.goto(adminPage('option=com_content&view=article&layout=edit'), { waitUntil: 'load', timeout });
   await frame.locator('#jform_title').fill(articleTitle);
   await frame.evaluate(() => {
     const text = '<p>Committed content must survive a whole-page reload without a clean database shutdown.</p>';
@@ -58,12 +58,12 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
   assert.match(await frame.locator('body').innerText(), /Article saved/i);
 
   page.testStep = 'prepared JCB writes a configuration.php marker before saving';
-  await frame.goto(adminPage('option=com_config'), { waitUntil: 'load' });
+  await frame.goto(adminPage('option=com_config'), { waitUntil: 'load', timeout });
   const originalSiteName = await frame.locator('#jform_sitename').inputValue();
   await frame.locator('#jform_sitename').fill(siteName);
   await saveJoomla('application.apply');
   assert.equal(await frame.locator('#jform_sitename').inputValue(), siteName);
-  await frame.goto(new URL(`.${initialPath}`, siteBase()).href, { waitUntil: 'load' });
+  await frame.goto(new URL(`.${initialPath}`, siteBase()).href, { waitUntil: 'load', timeout });
 
   for (let saved = 1; saved <= 2; saved++) {
     page.testStep = `prepared JCB save ${saved} then whole-page reload without Close`;
@@ -72,7 +72,7 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
     await page.locator('#save-button:enabled').waitFor({ timeout });
     // Intentionally do not click Close or invoke runtime.close(): either would
     // checkpoint MariaDB and conceal the live-persistence regression in issue #5.
-    await page.reload({ waitUntil: 'load' });
+    await page.reload({ waitUntil: 'load', timeout });
     await page.waitForFunction(() => document.getElementById('site-frame')
       || (document.getElementById('error-view') && !document.getElementById('error-view').hidden), undefined, { timeout });
     assert.equal(await page.locator('#error-view').isVisible(), false,
@@ -82,9 +82,9 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
     await frame.locator('body').waitFor();
     assert.equal(await frame.locator('input[name="passwd"]').count(), 0, 'Administrator access must survive reload.');
     assert.deepEqual(await credentials(), administrator, 'Saved administrator credentials must remain unchanged.');
-    await frame.goto(adminPage('option=com_config'), { waitUntil: 'load' });
+    await frame.goto(adminPage('option=com_config'), { waitUntil: 'load', timeout });
     assert.equal(await frame.locator('#jform_sitename').inputValue(), siteName, 'The saved configuration.php marker must survive reload.');
-    await frame.goto(adminPage('option=com_content&view=articles'), { waitUntil: 'load' });
+    await frame.goto(adminPage('option=com_content&view=articles'), { waitUntil: 'load', timeout });
     await frame.locator('#filter_search').fill(articleTitle);
     await Promise.all([
       frame.waitForNavigation({ waitUntil: 'load', timeout: 90_000 }),
@@ -92,12 +92,12 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
     ]);
     assert.equal(await frame.getByRole('link', { name: articleTitle, exact: true }).count(), 1,
       'The committed Joomla article must survive reload.');
-    await frame.goto(new URL(`.${initialPath}`, siteBase()).href, { waitUntil: 'load' });
+    await frame.goto(new URL(`.${initialPath}`, siteBase()).href, { waitUntil: 'load', timeout });
   }
   page.testStep = 'restore the prepared JCB site name after hard-reload validation';
-  await frame.goto(adminPage('option=com_config'), { waitUntil: 'load' });
+  await frame.goto(adminPage('option=com_config'), { waitUntil: 'load', timeout });
   await frame.locator('#jform_sitename').fill(originalSiteName);
   await saveJoomla('application.apply');
-  await frame.goto(new URL(`.${initialPath}`, siteBase()).href, { waitUntil: 'load' });
+  await frame.goto(new URL(`.${initialPath}`, siteBase()).href, { waitUntil: 'load', timeout });
   return { preparedJcb: true, hardReloadsWithoutClose: 2, committedRecord: true, savedConfigurationFile: true, administrator: true };
 }
