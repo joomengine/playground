@@ -188,5 +188,6 @@ export default Object.freeze({
   "help.recovery": "Unduh berkas dan basis data sebelum membuat perubahan. Anda dapat memulihkan pengaturan galat Joomla yang aman tanpa memasang ulang situs.",
   "help.customSetup": "Penerapan bersama ini berisi kode atau perintah khusus. Tinjau konfigurasi sebelum meluncurkan.",
   "confirm.customSetup": "Penerapan ini akan menjalankan kode atau perintah khusus. Penerapan ini dapat mengakses situs yang disimpan pada alamat web playground yang sama. Lanjutkan hanya jika Anda memercayai sumber berikut:",
-  "status.repaired": "Pengaturan galat Joomla yang aman telah dipulihkan. Konfigurasi asli Anda telah dicadangkan. Pilih Coba lagi untuk membuka kembali situs."
+  "status.repaired": "Pengaturan galat Joomla yang aman telah dipulihkan. Konfigurasi asli Anda telah dicadangkan. Pilih Coba lagi untuk membuka kembali situs.",
+  "format.recovery": "Berkas tersimpan (arsip pemulihan)"
 });

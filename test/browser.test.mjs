@@ -9,7 +9,11 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { createStaticServer } from './server.mjs';
 import { assertBrowserRequestBodies } from './browser-request-contract.mjs';
 import { assertExternalAssets } from './external-assets-contract.mjs';
+import { assertStaticAssetValidation } from './static-assets-contract.mjs';
 import { assertFrameLayoutStable } from './frame-layout-contract.mjs';
+import { assertJoomlaDebugConfiguration } from './joomla-debug-contract.mjs';
+import { assertJcbCompiler } from './jcb-compiler-contract.mjs';
+import { assertLaunchCountdown, assertFailedDeploymentRecovery } from './launch-ui-contract.mjs';
 import { classifyAssetDiagnostics } from './asset-diagnostics.mjs';
 import { assertMcpHttp } from './mcp-http.mjs';
 import { probeSyntheticRedirect, startRedirectTrace, recordVerifiedRedirectDiagnostic } from './firefox-redirect-probe.mjs';
@@ -146,8 +150,11 @@ function observePage(page) {
     page.failedRequests.push({ url: request.url(), method: request.method(), type: request.resourceType(), error: request.failure()?.errorText, step: page.testStep });
   });
   page.on('response', (response) => {
-    if (!response.url().includes('/__site/')) return;
+    const siteResponse = response.url().includes('/__site/');
+    const staticResponse = ['image', 'script', 'stylesheet', 'font'].includes(response.request().resourceType());
+    if (!siteResponse && !staticResponse) return;
     if (response.status() >= 400) page.failedSiteRequests.push({ url: response.url(), status: response.status(), resourceType: response.request().resourceType() });
+    if (!siteResponse) return;
     if (!['fetch', 'xhr'].includes(response.request().resourceType())) return;
     const checked = (async () => {
       const text = await response.text().catch(() => '');
@@ -439,15 +446,17 @@ async function assertAbnormalShutdown(page, config) {
     const before = page.consoleErrors.length;
     const diagnostic = page.waitForEvent('console', { predicate: message => message.type() === 'error'
       && message.location().url === source && expectedMessage.test(message.text()), timeout: 10_000 });
-    await assert.rejects(() => php(page, `<?php ${PDO} $db->beginTransaction(); $db->exec('INSERT INTO playground_contract (id) VALUES (2)'); ${ending}`),
-      'An abnormal PHP termination must fail the session explicitly.');
+    const response = await php(page, `<?php ${PDO} $db->beginTransaction(); $db->exec('INSERT INTO playground_contract (id) VALUES (2)'); ${ending}`);
+    assert.equal(response.status, 500, 'An abnormal PHP termination must report an HTTP error.');
+    assert.equal(await page.evaluate(expected => window.validationProgress.some(event =>
+      event.phase === 'warning' && event.message.includes(expected)), fatal ? failure : 'PHP restarted after an application error'), true,
+    'The activity channel must receive the PHP error or recovery message.');
     await diagnostic;
     const expected = page.consoleErrors.slice(before).filter(record => record.step === step && record.url === source && expectedMessage.test(record.message));
     assert.equal(expected.length, 1, 'The deliberate termination must emit exactly its own upstream stderr diagnostic.');
     page.consoleErrors.splice(page.consoleErrors.indexOf(expected[0]), 1);
-    page.testStep = 'recover after deliberate PHP termination';
-    await close(page);
-    await start(page, config);
+    page.testStep = 'continue after deliberate PHP termination without replay or data loss';
+    assert.equal(await page.evaluate(() => window.playground.healthy), true, 'An application error must not close the entire site.');
     const state = await phpJSON(page, `${PDO} echo json_encode(['count' => $db->query('SELECT COUNT(*) FROM playground_contract')->fetchColumn(), 'transaction' => $db->inTransaction()], JSON_THROW_ON_ERROR);`);
     assert.deepEqual(state, { count: 1, transaction: false }, `An abandoned native connection must roll back after ${ending}`);
   }
@@ -604,6 +613,7 @@ for (const name of browserNames) {
         await start(page, config);
         await assertSite(page, config);
         const externalAssets = await assertExternalAssets(page);
+        await assertStaticAssetValidation(page);
         await assertCleanConsole(page);
         await close(page);
         records.push({ ...defaultPair, staticServiceWorkerIsolation: true, externalAssets });
@@ -617,8 +627,8 @@ for (const name of browserNames) {
       const setup = () => ({ admin: configuration(defaultPair).admin, persistence: false, storageKey: `deploy-${randomUUID()}` });
       try {
         const componentCases = [
-          ...combinations.map((pair) => ({ id: pair.joomlaVersion.startsWith('6.') ? 'jcb-mcp' : 'jcb', version: pair.joomlaVersion, phpVersion: pair.phpVersion, element: 'com_componentbuilder' })),
-          { id: 'jcb', version: manifest.defaults.joomlaVersion, phpVersion: manifest.defaults.phpVersion, element: 'com_componentbuilder' },
+          ...combinations.map((pair) => ({ id: 'jcb', version: pair.joomlaVersion, phpVersion: pair.phpVersion, element: 'com_componentbuilder' })),
+          { id: 'jcb-mcp', version: manifest.defaults.joomlaVersion, phpVersion: manifest.defaults.phpVersion, element: 'com_componentbuilder' },
           { id: 'patchtester', version: defaultPair.joomlaVersion, element: 'com_patchtester' },
           { id: 'weblinks', version: defaultPair.joomlaVersion, element: 'com_weblinks' },
         ];
@@ -690,6 +700,9 @@ for (const name of browserNames) {
             assert.equal(spreadsheet.number, 42);
             assert.ok(spreadsheet.bytes > 0);
             assert.equal(spreadsheet.integerSize, 4, 'The official dependency solution must actually operate on upstream wasm32 PHP.');
+            if (item.id === 'jcb' && item.version === manifest.defaults.joomlaVersion && item.phpVersion === manifest.defaults.phpVersion) {
+              proof.push({ id: 'jcb-compiler', ...(await assertJcbCompiler(page)) });
+            }
           }
           proof.push({ ...item, administrator: true });
           await close(page);
@@ -757,15 +770,18 @@ for (const name of browserNames) {
           proof.push({ id: 'heritage-demo', fresh, fromSnapshot: Boolean(result.installation.fromSnapshot), content });
           await close(page);
         }
-        page.testStep = 'default domain automatically opens JCB and MCP in English';
+        page.testStep = 'default domain counts down and opens prepared JCB on PHP 8.5 in English';
         await page.setViewportSize({ width: 1440, height: 1000 });
-        await page.goto(server.url);
+        const defaultLaunchStarted = await assertLaunchCountdown(page, server.url);
         await renderedSiteFrame(page);
-        assert.equal(await page.locator('#deploy').inputValue(), 'jcb-mcp');
+        const preparedLaunchMs = Date.now() - defaultLaunchStarted;
+        assert.equal(await page.locator('#deploy').inputValue(), 'jcb');
+        assert.equal(await page.locator('#php-version').inputValue(), '8.5');
         assert.match(await page.frameLocator('#site-frame').locator('html').innerHTML(), /com_componentbuilder/);
         assert.equal(await page.frameLocator('#site-frame').locator('input[name="passwd"]').count(), 0);
         assert.deepEqual(dashboardErrors(await page.frameLocator('#site-frame').locator('html').innerHTML()), [],
           'The default JCB dashboard must be free of missing-runtime requirement alerts.');
+        proof.push({ id: 'joomla-diagnostics', ...(await assertJoomlaDebugConfiguration(page)) });
         if (name === 'chromium') {
           await mkdir(path.join(root, 'test-results'), { recursive: true });
           await page.screenshot({ path: path.join(root, 'test-results/jcb-desktop.png'), fullPage: true });
@@ -774,11 +790,22 @@ for (const name of browserNames) {
         await page.locator('#close-button').click();
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
-        proof.push({ id: 'jcb-mcp', defaultDomainAutostart: true });
+        proof.push({ id: 'jcb', defaultDomainCountdown: true, preparedLaunchMs });
         await assertCleanConsole(page, { contentImages: true });
         records.push({ ...defaultPair, deploys: proof, knownBrowserDiagnostics: page.knownBrowserDiagnostics, contentDiagnostics: page.contentDiagnostics });
       } catch (error) { await saveBrowserDiagnostics(page, `deploys-${name}`, error); throw error; }
       finally { await close(page).catch(() => {}); await context.close(); }
+    });
+    if (scenarios.includes('rocket')) await runScenario('failed installations retain recovery and reset access', { timeout: 240_000 }, async () => {
+      const context = await browser.newContext({ acceptDownloads: true });
+      const page = await context.newPage();
+      try {
+        const errors = [];
+        page.on('pageerror', error => errors.push(error.message));
+        const recovery = await assertFailedDeploymentRecovery(page, server.url);
+        assert.deepEqual(errors, [], 'Recovery controls must not produce JavaScript exceptions.');
+        records.push({ ...defaultPair, recovery });
+      } finally { await context.close(); }
     });
     if (scenarios.includes('export')) await runScenario('portable export restores exact files, SQL values, views and triggers in a new database', { timeout: 900_000 }, async () => {
       const context = await browser.newContext({ acceptDownloads: true });

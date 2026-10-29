@@ -188,5 +188,6 @@ export default Object.freeze({
   "help.recovery": "Download your files and database before making changes. You can restore safe Joomla error settings without reinstalling the site.",
   "help.customSetup": "This shared deployment contains custom code or commands. Review the configuration before launching.",
   "confirm.customSetup": "This deployment will run custom code or commands. It can access sites saved on this playground origin. Continue only if you trust these sources:",
-  "status.repaired": "Safe Joomla error settings restored. Your original configuration was backed up. Select Try again to reopen the site."
+  "status.repaired": "Safe Joomla error settings restored. Your original configuration was backed up. Select Try again to reopen the site.",
+  "format.recovery": "Saved files (recovery archive)"
 });

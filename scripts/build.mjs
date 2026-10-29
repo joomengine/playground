@@ -33,6 +33,15 @@ const extensionPackages = [
 await mkdir(cache, { recursive: true });
 const staging = await mkdtemp(path.join(cache, 'site-'));
 const assets = path.join(staging, 'assets');
+const bridgeAssetPath = `mariadb/${versions.bridge.version}`;
+
+async function versionNativeArtifact(artifact) {
+  const original = artifact.url;
+  artifact.url = `extensions/${artifact.sha256}/${path.posix.basename(original)}`;
+  await mkdir(path.dirname(path.join(assets, artifact.url)), { recursive: true });
+  await rename(path.join(assets, original), path.join(assets, artifact.url));
+  return artifact;
+}
 
 async function copyPackage(name) {
   const directory = path.join(root, 'node_modules', name);
@@ -89,8 +98,8 @@ try {
       throw new Error(`Bridge release source differs from the native driver pin: ${filename}`);
     }
   }
-  const bridgeTarget = path.join(assets, 'mariadb');
-  await mkdir(bridgeTarget);
+  const bridgeTarget = path.join(assets, bridgeAssetPath);
+  await mkdir(bridgeTarget, { recursive: true });
   for (const filename of ['vendor', 'patches', 'LICENSE', 'NOTICE']) {
     await cp(path.join(bridgeDirectory, filename), path.join(bridgeTarget, filename), { recursive: true });
   }
@@ -140,16 +149,17 @@ try {
     }
     await cp(driver, path.join(assets, 'extensions', `${basename}.so`));
     await cp(path.join(driverDirectory, `${basename}.json`), path.join(assets, 'extensions', `${basename}.json`));
-    sharedLibs.push({ name: `${basename}.so`, url: `extensions/${basename}.so`, ini: true });
-    const fileinfo = await stageFileinfo({ directory: fileinfoDirectory, destination: path.join(assets, 'extensions'), version, upstream: versions.upstream });
+    const driverArtifact = await versionNativeArtifact({ url: `extensions/${basename}.so`, sha256: driverHash, provenance });
+    sharedLibs.push({ name: `${basename}.so`, url: driverArtifact.url, ini: true });
+    const fileinfo = await versionNativeArtifact(await stageFileinfo({ directory: fileinfoDirectory, destination: path.join(assets, 'extensions'), version, upstream: versions.upstream }));
     sharedLibs.push({ name: `php${version.version}-fileinfo.so`, url: fileinfo.url, ini: true });
-    const curl = await stageCurl({ directory: curlDirectory, destination: path.join(assets, 'extensions'), version, upstream: versions.upstream });
+    const curl = await versionNativeArtifact(await stageCurl({ directory: curlDirectory, destination: path.join(assets, 'extensions'), version, upstream: versions.upstream }));
     sharedLibs.push({ name: `php${version.version}-curl.so`, url: curl.url, ini: true });
-    const sodium = await stageSodium({ directory: sodiumDirectory, destination: path.join(assets, 'extensions'), version, upstream: versions.upstream });
+    const sodium = await versionNativeArtifact(await stageSodium({ directory: sodiumDirectory, destination: path.join(assets, 'extensions'), version, upstream: versions.upstream }));
     sharedLibs.push({ name: `php${version.version}-sodium.so`, url: sodium.url, ini: true });
     php.push({ ...version, label: `PHP ${version.patchVersion}`, moduleUrl: 'php-cgi-wasm/PhpCgiWorker.mjs', sharedLibs, files,
       fileinfo, curl, sodium,
-      driver: { url: `extensions/${basename}.so`, sha256: driverHash, provenance } });
+      driver: driverArtifact });
   }
 
   const joomla = [];
@@ -176,9 +186,9 @@ try {
     bridge: {
       protocolVersion: versions.bridge.protocolVersion,
       sourceCommit: versions.nativeDriver.sourceCommit,
-      moduleUrl: 'mariadb/src/index.mjs',
-      adapterUrl: 'mariadb/adapters/php-wasm.mjs',
-      release: { ...versions.bridge, manifestUrl: 'mariadb/release-manifest.json' },
+      moduleUrl: `${bridgeAssetPath}/src/index.mjs`,
+      adapterUrl: `${bridgeAssetPath}/adapters/php-wasm.mjs`,
+      release: { ...versions.bridge, manifestUrl: `${bridgeAssetPath}/release-manifest.json` },
       engine: bridgeManifest.engine,
     },
     defaults: versions.defaults,

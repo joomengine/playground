@@ -66,6 +66,9 @@ try {
     if ($statements === false) {
         throw new RuntimeException('Cannot open the database statement stream.');
     }
+    // Consecutive inserts share a transaction until the next DDL boundary.
+    // MariaDB commits DDL implicitly; the final group is committed below.
+    $connection->exec('SET autocommit=0');
     $count = 0;
     // JSON can escape each source byte as six ASCII bytes. Data values in new
     // exports are chunked; this also bounds older or externally supplied dumps.
@@ -91,6 +94,7 @@ try {
         }
         $count++;
     }
+    $connection->exec('COMMIT');
     fclose($statements);
     $zip->close();
     unlink($playground['archive']);

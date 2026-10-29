@@ -28,5 +28,6 @@ export function createLaunchCountdown({ seconds = 10, onTick, onLaunch, schedule
 
 export function deploymentNeedsReview(input) {
   return Boolean(input.extensions?.length || input.startupCommands?.length || input.template?.url
-    || input.languages?.some(language => language.url));
+    || input.languages?.some(language => language.url) || input.content
+    || input.menus?.length || Object.keys(input.template?.params || {}).length);
 }

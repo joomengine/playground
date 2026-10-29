@@ -188,5 +188,6 @@ export default Object.freeze({
   "help.recovery": "Değişiklik yapmadan önce dosyalarınızı ve veritabanınızı indirin. Siteyi yeniden yüklemeden güvenli Joomla hata ayarlarını geri yükleyebilirsiniz.",
   "help.customSetup": "Bu paylaşılan dağıtım özel kod veya komutlar içeriyor. Başlatmadan önce yapılandırmayı inceleyin.",
   "confirm.customSetup": "Bu dağıtım özel kod veya komutlar çalıştıracak. Bu playground ile aynı web adresinde kaydedilen sitelere erişebilir. Yalnızca bu kaynaklara güveniyorsanız devam edin:",
-  "status.repaired": "Güvenli Joomla hata ayarları geri yüklendi. Özgün yapılandırmanız yedeklendi. Siteyi yeniden açmak için Tekrar dene seçeneğini seçin."
+  "status.repaired": "Güvenli Joomla hata ayarları geri yüklendi. Özgün yapılandırmanız yedeklendi. Siteyi yeniden açmak için Tekrar dene seçeneğini seçin.",
+  "format.recovery": "Kaydedilen dosyalar (kurtarma arşivi)"
 });

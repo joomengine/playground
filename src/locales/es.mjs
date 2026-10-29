@@ -188,5 +188,6 @@ export default Object.freeze({
   "help.recovery": "Descarga tus archivos y la base de datos antes de hacer cambios. Puedes restaurar ajustes de errores seguros de Joomla sin reinstalar el sitio.",
   "help.customSetup": "Este despliegue compartido contiene código o comandos personalizados. Revisa la configuración antes de iniciarlo.",
   "confirm.customSetup": "Este despliegue ejecutará código o comandos personalizados. Puede acceder a sitios guardados bajo esta misma dirección del playground. Continúa solo si confías en estas fuentes:",
-  "status.repaired": "Se han restaurado los ajustes de errores seguros de Joomla. Se ha guardado una copia de la configuración original. Selecciona Reintentar para volver a abrir el sitio."
+  "status.repaired": "Se han restaurado los ajustes de errores seguros de Joomla. Se ha guardado una copia de la configuración original. Selecciona Reintentar para volver a abrir el sitio.",
+  "format.recovery": "Archivos guardados (archivo de recuperación)"
 });

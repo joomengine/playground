@@ -165,7 +165,7 @@ async function defaultSourceLoader(name) {
 }
 
 export async function buildPhpProgram(operation, payload, sourceLoader = defaultSourceLoader) {
-  if (!['extract', 'install', 'console', 'status', 'health', 'customize', 'administrator', 'import', 'configure', 'discover', 'mcp'].includes(operation)) throw new TypeError('Unknown provisioning operation.');
+  if (!['extract', 'install', 'console', 'status', 'health', 'customize', 'administrator', 'import', 'configure', 'discover', 'mcp', 'recovery'].includes(operation)) throw new TypeError('Unknown provisioning operation.');
   const [common, script] = await Promise.all([sourceLoader('common'), sourceLoader(operation)]);
   const encoded = new TextEncoder().encode(JSON.stringify(payload));
   let binary = '';
@@ -203,8 +203,19 @@ function paths(runtime) {
   return { root, marker };
 }
 
-export async function inspectJoomla(runtime, { sourceLoader } = {}) {
-  return execute(runtime, 'status', paths(runtime), sourceLoader);
+export async function inspectJoomla(runtime, { sourceLoader, recovery = false } = {}) {
+  return execute(runtime, 'status', { ...paths(runtime), recovery }, sourceLoader);
+}
+
+/** Read the private saved login without loading Joomla or its plugins. */
+export async function readJoomlaAdministrator(runtime, { sourceLoader } = {}) {
+  const result = await execute(runtime, 'administrator', { ...paths(runtime), mode: 'read' }, sourceLoader);
+  return result.administrator;
+}
+
+/** Restore conservative diagnostic settings without bootstrapping a broken site. */
+export async function repairJoomlaConfiguration(runtime, { sourceLoader } = {}) {
+  return execute(runtime, 'recovery', paths(runtime), sourceLoader);
 }
 
 export async function checkJoomla(runtime, { sourceLoader } = {}) {
@@ -413,7 +424,7 @@ export async function installJoomla(runtime, config, {
     progress({ stage: 'ready', message: 'Opened the saved Joomla site.' });
     return { resumed: true, version: health.version, siteName: health.siteName, language: health.language, deployId: state.marker.deployId, administrator };
   }
-  if (state.marker || state.configured || state.installerPresent) throw new Error('A previous installation is incomplete. Reset this site before trying again.');
+  if (state.marker || state.configured || state.installerPresent) throw new Error('This installation is incomplete. Recover your saved files, or reset and launch it again.');
   if (!digest) throw new TypeError('The Joomla release SHA-256 is required.');
   const archive = await verifyPackage(archiveBytes, digest);
   await runtime.fs.writeFile(location.marker, JSON.stringify({ state: 'installing', joomlaVersion: options.joomlaVersion }));

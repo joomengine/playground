@@ -188,5 +188,6 @@ export default Object.freeze({
   "help.recovery": "更改之前，请下载文件和数据库。无需重新安装网站，即可恢复 Joomla 的安全错误设置。",
   "help.customSetup": "此共享部署包含自定义代码或命令。启动前请检查配置。",
   "confirm.customSetup": "此部署将运行自定义代码或命令。它可以访问保存在同一体验环境网址下的网站。仅在信任以下来源时继续：",
-  "status.repaired": "已恢复 Joomla 的安全错误设置。原始配置已备份。请选择重试以重新打开网站。"
+  "status.repaired": "已恢复 Joomla 的安全错误设置。原始配置已备份。请选择重试以重新打开网站。",
+  "format.recovery": "已保存的文件（恢复归档）"
 });

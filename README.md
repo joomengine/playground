@@ -17,11 +17,7 @@ multilingual interface around the running Joomla site.
 This project builds directly on the work of these maintainers and contributors:
 
 - **[Joomla Component Builder](https://github.com/joomengine/Joomla-Component-Builder)**
-  is JoomEngine’s core development tool and default deployment. Created by
-  Llewellyn van der Merwe and Vast Development Method, JCB builds and maintains
-  native Joomla components, plugins and modules. Its component source is licensed
-  under **GNU GPL version 2 or later (GPL-2.0-or-later)**; copyright and license
-  notices remain with the installed component and companion packages.
+  is JoomEngine’s core development tool and default deployment.
 - **[seanmorris/php-wasm](https://github.com/seanmorris/php-wasm)** — Sean Morris
   and the project’s contributors provide the PHP runtime, CGI implementation,
   filesystem, asynchronous JavaScript integration, and loadable extension
@@ -120,6 +116,10 @@ external/emsdk/emsdk install "$compiler_version"
 external/emsdk/emsdk activate "$compiler_version"
 source external/emsdk/emsdk_env.sh
 
+npm ci --prefix external/bridge --ignore-scripts
+node scripts/prepare-bridge-engine.mjs external/bridge
+npm run prepare:engine --prefix external/bridge
+
 while IFS= read -r minor; do
   bash external/bridge/native/build-upstream.sh "$minor" "$PWD/.cache/native"
   BRIDGE_SOURCE_DIR=external/bridge node scripts/build-fileinfo.mjs "$minor"
@@ -161,7 +161,7 @@ verified before staging. A missing driver or mismatched input fails the build.
 `dist/assets/manifest.json` records the selected runtimes, extension assets,
 preload files, source revisions, and dependency identities. Its `bridge.release`
 entry identifies the published release archive. Its complete inventory is retained
-as `assets/mariadb/release-manifest.json`; copied runtime and engine assets retain
+under the bridge's versioned asset directory; copied runtime and engine assets retain
 their released hashes.
 `dist/asset-inventory.json` records the files, sizes, and SHA-256 values in the
 assembled site. Updating a dependency means updating its pins, rebuilding its

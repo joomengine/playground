@@ -26,6 +26,7 @@ jobs:
       bridge: ${{ steps.plan.outputs.bridge }}
       emsdk: ${{ steps.plan.outputs.emsdk }}
       emscripten: ${{ steps.plan.outputs.emscripten }}
+      native: ${{ steps.plan.outputs.native }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -72,7 +73,7 @@ jobs:
             .cache/fileinfo
             .cache/curl
             .cache/sodium
-          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('versions.json', 'scripts/build-fileinfo.mjs', 'scripts/build-curl.mjs', 'scripts/build-sodium.mjs', 'scripts/fileinfo.mjs', 'scripts/curl.mjs', 'scripts/sodium.mjs', 'src/php-settings.mjs') }}
+          key: native-v2-${{ runner.os }}-${{ runner.arch }}-${{ needs.checks.outputs.native }}-${{ hashFiles('scripts/build-fileinfo.mjs', 'scripts/build-curl.mjs', 'scripts/build-sodium.mjs', 'scripts/fileinfo.mjs', 'scripts/curl.mjs', 'scripts/sodium.mjs', 'native/**') }}
       - name: Restore verified download archives
         id: archives
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -134,10 +135,10 @@ jobs:
             external/emsdk/node
           key: ${{ steps.compiler.outputs.cache-primary-key }}
       - name: Prepare real MariaDB engine for native validation
-        working-directory: external/bridge
         run: |
-          npm ci --ignore-scripts
-          npm run prepare:engine
+          npm ci --prefix external/bridge --ignore-scripts
+          node scripts/prepare-bridge-engine.mjs external/bridge
+          npm run prepare:engine --prefix external/bridge
       - name: Validate upstream PHP and native MariaDB PDO
         if: needs.checks.outputs.full == 'true' || steps.native.outputs.cache-hit != 'true'
         run: |

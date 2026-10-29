@@ -188,5 +188,6 @@ export default Object.freeze({
   "help.recovery": "Lade vor Änderungen deine Dateien und Datenbank herunter. Du kannst sichere Joomla-Fehlereinstellungen ohne Neuinstallation der Website wiederherstellen.",
   "help.customSetup": "Diese geteilte Bereitstellung enthält eigenen Code oder Befehle. Prüfe die Konfiguration vor dem Start.",
   "confirm.customSetup": "Diese Bereitstellung führt eigenen Code oder Befehle aus. Sie kann auf Websites zugreifen, die unter derselben Playground-Webadresse gespeichert sind. Fahre nur fort, wenn du diesen Quellen vertraust:",
-  "status.repaired": "Sichere Joomla-Fehlereinstellungen wiederhergestellt. Deine ursprüngliche Konfiguration wurde gesichert. Wähle Erneut versuchen, um die Website wieder zu öffnen."
+  "status.repaired": "Sichere Joomla-Fehlereinstellungen wiederhergestellt. Deine ursprüngliche Konfiguration wurde gesichert. Wähle Erneut versuchen, um die Website wieder zu öffnen.",
+  "format.recovery": "Gespeicherte Dateien (Wiederherstellungsarchiv)"
 });

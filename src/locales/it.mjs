@@ -188,5 +188,6 @@ export default Object.freeze({
   "help.recovery": "Scarica i file e il database prima di apportare modifiche. Puoi ripristinare impostazioni degli errori Joomla sicure senza reinstallare il sito.",
   "help.customSetup": "Questa distribuzione condivisa contiene codice o comandi personalizzati. Controlla la configurazione prima di avviarla.",
   "confirm.customSetup": "Questa distribuzione eseguirà codice o comandi personalizzati. Può accedere ai siti salvati sotto questo stesso indirizzo del playground. Continua solo se ti fidi di queste fonti:",
-  "status.repaired": "Le impostazioni degli errori Joomla sicure sono state ripristinate. È stata creata una copia della configurazione originale. Seleziona Riprova per riaprire il sito."
+  "status.repaired": "Le impostazioni degli errori Joomla sicure sono state ripristinate. È stata creata una copia della configurazione originale. Seleziona Riprova per riaprire il sito.",
+  "format.recovery": "File salvati (archivio di recupero)"
 });

@@ -24,6 +24,9 @@ export async function stageCurl({ directory, destination, version, upstream }) {
     || !Array.isArray(provenance.phpSourceInventory) || !Array.isArray(provenance.curlSourceInventory)
     || !/^[a-f0-9]{64}$/.test(provenance.phpSourceInventory?.find(entry => entry.path === 'interface.c')?.sha256 || '')
     || !/^[a-f0-9]{64}$/.test(provenance.curlSourceInventory?.find(entry => entry.path === 'src/fetch_js.c')?.sha256 || '')
+    || provenance.httpStreams?.sourceSha256 !== await hashFile(fileURLToPath(new URL('../native/http-stream.c', import.meta.url)))
+    || !/^[a-f0-9]{64}$/.test(provenance.httpStreams?.originalInterfaceSha256 || '')
+    || provenance.httpStreams?.interfaceSha256 !== provenance.phpSourceInventory?.find(entry => entry.path === 'interface.c')?.sha256
     || provenance.buildScriptSha256 !== await hashFile(fileURLToPath(new URL('./build-curl.mjs', import.meta.url)))) {
     throw new Error(`Curl provenance differs from the pinned PHP runtime: ${version.version}. Rebuild the extension.`);
   }

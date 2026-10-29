@@ -40,6 +40,20 @@ try {
   const configuration = await readFile(path.join(extensionSource, 'config.m4'), 'utf8');
   const sources = ['interface.c', 'multi.c', 'share.c', 'curl_file.c'];
   if (!configuration.includes(sources.join(' '))) throw new Error('Review the changed curl extension build inputs.');
+  const httpSource = path.join(root, 'native/http-stream.c');
+  const interfacePath = path.join(extensionSource, 'interface.c');
+  const originalInterfaceSha256 = await hashFile(interfacePath);
+  const originalInterface = await readFile(interfacePath, 'utf8');
+  const moduleSlot = '\tPHP_MSHUTDOWN(curl),\n\tNULL,\n\tNULL,\n\tPHP_MINFO(curl),';
+  const moduleDeclaration = 'zend_module_entry curl_module_entry = {';
+  if (originalInterface.split(moduleSlot).length !== 2 || originalInterface.split(moduleDeclaration).length !== 2) {
+    throw new Error('Review the changed cURL request initialization interface.');
+  }
+  await writeFile(interfacePath, originalInterface
+    .replace(moduleDeclaration, `PHP_RINIT_FUNCTION(curl_rocket_http);\n\n${moduleDeclaration}`)
+    .replace(moduleSlot, '\tPHP_MSHUTDOWN(curl),\n\tPHP_RINIT(curl_rocket_http),\n\tNULL,\n\tPHP_MINFO(curl),'));
+  const httpStreams = { sourceSha256: await hashFile(httpSource), originalInterfaceSha256,
+    interfaceSha256: await hashFile(interfacePath) };
   // The upstream Makefile keeps EM_JS objects out of LTO so their JavaScript
   // bodies remain available to the published runtime's dynamic module loader.
   execFileSync('make', ['-j2', 'CFLAGS=-O3 -flto'], { cwd: librarySource, stdio: 'inherit' });
@@ -50,7 +64,7 @@ try {
     .map(directory => `-I${directory}`);
   await mkdir(output, { recursive: true });
   const basename = `php${minor}-curl`;
-  execFileSync('emcc', [...flags, ...includes, ...sources.map(name => path.join(extensionSource, name)),
+  execFileSync('emcc', [...flags, ...includes, ...sources.map(name => path.join(extensionSource, name)), httpSource,
     '-Wl,--whole-archive', path.join(librarySource, 'build/libcurl.a'), '-Wl,--no-whole-archive',
     '-o', path.join(output, `${basename}.so`)], { stdio: 'inherit' });
   const licenses = [];
@@ -68,7 +82,7 @@ try {
     emscriptenVersion: compilerVersion,
     phpSource: { url: `https://www.php.net/distributions/php-${version.patchVersion}.tar.xz`, sha256: version.sourceSha256 },
     curlSource, buildScriptSha256: await hashFile(fileURLToPath(import.meta.url)),
-    sources, phpSourceInventory: await inventory(extensionSource), curlSourceInventory, flags,
+    sources, phpSourceInventory: await inventory(extensionSource), curlSourceInventory, httpStreams, flags,
     licenses, extension: { file: `${basename}.so`, sha256: await hashFile(path.join(output, `${basename}.so`)) },
   };
   await writeFile(path.join(output, `${basename}.json`), `${JSON.stringify(provenance, null, 2)}\n`);

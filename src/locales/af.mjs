@@ -188,5 +188,6 @@ export default Object.freeze({
   "help.recovery": "Laai jou lêers en databasis af voordat jy veranderings aanbring. Jy kan veilige Joomla-foutinstellings herstel sonder om die werf weer te installeer.",
   "help.customSetup": "Hierdie gedeelde ontplooiing bevat pasgemaakte kode of opdragte. Gaan die opstelling na voordat jy lanseer.",
   "confirm.customSetup": "Hierdie ontplooiing sal pasgemaakte kode of opdragte uitvoer. Dit kan toegang kry tot werwe wat onder hierdie speelgrond se webadres gestoor is. Gaan slegs voort as jy hierdie bronne vertrou:",
-  "status.repaired": "Veilige Joomla-foutinstellings is herstel. Jou oorspronklike opstelling is gerugsteun. Kies Probeer weer om die werf weer oop te maak."
+  "status.repaired": "Veilige Joomla-foutinstellings is herstel. Jou oorspronklike opstelling is gerugsteun. Kies Probeer weer om die werf weer oop te maak.",
+  "format.recovery": "Gestoorde lêers (herstelargief)"
 });

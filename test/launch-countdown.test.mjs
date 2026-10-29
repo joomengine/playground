@@ -33,5 +33,8 @@ test('shared custom code and commands require review while catalog presets do no
     { template: { url: 'https://example.test/template.zip' } },
     { startupCommands: [['extension:install', '--url=https://example.test/component.zip']] },
     { languages: [{ tag: 'af-ZA', url: 'https://example.test/language.zip' }] },
+    { content: { articles: [{ introtext: '<script>console.log("custom article")</script>' }] } },
+    { menus: [{ title: 'Demo', component: 'com_demo' }] },
+    { template: { params: { customHtml: '<script>console.log("template")</script>' } } },
   ]) assert.equal(deploymentNeedsReview(input), true);
 });

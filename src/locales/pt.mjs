@@ -188,5 +188,6 @@ export default Object.freeze({
   "help.recovery": "Baixe seus arquivos e o banco de dados antes de fazer alterações. Você pode restaurar configurações de erro seguras do Joomla sem reinstalar o site.",
   "help.customSetup": "Esta implantação compartilhada contém código ou comandos personalizados. Revise a configuração antes de iniciar.",
   "confirm.customSetup": "Esta implantação executará código ou comandos personalizados. Ela pode acessar sites salvos neste mesmo endereço do playground. Continue somente se confiar nestas fontes:",
-  "status.repaired": "As configurações de erro seguras do Joomla foram restauradas. Foi criada uma cópia da configuração original. Selecione Tentar novamente para reabrir o site."
+  "status.repaired": "As configurações de erro seguras do Joomla foram restauradas. Foi criada uma cópia da configuração original. Selecione Tentar novamente para reabrir o site.",
+  "format.recovery": "Arquivos salvos (arquivo de recuperação)"
 });

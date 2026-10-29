@@ -188,5 +188,6 @@ export default Object.freeze({
   "help.recovery": "Téléchargez vos fichiers et votre base de données avant toute modification. Vous pouvez restaurer des paramètres d’erreur Joomla sûrs sans réinstaller le site.",
   "help.customSetup": "Ce déploiement partagé contient du code ou des commandes personnalisés. Vérifiez la configuration avant le lancement.",
   "confirm.customSetup": "Ce déploiement exécutera du code ou des commandes personnalisés. Il peut accéder aux sites enregistrés sous cette même adresse du playground. Continuez uniquement si vous faites confiance à ces sources :",
-  "status.repaired": "Les paramètres d’erreur Joomla sûrs ont été restaurés. Votre configuration d’origine a été sauvegardée. Sélectionnez Réessayer pour rouvrir le site."
+  "status.repaired": "Les paramètres d’erreur Joomla sûrs ont été restaurés. Votre configuration d’origine a été sauvegardée. Sélectionnez Réessayer pour rouvrir le site.",
+  "format.recovery": "Fichiers enregistrés (archive de récupération)"
 });

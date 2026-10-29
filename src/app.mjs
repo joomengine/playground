@@ -20,6 +20,7 @@ const controls = ['save-button', 'restart-button', 'close-button', 'reset-button
 const drafts = new Map();
 let catalog, deployCatalog, runtime, currentConfig, currentInput;
 let busy = false;
+let initialized = false;
 let disconnectFrame = () => {};
 let phpSettings = { ...DEFAULT_PHP_SETTINGS };
 let lastSavedAt;
@@ -100,9 +101,11 @@ function approveCustomSetup(input) {
   const sources = [...(input.extensions || []).map(item => item.url), input.template?.url,
     ...(input.languages || []).map(item => item.url)].filter(Boolean);
   const commands = (input.startupCommands || []).map(command => command.join(' '));
-  const identity = JSON.stringify({ sources, commands, extensions: input.extensions, template: input.template, languages: input.languages });
+  const custom = { sources, commands, extensions: input.extensions, template: input.template,
+    languages: input.languages, content: input.content, menus: input.menus };
+  const identity = JSON.stringify(custom);
   if (identity === approvedCustomSetup) return true;
-  if (!confirm(`${t('confirm.customSetup')}\n\n${[...sources, ...commands].join('\n')}`)) return false;
+  if (!confirm(`${t('confirm.customSetup')}\n\n${JSON.stringify(custom, null, 2)}`)) return false;
   approvedCustomSetup = identity;
   return true;
 }
@@ -154,7 +157,7 @@ function updateMcpPreview() {
 }
 function setBusy(value) {
   busy = value;
-  const unavailable = !catalog || !deployCatalog;
+  const unavailable = !initialized || !catalog || !deployCatalog;
   $('configuration-fields').disabled = busy || unavailable;
   $('installation-fields').disabled = busy || unavailable;
   fields.persistence.disabled = busy || unavailable;
@@ -172,11 +175,16 @@ function setBusy(value) {
   $('reset-button').disabled = busy || (!runtime && (unavailable || !fields.persistence.checked));
   $('save-button').disabled = busy || !runtime;
   $('download-dialog-button').disabled = busy || !runtime;
+  const recoveryFormat = $('export-format').querySelector('[value="recovery"]');
+  recoveryFormat.hidden = !runtime?.recovery;
+  recoveryFormat.disabled = !runtime?.recovery;
+  if (runtime?.recovery && !runtime.recovery.configured) $('export-format').value = 'recovery';
+  else if (!runtime?.recovery && $('export-format').value === 'recovery') $('export-format').value = 'bundle';
   $('credentials-button').disabled = busy || !runtime || Boolean(runtime.recovery);
   $('php-settings-button').disabled = busy || unavailable;
   $('use-deploy').disabled = busy || unavailable;
   $('apply-deploy').disabled = busy || !runtime || Boolean(runtime.recovery);
-  $('open-link').setAttribute('aria-disabled', String(busy || !runtime || runtime.recovery));
+  $('open-link').setAttribute('aria-disabled', String(Boolean(busy || !runtime || runtime.recovery)));
   $('preview-dot').className = `status-dot${busy ? ' busy' : runtime ? '' : ' muted'}`;
   $('launch-button').querySelector('span').textContent = t(busy ? 'status.working' : runtime ? 'status.running' : 'action.launch');
   $('launch-hint').textContent = t('help.firstLaunch');
@@ -362,7 +370,7 @@ function findProfile(deployId, joomlaVersion) {
     || Object.values(savedState.sites).reverse().find((item) => item.deployId === deployId && item.joomlaVersion === joomlaVersion);
 }
 async function launch() {
-  if (busy || runtime || !catalog || !deployCatalog) return;
+  if (busy || runtime || !initialized || !catalog || !deployCatalog) return;
   launchCountdown.stop();
   $('launch-countdown').hidden = true;
   try {
@@ -472,7 +480,7 @@ async function newSite() {
   fields.storageKey.value = `${defaultSiteKey(fields.deployId.value, fields.joomlaVersion.value).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`;
   fields.siteName.value = `${label.slice(0, 88)} ${Object.keys(savedState.sites).length + 1}`;
   $('admin-password').value = password();
-  pendingFresh = true;
+  pendingFresh = false;
   freshKeyPending = false;
   renderSavedSites('');
   show('welcome');
@@ -602,7 +610,7 @@ $('export-button').addEventListener('click', async () => {
   const format = $('export-format').value;
   activity('Preparing your download…');
   try {
-    const result = runtime.recovery && !runtime.recovery.configured
+    const result = format === 'recovery' || (runtime.recovery && !runtime.recovery.configured)
       ? await runtime.exportRecoveryFiles()
       : await runtime.exportSite({ format, onProgress: (event) => activity(event.message || event) });
     if (!result || typeof result.filename !== 'string' || !result.filename
@@ -779,7 +787,7 @@ async function useDeployment() {
     if (wasRunning) {
       if (!await saveSite()) return;
       if (!await closeSite()) return;
-      input = { ...input, storageKey: `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`, fresh: true, admin: { ...input.admin, password: password() } };
+      input = { ...input, storageKey: `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`, admin: { ...input.admin, password: password() } };
     }
     const resolved = await resolve(input);
     applyConfiguration(resolved.configuration, input, resolved.deploy); applyAdministrator(input.admin);
@@ -978,6 +986,7 @@ async function initialize() {
     resolved = await resolve(input);
     applyConfiguration(resolved.configuration, input, resolved.deploy);
     freshKeyPending = Boolean(parsed.config.fresh);
+    initialized = true;
     setBusy(false);
     const shouldResume = Boolean(previous) && (!params.has('start') || parsed.autostart);
     activity(shouldResume ? 'Reopening your saved site…' : 'Ready to launch. Choose a starting point and your runtime versions.');
@@ -985,7 +994,7 @@ async function initialize() {
       automaticLaunchPaused = true;
       feedback(t('help.customSetup'), { persistent: true });
       openEditor();
-    } else if ((!params.has('start') || parsed.autostart) && !automaticLaunchPaused) launchCountdown.start();
+    } else if ((!params.has('start') || parsed.autostart) && !automaticLaunchPaused && !document.hidden) launchCountdown.start();
   } catch (error) {
     setBusy(false);
     displayError(error, t('title.error'));
@@ -994,4 +1003,5 @@ async function initialize() {
 }
 
 setupInterface();
+setBusy(false);
 void initialize();
