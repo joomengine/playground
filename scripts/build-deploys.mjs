@@ -66,6 +66,7 @@ export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || 
         const phpVersion = release.php.includes(catalog.defaults.phpVersion) ? catalog.defaults.phpVersion : release.php[0];
         const label = `${descriptor.id} / Joomla ${release.version} / PHP ${phpVersion}`;
         console.log(`Preparing ${label}…`);
+        const buildStarted = performance.now();
         const { configuration } = await resolveDeployConfiguration({
           deployId: descriptor.id, joomlaVersion: release.version, phpVersion,
           fresh: true, persistence: false, autoLogin: false, admin: administrator('build'),
@@ -85,6 +86,7 @@ export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || 
           exported = await runtime.exportSite({ format: 'bundle' });
         } finally { await runtime?.close(); }
 
+        const preparationMs = Math.round(performance.now() - buildStarted);
         const sha256 = digest(exported.bytes);
         const restoredConfig = {
           ...configuration, fresh: false, autoLogin: true, admin: administrator('restore'),
@@ -92,6 +94,7 @@ export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || 
         };
         assert.notEqual(restoredConfig.admin.username, configuration.admin.username);
         assert.notEqual(restoredConfig.admin.password, configuration.admin.password);
+        const restoreStarted = performance.now();
         try {
           runtime = await createNodeRuntime({ directory: distribution, phpVersion, phpSettings: restoredConfig.phpSettings });
           const imported = await importJoomlaSnapshot(runtime, restoredConfig, {
@@ -108,8 +111,15 @@ export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || 
           assert.doesNotMatch(administratorHTML, /name=["']passwd["']/i, 'The restored page must not be the login form.');
           assert.match(administratorHTML, /task=logout|value=["']logout["']/i,
             'The restored administrator page must use the new authenticated session.');
+          if (restoredConfig.initialPath !== '/administrator/index.php') {
+            const landing = await requestJoomlaPage(runtime, restoredConfig.initialPath.replace(/^\/+/, '') || 'index.php');
+            assert.equal(landing.status, 200, 'The prepared deployment’s configured landing page must open.');
+            assert.doesNotMatch(await landing.text(), /Fatal error:|Uncaught (?:Error|Exception)|name=["']passwd["']/i,
+              'The prepared landing page must not be a fatal error or login form.');
+          }
         } finally { await runtime?.close(); runtime = undefined; }
 
+        const verificationMs = Math.round(performance.now() - restoreStarted);
         const filename = `${descriptor.id}-${release.version}-${sha256}.zip`;
         await writeFile(path.join(staging, filename), exported.bytes);
         const snapshot = {
@@ -121,8 +131,9 @@ export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || 
         recipe.variants[major] = { ...recipe.variants[major], snapshot };
         prepared.push({ id: descriptor.id, joomlaVersion: release.version, phpVersion,
           url: `snapshots/${filename}`, sha256, size: exported.bytes.byteLength,
-          sourceSha256, sourceInventorySha256: digest(inventoryBytes), verifiedImport: true });
-        console.log(`Verified independent import of ${label} (${exported.bytes.byteLength} bytes).`);
+          sourceSha256, sourceInventorySha256: digest(inventoryBytes), verifiedImport: true,
+          initialPath: restoredConfig.initialPath, preparationMs, verificationMs });
+        console.log(`Verified independent import of ${label} (${exported.bytes.byteLength} bytes; preparation ${preparationMs} ms, restore verification ${verificationMs} ms).`);
       }
       normalizeDeploy(recipe, { baseURL: descriptor.url });
     }

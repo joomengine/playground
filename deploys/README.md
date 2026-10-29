@@ -1,12 +1,12 @@
 # Playground deploys
 
-Deploys describe a reproducible Joomla installation: extension packages, languages, sample content and Joomla CLI commands. The application defaults to **JCB + MCP on Joomla 6** and **JCB only on Joomla 5**. Ordinary deployments start in English. Choose **Joomla only** or `?deploy=blank` to start without additional extensions. The low-level `createPlayground()` API installs only the configuration supplied by its caller.
+Deploys describe a reproducible Joomla installation: extension packages, languages, sample content and Joomla CLI commands. The application defaults to **JCB on Joomla 5 and Joomla 6**, using **PHP 8.5** and opening the JCB dashboard. **JCB + MCP** is an optional Joomla 6 deployment. Ordinary deployments start in English. Choose **Joomla only** or `?deploy=blank` to start without additional extensions. The low-level `createPlayground()` API installs only the configuration supplied by its caller.
 
 | Deploy | Open the playground | Contents |
 | --- | --- | --- |
+| `jcb` | [Joomla Component Builder](https://playground.joomengine.org/?deploy=jcb) | Complete JCB package selected for Joomla 5 or 6 |
 | `jcb-mcp` | [JCB + MCP](https://playground.joomengine.org/?deploy=jcb-mcp) | Joomla 6 with JCB and the Joomla-native MCP package |
 | `servicedirectory` | [Service Directory](https://playground.joomengine.org/?deploy=servicedirectory) | Service Directory for Joomla 5 or 6, with its directory view as Home |
-| `jcb` | [Joomla Component Builder](https://playground.joomengine.org/?deploy=jcb) | Complete JCB package selected for Joomla 5 or 6 |
 | `blank` | [Joomla only](https://playground.joomengine.org/?deploy=blank) | Clean Joomla installation |
 | `heritage-demo` | [Multilingual heritage site](https://playground.joomengine.org/?deploy=heritage-demo) | Afrikaans-first home pages and content in all eight configured languages |
 | `patchtester` | [Patch Tester](https://playground.joomengine.org/?deploy=patchtester) | Official Patch Tester component |
@@ -96,9 +96,11 @@ Share links include the selected deployment, site name, runtime/PHP settings, me
 
 ## Prepared copies
 
-`prebuild: true` requests generation of a portable prepared copy during the build. The heritage recipe uses this option. Build output adds verified snapshot metadata to each supported Joomla variant; source recipes need no placeholder snapshot URL.
+`prebuild: true` requests generation of a portable prepared copy during the build. The JCB and heritage recipes use this option for both supported Joomla releases. Build output adds verified snapshot metadata to each supported Joomla variant; source recipes need no placeholder snapshot URL.
 
-A snapshot contains `site/`, `database.sql` and `export.json`, and declares `format: "joomengine-playground-export"`, `schemaVersion: 1`, an exact `joomlaVersion`, `url` and `sha256`. Snapshot contents are PHP-runtime independent. A snapshot is selected only for its exact Joomla release and when `fresh` is false. Explicit user extension and CLI additions run after import; the prepared recipe's installation steps are not repeated.
+A snapshot contains `site/`, `database.sql` and `export.json`, and declares `format: "joomengine-playground-export"`, `schemaVersion: 1`, an exact `joomlaVersion`, `url` and `sha256`. Snapshot contents are PHP-runtime independent. A snapshot is selected only for its exact Joomla release and when `fresh` is false. Administrator credentials are rotated on import. Selected PHP settings, language, menus and template still apply. Explicit user extension and CLI additions run after import; the prepared recipe's installation steps are not repeated.
+
+To update prepared JCB installations, select a stable release, update its versioned package URL and SHA-256 in `jcb.json` and (for Joomla 6) `jcb-mcp.json`, then rebuild. Package compatibility inputs must also match the selected release. The build installs the pinned package and independently restores the exported site before it publishes the copy. Existing saved sites are not replaced. This deliberately trades a build on stable-release updates for a faster, repeatable visitor launch.
 
 ## Resolver API
 
@@ -125,7 +127,7 @@ The portable JSON document uses [document.schema.json](document.schema.json). It
   "configuration": {
     "deployId": "blank",
     "joomlaVersion": "6.2.0",
-    "phpVersion": "8.4",
+    "phpVersion": "8.5",
     "siteName": "Client demonstration",
     "language": "en-GB",
     "autoLogin": false,

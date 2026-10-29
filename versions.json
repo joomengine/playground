@@ -77,7 +77,7 @@
     }
   ],
   "defaults": {
-    "phpVersion": "8.4",
+    "phpVersion": "8.5",
     "joomlaVersion": "6.2.0"
   }
 }

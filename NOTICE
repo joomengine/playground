@@ -21,7 +21,8 @@ original behavior on conventional PHP. Its exact source inventory and scope are
 documented in dependencies/joomla/README.md.
 
 Joomla Component Builder is provided by Llewellyn van der Merwe and Vast
-Development Method through https://github.com/joomengine/pkg-component-builder .
+Development Method through https://github.com/joomengine/Joomla-Component-Builder .
+JCB is the core development tool and default deployment of JoomEngine.
 Its GPL-2.0-or-later license and copyright notices remain in the derived browser
 packages. The reviewed reader-interface adjustment preserves its source header.
 The upstream fixture license is included at test/fixtures/LICENSE.jcb.txt.

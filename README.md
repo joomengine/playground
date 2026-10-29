@@ -1,12 +1,14 @@
 # JoomEngine Playground
 
-Run Joomla in your browser with Sean Morris’s PHP WebAssembly runtime and a real
-MariaDB WebAssembly database. The playground assembles published upstream PHP
-packages, the MariaDB bridge, and a separately compiled native PDO extension into
+Build Joomla extensions with **Joomla Component Builder (JCB)** in your browser.
+JCB is the development engine at the heart of JoomEngine. Sean Morris’s PHP
+WebAssembly runtime and a real MariaDB WebAssembly database run the site. The
+playground assembles published upstream PHP packages, the MariaDB bridge, and a separately compiled native PDO extension into
 a static site. PHP requests and SQL execute in browser workers.
 
 The deployment address is **https://playground.joomengine.org/**. The default
-deploy installs **JCB + MCP on Joomla 6** and **JCB only on Joomla 5**. Select
+deploy opens the **JCB dashboard on Joomla 6 with PHP 8.5**. JCB is also the
+default on Joomla 5; **JCB + MCP** remains an optional Joomla 6 deployment. Select
 **Joomla only** to start without additional extensions. Rocket is the compact,
 multilingual interface around the running Joomla site.
 
@@ -14,6 +16,12 @@ multilingual interface around the running Joomla site.
 
 This project builds directly on the work of these maintainers and contributors:
 
+- **[Joomla Component Builder](https://github.com/joomengine/Joomla-Component-Builder)**
+  is JoomEngine’s core development tool and default deployment. Created by
+  Llewellyn van der Merwe and Vast Development Method, JCB builds and maintains
+  native Joomla components, plugins and modules. Its component source is licensed
+  under **GNU GPL version 2 or later (GPL-2.0-or-later)**; copyright and license
+  notices remain with the installed component and companion packages.
 - **[seanmorris/php-wasm](https://github.com/seanmorris/php-wasm)** — Sean Morris
   and the project’s contributors provide the PHP runtime, CGI implementation,
   filesystem, asynchronous JavaScript integration, and loadable extension
@@ -70,7 +78,7 @@ The current pinned catalog is:
 These are the patch versions contained in the selected upstream `0.2.0`
 packages. They are recorded explicitly for ABI compatibility; the minor-version
 selector does not imply a newer PHP patch release. Defaults are Joomla 6.2.0 and
-PHP 8.4.1. [versions.json](versions.json) is the authoritative build catalog.
+PHP 8.5.2. [versions.json](versions.json) is the authoritative build catalog.
 
 ## Build and run locally
 
@@ -183,9 +191,10 @@ provide a public CORS proxy.
 
 ## Using Rocket
 
-The default page automatically launches the selected deploy. Use `?start=0` to
-configure it first. The slim header scrolls away with the page; its expandable
-controls and dialogs leave the Joomla site the full available width. The launch
+The default page shows a ten-second rocket countdown before launching JCB.
+Choose **Configure** during the countdown to pause and edit the deployment, or
+launch immediately. Use `?start=0` to load setup without a countdown. The slim
+header scrolls away with the page; its expandable controls and dialogs leave the Joomla site the full available width. The launch
 view shows the rocket animation and deployment progress. Activity remains
 available below the site, and the footer information button lists dependency
 credits and licenses.
@@ -331,12 +340,12 @@ processes and stdio are outside this integration. See [the MCP integration notes
 
 Repository deploys define packages, language packs, content, and console
 commands. See the [contributor guide and schemas](deploys/README.md) to add
-another recipe. The default is `jcb-mcp` on Joomla 6 and `jcb` on Joomla 5;
+another recipe. The default is `jcb` on both Joomla 5 and Joomla 6;
 `blank` installs Joomla alone. Deployment documents can also be composed entirely
 in the interface without changing this repository.
 
-- [JCB + MCP — Joomla 6](https://playground.joomengine.org/?deploy=jcb-mcp)
-- [JCB only — Joomla 5 or 6](https://playground.joomengine.org/?deploy=jcb)
+- [JCB — default on Joomla 5 or 6](https://playground.joomengine.org/?deploy=jcb)
+- [JCB + MCP — optional on Joomla 6](https://playground.joomengine.org/?deploy=jcb-mcp)
 - [Service Directory — Joomla 5 or 6](https://playground.joomengine.org/?deploy=servicedirectory)
 - [Joomla only](https://playground.joomengine.org/?deploy=blank)
 - [Multilingual heritage site](https://playground.joomengine.org/?deploy=heritage-demo)
@@ -355,16 +364,27 @@ site explicitly.
 The build stages verified packages on the same origin. For `prebuild: true`
 recipes, `npm run build:deploys` installs real Joomla, exports it, and imports
 the archive into a second runtime with new credentials before publishing it.
-Prepared copies match an exact Joomla release. The heritage demonstration is
-prepared for both catalog releases; `fresh=1` builds its original recipe instead.
+Prepared copies match an exact Joomla release. JCB and the heritage demonstration
+are prepared for both catalog releases. Opening JCB restores the installed files
+and database instead of repeating its installer. Administrator credentials are
+rotated on every new import; PHP settings and explicit extension, language, menu
+and template choices still apply. `fresh=1` builds the original recipe instead.
+
+Prepared JCB copies use the stable package releases pinned in
+[deploys/jcb.json](deploys/jcb.json): currently JCB 5.2.0 and 6.2.0. To adopt a new
+stable release, update its versioned URL and SHA-256 in that recipe and the
+optional MCP recipe, update any applicable compatibility inputs, and rebuild.
+CI installs and independently restores the new copies before publishing them.
+Existing saved sites are preserved; a new deployment receives the new prepared
+version. There is no unverified latest-release download during launch.
 
 The interface recognizes these query parameters:
 
 | Parameter | Meaning |
 | --- | --- |
-| `deploy=jcb-mcp` | Choose a repository deploy; `blank` installs Joomla alone |
+| `deploy=jcb` | Choose a repository deploy; `blank` installs Joomla alone |
 | `joomla=5.4` | Resolve a minor or exact version to a tested catalog release |
-| `php=8.4` | Select the PHP minor whose patch version is pinned in the catalog |
+| `php=8.5` | Select the PHP minor whose patch version is pinned in the catalog |
 | `path=/administrator/` | Initial page inside Joomla |
 | `toolbar=0` | Hide the configuration toolbar |
 | `persist=0` | Use a temporary site |
@@ -376,7 +396,7 @@ The interface recognizes these query parameters:
 | `key=example` | Reopen a saved site in this browser |
 | `extensions=[...]` | Additional objects containing `url` and optional `sha256` |
 | `commands=[["cache:clean"]]` | Additional Joomla console argument arrays |
-| `start=0` | Show setup first; the default page starts automatically |
+| `start=0` | Show setup first; the default page offers a ten-second countdown |
 | `config=https://example.org/deploy.json` | Load a public deployment document, optionally verified with `sha256` |
 
 For a deployment hosted at `/playground/`, this same-origin iframe opens an
@@ -384,7 +404,7 @@ administrator playground with the toolbar hidden:
 
 ```html
 <iframe
-  src="/playground/?joomla=6.2.0&php=8.4&path=%2Fadministrator%2F&toolbar=0&start=1"
+  src="/playground/?joomla=6.2.0&php=8.5&path=%2Fadministrator%2F&toolbar=0&start=1"
   title="Joomla Playground"
   allow="cross-origin-isolated"
   style="width:100%;height:800px;border:0"
@@ -444,7 +464,7 @@ try {
   } else {
     const password = `Jp!${crypto.randomUUID()}`;
     const site = await createPlayground({
-      phpVersion: '8.4',
+      phpVersion: '8.5',
       joomlaVersion: '6.2.0',
       siteName: 'API demonstration',
       initialPath: '/administrator/',

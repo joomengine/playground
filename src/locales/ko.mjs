@@ -178,5 +178,15 @@ export default Object.freeze({
   "help.setupSteps": "새 설치에서 선택한 배포 후에 이 단계를 실행합니다. 사이트가 열린 뒤 Joomla에서 확장을 설치할 수도 있습니다.",
   "help.compatibility": "사용 가능한 실행 환경 조합은 함께 테스트됩니다.",
   "license.notices": "포함된 고지",
-  "confirm.temporary": "실행 중인 임시 사이트가 변경됩니다. 작업을 보관하려면 먼저 저장하거나 다운로드하세요. 계속할까요?"
+  "confirm.temporary": "실행 중인 임시 사이트가 변경됩니다. 작업을 보관하려면 먼저 저장하거나 다운로드하세요. 계속할까요?",
+  "status.countdown": "{seconds}초 후 시작합니다",
+  "status.countdownPaused": "시작이 일시 중지되었습니다. 배포를 구성한 후 시작을 선택하세요.",
+  "action.recover": "저장된 사이트 복구",
+  "action.repair": "안전한 오류 설정 복원",
+  "action.resetStart": "초기화 후 시작",
+  "title.recovery": "저장된 사이트가 복구를 위해 열렸습니다",
+  "help.recovery": "변경하기 전에 파일과 데이터베이스를 다운로드하세요. 사이트를 다시 설치하지 않고 Joomla의 안전한 오류 설정을 복원할 수 있습니다.",
+  "help.customSetup": "이 공유 배포에는 사용자 지정 코드나 명령이 포함되어 있습니다. 시작하기 전에 구성을 검토하세요.",
+  "confirm.customSetup": "이 배포는 사용자 지정 코드나 명령을 실행합니다. 동일한 플레이그라운드 웹 주소에 저장된 사이트에 접근할 수 있습니다. 다음 출처를 신뢰하는 경우에만 계속하세요:",
+  "status.repaired": "Joomla의 안전한 오류 설정이 복원되었습니다. 원래 구성은 백업되었습니다. 사이트를 다시 열려면 다시 시도를 선택하세요."
 });

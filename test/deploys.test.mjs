@@ -10,7 +10,7 @@ const sourceCatalog = JSON.parse(await readFile(new URL('catalog.json', root), '
 const catalog = parseCatalog({
   php: [{ version: '8.3' }, { version: '8.4' }, { version: '8.5' }],
   joomla: [{ version: '5.4.10', php: ['8.3', '8.4', '8.5'] }, { version: '6.2.0', php: ['8.3', '8.4', '8.5'] }],
-  defaults: { phpVersion: '8.4', joomlaVersion: '6.2.0' },
+  defaults: { phpVersion: '8.5', joomlaVersion: '6.2.0' },
 });
 const admin = { password: 'Deploy-contract-password-123!' };
 const files = new Map(await Promise.all(['catalog', ...sourceCatalog.deploys.map((entry) => entry.id)].map(async (name) => [
@@ -22,21 +22,23 @@ const options = { catalog, deployCatalog, baseURL: 'https://playground.joomengin
 
 test('repository catalog and every manifest validate with required integrity pins', async () => {
   const loaded = await loadDeployCatalog({ url: baseURL, fetcher });
-  assert.equal(loaded.default, 'jcb-mcp');
-  assert.deepEqual(loaded.defaultsByJoomla, { '5': 'jcb', '6': 'jcb-mcp' });
-  assert.deepEqual(loaded.deploys.map((entry) => entry.id), ['jcb-mcp', 'jcb', 'servicedirectory', 'blank', 'heritage-demo', 'patchtester', 'weblinks']);
+  assert.equal(loaded.default, 'jcb');
+  assert.deepEqual(loaded.defaultsByJoomla, { '5': 'jcb', '6': 'jcb' });
+  assert.deepEqual(loaded.deploys.map((entry) => entry.id), ['jcb', 'jcb-mcp', 'servicedirectory', 'blank', 'heritage-demo', 'patchtester', 'weblinks']);
   for (const entry of loaded.deploys) {
     const deploy = normalizeDeploy(JSON.parse(files.get(entry.url)), { baseURL: entry.url });
     assert.equal(deploy.id, entry.id);
   }
 });
 
-test('defaults select JCB on Joomla 5 and JCB with MCP on Joomla 6', async () => {
+test('defaults select prepared JCB on PHP 8.5 for Joomla 5 and 6', async () => {
   for (const [requested, expected, packageVersion] of [['5.4', '5.4.10', '5.2.0'], ['6.2', '6.2.0', '6.2.0']]) {
-    const { configuration } = await resolveDeployConfiguration({ admin, joomlaVersion: requested }, options);
-    assert.equal(configuration.deployId, requested.startsWith('5') ? 'jcb' : 'jcb-mcp');
+    const { configuration, deploy } = await resolveDeployConfiguration({ admin, joomlaVersion: requested }, options);
+    assert.equal(configuration.deployId, 'jcb');
+    assert.equal(configuration.phpVersion, '8.5');
+    assert.equal(deploy.prebuild, true);
     assert.equal(configuration.joomlaVersion, expected);
-    assert.equal(configuration.extensions.length, requested.startsWith('5') ? 1 : 2);
+    assert.equal(configuration.extensions.length, 1);
     assert.ok(configuration.extensions[0].url.endsWith(`/v${packageVersion}.zip`));
     assert.match(configuration.extensions[0].sha256, /^[a-f0-9]{64}$/);
     assert.equal(configuration.initialPath, '/administrator/index.php?option=com_componentbuilder');
@@ -91,6 +93,10 @@ test('snapshots require exact Joomla compatibility and fresh bypasses them', asy
   const snapshotFetcher = async (url) => String(url).endsWith('/blank.json') ? new Response(JSON.stringify(deploy)) : fetcher(url);
   const prepared = await resolveDeployConfiguration({ admin, deployId: 'blank' }, { ...options, fetcher: snapshotFetcher });
   assert.equal(prepared.configuration.snapshot.url, 'https://playground.joomengine.org/deploys/blank-6.2.0.zip');
+  const customizedPHP = await resolveDeployConfiguration({ admin, deployId: 'blank', phpVersion: '8.3', phpSettings: { memory_limit: '768M' } }, { ...options, fetcher: snapshotFetcher });
+  assert.equal(customizedPHP.configuration.snapshot.sha256, deploy.snapshot.sha256);
+  assert.equal(customizedPHP.configuration.phpVersion, '8.3');
+  assert.equal(customizedPHP.configuration.phpSettings.memory_limit, '768M');
   const fresh = await resolveDeployConfiguration({ admin, deployId: 'blank', fresh: true }, { ...options, fetcher: snapshotFetcher });
   assert.equal(fresh.configuration.snapshot, undefined);
   const different = await resolveDeployConfiguration({ admin, deployId: 'blank', joomlaVersion: '5.4' }, { ...options, fetcher: snapshotFetcher });
@@ -119,5 +125,12 @@ test('explicit MCP on Joomla 5 fails instead of silently changing the requested 
   await assert.rejects(resolveDeployConfiguration({ admin, deployId: 'jcb-mcp', joomlaVersion: '5.4' }, options), /not available for Joomla 5/);
   const { configuration } = await resolveDeployConfiguration({ admin, deployId: 'jcb', joomlaVersion: '6.2' }, options);
   assert.equal(configuration.extensions.length, 1);
+  assert.equal(configuration.language, 'en-GB');
+});
+
+test('MCP remains an explicit Joomla 6 choice with both pinned packages', async () => {
+  const { configuration } = await resolveDeployConfiguration({ admin, deployId: 'jcb-mcp' }, options);
+  assert.equal(configuration.deployId, 'jcb-mcp');
+  assert.equal(configuration.extensions.length, 2);
   assert.equal(configuration.language, 'en-GB');
 });

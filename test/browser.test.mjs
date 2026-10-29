@@ -9,6 +9,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { createStaticServer } from './server.mjs';
 import { assertBrowserRequestBodies } from './browser-request-contract.mjs';
 import { assertExternalAssets } from './external-assets-contract.mjs';
+import { assertFrameLayoutStable } from './frame-layout-contract.mjs';
 import { classifyAssetDiagnostics } from './asset-diagnostics.mjs';
 import { assertMcpHttp } from './mcp-http.mjs';
 import { probeSyntheticRedirect, startRedirectTrace, recordVerifiedRedirectDiagnostic } from './firefox-redirect-probe.mjs';
@@ -193,7 +194,7 @@ async function assertCleanConsole(page, { contentImages = false } = {}) {
   if (contentImages) {
     const diagnostics = classifyAssetDiagnostics(page.failedSiteRequests, page.consoleErrors);
     page.contentDiagnostics = diagnostics.missingImages;
-    assert.deepEqual(diagnostics.unexpectedAssets, [], 'Installed scripts, styles and fonts must load; image failures other than missing content remain errors.');
+    assert.deepEqual(diagnostics.unexpectedAssets, [], 'Installed images, scripts, styles and fonts must load successfully.');
     consoleErrors = diagnostics.consoleErrors;
   }
   assert.deepEqual(page.errors, [], 'The application must not produce uncaught browser exceptions.');
@@ -1114,6 +1115,9 @@ for (const name of browserNames) {
         page.testStep = 'full width and one scrolling document';
         if (await page.locator('#settings').isVisible()) await page.locator('#settings-toggle').click();
         const actualFrame = await renderedSiteFrame(page);
+        page.testStep = 'footer settles after responsive layout updates';
+        await assertFrameLayoutStable(page, actualFrame);
+        page.testStep = 'full width and one scrolling document';
         await actualFrame.locator('body').evaluate(body => {
           const block = document.createElement('div'); block.id = 'rocket-scroll-proof'; block.style.cssText = 'height:3400px;position:relative'; block.textContent = 'Long Joomla document';
           const button = document.createElement('button'); button.id = 'rocket-focus-proof'; button.textContent = 'Focus at the end of the Joomla document'; button.style.cssText = 'position:absolute;bottom:0'; block.append(button); body.append(block);

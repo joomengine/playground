@@ -67,7 +67,10 @@ try {
         throw new RuntimeException('Cannot open the database statement stream.');
     }
     $count = 0;
-    while (($line = fgets($statements, 64 * 1024 * 1024)) !== false) {
+    // JSON can escape each source byte as six ASCII bytes. Data values in new
+    // exports are chunked; this also bounds older or externally supplied dumps.
+    $maximumStatementBytes = 4 * 1024 * 1024;
+    while (($line = fgets($statements, $maximumStatementBytes * 6 + 4)) !== false) {
         if (!str_ends_with($line, "\n") && !feof($statements)) {
             throw new RuntimeException('A database statement exceeds the import size limit.');
         }
@@ -77,6 +80,9 @@ try {
         $statement = json_decode($line, true, 512, JSON_THROW_ON_ERROR);
         if (!is_string($statement) || trim($statement) === '' || str_contains($statement, "\0")) {
             throw new RuntimeException('The prebuilt database contains an invalid SQL statement.');
+        }
+        if (strlen($statement) > $maximumStatementBytes) {
+            throw new RuntimeException('A database statement exceeds 4 MiB. Export large values as bounded SQL chunks before importing.');
         }
         try {
             $connection->exec($statement);
