@@ -150,7 +150,7 @@ directory; all bridge JavaScript and engine assets come from the verified releas
 release archive checksum, native and adapter source hashes, Joomla distributions,
 and compatible runtime combinations.
 
-The build verifies every entry in the MariaDB bridge 0.1.6 release inventory and
+The build verifies every entry in the MariaDB bridge 0.1.7 release inventory and
 stages its runtime, PHP adapter, engine JavaScript and WebAssembly directly from
 that release. Native driver source hashes must match the same release. The
 PDO extension’s compiler, PHP version, source hashes, upstream revision, and
