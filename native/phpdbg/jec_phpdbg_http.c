@@ -241,7 +241,16 @@ static size_t jec_write_response(const char *bytes, size_t length)
 
 static int jec_statement(zend_execute_data *execute_data)
 {
-    if (!(PHPDBG_G(flags) & PHPDBG_IN_EVAL)) jec_inspection_output = false;
+    if (!(PHPDBG_G(flags) & PHPDBG_IN_EVAL)) {
+        jec_inspection_output = false;
+        if ((execute_data->opline->opcode == ZEND_RETURN || execute_data->opline->opcode == ZEND_GENERATOR_RETURN)
+            && execute_data->prev_execute_data) {
+            /* Returning resumes the same call-site statement. Keep phpdbg's
+             * line-breakpoint guard there rather than counting the return as
+             * a new execution of that line under Continue or Step Over. */
+            PHPDBG_G(last_line) = execute_data->prev_execute_data->opline->lineno;
+        }
+    }
     if (jec_step_over_frame && !(PHPDBG_G(flags) & PHPDBG_IN_EVAL)) {
         bool return_opcode = execute_data->opline->opcode == ZEND_RETURN || execute_data->opline->opcode == ZEND_GENERATOR_RETURN;
         bool returned = execute_data == jec_step_over_frame && return_opcode;
@@ -251,11 +260,6 @@ static int jec_statement(zend_execute_data *execute_data)
              * source. Leaving the request's main file should finish normally. */
             if (execute_data->prev_execute_data && execute_data->prev_execute_data->prev_execute_data)
                 PHPDBG_G(flags) |= PHPDBG_IS_STEPPING;
-        } else if (return_opcode && execute_data->prev_execute_data) {
-            /* Returning from a callee resumes the same call-site line. Keep
-             * phpdbg's line-breakpoint guard on that line so the original
-             * gutter breakpoint is not hit again midway through Step Over. */
-            PHPDBG_G(last_line) = execute_data->prev_execute_data->opline->lineno;
         } else if (execute_data->opline->opcode == ZEND_EXT_STMT) {
             zend_execute_data *frame = execute_data;
             while (frame && frame != jec_step_over_frame) frame = frame->prev_execute_data;

@@ -42,8 +42,8 @@ Check an item only after its implementation and stated evidence are available. R
 - [x] F05 — Provide cancellable workspace search and replace with affected-file review before project-wide replacement. Evidence: cancellation remains responsive and all searched/replaced paths obey the worker boundary.
 - [x] F06 — Provide multiple tabs, groups, split editors, dirty indicators, undo/redo, keyboard shortcuts, find/replace, quick open and command palette. Evidence: native workbench interactions edit actual Joomla files.
 - [x] F07 — Save and Save All against the active runtime; manual save is initial behavior and autosave is independently configurable. Evidence: successful saves alter disk, unsaved buffers remain unsaved, and undo/redo changes buffers until saving.
-- [ ] F08 — Preserve buffers, selections, cursor/scroll positions, tab order and undo history across every movement, detach/redock and hide/reopen. Evidence: dirty multi-tab continuity smoke flow.
-- [ ] F09 — Dirty close offers save/discard/cancel; hiding preserves documents; rename/move updates open identities and deletion accounts for dirty buffers. Evidence: each choice preserves its documented outcome.
+- [x] F08 — Preserve buffers, selections, cursor/scroll positions, tab order and undo history across every movement, detach/redock and hide/reopen. Evidence: dirty multi-tab continuity smoke flow.
+- [x] F09 — Dirty close offers save/discard/cancel; hiding preserves documents; rename/move updates open identities and deletion accounts for dirty buffers. Evidence: each choice preserves its documented outcome.
 - [x] F10 — Publish file-change notifications and detect Joomla/other-view writes. Evidence: changed content prompts diff/reload/overwrite and neither disk nor unsaved changes are silently lost.
 - [x] F11 — Preserve supported encodings and line endings; unsupported decoding is explicit and original bytes remain intact. Evidence: supported text round trips plus unsupported/binary rejection without corruption.
 - [x] F12 — Maintain bounded recovery for destructive operations and accepted AI sets, scoped to the active site and cleared with that site. Evidence: restore a previous file/tree safely without overwriting a new conflicting change.
@@ -56,11 +56,11 @@ Check an item only after its implementation and stated evidence are available. R
 
 ## 3 — Layout and preview
 
-- [ ] L01 — Left and right docks show editor and independently navigable site with draggable dividers. Evidence: both orientations resize within usable minimums.
-- [ ] L02 — Bottom dock has adjustable height; full-workspace mode fills available space while Joomla continues. Evidence: restore returns to the remembered layout without runtime replacement.
-- [ ] L03 — Floating panel is draggable, resizable and modeless; uncovered site areas remain interactive. Evidence: move/resize and site navigation coexist.
-- [ ] L04 — Detached mode opens a real browser window tied to the same owner and editor session; blocked popups leave the editor docked with an actionable message. Evidence: browser window and blocked-popup flows.
-- [ ] L05 — Dock, detach, maximize, restore and close controls remain reachable; remember layout/dimensions and clamp them after viewport changes. Evidence: resize to a smaller viewport and restore preferences.
+- [x] L01 — Left and right docks show editor and independently navigable site with draggable dividers. Evidence: both orientations resize within usable minimums.
+- [x] L02 — Bottom dock has adjustable height; full-workspace mode fills available space while Joomla continues. Evidence: restore returns to the remembered layout without runtime replacement.
+- [x] L03 — Floating panel is draggable, resizable and modeless; uncovered site areas remain interactive. Evidence: move/resize and site navigation coexist.
+- [x] L04 — Detached mode opens a real browser window tied to the same owner and editor session; blocked popups leave the editor docked with an actionable message. Evidence: browser window and blocked-popup flows.
+- [x] L05 — Dock, detach, maximize, restore and close controls remain reachable; remember layout/dimensions and clamp them after viewport changes. Evidence: resize to a smaller viewport and restore preferences.
 - [x] L06 — Detach/redock uses relocation or a narrow validated view bridge; messages validate expected origin/window and cannot create competing document authorities. Evidence: stale/foreign messages are ignored and shared edits cannot overwrite each other silently.
 - [x] L07 — Closing a detached window restores the host editor intact; owner loss/site end clearly disconnects or closes the detached view and preserves recoverable saved-site drafts. Evidence: window close, owner close and site reset flows; no ownership-transfer requirement is invented.
 - [ ] L08 — Desktop Firefox and Chromium, keyboard navigation, visible focus, contrast and smaller viewports remain usable. Evidence: focused browser checks and accessible controls; the site preview gains no new device restrictions.
@@ -88,13 +88,13 @@ Check an item only after its implementation and stated evidence are available. R
 
 ## 5 — Complete PHP debugging
 
-- [ ] D01 — Ship the required phpdbg builds and reproducible small runtime/SAPI patches for every supported PHP version, preserving required extensions and the MariaDB bridge. Evidence: build provenance and actual Joomla debug requests on the supported catalog versions.
+- [x] D01 — Ship the required phpdbg builds and reproducible small runtime/SAPI patches for every supported PHP version, preserving required extensions and the MariaDB bridge. Evidence: build provenance and actual Joomla debug requests on the supported catalog versions.
 - [x] D02 — Arm the next explicitly matching request, debug-refresh the current page, or wait for navigation/form submission. Evidence: unrelated background requests cannot consume the armed target.
 - [x] D03 — Preserve actual request method/URL/query/headers/body/uploads, cookies, authentication, sessions, selected PHP, current files and database; populate correct request globals and return actual status/headers/body to the existing preview. Evidence: authenticated GET plus POST/upload behavior against real Joomla routes.
 - [x] D04 — Execute the selected request exactly once; no normal execution followed by replay. Coordinate exclusive ownership and filesystem handoff if a distinct phpdbg instance is needed. Evidence: one observable POST/database side effect and one authoritative filesystem/database state.
 - [x] D05 — Connect phpdbg to the native VS Code debugging UI through an in-browser Debug Adapter Protocol adapter without a network debugger server. Evidence: debugger events drive the real workbench and source documents.
 - [x] D06 — Persist file/line breakpoints with enable/disable/remove, conditional breakpoints and honest unresolved-location reporting. Evidence: breakpoints in Joomla source bind/hit or explicitly report why unresolved.
-- [ ] D07 — Start, continue, pause, step into, step over, step out and stop; highlight and reveal the current executing line. Evidence: a real Joomla request steps through a caller/callee and continues to a valid response.
+- [x] D07 — Start, continue, pause, step into, step over, step out and stop; highlight and reveal the current executing line. Evidence: a real Joomla request steps through a caller/callee and continues to a valid response.
 - [x] D08 — Inspect call stack and selected frames, local/global variables, nested arrays/objects, property names and types. Expand large/recursive values progressively. Evidence: authenticated request inspection includes an object and caller frame without freezing or unbounded output.
 - [x] D09 — Support watches and debug-console expressions in the selected frame, with clear evaluation side effects and recoverable errors. Evidence: frame-specific evaluation and an invalid expression both produce accurate results.
 - [x] D10 — Report PHP errors and exception locations with source navigation using the same URI/path mapping as ordinary editing. Evidence: known error/exception opens its real document and line.
@@ -139,7 +139,7 @@ Check an item only after its implementation and stated evidence are available. R
 
 ### Integration stabilization evidence (current source milestone)
 
-The following local receipts establish the checked implementation requirements. They do **not** replace the final-head workflow requirement, the Firefox requirement or authenticated provider verification. The PR commit history identifies the implementing milestone; the final evidence update will name its immutable SHA.
+The following local receipts establish the checked implementation requirements. They do **not** replace the final-head workflow requirement, the Firefox requirement or authenticated provider verification. The main integration milestone is `ea11303d2607273a1348d18185434e1862b99fc4`. Subsequent focused fixes and evidence are identified by the PR commit history and final verification record.
 
 | Requirements | Behavior and receipt | Result |
 | --- | --- | --- |
@@ -153,7 +153,15 @@ The following local receipts establish the checked implementation requirements. 
 | R04, D11–D13 | `test/code-request-liveness.test.mjs` and editor-session cases: deliberate pause survives ordinary request deadlines, new queued requests inherit pause, owner loss fails, stale timeout races cannot win and paused automatic refresh stays suppressed | Pass |
 | G01–G04, G07–G08 | Four rendered vector variants; full/compact accessible branding; exact shipped source/licence inventory; strict build patches documented; 20-locale parity for all added labels including About; user, AI, debugger and branding guides | Build, visual review and localization checks pass; final cross-browser usability remains L08/G05/V02/V07 work |
 
-Remaining open evidence is deliberate: dirty-close choices and movement/selection/scroll/layout interaction coverage, final Step Over UI verification, full existing regressions and Firefox on the final head, and **A02 authenticated browser provider verification**. A02 requires an actual user-owned credential in the isolated settings panel; fixture tests and an unverified candidate endpoint do not satisfy it.
+Additional stabilized behavior:
+
+- L01–L05: actual host controls exercise left/right/bottom divider drags, floating drag and resize, interactive uncovered site, saved geometry, maximize/restore, viewport clamping, narrow-layout collapse, hide/reopen and blocked-popup feedback while editor and preview documents retain identity. Chromium host suite passes both cases.
+- D01/D07: corrected phpdbg call-site behavior for Step Over and Continue. Thirty native integration cases pass across PHP 8.3/8.4/8.5, including nested calls, enabled call-site/callee breakpoints, final-line completion and preserved HTTP output. Twenty-one adapter/request/assets checks pass. The native UI steps over real Joomla dispatch in the caller, then continues to an authenticated HTTP 200 (latest pass: 60 seconds).
+
+- F08/F09: the extended native workbench suite passes in Chromium (144 seconds), preserving exact selection/cursor/scroll/draft state through hide, movement, resize and detach/redock; actual Save/Discard/Cancel dialogs, denied dirty deletion, failed dirty rename recovery and successful rename/save all preserve the expected documents and bytes. Deliberately denied operations are identified by their exact expected test errors; unexpected errors still fail the suite.
+- Responsive regression: CI run `40969011264` reproduced toolbar overflow at 768 pixels (document width 893 pixels). The focused fix lets the header and toolbar wrap within the viewport. The original 390/768/1440 widths, Refresh shown/hidden, and 80 width/locale combinations pass. The original full regression assertions remain unchanged for final CI.
+
+Remaining open evidence is deliberate: full existing regressions and Firefox on the final head, and **A02 authenticated browser provider verification**. A02 requires an actual user-owned credential in the isolated settings panel; fixture tests and an unverified candidate endpoint do not satisfy it.
 
 Add rows as commits land. Keep incomplete checkboxes open and describe any blocker concretely. Cross-cutting requirements may share one behavior-driven receipt; avoid an exhaustive duplicate test matrix.
 
