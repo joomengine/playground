@@ -1,7 +1,7 @@
 import { resolveSiteURL, createShareURL, createDeploymentDocument, parseDeploymentDocument, loadDeploymentDocument, normalizeConfiguration, parseCatalog, readURLConfiguration } from './config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from './deploys.mjs';
 import { createPlayground, prepareEnvironment, resetPlayground } from './playground.mjs';
-import { defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from './ui-state.mjs';
+import { customSetupDetails, defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from './ui-state.mjs';
 
 import { connectFrame } from './frame-view.mjs';
 import { DEFAULT_PHP_SETTINGS, normalizePhpSettings } from './php-settings.mjs';
@@ -98,11 +98,7 @@ function pauseAutomaticLaunch() {
 }
 function approveCustomSetup(input) {
   if (!deploymentNeedsReview(input)) return true;
-  const sources = [...(input.extensions || []).map(item => item.url), input.template?.url,
-    ...(input.languages || []).map(item => item.url)].filter(Boolean);
-  const commands = (input.startupCommands || []).map(command => command.join(' '));
-  const custom = { sources, commands, extensions: input.extensions, template: input.template,
-    languages: input.languages, content: input.content, menus: input.menus };
+  const custom = customSetupDetails(input);
   const identity = JSON.stringify(custom);
   if (identity === approvedCustomSetup) return true;
   if (!confirm(`${t('confirm.customSetup')}\n\n${JSON.stringify(custom, null, 2)}`)) return false;
@@ -989,8 +985,12 @@ async function initialize() {
     initialized = true;
     setBusy(false);
     const shouldResume = Boolean(previous) && (!params.has('start') || parsed.autostart);
+    // A saved installation already ran this exact reviewed setup. A shared link
+    // that changes any executable source or custom content still needs consent.
+    const reviewedSavedSetup = previous && JSON.stringify(customSetupDetails(previous)) === JSON.stringify(customSetupDetails(input));
+    if (reviewedSavedSetup) approvedCustomSetup = JSON.stringify(customSetupDetails(input));
     activity(shouldResume ? 'Reopening your saved site…' : 'Ready to launch. Choose a starting point and your runtime versions.');
-    if (deploymentNeedsReview(parsed.config)) {
+    if (deploymentNeedsReview(parsed.config) && !reviewedSavedSetup) {
       automaticLaunchPaused = true;
       feedback(t('help.customSetup'), { persistent: true });
       openEditor();

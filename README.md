@@ -54,7 +54,7 @@ The native build compiles the PDO, fileinfo, cURL, and Sodium extensions against
 matching PHP headers. Fileinfo supplies MIME detection with its embedded magic
 database.
 cURL uses Sean Morris’s [php-wasm-curl](https://github.com/seanmorris/php-wasm-curl)
-to connect PHP’s unchanged `ext/curl` to the host’s Fetch API. The implementation
+to connect PHP’s `ext/curl` to the host’s Fetch API. The implementation
 is pinned to [6085917954da9682c32ebcbea27a626d2308381b](https://github.com/seanmorris/php-wasm-curl/tree/6085917954da9682c32ebcbea27a626d2308381b)
 and loaded alongside the published `0.2.0` PHP runtime. Sodium uses the official
 libsodium 1.0.22 release and Web Crypto for its random source. A checksum-verified
@@ -149,7 +149,7 @@ directory; all bridge JavaScript and engine assets come from the verified releas
 release archive checksum, native and adapter source hashes, Joomla distributions,
 and compatible runtime combinations.
 
-The build verifies every entry in the MariaDB bridge 0.1.5 release inventory and
+The build verifies every entry in the MariaDB bridge 0.1.6 release inventory and
 stages its runtime, PHP adapter, engine JavaScript and WebAssembly directly from
 that release. Native driver source hashes must match the same release. The
 PDO extension’s compiler, PHP version, source hashes, upstream revision, and
@@ -174,6 +174,16 @@ through the upstream Fetch integration. cURL supports request methods, headers,
 binary bodies, status codes, redirects, timeouts, and streaming response
 callbacks. The native extension is exercised on every supported PHP build,
 including the HTTP patterns used by JCB’s file and API helpers.
+
+A small native HTTP stream adapter is compiled into the loadable cURL extension.
+It preserves `file_get_contents()`, `fopen()`, `get_headers()`, stream contexts,
+response-header metadata and caller-local `$http_response_header`, using the same
+browser transport. The upstream PHP binary remains unchanged. A version-independent
+JCB compatibility guard skips unavailable image-format identifiers instead of
+claiming support for decoders absent from the runtime. If JCB cannot cache a public
+image, its image helper can display the original HTTPS URL directly. This fallback
+uses the installed component’s own metadata; no artwork copies or host lists are
+maintained, and PHP reads still require CORS permission.
 
 In a browser, remote servers must permit the playground origin through CORS.
 Only HTTP and HTTPS are supported. The browser controls certificate validation,
@@ -219,6 +229,9 @@ for the complete document format and advanced parameters.
 - **Close** shuts down the workers and releases the site lock. Closing a temporary
   site discards its state after confirmation.
 - **Reset** deletes the selected site's saved data after confirmation.
+- **Recover saved site** opens storage without booting Joomla. Download a backup,
+  then restore safe error settings if needed; the original configuration is kept
+  privately. **Reset and launch** provides an explicit fresh start from the failure screen.
 - **New site** starts an independent installation; saved sites remain selectable.
 - **Download** exports the complete site, its files, or its SQL database.
 - **Open site** transfers the running site to a standalone tab without Rocket's
@@ -245,6 +258,10 @@ browser access through CORS. Packages are limited to 128 MiB. An optional SHA-25
 is verified before installation; repository packages always have pinned digests.
 When a host blocks downloads, provide a permitted URL or stage the package on the
 playground origin. There is no public download proxy.
+
+Shared configurations with custom packages, commands or site content pause for
+review before launching. Installed code shares the playground origin and can access
+other sites saved on that origin; separate site keys are an organizational feature.
 
 Startup commands are arrays of Joomla console arguments, executed in order after
 package installation and without a shell. For example:
@@ -321,6 +338,14 @@ than accepting arbitrary ini directives. Deploys can request different values;
 Service Directory allows 180 seconds for its large initial geographic-data import.
 A PHP memory limit is not a guarantee that a particular browser or device can
 allocate that much memory.
+
+MariaDB uses a 128 MiB server packet limit and a 64 MiB initial InnoDB buffer pool.
+Transport bounds are 32 MiB per JSON request, 64 MiB per JSON response and 128 MiB
+of queued requests. These are operation limits, not a small total-database quota:
+base64 encoding, PHP memory and the database heap still constrain individual results.
+Exports transfer large values in bounded chunks and report destination packet limits.
+Database-limit controls in Rocket are deferred; the bridge already exposes bounded
+startup options and MariaDB's supported settings for future integration.
 
 Runtime health checks require the real PDO MySQL bridge, cURL, fileinfo, Sodium,
 GD, Intl, mbstring, OpenSSL, DOM, SimpleXML, XML/reader/writer, JSON, ZIP and zlib
@@ -527,6 +552,9 @@ provisioning completes:
 | `applyConfiguration(configuration)` | Apply additions and site settings with a recovery checkpoint |
 | `openStandalone({ path })` | Transfer ownership to an independent tab; call from a user gesture |
 | `exportSite({ format })` | Return `{ bytes, filename, mimeType, metadata }`; format is `bundle`, `files`, or `database` |
+| `recovery` | Recovery metadata when opened with `createPlayground(config, { recovery: true })` |
+| `repairConfiguration()` | Back up configuration and restore safe Joomla debugging/error settings |
+| `exportRecoveryFiles()` | Download raw saved files, including private credentials and sessions; does not include SQL |
 | `close()` | Close the instance while keeping saved data |
 | `reset()` | Close the instance and delete its saved data |
 
@@ -623,7 +651,7 @@ standalone ownership transfer, responsive controls and timeout recovery.
 
 CI runs source checks and unit tests first. Documentation-only pull requests skip
 native/browser jobs. Presentation-only changes run the default Joomla 6.2.0 / PHP
-8.4 combination with deployment, lifecycle and Rocket checks. Runtime, deployment,
+8.5 combination with deployment, lifecycle and Rocket checks. Runtime, deployment,
 configuration and unclassified changes run the full supported matrix, as do
 `main` and manual builds. Chromium and Firefox validate in parallel jobs against
 the same built artifact. Native/compiler caches require exact source and toolchain
@@ -636,12 +664,10 @@ still execute those contracts.
 
 An installed fixture extension must render its own nested image, stylesheet and
 script; a separate fixture verifies external resources alongside native database
-queries. Third-party image 404 responses are retained as content diagnostics,
-including any exactly correlated browser message. Scripts, styles, fonts, other
-image failures and unrelated console errors still fail validation. The pinned JCB
-packages contain a rotating banner filename mismatch, so that optional image can
-be missing on ordinary hosting too. Its package and URLs remain unchanged; the
-playground does not replace artwork or hide production errors.
+queries. Missing images, scripts, styles and fonts fail validation, with their
+URLs and browser diagnostics retained. A controlled cross-origin PHP read also
+verifies that a denied request reports its error promptly and leaves PHP and the
+database usable. The playground does not replace artwork or hide production errors.
 
 Firefox 157 emits an empty-URL service-worker diagnostic for some successful native
 redirects, including a minimal `Response.redirect()` with no playground runtime.
@@ -658,8 +684,8 @@ Installed extensions and PHP code run with access to that playground’s files a
 database. Keep independent applications in separate site keys; this is not a
 multi-tenant hosting boundary.
 
-The bridge exposes one native connection per MariaDB instance, uses PDO emulated
-prepares, and does not implement `mysqli` or remote database connections. Integer
+The bridge supports up to 32 independent PDO connections per MariaDB instance,
+uses PDO emulated prepares, and does not implement `mysqli` or remote database connections. Integer
 values within PHP’s integer range are returned as integers; larger integers and
 DECIMAL values remain exact strings. `PDO::ATTR_STRINGIFY_FETCHES` requests
 numeric strings explicitly. Files and database state are separate stores; they
@@ -667,8 +693,10 @@ are not committed together as one transaction.
 
 The verified JavaScript CGI input adapter supports binary POST, PUT, PATCH and
 DELETE bodies, including large multipart uploads. Request queues, source size,
-body size and execution time remain bounded. On timeout, PHP is terminated and the database lease is reset; uncertain writes are never replayed.
-Restart the instance before continuing after a runtime failure.
+body size and execution time remain bounded. A recoverable PHP application error
+preserves its HTTP error response and files, resets abandoned database sessions,
+and prepares PHP for the next request without replaying uncertain writes. On a
+worker timeout, use the recovery controls or restart the instance.
 
 Host processes, system executables, arbitrary socket services, and a production
 mail server are not supplied by this static playground. Extensions that require

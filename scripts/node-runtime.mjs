@@ -10,7 +10,7 @@ import { applyJcbRuntimeCompatibility } from '../src/jcb-compatibility.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 
 /** Run the verified upstream PHP binary and staged CGI adapter for build tasks. */
-export async function createNodeRuntime({ directory = path.join(root, 'dist'), phpVersion, database = 'joomla', phpSettings: requestedPhpSettings } = {}) {
+export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIST || path.join(root, 'dist'), phpVersion, database = 'joomla', phpSettings: requestedPhpSettings } = {}) {
   const phpSettings = normalizePhpSettings(requestedPhpSettings);
   const bodyLimit = phpRequestBodyLimit(phpSettings);
   const distribution = path.resolve(directory);
@@ -166,7 +166,7 @@ export async function createNodeRuntime({ directory = path.join(root, 'dist'), p
     },
   };
   try {
-    const adapter = createPhpWasmAdapter(databaseRuntime.hostCalls, { shimUrl: assetURL('mariadb/adapters/php-wasm.php') });
+    const adapter = createPhpWasmAdapter(databaseRuntime.hostCalls, { shimUrl: new URL('./php-wasm.php', assetURL(manifest.bridge.adapterUrl)) });
     php = new PhpCgiNode({
       ...adapter, phpArgs: { ...adapter.phpArgs, getRandomValue: runtimeRandomValue }, version: entry.version, prefix, docroot: raw.documentRoot, persist: [], staticFS: true, autoTransaction: false,
       sharedLibs: entry.sharedLibs.map((library) => ({ ...library, url: assetURL(library.url).href })),

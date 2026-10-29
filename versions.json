@@ -25,15 +25,15 @@
     }
   ],
   "bridge": {
-    "version": "0.1.5",
+    "version": "0.1.6",
     "protocolVersion": 1,
-    "sourceCommit": "67c9f39c8491046c496aaec478fb1dd59d1d4688",
-    "url": "https://github.com/joomengine/mariadb-wasm-bridge/releases/download/v0.1.5/mariadb-wasm-bridge-0.1.5.tar.gz",
-    "sha256": "ba4f121211f77932c6ca240648674ea432988ae9d0687dee36a2d1d04d9b6ce4"
+    "sourceCommit": "a20fd8638577aa68bded4310cc25c73a470d772d",
+    "url": "https://github.com/joomengine/mariadb-wasm-bridge/releases/download/v0.1.6/mariadb-wasm-bridge-0.1.6.tar.gz",
+    "sha256": "ebd9de46d02fc97558ca33d355592aca8688b7a8603b7e6d900bb4e31acd6549"
   },
   "nativeDriver": {
     "repository": "joomengine/mariadb-wasm-bridge",
-    "sourceCommit": "67c9f39c8491046c496aaec478fb1dd59d1d4688",
+    "sourceCommit": "a20fd8638577aa68bded4310cc25c73a470d772d",
     "nativeSources": {
       "pdo_mariadb_wasm.c": "971166c9ecb35d49132be2a6e2aac116afeeae473f01d7fafa39f9089737876f",
       "php_pdo_mariadb_wasm.h": "538723d9a7af28f07e5d3a0350a77c98b79a831d7dd936156a8c4a18230af88b",
@@ -44,10 +44,10 @@
       "php-wasm.php": "e6914baf22aafb0333ed7a5df0fc6a3d2719bde40aa9a7577a64010d41627b2d"
     },
     "runtimeSources": {
-      "engine.mjs": "4961326dfe6bf43c4273144e6e8f299d2240d394a19a0a41eedb9f46830a6922",
+      "engine.mjs": "4f93e6989e81c354ee7602c72aa4b6fa86bc6d3ba5783b009d25ece451d68ae7",
       "errors.mjs": "27a25610082b7cf34894a8066457fa46da40555ffc2e5cda7cbbfaa11673e217",
-      "index.mjs": "f476bc6e75ffa9a3ef27e97d29c0381ab8ddb7e8091c88bfbf26e475f32c9605",
-      "protocol.mjs": "26e949f98a9b87403692edcbbd30d8a8b284a0fbabdf5c950efbef3bf353c998",
+      "index.mjs": "2d555f80891ce28f520893e85d493e78cd0215757b4962f2cf2f48562792ba1f",
+      "protocol.mjs": "d8893cc01494e6f409dcc596eaf4fc13afa73d5aa19874d2e3bb7f96ded1e6c0",
       "result.mjs": "c47406902784768a259eeeb86c9cd92de9b680a8e2058b034fcd1a587da120be",
       "worker.mjs": "0ebb4a9213a8278aeacb16841b725e79cdd7bee4655f9551a3626eb0382448a2"
     }

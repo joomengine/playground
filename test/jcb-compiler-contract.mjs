@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 
 /** Exercise the real compiler form and its downloadable, independently readable package. */
-export async function assertJcbCompiler(page) {
+export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, compileTimeoutMs = 180_000 } = {}) {
   const site = await page.evaluate(() => window.playground.baseUrl);
-  let element = await page.locator('#site-frame').elementHandle();
+  let element = await page.locator('#site-frame').count() ? await page.locator('#site-frame').elementHandle() : null;
   const owned = !element;
   if (owned) {
     await page.evaluate(() => {
@@ -16,21 +16,26 @@ export async function assertJcbCompiler(page) {
   }
   const frame = await element.contentFrame();
   const initial = frame.url();
+  let completed = false;
   try {
     page.testStep = 'open the actual JCB compiler and choose Demo J6';
     const response = await frame.goto(new URL('administrator/index.php?option=com_componentbuilder&view=compiler', site).href,
-      { waitUntil: 'load', timeout: 90_000 });
+      { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs });
     assert.equal(response.status(), 200);
+    await frame.waitForFunction(() => {
+      const image = document.querySelector('#compiler-spinner img');
+      return image?.complete && image.naturalWidth > 0;
+    }, null, { timeout: Math.min(navigationTimeoutMs, 30_000) });
     await frame.locator('#component_id').selectOption({ label: 'Demo J6' });
     const started = Date.now();
     page.testStep = 'compile Demo J6 through the administrator form';
     const [compiled] = await Promise.all([
-      frame.waitForNavigation({ waitUntil: 'load', timeout: 180_000 }),
-      frame.getByRole('button', { name: 'Compile Component', exact: true }).click(),
+      frame.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: compileTimeoutMs }),
+      frame.getByRole('button', { name: /Compile Component$/ }).click({ noWaitAfter: true }),
     ]);
     assert.equal(compiled.status(), 200, (await frame.locator('body').innerText()).slice(0, 3000));
     assert.doesNotMatch(await frame.locator('body').innerText(), /Undefined constant|Fatal error|Maximum execution time|SQLSTATE/);
-    const link = await frame.getByRole('link', { name: 'Download Component', exact: true }).getAttribute('href');
+    const link = await frame.getByRole('link', { name: /Download Component$/ }).getAttribute('href');
     const url = new URL(link, site);
     assert.equal(url.origin, new URL(site).origin);
     assert.ok(url.pathname.startsWith(new URL(site).pathname));
@@ -70,10 +75,12 @@ export async function assertJcbCompiler(page) {
     assert.equal(proof.manifest?.type, 'component');
     assert.match(proof.manifest.name, /demo/i);
     assert.ok(proof.manifest.version);
-    return { demoJ6: true, durationMs: Date.now() - started, zipBytes: downloaded.length, entries: proof.entries,
+    completed = true;
+    return { demoJ6: true, compilerImage: true, durationMs: Date.now() - started, zipBytes: downloaded.length, entries: proof.entries,
       manifest: proof.manifest, download: true };
   } finally {
-    if (owned) await page.locator('#compiler-contract-frame').evaluate(element => element.remove());
-    else if (initial.startsWith(site)) await frame.goto(initial, { waitUntil: 'load', timeout: 90_000 });
+    // Preserve a failed form for the browser runner's diagnostic screenshot and HTML.
+    if (completed && owned) await page.locator('#compiler-contract-frame').evaluate(element => element.remove());
+    else if (completed && initial.startsWith(site)) await frame.goto(initial, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs });
   }
 }

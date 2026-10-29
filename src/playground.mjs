@@ -17,7 +17,7 @@ export function prepareEnvironment() {
   preparation = (async () => {
     if (!globalThis.isSecureContext || !navigator.serviceWorker) throw new Error('The playground needs HTTPS or localhost and service worker support.');
     if (!navigator.locks || !globalThis.indexedDB) throw new Error('This browser does not provide the storage and locking APIs required by the playground.');
-    const registration = await navigator.serviceWorker.register(new URL('service-worker.mjs', base), { type: 'module', scope: base.pathname });
+    const registration = await navigator.serviceWorker.register(new URL('service-worker.mjs', base), { type: 'module', scope: base.pathname, updateViaCache: 'none' });
     const active = registration.installing ?? registration.waiting;
     if (active && active.state !== 'activated') await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Service worker activation timed out.')), 30_000);

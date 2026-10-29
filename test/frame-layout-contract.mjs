@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 
 /** Exercise responsive extension handlers without repeatedly moving the footer. */
 export async function assertFrameLayoutStable(page, frame) {
+  // The preceding settings action shows a seven-second notification. Its normal
+  // dismissal shortens the outer document and clamps scrollY at the bottom,
+  // even though the iframe and the visible footer have not moved.
+  await page.locator('#header-feedback').waitFor({ state: 'hidden', timeout: 10_000 });
   const originalHeight = await page.locator('#site-frame').evaluate(element => element.clientHeight);
   await frame.evaluate(() => {
     const block = document.createElement('div');
@@ -30,7 +34,9 @@ export async function assertFrameLayoutStable(page, frame) {
       const values = [];
       const sample = () => {
         values.push({ height: document.getElementById('site-frame').clientHeight, scroll: scrollY,
-          footer: document.getElementById('site-footer').getBoundingClientRect().top });
+          footer: document.getElementById('site-footer').getBoundingClientRect().top,
+          documentHeight: document.documentElement.scrollHeight,
+          feedbackHidden: document.getElementById('header-feedback')?.hidden });
         if (values.length < 24) requestAnimationFrame(sample); else resolve(values);
       };
       requestAnimationFrame(sample);
@@ -39,7 +45,8 @@ export async function assertFrameLayoutStable(page, frame) {
       'An idle site must not repeatedly resize its own viewport.');
     for (const sample of samples) {
       assert.ok(Math.abs(sample.height - samples[0].height) <= 1, 'The iframe height must settle.');
-      assert.ok(Math.abs(sample.scroll - samples[0].scroll) <= 1, 'The outer scroll position must remain stable at the footer.');
+      assert.ok(Math.abs(sample.scroll - samples[0].scroll) <= 1,
+        `The outer scroll position must remain stable at the footer. Samples: ${JSON.stringify(samples)}`);
       assert.ok(Math.abs(sample.footer - samples[0].footer) <= 1, 'The footer must not flicker between layout positions.');
     }
     const tallHeight = samples[0].height;

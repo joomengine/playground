@@ -2,6 +2,15 @@ import { createShareURL } from './config.mjs';
 const SITE_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 const PUBLIC_FIELDS = ['deployId', 'joomlaVersion', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'phpSettings', 'menus', 'template', 'languageTags', 'multilingual', 'content'];
 
+/** Approval must preserve command argument boundaries as well as source URLs. */
+export function customSetupDetails(input) {
+  const sources = [...(input.extensions || []).map(item => item.url), input.template?.url,
+    ...(input.languages || []).map(item => item.url)].filter(Boolean);
+  const commands = (input.startupCommands || []).map(command => [...command]);
+  return { sources, commands, extensions: input.extensions || [], template: input.template || null,
+    languages: input.languages || [], content: input.content || null, menus: input.menus || [] };
+}
+
 /** Scope resume preferences to this deployment, like its browser database stores. */
 export function savedStateKey(baseURL) {
   return `joomengine:launch:${new URL(baseURL).href}`;

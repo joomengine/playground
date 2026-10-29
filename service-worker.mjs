@@ -68,7 +68,12 @@ self.addEventListener('fetch', event => {
     try {
       const response = url.pathname.startsWith(sitePrefix)
         ? await routeToPlayground(event.request)
-        : await fetch(event.request);
+        : await fetch(event.request, {
+          // Revalidate the shell/module graph and catalog after a release. Large
+          // runtime binaries use versioned/content-hashed URLs in the manifest.
+          ...(!url.pathname.startsWith(`${scope.pathname}assets/`) || url.pathname === `${scope.pathname}assets/manifest.json`
+            ? { cache: event.request.cache === 'no-store' ? 'no-store' : 'no-cache' } : {}),
+        });
       if (response.type === 'opaque' || response.status === 0) return response;
       const headers = isolationHeaders(response.headers);
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });

@@ -6,11 +6,11 @@ Rocket provides the next JoomEngine Playground interface and deployment workflow
 - [x] Deploy terminology and configuration throughout, without legacy compatibility.
 - [x] Visual deployment editor, complete share links, templates and component menu home pages.
 - [x] Adjustable, validated PHP settings shared by browser and build runtimes.
-- [x] JCB + MCP on Joomla 6; JCB and Service Directory on Joomla 5 and 6.
+- [x] Prepared JCB by default on PHP 8.5, with a cancellable ten-second countdown; MCP remains optional on Joomla 6.
 - [x] Afrikaans-first multilingual deployments with all requested languages; ordinary deployments default to English.
 - [x] Independently translated Rocket interface, starting in English, including RTL support.
 - [x] Clear persistence, credentials, downloads and standalone viewing.
-- [x] Verified bridge 0.1.5 release assets, compatibility fixes and focused validation.
+- [x] Independent database sessions, bounded large-value exports, configuration recovery and real compiler validation.
 
 The footer copyright and Powered by attribution form one line when space permits. The Joomla affiliation notice remains separate and smaller. Upstream credits remain in README and the interface information dialog.
 

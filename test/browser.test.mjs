@@ -227,6 +227,24 @@ async function closeDeployEditor(page) {
   if (await page.locator('#deploy-dialog').isVisible()) await page.locator('#deploy-dialog [data-close-dialog]').click();
 }
 
+async function approveFixtureLaunch(page, button, source) {
+  const pending = page.waitForEvent('dialog');
+  const clicked = button.click();
+  const review = await pending;
+  assert.equal(review.type(), 'confirm');
+  assert.ok(review.message().includes(source), 'The source being installed must be visible in the launch review.');
+  await review.accept();
+  await clicked;
+}
+
+async function reviewFixtureLink(page, source) {
+  await page.locator('#deploy-dialog[open]').waitFor();
+  assert.ok((await page.locator('#extensions').inputValue()).includes(source));
+  assert.equal(await page.locator('#site-frame').count(), 0, 'Shared custom packages must wait for review before execution.');
+  await closeDeployEditor(page);
+  await approveFixtureLaunch(page, page.locator('#embedded-launch'), source);
+}
+
 async function showSiteActions(page) {
   if (await page.locator('#site-actions').getAttribute('open') === null) await page.locator('#site-actions > summary').click();
 }
@@ -884,7 +902,7 @@ for (const name of browserNames) {
         await closeDeployEditor(page);
         await showQuickSettings(page);
         page.testStep = 'launch administrator';
-        await page.locator('#launch-button').click();
+        await approveFixtureLaunch(page, page.locator('#launch-button'), new URL('__test_extension.zip', server.url).href);
         await renderedSiteFrame(page);
         assert.match(await page.frameLocator('#site-frame').locator('html').innerHTML(), /com_cpanel|task=logout|value=["']logout["']/i);
         await mkdir(path.join(root, 'test-results'), { recursive: true });
@@ -945,6 +963,7 @@ for (const name of browserNames) {
         const freshURL = new URL(server.url);
         for (const [key, value] of Object.entries({ deploy: 'blank', joomla: defaultPair.joomlaVersion, php: changedPHP, key: savedKey, fresh: '1', extension: new URL('__test_extension.zip', server.url).href })) freshURL.searchParams.set(key, value);
         await page.goto(freshURL.href);
+        await reviewFixtureLink(page, new URL('__test_extension.zip', server.url).href);
         await renderedSiteFrame(page);
         const freshKey = await page.locator('#storage-key').inputValue();
         assert.notEqual(freshKey, savedKey, 'fresh=1 must give the new saved site its own storage key.');
@@ -960,6 +979,21 @@ for (const name of browserNames) {
         await renderedSiteFrame(page);
         assert.equal(await page.locator('#storage-key').inputValue(), savedKey);
         assert.deepEqual(await previewContract(page), afterSwitch, 'A fresh URL must leave the original saved site intact.');
+        page.testStep = 'changed sources on a saved-site link still require review';
+        await showSiteActions(page);
+        await page.locator('#close-button').click();
+        await page.locator('#embedded-launch:enabled').waitFor();
+        const changedSourceURL = new URL(savedURL);
+        const unreviewedSource = new URL('unreviewed-extension.zip', server.url).href;
+        changedSourceURL.searchParams.set('extension', unreviewedSource);
+        await page.goto(changedSourceURL.href);
+        await page.locator('#deploy-dialog[open]').waitFor();
+        assert.ok((await page.locator('#extensions').inputValue()).includes(unreviewedSource));
+        assert.equal(await page.locator('#launch-countdown').isVisible(), false);
+        assert.equal(await page.locator('#site-frame').count(), 0);
+        await page.goto(savedURL.href);
+        await renderedSiteFrame(page);
+        assert.deepEqual(await previewContract(page), afterSwitch, 'Reviewing an altered link must preserve the original saved site.');
         page.testStep = 'new site control preserves saved sites';
         await showSiteActions(page);
         await page.locator('#new-site-button').click();
@@ -1019,6 +1053,7 @@ for (const name of browserNames) {
           name: 'Rocket shared demonstration', persist: '0', extension: new URL('__test_extension.zip', server.url).href })) url.searchParams.set(key, value);
         page.testStep = 'launch temporary site in English';
         await page.goto(url.href);
+        await reviewFixtureLink(page, new URL('__test_extension.zip', server.url).href);
         await page.locator('#loading-view:not([hidden])').waitFor();
         await page.locator('#loading-message').filter({ hasText: /Starting MariaDB|Loading PHP|Loading Joomla|Extracting Joomla/ }).waitFor();
         await mkdir(path.join(root, 'test-results'), { recursive: true });

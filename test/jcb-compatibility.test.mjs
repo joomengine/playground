@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { guardJcbImageTypes, applyJcbRuntimeCompatibility } from '../src/jcb-compatibility.mjs';
+import { guardJcbImageTypes, guardJcbImageCache, applyJcbRuntimeCompatibility } from '../src/jcb-compatibility.mjs';
 
 const helper = `<?php
 class ComponentbuilderHelper {
@@ -26,6 +26,37 @@ test('optional image identifiers are guarded without defining unsupported decode
   assert.match(patched, /return \$extensions\[\$result\[2\]\];/);
   assert.equal(guardJcbImageTypes(patched), patched, 'Repeated requests must not rewrite the helper.');
   assert.equal(guardJcbImageTypes(helper.replaceAll('\n', '\r\n')).replaceAll('\r\n', '\n'), patched);
+});
+
+const cache = `public static function getDynamicContent($type, $size) {
+  $target = self::$dynamicContent[$type][$size][$get];
+  $path = JPATH_ROOT . "/administrator/components/com_componentbuilder/assets/images/$type/$file_name";
+  if (($image_data = FileHelper::getContent($target['url'], false)) !== false && md5($image_data) === $target['hash']) {
+    FileHelper::write($path, $image_data);
+  }
+  return str_replace('[[[ROOT-URL]]]', Uri::root(), $target['html']);
+}`;
+
+test('missing image caches use only the original HTTPS image source after an unreadable download', () => {
+  const patched = guardJcbImageCache(cache);
+  assert.notEqual(patched, cache);
+  assert.match(patched, /\$image_data === false && !is_file\(\$path\)/);
+  assert.match(patched, /htmlspecialchars\(\$remote, ENT_QUOTES \| ENT_SUBSTITUTE, 'UTF-8'\)/);
+  assert.match(patched, /=== 'https'/);
+  assert.match(patched, /!isset\(\$parts\['user'\]\)/);
+  assert.match(patched, /!isset\(\$parts\['pass'\]\)/);
+  assert.ok(patched.includes("(<img\\b[^>]*?\\ssrc"));
+  assert.doesNotMatch(patched, /https:\/\//, 'The fallback must not carry its own URL or host list.');
+  assert.equal(guardJcbImageCache(patched), patched);
+  assert.equal(guardJcbImageCache(cache.replaceAll('\n', '\r\n')).replaceAll('\r\n', '\n'), patched);
+});
+
+test('unknown image cache structures are never rewritten', () => {
+  for (const source of [cache.replace('getDynamicContent', 'otherMethod'), cache.replace("md5($image_data)", 'customCheck($image_data)'),
+    cache.replace("$target['url']", "$other['url']"), cache.replace('$path = JPATH_ROOT', '$path = OTHER_ROOT'),
+    cache.replace("Uri::root()", "Uri::base()"), '<?php class ComponentbuilderHelper {}']) {
+    assert.equal(guardJcbImageCache(source), source);
+  }
 });
 
 test('changed helper structure or computed image maps are left untouched', () => {
