@@ -139,9 +139,11 @@ export function createWorkspaceFileService(FS, root = '/persist/www', options = 
     if (path === physicalRoot) error('PROTECTED_ROOT', 'The workspace root cannot be replaced, moved, copied or deleted.');
   }
 
-  function metadata(path, info = FS.stat(resolve(path))) {
+  function metadata(path, info, actual = resolve(path)) {
+    info ??= FS.stat(actual);
     return {
-      path: normalizeWorkspacePath(path), type: directory(info.mode) ? 'directory' : regular(info.mode) ? 'file' : 'other',
+      path: normalizeWorkspacePath(path), canonicalPath: relative(actual),
+      type: directory(info.mode) ? 'directory' : regular(info.mode) ? 'file' : 'other',
       size: info.size, mtime: date(info.mtime), ctime: date(info.ctime),
       readonly: Boolean(options.readOnly) || (info.mode & 0o222) === 0,
     };
@@ -192,7 +194,13 @@ export function createWorkspaceFileService(FS, root = '/persist/www', options = 
     return regular(info.mode) ? digest(fileBytes(actual)) : fingerprint(snapshot(path));
   }
 
-  async function precondition(path, expected) {
+  async function precondition(path, expected, expectedCanonicalPath) {
+    if (expectedCanonicalPath !== undefined) {
+      const canonicalPath = normalizeWorkspacePath(expectedCanonicalPath);
+      if (relative(resolve(path, { allowMissing: true })) !== canonicalPath) {
+        error('CONFLICT', `The workspace target changed since it was reviewed: ${normalizeWorkspacePath(path)}.`);
+      }
+    }
     if (expected === undefined) return;
     if (expected !== null && typeof expected !== 'string') error('INVALID_REVISION', 'A revision must be a string or null for a missing file.');
     if (await revision(path) !== expected) error('CONFLICT', `The workspace item changed since it was reviewed: ${normalizeWorkspacePath(path)}.`);
@@ -279,7 +287,10 @@ export function createWorkspaceFileService(FS, root = '/persist/www', options = 
 
   async function captureAfter(entries) {
     return Promise.all(entries.map(async ({ path }) => {
-      try { return { path, revision: await revision(path) }; }
+      try {
+        const canonicalPath = relative(resolve(path, { allowMissing: true }));
+        return { path, canonicalPath, revision: await revision(path) };
+      }
       catch (cause) { return { path, error: cause.message, code: cause.code || 'READ_FAILED' }; }
     }));
   }
@@ -310,10 +321,10 @@ export function createWorkspaceFileService(FS, root = '/persist/www', options = 
       return change;
     });
     if (args.preconditions !== undefined && (!Array.isArray(args.preconditions) || args.preconditions.length > limits.maxEntries)) error('INVALID_REVISION', 'Invalid change-set preconditions.');
-    for (const condition of args.preconditions || []) await precondition(condition.path, condition.revision);
+    for (const condition of args.preconditions || []) await precondition(condition.path, condition.revision, condition.canonicalPath);
     for (const change of changes) {
-      await precondition(change.path, change.expectedRevision);
-      if (change.target) await precondition(change.target, change.expectedTargetRevision);
+      await precondition(change.path, change.expectedRevision, change.expectedCanonicalPath);
+      if (change.target) await precondition(change.target, change.expectedTargetRevision, change.expectedTargetCanonicalPath);
     }
     // Snapshot canonical destinations too: two aliases must not produce separate
     // undo records for the same underlying directory or file.
@@ -406,7 +417,7 @@ export function createWorkspaceFileService(FS, root = '/persist/www', options = 
     if (!entry) error('RECOVERY_EXPIRED', 'This recovery snapshot is no longer available in the bounded session history.');
     for (const item of entry.after) {
       if (item.error) error('RECOVERY_UNVERIFIED', `The post-write state of ${item.path} could not be read. Its snapshot is retained; automatic recovery cannot safely overwrite unverified changes.`);
-      await precondition(item.path, item.revision);
+      await precondition(item.path, item.revision, item.canonicalPath);
     }
     const results = [];
     const changes = [];
@@ -568,7 +579,7 @@ export function createWorkspaceFileService(FS, root = '/persist/www', options = 
         const path = normalizeWorkspacePath(args.path);
         const actual = resolve(path, { allowMissing: true });
         const info = lstat(actual);
-        return info ? { ...metadata(path, info), ...(args.revision ? { revision: await revision(path) } : {}) } : null;
+        return info ? { ...metadata(path, info, actual), ...(args.revision ? { revision: await revision(path) } : {}) } : null;
       }
       case 'list': {
         const path = normalizeWorkspacePath(args.path);
@@ -587,8 +598,10 @@ export function createWorkspaceFileService(FS, root = '/persist/www', options = 
       }
       case 'read': {
         const path = normalizeWorkspacePath(args.path);
-        const bytes = fileBytes(resolve(path));
-        return { path, bytes, revision: await digest(bytes), stat: metadata(path) };
+        const actual = resolve(path);
+        const bytes = fileBytes(actual);
+        const stat = metadata(path, undefined, actual);
+        return { path, canonicalPath: stat.canonicalPath, bytes, revision: await digest(bytes), stat };
       }
       case 'batch': return batch(args);
       case 'recover': return recover(args);

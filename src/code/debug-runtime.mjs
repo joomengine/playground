@@ -323,22 +323,20 @@ export class PhpDebugRuntime {
     }
   }
   requirePaused() { if (!this.php || this.phase !== 'paused') throw new Error('Pause PHP before inspecting or stepping.'); }
-  async resume(command) {
+  async resume(command, { prepare, step = command !== 'continue' } = {}) {
     await this.inspectionQueue;
     this.requirePaused();
-    this.phase = 'running'; this.resumeReason = command === 'continue' ? undefined : 'step'; this.references.clear(); this.callbacks.resumed?.();
+    await this.send('ev jec_debug_clear()');
+    if (prepare) await this.send(`ev ${prepare}`);
+    this.binary.jecDebugResume();
+    this.phase = 'running'; this.resumeReason = step ? 'step' : undefined; this.references.clear(); this.callbacks.resumed?.();
     this.emit('continued', { threadId: 1, allThreadsContinued: true });
     await this.php.provideInput(command);
   }
   continue() { return this.resume('continue'); }
-  next() { return this.resume('next'); }
+  next() { return this.resume('continue', { prepare: 'jec_debug_step_over()', step: true }); }
   stepIn() { return this.resume('step'); }
-  async stepOut() {
-    await this.inspectionQueue;
-    this.requirePaused();
-    await this.send('ev jec_debug_step_out()');
-    return this.resume('finish');
-  }
+  stepOut() { return this.resume('finish', { prepare: 'jec_debug_step_out()' }); }
   async pause() {
     if (!this.binary || this.phase !== 'running') throw new Error('PHP is not executing.');
     this.pauseRequested = true; this.binary.jecDebugControl = 1;
@@ -369,42 +367,37 @@ export class PhpDebugRuntime {
     return result;
   }
   async scopes(frameId) {
-    return this.withFrame(frameId, async () => [
-      { name: 'Locals', variablesReference: this.reference(await this.php.dumpVars() || {}), expensive: false },
-      { name: 'Globals', variablesReference: this.reference(await this.php.dumpGlobals() || {}), expensive: true },
-    ]);
-  }
-  describe(name, value) {
-    const object = value !== null && (typeof value === 'object' || typeof value === 'function');
-    const array = Array.isArray(value) || (object && typeof value[Symbol.iterator] === 'function' && typeof value.length === 'number');
-    return { name, value: object ? (array ? `Array(${value.length})` : 'Object') : value === null ? 'null' : typeof value === 'string' ? JSON.stringify(value) : String(value),
-      type: value === null ? 'null' : array ? 'array' : typeof value === 'number' ? (Number.isInteger(value) ? 'int' : 'float') : typeof value === 'boolean' ? 'bool' : typeof value,
-      variablesReference: object ? this.reference(value) : 0,
-      ...(array ? { indexedVariables: value.length } : {}) };
+    return this.withFrame(frameId, async () => {
+      const locals = await this.nativeJSON('jec_debug_scope(false)');
+      const globals = await this.nativeJSON('jec_debug_scope(true)');
+      return [
+        { name: 'Locals', variablesReference: locals.variablesReference, expensive: false },
+        { name: 'Globals', variablesReference: globals.variablesReference, expensive: true },
+      ];
+    });
   }
   async variables(reference, { start = 0, count = 100 } = {}) {
     this.requirePaused();
-    const value = this.references.get(reference);
-    if (!value) throw new Error('The PHP variable reference expired.');
+    if (!Number.isSafeInteger(reference) || reference < 1) throw new TypeError('A valid PHP variable handle is required.');
     if (!Number.isSafeInteger(start) || start < 0 || !Number.isSafeInteger(count) || count < 0 || count > 1000) throw new RangeError('Inspect at most 1000 properties at a time.');
-    return Reflect.ownKeys(value).filter(name => typeof name === 'string').slice(start, start + (count || 100)).map(name => {
-      try { return this.describe(name, value[name]); } catch (error) { return { name, value: error.message, variablesReference: 0 }; }
-    });
+    return this.withFrame(0, () => this.nativeJSON(`jec_debug_variables(${reference}, ${start}, ${count || 100})`));
+  }
+  async nativeJSON(expression) {
+    const name = `__jec_eval_${crypto.randomUUID().replaceAll('-', '')}`;
+    await this.send(`ev ($${name} = ${expression}) ? null : null;`);
+    const values = await this.php.dumpVars();
+    if (!Object.prototype.hasOwnProperty.call(values || {}, name)) throw new Error('PHP expression evaluation failed. See the debug console for the PHP error.');
+    const value = values[name];
+    await this.send(`ev eval(${phpString(`unset($${name});`)});`);
+    if (typeof value !== 'string') throw new Error('PHP inspection returned invalid data.');
+    return JSON.parse(value);
   }
   async evaluate(expression, frameId = 0) {
     if (typeof expression !== 'string' || !expression.trim() || /[\r\n\0]/.test(expression)) throw new TypeError('Enter one PHP expression. Evaluation may have side effects.');
     return this.withFrame(frameId, async () => {
-      // phpdbg eval executes in the selected frame. A unique temporary captures
-      // the value without requiring console-output parsing or JSON conversion.
-      const name = `__jec_eval_${crypto.randomUUID().replaceAll('-', '')}`;
-      // phpdbg prints its eval return value recursively. Return null while
-      // retaining the value in the selected frame for progressive inspection.
-      await this.send(`ev ($${name} = ${encodedExpression(expression)}) ? null : null;`);
-      const values = await this.php.dumpVars();
-      if (!Object.prototype.hasOwnProperty.call(values || {}, name)) throw new Error('PHP expression evaluation failed. See the debug console for the PHP error.');
-      const value = values[name];
-      const result = this.describe('', value);
-      await this.send(`ev eval(${phpString(`unset($${name});`)});`);
+      // Native handles retain the actual value without recursive print_r or
+      // object property proxies invoking application magic methods.
+      const result = await this.nativeJSON(`jec_debug_describe(${encodedExpression(expression)})`);
       return { result: result.value, type: result.type, variablesReference: result.variablesReference, indexedVariables: result.indexedVariables };
     });
   }

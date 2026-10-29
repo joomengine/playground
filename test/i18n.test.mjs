@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import english from '../src/locales/en.mjs';
+import { FILE_ACTION_MESSAGES } from '../src/code/file-actions.mjs';
+import { AI_PANEL_MESSAGES } from '../src/code/ai-panel.mjs';
+import { DETACHED_MESSAGES } from '../src/code/detached-tools.mjs';
+import { WORKBENCH_MESSAGES } from '../src/code/workbench-messages.mjs';
 import { UI_LANGUAGES, UI_LOCALE_STORAGE_KEY, applyTranslations, getDirection, getLocale, initializeLocale, loadLocale, normalizeLocale, setLocale, t } from '../src/i18n.mjs';
 
 function memoryStorage() {
@@ -26,6 +30,9 @@ test('Rocket starts in English and its language is independent of Joomla deploym
 });
 
 test('Every selectable interface language translates the complete UI and preserves interpolated fields', async () => {
+  for (const [key, message] of Object.entries({ ...FILE_ACTION_MESSAGES, ...AI_PANEL_MESSAGES, ...DETACHED_MESSAGES, ...WORKBENCH_MESSAGES })) {
+    assert.equal(english[key], message, `Code fallback must be included unchanged in the locale catalog: ${key}`);
+  }
   const placeholders = message => [...message.matchAll(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g)].map(match => match[1]).sort();
   for (const { code } of UI_LANGUAGES) {
     const messages = await loadLocale(code);

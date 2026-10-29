@@ -62,3 +62,123 @@ test('Save All uses the reserved transport and releases it on failure', async ()
   assert.deepEqual(calls, ['reserved', 'ordinary']);
   provider.dispose();
 });
+
+test('Explorer bursts remain bounded and duplicate metadata failures retain VS Code error codes', async () => {
+  let active = 0, maximum = 0, requests = 0;
+  const provider = new JoomlaFileSystemProvider({ async request(_operation, args) {
+    requests++; active++; maximum = Math.max(maximum, active);
+    await new Promise(resolve => setTimeout(resolve, 1));
+    active--;
+    if (args.path === '/missing') { const error = new Error('Missing'); error.code = 'ENOENT'; throw error; }
+    return { type: 'file', size: 0, mtime: 1, ctime: 1 };
+  } }, 'test');
+  const values = await Promise.all(Array.from({ length: 160 }, (_, index) => provider.request('stat', { path: `/file-${index % 80}` })));
+  assert.equal(values.length, 160);
+  assert.equal(requests, 80);
+  assert.ok(maximum <= 4, `Only four calls may reach the PHP owner queue, observed ${maximum}.`);
+  const failures = await Promise.allSettled([provider.request('stat', { path: '/missing' }), provider.request('stat', { path: '/missing' })]);
+  assert.equal(requests, 81);
+  assert.ok(failures.every(result => result.status === 'rejected' && result.reason.code === 'EntryNotFound'));
+  provider.dispose();
+});
+
+test('disk comparison reads cannot authorize overwriting a dirty editor buffer baseline', async () => {
+  let revision = 'original', dirty = false, attempted;
+  const provider = new JoomlaFileSystemProvider({ async request(operation, args) {
+    if (operation === 'read') return { bytes: new Uint8Array([1]), revision };
+    if (operation === 'write') {
+      attempted = args.expectedRevision;
+      if (attempted !== revision) throw Object.assign(new Error('Changed on disk'), { code: 'CONFLICT' });
+      return { ok: true, results: [{ operation, path: args.path, revision }], changes: [] };
+    }
+  } }, 'test');
+  provider.isDirty = () => dirty;
+  const uri = provider.uri('/file.php');
+  await provider.readFile(uri);
+  dirty = true;
+  revision = 'external';
+  await provider.readFile(uri); // Native compare view reads the saved file.
+  assert.equal(provider.readRevisions.get('/file.php'), 'external');
+  assert.equal(provider.revisions.get('/file.php'), 'original');
+  await assert.rejects(provider.writeFile(uri, new Uint8Array([2]), { create: false, overwrite: true }),
+    error => error.fileOperationResult === FileOperationResult.FILE_MODIFIED_SINCE);
+  assert.equal(attempted, 'original');
+  // Only resolution of the primary text model accepts the new disk baseline.
+  provider.acceptReadRevision('/file.php');
+  await provider.writeFile(uri, new Uint8Array([2]), { create: false, overwrite: true });
+  assert.equal(attempted, 'external');
+  provider.dispose();
+});
+
+test('explicit overwrite authorizes exactly the reviewed current revision and still rejects a later disk change', async () => {
+  let revision = 'original', attempted;
+  const provider = new JoomlaFileSystemProvider({ async request(operation, args) {
+    if (operation === 'read') return { bytes: new Uint8Array([1]), revision };
+    if (operation === 'stat') { assert.equal(args.revision, true); return { type: 'file', revision }; }
+    if (operation === 'write') {
+      attempted = args.expectedRevision;
+      if (attempted !== revision) throw Object.assign(new Error('Changed on disk'), { code: 'CONFLICT' });
+      return { ok: true, results: [{ operation, path: args.path, revision: 'saved' }], changes: [] };
+    }
+  } }, 'test');
+  const uri = provider.uri('/file.php');
+  await provider.readFile(uri);
+  revision = 'first-external';
+  await provider.authorizeOverwrite('/file.php');
+  revision = 'second-external';
+  await assert.rejects(provider.writeFile(uri, new Uint8Array([2]), { create: false, overwrite: true }),
+    error => error.fileOperationResult === FileOperationResult.FILE_MODIFIED_SINCE);
+  assert.equal(attempted, 'first-external');
+  await provider.authorizeOverwrite('/file.php');
+  await provider.writeFile(uri, new Uint8Array([2]), { create: false, overwrite: true });
+  assert.equal(attempted, 'second-external');
+  assert.equal(provider.revisions.get('/file.php'), 'saved');
+  provider.dispose();
+});
+
+test('saving an unread path checks missing or existing disk state before its write', async () => {
+  let revision = null, changeAfterStat = false;
+  const provider = new JoomlaFileSystemProvider({ async request(operation, args) {
+    if (operation === 'stat') {
+      const result = revision === null ? null : { type: 'file', revision };
+      if (changeAfterStat) revision = 'concurrent';
+      return result;
+    }
+    if (operation === 'write') {
+      if (args.expectedRevision !== revision) throw Object.assign(new Error('Changed on disk'), { code: 'CONFLICT' });
+      return { ok: true, results: [{ operation, path: args.path, revision: 'saved' }], changes: [] };
+    }
+  } }, 'test');
+  const uri = provider.uri('/new.php');
+  changeAfterStat = true;
+  await assert.rejects(provider.writeFile(uri, new Uint8Array([2]), { create: true, overwrite: true }),
+    error => error.fileOperationResult === FileOperationResult.FILE_MODIFIED_SINCE);
+  changeAfterStat = false;
+  await provider.writeFile(uri, new Uint8Array([2]), { create: true, overwrite: true });
+  assert.equal(provider.revisions.get('/new.php'), 'saved');
+  provider.dispose();
+});
+
+test('content-identical alias retarget cannot bypass the editor canonical baseline', async () => {
+  let canonicalPath = '/original.php', written;
+  const provider = new JoomlaFileSystemProvider({ async request(operation, args) {
+    if (operation === 'read') return { bytes: new Uint8Array([1]), revision: 'same-content', canonicalPath };
+    if (operation === 'stat') return { type: 'file', revision: 'same-content', canonicalPath };
+    if (operation === 'write') {
+      written = args;
+      if (args.expectedCanonicalPath !== canonicalPath) { const error = Error('Alias changed'); error.code = 'CONFLICT'; throw error; }
+      return { ok: true, results: [], changes: [] };
+    }
+  } }, 'test');
+  await provider.readFile(provider.uri('/alias.php'));
+  provider.isDirty = () => true;
+  canonicalPath = '/different.php';
+  await provider.readFile(provider.uri('/alias.php'));
+  await assert.rejects(provider.writeFile(provider.uri('/alias.php'), new Uint8Array([2]), { create: true, overwrite: true }),
+    error => error.fileOperationResult === FileOperationResult.FILE_MODIFIED_SINCE);
+  assert.equal(written.expectedCanonicalPath, '/original.php');
+  await provider.authorizeOverwrite('/alias.php');
+  await provider.writeFile(provider.uri('/alias.php'), new Uint8Array([2]), { create: true, overwrite: true });
+  assert.equal(written.expectedCanonicalPath, '/different.php');
+  provider.dispose();
+});

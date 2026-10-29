@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "integrationVersion": "38.1.3",
+  "upstream": [
+    {
+      "name": "CodinGame Monaco VS Code integration",
+      "version": "38.1.3",
+      "repository": "https://github.com/CodinGame/monaco-vscode-api",
+      "revision": "010c84da9caff452b81db844b647b6ab749af012",
+      "licence": "MIT",
+      "noticeFiles": [
+        "LICENSE.codingame.txt"
+      ],
+      "evidence": "package.json and package-lock.json at the pinned source revision declare the VS Code/Monaco and embedded package versions."
+    },
+    {
+      "name": "Microsoft Visual Studio Code",
+      "version": "1.142.0",
+      "repository": "https://github.com/microsoft/vscode",
+      "revision": "d956e8a6ac5d904486557eea07e1d6bd62a4d36f",
+      "licence": "MIT with preserved third-party component notices",
+      "noticeFiles": [
+        "LICENSE.vscode.txt",
+        "ThirdPartyNotices.vscode.txt"
+      ]
+    },
+    {
+      "name": "Microsoft Monaco Editor",
+      "version": "0.57.0",
+      "repository": "https://github.com/microsoft/monaco-editor",
+      "revision": "d61824269f1377111d34306e4a47172327777083",
+      "licence": "MIT with preserved third-party component notices",
+      "noticeFiles": [
+        "LICENSE.monaco.txt",
+        "ThirdPartyNotices.monaco.txt"
+      ]
+    }
+  ],
+  "embeddedPackages": [
+    {
+      "name": "vscode-oniguruma",
+      "version": "1.7.0",
+      "resolved": "https://registry.npmjs.org/vscode-oniguruma/-/vscode-oniguruma-1.7.0.tgz",
+      "integrity": "sha512-L9WMGRfrjOhgHSdOYgCt/yRMsXzLDJSL7BPrOZt73gU0iWO4mpqzqQzOz5srxqTvMBaR0XZTSrVWo4j55Rc6cA==",
+      "licence": "MIT",
+      "noticeFiles": [
+        "LICENSE.vscode-oniguruma.txt",
+        "NOTICES.vscode-oniguruma.txt"
+      ],
+      "evidence": "Pinned CodinGame package-lock.json; npm archive integrity verified.",
+      "verifiedBundledFile": "node_modules/@codingame/monaco-vscode-textmate-service-override/external/vscode-oniguruma/release/onig.wasm",
+      "verification": "Byte-identical to release/onig.wasm in the verified npm archive."
+    },
+    {
+      "name": "vscode-textmate",
+      "version": "9.3.2",
+      "resolved": "https://registry.npmjs.org/vscode-textmate/-/vscode-textmate-9.3.2.tgz",
+      "integrity": "sha512-n2uGbUcrjhUEBH16uGA0TvUfhWwliFZ1e3+pTjrkim1Mt7ydB41lV08aUvsi70OlzDWp6X7Bx3w/x3fAXIsN0Q==",
+      "licence": "MIT",
+      "noticeFiles": [
+        "LICENSE.vscode-textmate.txt"
+      ],
+      "evidence": "Pinned CodinGame package-lock.json; npm archive integrity verified."
+    },
+    {
+      "name": "@vscode/codicons",
+      "version": "0.0.46-48",
+      "resolved": "https://registry.npmjs.org/@vscode/codicons/-/codicons-0.0.46-48.tgz",
+      "integrity": "sha512-HhX6VUa84nR9C9ceyiZvR1lRCOc4dZC1vSwnyPWiqIpN+06x+KDaGGn0WFmFLG0APariLhFPlBUljep1cIWk/Q==",
+      "licence": "CC-BY-4.0",
+      "noticeFiles": [
+        "LICENSE.codicons.txt",
+        "LICENSE-CODE.codicons.txt"
+      ],
+      "evidence": "Pinned CodinGame package-lock.json; npm archive integrity verified.",
+      "verifiedBundledFile": "node_modules/@codingame/monaco-vscode-api/vscode/src/vs/base/browser/ui/codicons/codicon/codicon.ttf",
+      "verification": "Byte-identical to dist/codicon.ttf in the verified npm archive."
+    }
+  ],
+  "correspondingSource": [
+    {
+      "name": "jschardet",
+      "version": "3.1.4",
+      "resolved": "https://registry.npmjs.org/jschardet/-/jschardet-3.1.4.tgz",
+      "integrity": "sha512-/kmVISmrwVwtyYU40iQUOp3SUPk2dhNCMsZBQX0R1/jZ8maaXJ/oZIzUOiyOqcgtLnETFKYChbJ5iDC/eWmFHg==",
+      "revision": "9c59b6e388ddcdf8708a06da2411f88cc5d294c3",
+      "repository": "https://github.com/aadsm/jschardet",
+      "licence": "LGPL-2.1-or-later",
+      "distributionDirectory": "jschardet",
+      "replacementModule": "../../jschardet.js",
+      "modifications": "No library source changes. A separate ESM adapter exposes the existing CommonJS exports for the browser."
+    }
+  ],
+  "noticeDigests": {
+    "LICENSE-CODE.codicons.txt": "9906940f61b1f0b533fa7d99baf55178b2808fbe113ea51dfbfad8572ccd5f2b",
+    "LICENSE.codicons.txt": "af5e030844efddbc7ab00dcfea8b019703753d4d9f5172d727c533a492aec665",
+    "LICENSE.codingame.txt": "cfc1e8f5d4ff0aba05f0e8d6d781b68088ab7f2fc054dcee6a85aaa3753b653e",
+    "LICENSE.monaco.txt": "5378c3bba06d4996015eeb26a54e76811e2842c876d1b455c3ac7bcd75429f9c",
+    "LICENSE.vscode-oniguruma.txt": "ddde8aba8fe72b4830e27901fc78733eb6db7b6c653161075de213a6adeda3fd",
+    "LICENSE.vscode-textmate.txt": "b5cb7ff7859e7d282d98fc43ab081b0dda5dc659dc3385cf65740c759a7e6a6c",
+    "LICENSE.vscode.txt": "6b4861ff7dc16820de113b2356eaa9953a5b7a023ce91bd0d0edb109f2a0c0e2",
+    "NOTICES.vscode-oniguruma.txt": "615d94d89eacc046241518c247f6650a5df80d1adf4b284a756f500867620b35",
+    "ThirdPartyNotices.monaco.txt": "81e99a0923eaf68a3b7e8f5ab5422cde54b6035a0a07c52203ebb2acffa118b0",
+    "ThirdPartyNotices.vscode.txt": "111354f31f180212e7fda9bf4e6c811fcbc610d60f1e98b94ec92d1a0744925d"
+  },
+  "localAdaptations": [
+    {
+      "component": "@codingame/monaco-vscode-api",
+      "version": "38.1.3",
+      "sourceFile": "@codingame/monaco-vscode-api/vscode/src/vs/workbench/services/textfile/common/encoding.js",
+      "sourceSha256": "70f5165292a49dfb89323b40d22c3c6cce9dec3ebf4b649ea1e167abf4ac46e0",
+      "buildScript": "scripts/code-assets.mjs",
+      "adapter": "src/code/encoding-guard.mjs",
+      "modification": "Bundle-time replacement of permissive Unicode decoding with fatal UTF-8/UTF-16 decoding; legacy iconv paths unchanged. The installed package source is not modified."
+    }
+  ]
+}

@@ -6,6 +6,7 @@ let runtime;
 let running = false;
 let nextDatabaseId = 0;
 const databaseCalls = new Map();
+const errorMessage = error => error?.message || String(error);
 
 function databaseCall(payload) {
   const id = ++nextDatabaseId;
@@ -37,7 +38,7 @@ async function start(message) {
     });
     self.postMessage({ type: 'debug-result', value, snapshot: runtime.snapshotEntries });
   } catch (error) {
-    self.postMessage({ type: 'debug-result', error: error.message, snapshot: runtime.snapshotEntries });
+    self.postMessage({ type: 'debug-result', error: errorMessage(error), snapshot: runtime.snapshotEntries });
   }
   // The owner applies the returned delta before resolving the original request.
   // Closing this disposable Worker releases the finished phpdbg module memory.
@@ -54,7 +55,7 @@ self.addEventListener('message', event => {
     return;
   }
   if (message?.type === 'debug-start') {
-    void start(message).catch(error => { self.postMessage({ type: 'debug-result', error: error.message }); self.close(); });
+    void start(message).catch(error => { self.postMessage({ type: 'debug-result', error: errorMessage(error) }); self.close(); });
     return;
   }
   if (message?.type === 'debug-command') {
@@ -62,6 +63,6 @@ self.addEventListener('message', event => {
       if (!runtime) throw new Error('PHP debugging has not started.');
       return runtime.command(message.command, message.args);
     }).then(value => self.postMessage({ type: 'debug-command-result', id: message.id, value }),
-      error => self.postMessage({ type: 'debug-command-result', id: message.id, error: error.message }));
+      error => self.postMessage({ type: 'debug-command-result', id: message.id, error: errorMessage(error) }));
   }
 });

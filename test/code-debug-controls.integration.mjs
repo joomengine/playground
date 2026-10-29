@@ -68,9 +68,64 @@ echo json_encode($answer);
   } finally { await runtime.stop(); await execution.catch(() => {}); }
 });
 
+test(`native PHP ${version} steps over nested application calls without entering their frames`, { timeout: 20_000 }, async () => {
+  const runtime = runtimeFor(`<?php
+function inner($value) {
+    return $value + 1;
+}
+function outer($value) {
+    $result = inner($value);
+    return $result;
+}
+$first = outer(4);
+$second = outer(7);
+echo json_encode([$first, $second]);
+`);
+  await runtime.setBreakpoints('/persist/www/index.php', [{ line: 9 }]);
+  const stopped = nextStop(runtime);
+  const execution = runtime.execute(request);
+  execution.catch(() => {});
+  try {
+    await Promise.race([stopped, execution.then(() => { throw new Error('Breakpoint was not reached.'); })]);
+    let frames = await step(runtime, 'next');
+    assert.equal(frames.length, 1, 'Step Over must retain the caller frame.');
+    assert.equal(frames[0].line, 10);
+    assert.equal((await runtime.evaluate('$first')).result, '5');
+    frames = await step(runtime, 'next');
+    assert.equal(frames.length, 1);
+    assert.equal(frames[0].line, 11);
+    assert.equal((await runtime.evaluate('$second')).result, '8');
+    await runtime.next();
+    assert.equal(new TextDecoder().decode((await execution).body), '[5,8]');
+  } finally { await runtime.stop(); await execution.catch(() => {}); }
+});
+
+test(`native PHP ${version} preserves callee breakpoints during Step Over and cancels its pending step on Continue`, { timeout: 20_000 }, async () => {
+  const runtime = runtimeFor(`<?php
+function nested() {
+    return 9;
+}
+$value = nested();
+echo $value;
+`);
+  await runtime.setBreakpoints('/persist/www/index.php', [{ line: 3 }, { line: 5 }]);
+  const stopped = nextStop(runtime);
+  const execution = runtime.execute(request);
+  execution.catch(() => {});
+  try {
+    await Promise.race([stopped, execution.then(() => { throw new Error('Breakpoint was not reached.'); })]);
+    const frames = await step(runtime, 'next');
+    assert.equal(frames.length, 2);
+    assert.equal(frames[0].line, 3);
+    await runtime.setBreakpoints('/persist/www/index.php', []);
+    await runtime.continue();
+    assert.equal(new TextDecoder().decode((await execution).body), '9');
+  } finally { await runtime.stop(); await execution.catch(() => {}); }
+});
+
 test(`native PHP ${version} evaluates conditional breakpoints and paged recursive values`, { timeout: 20_000 }, async () => {
   const runtime = runtimeFor(`<?php
-$object = (object) ['label' => 'root']; $object->self = $object;
+class DebugValue { public $label = 'root'; public $self; protected $secret = 'hidden'; public function __get($name) { throw new RuntimeException('Inspection invoked __get'); } public function __debugInfo() { throw new RuntimeException('Inspection invoked __debugInfo'); } } $object = new DebugValue(); $object->self = $object;
 for ($index = 0; $index < 4; $index++) {
     $value = $index;
 }
@@ -91,6 +146,8 @@ echo 'done';
     const nested = await runtime.variables(properties[0].variablesReference, { start: 0, count: 1 });
     assert.equal(nested[0].name, 'label');
     assert.equal(nested[0].value, '"root"');
+    const all = await runtime.variables(object.variablesReference, { start: 0, count: 10 });
+    assert.ok(all.some(value => value.name === 'secret (protected)' && value.value === '"hidden"'));
     await runtime.setBreakpoints('/persist/www/index.php', []);
     await runtime.continue();
     assert.equal(new TextDecoder().decode((await execution).body), 'done');

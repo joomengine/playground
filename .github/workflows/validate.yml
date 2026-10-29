@@ -217,9 +217,13 @@ jobs:
       - name: Validate JoomEngine Code workbench and isolated AI review
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
+          PLAYGROUND_PHP_VERSIONS: ${{ needs.checks.outputs.php }}
         run: |
           npm run test:code-browser
           node --test test/code-ai-browser.mjs
+          node --test test/code-host-lifecycle.browser.mjs
+          node --test test/code-joomla.browser.mjs
+          node --test test/code-debug-joomla.browser.mjs
       - name: Validate the exact candidate build
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}

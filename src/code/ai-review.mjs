@@ -11,6 +11,29 @@ function pathName(value) {
   return path;
 }
 const within = (path, directory) => path === directory || path.startsWith(`${directory}/`);
+const literalPath = path => path === '/' ? '/' : pathName(path);
+function canonicalWorkspacePath(value) {
+  if (typeof value?.canonicalPath !== 'string') throw new Error('The workspace did not identify the canonical source of this file. Reopen it before sending AI context.');
+  return literalPath(value.canonicalPath);
+}
+async function canonicalWorkspaceTarget(workspace, path, stat) {
+  if (stat) return canonicalWorkspacePath(stat);
+  // Even a missing file can have an aliased parent. Resolve the nearest existing
+  // ancestor without exposing the physical runtime root to the editor or AI.
+  let ancestor = path;
+  const suffix = [];
+  while (ancestor !== '/') {
+    const slash = ancestor.lastIndexOf('/');
+    suffix.unshift(ancestor.slice(slash + 1));
+    ancestor = ancestor.slice(0, slash) || '/';
+    const parent = await workspace.request('stat', { path: ancestor });
+    if (!parent) continue;
+    if (parent.type !== 'directory') throw new Error('An AI file path has a parent that is not a folder.');
+    const base = canonicalWorkspacePath(parent);
+    return literalPath(`${base === '/' ? '' : base}/${suffix.join('/')}`);
+  }
+  throw new Error('The AI workspace root is unavailable.');
+}
 function textOf(bytes, path) {
   try {
     const text = decoder.decode(bytes);
@@ -25,7 +48,9 @@ function textOf(bytes, path) {
  */
 export function createAiReview({ workspace, isDirty = () => false, onApplied = () => {},
   maxChanges = 32, maxBytes = 2 * 1024 * 1024, maxReviews = 8 } = {}) {
-  if (typeof workspace?.request !== 'function') throw new TypeError('AI review requires the shared workspace service.');
+  if (typeof workspace?.request !== 'function' || typeof workspace?.withBatch !== 'function') {
+    throw new TypeError('AI review requires the shared workspace service and its write reservation.');
+  }
   const reviews = new Map();
   let sequence = 0, busy = false;
   const known = id => {
@@ -62,10 +87,12 @@ export function createAiReview({ workspace, isDirty = () => false, onApplied = (
         }
       }
       const stat = await workspace.request('stat', { path, revision: true });
+      const canonical = await canonicalWorkspaceTarget(workspace, path, stat);
       const originalRevision = stat?.revision ?? null;
       if (stat && typeof originalRevision !== 'string') throw new Error('The workspace did not provide a conflict revision. No changes were prepared.');
-      preconditions.set(path, originalRevision);
+      preconditions.set(path, { revision: originalRevision, canonicalPath: canonical });
       paths.add(path);
+      paths.add(pathName(canonical));
       const operation = { operation: input.operation, path, type: stat?.type ?? (input.operation === 'mkdir' ? 'directory' : 'file'),
         before: null, after: null, bytes: stat?.size ?? 0 };
       if (stat?.type === 'file' && stat.size > maxBytes - totalBytes) throw new Error('This AI change set is too large to review safely.');
@@ -93,10 +120,10 @@ export function createAiReview({ workspace, isDirty = () => false, onApplied = (
         }
         operation.after = input.content;
         operation.bytes = bytes.byteLength;
-        changes.push({ operation: 'write', path, bytes, create: true, overwrite: Boolean(stat), expectedRevision: originalRevision });
+        changes.push({ operation: 'write', path, bytes, create: true, overwrite: Boolean(stat), expectedRevision: originalRevision, expectedCanonicalPath: canonical });
       } else if (input.operation === 'mkdir') {
         if (stat) throw new Error(`The proposed folder already exists: ${path}`);
-        changes.push({ operation: 'mkdir', path, expectedRevision: null });
+        changes.push({ operation: 'mkdir', path, expectedRevision: null, expectedCanonicalPath: canonical });
       } else {
         if (!stat) throw new Error(`The proposed source no longer exists: ${path}`);
         if (stat.type === 'file') {
@@ -110,18 +137,21 @@ export function createAiReview({ workspace, isDirty = () => false, onApplied = (
           // Replacement must be proposed separately, making destructive intent
           // explicit and preserving the destination's recoverable review.
           if (destination) throw new Error(`The proposed destination already exists: ${target}. Choose a new destination.`);
-          paths.add(target); preconditions.set(target, null);
+          const targetCanonical = await canonicalWorkspaceTarget(workspace, target, destination);
+          paths.add(target); paths.add(targetCanonical);
+          preconditions.set(target, { revision: null, canonicalPath: targetCanonical });
           operation.target = target;
           operation.after = operation.before;
-          changes.push({ operation: 'rename', path, target, overwrite: false, expectedRevision: originalRevision, expectedTargetRevision: null });
-        } else changes.push({ operation: 'delete', path, recursive: stat.type === 'directory', expectedRevision: originalRevision });
+          changes.push({ operation: 'rename', path, target, overwrite: false, expectedRevision: originalRevision, expectedTargetRevision: null,
+            expectedCanonicalPath: canonical, expectedTargetCanonicalPath: targetCanonical });
+        } else changes.push({ operation: 'delete', path, recursive: stat.type === 'directory', expectedRevision: originalRevision, expectedCanonicalPath: canonical });
       }
       if (totalBytes > maxBytes) throw new Error('This AI change set is too large to review safely. Propose a smaller change.');
       operations.push(operation);
     }
     const id = `ai-review-${++sequence}`;
     const record = { id, summary: proposal.summary.trim(), status: 'pending', operations,
-      changes, preconditions: [...preconditions].map(([path, revision]) => ({ path, revision })), paths: [...paths] };
+      changes, preconditions: [...preconditions].map(([path, condition]) => ({ path, ...condition })), paths: [...paths] };
     reviews.set(id, record);
     while (reviews.size > maxReviews) reviews.delete(reviews.keys().next().value);
     return publicReview(record);
@@ -132,8 +162,12 @@ export function createAiReview({ workspace, isDirty = () => false, onApplied = (
     if (record.status !== 'pending') throw new Error('This change set has already been resolved. It will not be applied again.');
     busy = true;
     try {
-      await clean(record.paths);
-      const result = await workspace.request('batch', { changes: record.changes, preconditions: record.preconditions });
+      // A paused PHP request can hold this reservation while the user continues
+      // editing. Check buffers only after the owner's queue grants our turn.
+      const result = await workspace.withBatch(async reserved => {
+        await clean(record.paths);
+        return reserved.request('batch', { changes: record.changes, preconditions: record.preconditions });
+      });
       record.result = result;
       record.recoveryId = result.recoveryId;
       record.status = result.ok ? 'applied' : 'partial';
@@ -146,6 +180,7 @@ export function createAiReview({ workspace, isDirty = () => false, onApplied = (
     } finally { busy = false; }
   }
   function reject(id) {
+    if (busy) throw new Error('Another AI change set is still being applied.');
     const record = known(id);
     if (record.status !== 'pending') throw new Error('This change set has already been resolved.');
     record.status = 'rejected'; record.changes = [];
@@ -157,8 +192,10 @@ export function createAiReview({ workspace, isDirty = () => false, onApplied = (
     if (!['applied', 'partial'].includes(record.status) || !record.recoveryId) throw new Error('There is no recoverable applied change set.');
     busy = true;
     try {
-      await clean(record.paths);
-      const result = await workspace.request('recover', { recoveryId: record.recoveryId });
+      const result = await workspace.withBatch(async reserved => {
+        await clean(record.paths);
+        return reserved.request('recover', { recoveryId: record.recoveryId });
+      });
       record.result = result;
       if (result.ok) record.status = 'recovered';
       if (result.changes?.length) {
@@ -198,24 +235,38 @@ export const AI_WORKSPACE_TOOLS = Object.freeze([
 export function createAiWorkspaceTools({ workspace, review, selectedPaths = () => [], maxFileBytes = 128 * 1024,
   maxContextBytes = 512 * 1024, maxEntries = 500, maxMatches = 100 } = {}) {
   if (typeof workspace?.request !== 'function' || typeof review?.prepare !== 'function') throw new TypeError('Workspace and review services are required.');
-  function allowed(path) { return !isSensitiveAiPath(path) || selectedPaths().includes(path); }
-  function allowedText(path, content) { return selectedPaths().includes(path) || !containsAiCredentialMaterial(content); }
-  function check(path, rootAllowed = false) {
-    const valid = rootAllowed && path === '/' ? '/' : pathName(path);
-    if (!allowed(valid)) throw new Error('This file may contain credentials. Explicitly select it before including it in AI context.');
-    return valid;
+  const literal = literalPath, canonicalPath = canonicalWorkspacePath;
+  function authorize(path, canonical) {
+    // An innocent alias must not authorize configuration.php, .env or a sensitive
+    // directory. Only deliberate selection of the actual target grants access.
+    if ((isSensitiveAiPath(path) || isSensitiveAiPath(canonical)) && !selectedPaths().includes(canonical)) {
+      throw new Error('This file may contain credentials. Explicitly select its canonical workspace path before including it in AI context.');
+    }
+    return canonical;
+  }
+  function allowedEntry(entry) {
+    try { authorize(literal(entry.path), canonicalPath(entry)); return true; }
+    catch { return false; }
+  }
+  function allowedText(canonical, content) { return selectedPaths().includes(canonical) || !containsAiCredentialMaterial(content); }
+  async function inspect(path, { allowMissing = false } = {}) {
+    const stat = await workspace.request('stat', { path });
+    if (!stat && !allowMissing) throw new Error('Choose an existing text file or folder.');
+    return { stat, canonical: authorize(path, await canonicalWorkspaceTarget(workspace, path, stat)) };
   }
   async function read(path, signal) {
     signal?.throwIfAborted();
-    const stat = await workspace.request('stat', { path });
+    const { stat, canonical } = await inspect(path);
     if (!stat || stat.type !== 'file') throw new Error('Choose an existing text file.');
     if (stat.size > maxFileBytes) throw new Error('This file exceeds the AI context size limit. Select a smaller file or a text selection.');
     const value = await workspace.request('read', { path });
+    const actual = authorize(path, canonicalPath(value));
+    if (actual !== canonical) throw new Error('The file target changed while AI context was being read. Select it again.');
     if (value.bytes.byteLength > maxFileBytes) throw new Error('This file exceeds the AI context size limit.');
     signal?.throwIfAborted();
     const content = textOf(value.bytes, path);
-    if (!allowedText(path, content)) throw new Error('This file appears to contain credentials. Explicitly select it before including it in AI context.');
-    return { path, content, revision: value.revision };
+    if (!allowedText(actual, content)) throw new Error('This file appears to contain credentials. Explicitly select its canonical workspace path before including it in AI context.');
+    return { path, canonicalPath: actual, content, revision: value.revision };
   }
   async function execute(name, args, { signal } = {}) {
     signal?.throwIfAborted();
@@ -224,17 +275,39 @@ export function createAiWorkspaceTools({ workspace, review, selectedPaths = () =
       // Writes to sensitive files can only be reviewed after explicit selection,
       // including moves into a sensitive destination and folder deletion.
       if (!Array.isArray(args.changes)) throw new TypeError('Invalid proposed changes.');
-      for (const change of args.changes) { check(change.path); if (change.target) check(change.target); }
+      for (const change of args.changes) {
+        const path = pathName(change.path);
+        const { stat } = await inspect(path, { allowMissing: true });
+        if (change.target) await inspect(pathName(change.target), { allowMissing: true });
+        if (stat?.type === 'directory' && ['rename', 'delete'].includes(change.operation)) {
+          const pending = [path], visited = new Set();
+          let entries = 0;
+          while (pending.length) {
+            signal?.throwIfAborted();
+            const folder = pending.shift();
+            const { canonical } = await inspect(folder);
+            if (visited.has(canonical)) continue;
+            visited.add(canonical);
+            for (const entry of await workspace.request('list', { path: folder })) {
+              if (++entries > 1000) throw new Error('The folder affects too many files for one AI review. Propose smaller operations.');
+              authorize(literal(entry.path), canonicalPath(entry));
+              if (entry.type === 'directory') pending.push(entry.path);
+            }
+          }
+        }
+      }
       return review.prepare(args);
     }
-    const path = check(args.path, name !== 'read_file');
+    const path = name === 'read_file' ? pathName(args.path) : literal(args.path);
     if (name === 'read_file') return read(path, signal);
     if (name === 'list_files') {
+      await inspect(path);
       const entries = await workspace.request('list', { path });
-      const filtered = entries.filter(entry => allowed(entry.path ?? `${path === '/' ? '' : path}/${entry.name}`));
+      const filtered = entries.filter(allowedEntry);
       return { path, entries: filtered.slice(0, maxEntries), truncated: filtered.length > maxEntries };
     }
     if (name !== 'search_files') throw new Error('The assistant requested an unsupported tool.');
+    await inspect(path);
     if (typeof args.query !== 'string' || !args.query || args.query.length > 256) throw new TypeError('Search requires a nonempty literal query of at most 256 characters.');
     const matches = [], pending = [path];
     let visited = 0, bytes = 0, skipped = 0, truncated = false;
@@ -246,7 +319,7 @@ export function createAiWorkspaceTools({ workspace, review, selectedPaths = () =
         signal?.throwIfAborted();
         if (++visited > maxEntries || bytes >= maxContextBytes || matches.length >= maxMatches) { truncated = true; break; }
         const file = entry.path ?? `${directory === '/' ? '' : directory}/${entry.name}`;
-        if (!allowed(file)) { skipped++; continue; }
+        if (!allowedEntry(entry)) { skipped++; continue; }
         if (entry.type === 'directory') { pending.push(file); continue; }
         if (entry.type !== 'file' || entry.size > maxFileBytes || bytes + entry.size > maxContextBytes) { skipped++; continue; }
         let value;
@@ -278,21 +351,30 @@ export function createAiWorkspaceTools({ workspace, review, selectedPaths = () =
     for (const [path, file] of descriptors) {
       signal?.throwIfAborted();
       try {
-        check(path);
-        const value = typeof file.content === 'string' ? { path, content: file.content, unsaved: Boolean(file.unsaved) } : await read(path, signal);
+        pathName(path);
+        let value;
+        if (typeof file.content === 'string') {
+          const { canonical } = await inspect(path, { allowMissing: true });
+          const original = authorize(path, canonicalPath(file));
+          if (original !== canonical) throw new Error('The editor buffer belongs to a different file target. Reopen it before sending AI context.');
+          value = { path, canonicalPath: original, content: file.content, unsaved: Boolean(file.unsaved) };
+        } else value = await read(path, signal);
         const size = encoder.encode(value.content).byteLength;
         if (size > maxFileBytes || bytes + size > maxContextBytes) throw new Error('Context size limit reached.');
-        if (!allowedText(path, value.content)) throw new Error('Possible credentials require explicit selection.');
+        if (!allowedText(value.canonicalPath, value.content)) throw new Error('Possible credentials require explicit selection of the canonical workspace path.');
         bytes += size; files.push(value);
       } catch (error) { if (signal?.aborted) throw error; excluded.push({ path, reason: error.message }); }
     }
     let includedSelection = null;
     if (selection !== null) {
-      check(selection.path);
-      if (typeof selection.text !== 'string' || !allowedText(selection.path, selection.text)) throw new Error('The selected text may contain credentials. Explicitly select its file before sending.');
+      pathName(selection.path);
+      const { canonical } = await inspect(selection.path, { allowMissing: true });
+      const original = authorize(selection.path, canonicalPath(selection));
+      if (original !== canonical) throw new Error('The selected editor buffer belongs to a different file target. Reopen it before sending AI context.');
+      if (typeof selection.text !== 'string' || !allowedText(original, selection.text)) throw new Error('The selected text may contain credentials. Explicitly select its canonical file before sending.');
       const size = encoder.encode(selection.text).byteLength;
       if (size > maxFileBytes || bytes + size > maxContextBytes) throw new Error('The selected text exceeds the AI context limit.');
-      includedSelection = { path: selection.path, text: selection.text };
+      includedSelection = { path: selection.path, canonicalPath: original, text: selection.text };
     }
     return { selection: includedSelection, files, excluded };
   }

@@ -20,7 +20,7 @@ function streamResponse(events, { chunkSize = 7, done = true } = {}) {
 }
 const delta = (value, finish = null) => ({ choices: [{ index: 0, delta: value, finish_reason: finish }] });
 const settings = { baseURL: 'https://provider.invalid/v1/', model: 'tool-model', apiKey: 'secret-session-key' };
-function fixture({ dirty = () => false, overrides = {} } = {}) {
+function fixture({ dirty = () => false, overrides = {}, reserve = callback => callback() } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'jec-ai-')); temporary.push(directory);
   fs.mkdirSync(path.join(directory, 'templates'));
   fs.writeFileSync(path.join(directory, 'index.php'), '<?php echo "before";\r\n');
@@ -33,7 +33,8 @@ function fixture({ dirty = () => false, overrides = {} } = {}) {
     chmod: fs.chmodSync, utime: (filename, atime, mtime) => fs.utimesSync(filename, new Date(atime), new Date(mtime)), ...overrides };
   const service = createWorkspaceFileService(adapter, directory);
   let applied = 0;
-  const workspace = { request: (operation, args) => service.handle(operation, args) };
+  const workspace = { request: (operation, args) => service.handle(operation, args),
+    withBatch: callback => reserve(() => callback({ request: workspace.request })) };
   const review = createAiReview({ workspace, isDirty: dirty, onApplied: () => { applied++; } });
   return { directory, workspace, review, applied: () => applied };
 }
@@ -168,7 +169,7 @@ test('AI tools exclude sensitive automatic context, enforce bounds and have no a
   assert.deepEqual(found.matches, []);
   selected = ['/configuration.php'];
   assert.match((await tools.execute('read_file', { path: '/configuration.php' })).content, /password/);
-  const context = await tools.context({ openFiles: [{ path: '/index.php', content: 'unsaved editor text', unsaved: true }, '/.env'] });
+  const context = await tools.context({ openFiles: [{ path: '/index.php', canonicalPath: '/index.php', content: 'unsaved editor text', unsaved: true }, '/.env'] });
   assert.equal(context.files.find(file => file.path === '/index.php').unsaved, true);
   assert.equal(context.files.some(file => file.path === '/.env'), false);
   assert.equal(context.excluded[0].path, '/.env');
@@ -182,4 +183,97 @@ test('AI tools exclude sensitive automatic context, enforce bounds and have no a
   await assert.rejects(tools.execute('read_file', { path: '/../private' }), /traversal/);
   const controller = new AbortController(); controller.abort();
   await assert.rejects(tools.execute('search_files', { path: '/', query: 'echo' }, { signal: controller.signal }), { name: 'AbortError' });
+});
+
+test('AI guards canonical sources, alias directories and buffered text before sending context', async () => {
+  const { directory, workspace, review } = fixture();
+  const secret = '<?php public $secret = "canonical-source-regression";';
+  fs.writeFileSync(path.join(directory, 'configuration.php'), secret);
+  fs.symlinkSync('configuration.php', path.join(directory, 'readme.php'));
+  fs.mkdirSync(path.join(directory, '.ssh'));
+  fs.writeFileSync(path.join(directory, '.ssh/config'), 'Host private-system');
+  fs.symlinkSync('.ssh', path.join(directory, 'public-docs'));
+  let selected = [];
+  const tools = createAiWorkspaceTools({ workspace, review, selectedPaths: () => selected });
+  await assert.rejects(tools.execute('read_file', { path: '/readme.php' }), /canonical workspace path/);
+  await assert.rejects(tools.execute('list_files', { path: '/public-docs' }), /canonical workspace path/);
+  const listing = await tools.execute('list_files', { path: '/' });
+  assert.equal(listing.entries.some(entry => ['readme.php', 'public-docs'].includes(entry.name)), false);
+  assert.deepEqual((await tools.execute('search_files', { path: '/', query: 'canonical-source' })).matches, []);
+  const buffer = { path: '/readme.php', canonicalPath: '/configuration.php', content: secret, unsaved: true };
+  assert.deepEqual((await tools.context({ openFiles: [buffer] })).files, []);
+  await assert.rejects(tools.context({ selection: { ...buffer, text: secret } }), /canonical workspace path/);
+  await assert.rejects(tools.execute('propose_changes', { summary: 'Create file', changes: [
+    { operation: 'write', path: '/public-docs/new.txt', content: 'new' },
+  ] }), /canonical workspace path/);
+  selected = ['/readme.php'];
+  await assert.rejects(tools.execute('read_file', { path: '/readme.php' }), /canonical workspace path/);
+  selected = ['/configuration.php'];
+  assert.equal((await tools.execute('read_file', { path: '/readme.php' })).content, secret);
+  assert.ok((await tools.context({ openFiles: [buffer] })).files.some(file => file.path === '/readme.php'));
+  // Changing the link later must not relabel an old secret-bearing buffer as a
+  // harmless public file, even when the current target itself is allowed.
+  fs.unlinkSync(path.join(directory, 'readme.php'));
+  fs.symlinkSync('index.php', path.join(directory, 'readme.php'));
+  const moved = await tools.context({ openFiles: [buffer] });
+  assert.equal(moved.files.some(file => file.path === '/readme.php'), false);
+  assert.match(moved.excluded.find(file => file.path === '/readme.php').reason, /different file target/);
+  await assert.rejects(tools.context({ selection: { ...buffer, text: secret } }), /different file target/);
+  const unknown = await tools.context({ openFiles: [{ path: '/index.php', content: secret, unsaved: true }] });
+  assert.equal(unknown.files.some(file => file.path === '/index.php'), false);
+  // Revalidate the read response too: PHP can change an alias between the
+  // metadata request and the separate read operation in the owner queue.
+  selected = [];
+  const request = workspace.request;
+  workspace.request = (operation, args) => {
+    if (operation === 'read' && args.path === '/readme.php') {
+      fs.unlinkSync(path.join(directory, 'readme.php'));
+      fs.symlinkSync('configuration.php', path.join(directory, 'readme.php'));
+    }
+    return request(operation, args);
+  };
+  await assert.rejects(tools.execute('read_file', { path: '/readme.php' }), /canonical workspace path/);
+});
+
+test('AI applies only the canonical targets shown when a proposal was prepared', async () => {
+  const { directory, review } = fixture();
+  fs.mkdirSync(path.join(directory, 'other'));
+  fs.copyFileSync(path.join(directory, 'templates/site.css'), path.join(directory, 'other/site.css'));
+  fs.symlinkSync('templates', path.join(directory, 'alias'));
+  const prepared = await review.prepare({ summary: 'Update aliased template', changes: [
+    { operation: 'write', path: '/alias/new.txt', content: 'new' },
+    { operation: 'write', path: '/alias/site.css', content: 'reviewed update' },
+  ] });
+  fs.unlinkSync(path.join(directory, 'alias'));
+  fs.symlinkSync('other', path.join(directory, 'alias'));
+  await assert.rejects(review.accept(prepared.id), { code: 'CONFLICT' });
+  assert.equal(fs.existsSync(path.join(directory, 'other/new.txt')), false);
+  assert.equal(fs.readFileSync(path.join(directory, 'other/site.css'), 'utf8'), 'body { color: red; }');
+});
+
+test('AI accept and recovery recheck dirty buffers after obtaining the owner write reservation', async () => {
+  let dirty = false, gate = Promise.resolve(), release;
+  const { directory, review } = fixture({ dirty: () => dirty, reserve: async callback => { await gate; return callback(); } });
+  const prepared = await review.prepare({ summary: 'Update', changes: [{ operation: 'write', path: '/index.php', content: 'AI version' }] });
+  gate = new Promise(resolve => { release = resolve; });
+  const applying = review.accept(prepared.id);
+  // The user keeps editing while a paused PHP request holds the mutation queue.
+  dirty = true;
+  assert.throws(() => review.reject(prepared.id), /still being applied/);
+  release();
+  await assert.rejects(applying, /Unsaved/);
+  assert.equal(fs.readFileSync(path.join(directory, 'index.php'), 'utf8'), '<?php echo "before";\r\n');
+  dirty = false;
+  await review.accept(prepared.id);
+  gate = new Promise(resolve => { release = resolve; });
+  const recovering = review.undo(prepared.id);
+  dirty = true; release();
+  await assert.rejects(recovering, /Unsaved/);
+  assert.equal(fs.readFileSync(path.join(directory, 'index.php'), 'utf8'), 'AI version');
+  dirty = false;
+  assert.equal((await review.undo(prepared.id)).status, 'recovered');
+});
+
+test('AI review cannot mutate through a workspace without the authoritative write reservation', () => {
+  assert.throws(() => createAiReview({ workspace: { request() {} } }), /write reservation/);
 });

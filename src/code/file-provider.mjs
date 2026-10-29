@@ -46,9 +46,15 @@ export class JoomlaFileSystemProvider {
   capabilities = FileSystemProviderCapabilities.FileReadWrite | FileSystemProviderCapabilities.PathCaseSensitive
     | FileSystemProviderCapabilities.FileFolderCopy;
   onDidChangeCapabilities = Event.None;
+  saves = new Emitter();
+  onDidWriteFile = this.saves.event;
   changes = new Emitter();
   onDidChangeFile = this.changes.event;
   revisions = new Map();
+  readRevisions = new Map();
+  canonicalPaths = new Map();
+  readCanonicalPaths = new Map();
+  isDirty = () => false;
 
   constructor(workspace, siteId, { onSave = () => {}, onError = () => {} } = {}) {
     this.workspace = workspace;
@@ -78,13 +84,12 @@ export class JoomlaFileSystemProvider {
       this.waiting.push({ operation, args, resolve, reject });
       this.drain();
     });
-    if (key) this.inflight.set(key, pending);
-    try { return await pending; }
-    catch (error) {
+    const translated = pending.catch(error => {
       if (error.code === 'CONFLICT') throw new FileOperationError(error.message, FileOperationResult.FILE_MODIFIED_SINCE);
       throw new FileSystemProviderError(error.message, errors[error.code] || FileSystemProviderErrorCode.Unknown);
-    }
-    finally { if (key && this.inflight.get(key) === pending) this.inflight.delete(key); }
+    }).finally(() => { if (key && this.inflight.get(key) === translated) this.inflight.delete(key); });
+    if (key) this.inflight.set(key, translated);
+    return translated;
   }
   drain() {
     while (!this.disposed && this.activeRequests < 4 && this.waiting.length) {
@@ -140,17 +145,45 @@ export class JoomlaFileSystemProvider {
   async readFile(uri) {
     const path = this.path(uri);
     const result = await this.request('read', { path });
-    this.revisions.set(path, result.revision);
+    if (!this.isDirty(path) || !this.revisions.has(path)) this.revisions.set(path, result.revision);
+    if (!this.isDirty(path) || !this.canonicalPaths.has(path)) this.canonicalPaths.set(path, result.canonicalPath || path);
+    this.readCanonicalPaths.set(path, result.canonicalPath || path);
+    this.readRevisions.set(path, result.revision);
     this.observed.set(path, result.revision);
     return new Uint8Array(result.bytes);
   }
+  acceptReadRevision(path) {
+    if (this.readRevisions.has(path)) this.revisions.set(path, this.readRevisions.get(path));
+    if (this.readCanonicalPaths.has(path)) this.canonicalPaths.set(path, this.readCanonicalPaths.get(path));
+  }
+  async currentIdentity(path) {
+    const current = await this.request('stat', { path, revision: true });
+    if (current) return { revision: current.revision, canonicalPath: current.canonicalPath || path };
+    const separator = path.lastIndexOf('/');
+    const parent = await this.request('stat', { path: path.slice(0, separator) || '/' });
+    return { revision: null, canonicalPath: `${(parent?.canonicalPath || path.slice(0, separator) || '/').replace(/\/$/, '')}/${path.slice(separator + 1)}` };
+  }
+  async authorizeOverwrite(path) {
+    const current = await this.currentIdentity(path);
+    this.revisions.set(path, current.revision);
+    this.canonicalPaths.set(path, current.canonicalPath);
+  }
   async writeFile(uri, bytes, options) {
     const path = this.path(uri);
+    let expectedRevision = this.revisions.get(path);
+    if (expectedRevision === undefined) {
+      // Save As and new files may not have been read by this provider. Capture
+      // their current state too, so an intervening PHP write cannot go unnoticed.
+      const current = await this.currentIdentity(path);
+      expectedRevision = current.revision;
+      this.canonicalPaths.set(path, current.canonicalPath);
+    }
     const result = await this.mutation('write', { path, bytes: new Uint8Array(bytes), create: options.create,
-      overwrite: options.overwrite, expectedRevision: this.revisions.get(path) });
+      overwrite: options.overwrite, expectedRevision, expectedCanonicalPath: this.canonicalPaths.get(path) || path });
     // Do not cache a post-write read: a Joomla request may already have changed it again.
     const written = result.results?.find(entry => entry.path === path && entry.operation === 'write');
     if (written?.revision) this.revisions.set(path, written.revision);
+    this.saves.fire({ path, bytes: new Uint8Array(bytes) });
   }
   mkdir(uri) { return this.mutation('mkdir', { path: this.path(uri) }); }
   delete(uri, options) { return this.mutation('delete', { path: this.path(uri), recursive: options.recursive }); }
@@ -197,7 +230,11 @@ export class JoomlaFileSystemProvider {
     if (typeof this.subscription === 'function') this.subscription();
     else this.subscription?.dispose();
     this.changes.dispose();
+    this.saves.dispose();
     this.revisions.clear();
+    this.readRevisions.clear();
+    this.canonicalPaths.clear();
+    this.readCanonicalPaths.clear();
     this.observed.clear();
     this.listed.clear();
   }

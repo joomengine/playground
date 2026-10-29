@@ -9,6 +9,9 @@
 .jec-titlebar{display:flex;align-items:center;gap:6px;min-height:43px;padding:5px 8px;background:linear-gradient(100deg,#141a36,#1c2443);border-bottom:1px solid #39415e;flex:none}
 .jec-panel-title{font-size:12px!important;font-weight:700;color:#e6c889!important;letter-spacing:.1px;white-space:nowrap;margin-inline-end:auto;touch-action:none}
 .jec-panel-title:disabled{opacity:1;cursor:default}
+.jec-wordmark{display:block;width:240px;max-width:100%;height:28px;object-fit:contain;object-position:left center}
+.jec-panel-title{min-width:42px;overflow:hidden}
+@media(max-width:800px){.jec-wordmark{width:48px}}
 .jec-control{border:1px solid transparent;background:transparent;color:#c9d2e9;border-radius:4px;min-width:30px;min-height:30px;padding:4px 7px;font-size:17px;line-height:1.2;cursor:pointer}
 .jec-control:enabled:hover{background:#ffffff10;border-color:#ffffff20;color:white}
 .jec-control:focus-visible,.jec-mode:focus-visible,.jec-divider:focus-visible{outline:2px solid #edc56b;outline-offset:-2px}

@@ -72,7 +72,14 @@ export function createCodeLayout({
   panel.setAttribute('aria-label', t('code.title')); panel.setAttribute('data-i18n-aria-label', 'code.title');
   const titlebar = create('div', 'jec-titlebar');
   const title = button('code.move', t('code.title'));
-  title.classList.add('jec-panel-title'); title.setAttribute('data-i18n', 'code.title');
+  title.classList.add('jec-panel-title');
+  const logo = create('img', 'jec-wordmark');
+  logo.src = new URL('../brand/joomengine-code-dark.svg', import.meta.url).href;
+  logo.alt = t('code.title'); logo.setAttribute('data-i18n-alt', 'code.title');
+  const identity = create('picture', 'jec-identity');
+  const compact = create('source', ''); compact.media = '(max-width:800px)';
+  compact.srcset = new URL('../brand/joomengine-code-compact-dark.svg', import.meta.url).href;
+  identity.append(compact, logo); title.replaceChildren(identity);
   const modeLabel = create('label', 'jec-mode-label');
   const label = create('span', 'jec-visually-hidden', t('code.layout'));
   label.setAttribute('data-i18n', 'code.layout');
