@@ -15,6 +15,7 @@
 #include "SAPI.h"
 #include "main/php_variables.h"
 #include "Zend/zend_execute.h"
+#include "Zend/zend_exceptions.h"
 #include "sapi/phpdbg/phpdbg.h"
 
 /* Upstream exports the bp_count address but keeps phpdbg_globals local. The
@@ -40,11 +41,15 @@ static size_t jec_output_length;
 static char *jec_method, *jec_query, *jec_uri, *jec_filename, *jec_type, *jec_cookies;
 static sapi_module_struct jec_original_sapi;
 static user_opcode_handler_t jec_original_handlers[256];
-static const unsigned char jec_opcodes[] = { ZEND_EXT_STMT, ZEND_JMP, ZEND_JMPZ, ZEND_JMPNZ, ZEND_JMPZ_EX, ZEND_JMPNZ_EX };
+static const unsigned char jec_opcodes[] = { ZEND_EXT_STMT, ZEND_JMP, ZEND_JMPZ, ZEND_JMPNZ, ZEND_JMPZ_EX, ZEND_JMPNZ_EX,
+    ZEND_RETURN, ZEND_GENERATOR_RETURN };
+static zend_execute_data *jec_step_out_frame;
 static void (*jec_original_execute)(zend_execute_data *);
+static void (*jec_original_error)(int, zend_string *, const uint32_t, zend_string *);
 static unsigned jec_stmt_count;
 static double jec_next_yield;
 static bool jec_active;
+static bool jec_request_started;
 
 /* The worker sets this field directly; these messages never queue behind PHP. */
 EM_ASYNC_JS(int, jec_yield_control, (void), {
@@ -53,6 +58,20 @@ EM_ASYNC_JS(int, jec_yield_control, (void), {
     Module.jecDebugControl = 0;
     return command;
 });
+
+EM_JS(void, jec_report_error, (const char *message, const char *filename, unsigned line), {
+    if (Module.jecDebugError) Module.jecDebugError(UTF8ToString(message), UTF8ToString(filename), line);
+});
+
+static void jec_error(int type, zend_string *filename, const uint32_t line, zend_string *message)
+{
+    if (!(PHPDBG_G(flags) & PHPDBG_IN_EVAL) && !SG(headers_sent)
+        && (type & (E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR | E_RECOVERABLE_ERROR))) {
+        SG(sapi_headers).http_response_code = 500;
+    }
+    jec_report_error(ZSTR_VAL(message), filename ? ZSTR_VAL(filename) : "", line);
+    jec_original_error(type, filename, line, message);
+}
 
 static void jec_record_failure(const char *message)
 {
@@ -96,6 +115,11 @@ static int jec_initialize_environment(void)
 
 static size_t jec_read_post(char *buffer, size_t count)
 {
+    /* php_module_startup deactivates its empty bootstrap request after MINIT.
+     * SAPI drains unread input then, although our real request has not started.
+     * Real activation reads POST before calling our activate callback, so permit
+     * that read through PHP's startup flag and later lazy php://input reads. */
+    if (!jec_request_started && !PG(during_request_startup)) return 0;
     if (!jec_input) return 0;
     return fread(buffer, 1, count, jec_input);
 }
@@ -107,6 +131,7 @@ static char *jec_read_cookies(void)
 
 static int jec_activate(void)
 {
+    jec_request_started = true;
     int result = jec_original_sapi.activate ? jec_original_sapi.activate() : SUCCESS;
     SG(request_info).proto_num = 1001;
     return result;
@@ -119,6 +144,14 @@ static void jec_execute(zend_execute_data *execute_data)
 {
     zend_try {
         jec_original_execute(execute_data);
+        zend_exception_restore();
+        zend_try_exception_handler();
+        if (EG(exception) && !zend_is_unwind_exit(EG(exception))) {
+            /* The debugger already stopped at the throw. Report the final HTTP
+             * failure without a second prompt after the application stack ended. */
+            PHPDBG_G(flags) |= PHPDBG_PREVENT_INTERACTIVE;
+            zend_exception_error(EG(exception), E_ERROR);
+        }
     } zend_catch {
         /* The original PHP error/exit state is preserved for request shutdown. */
     } zend_end_try();
@@ -185,6 +218,13 @@ static size_t jec_write_response(const char *bytes, size_t length)
 
 static int jec_statement(zend_execute_data *execute_data)
 {
+    if (execute_data == jec_step_out_frame
+        && (execute_data->opline->opcode == ZEND_RETURN || execute_data->opline->opcode == ZEND_GENERATOR_RETURN)) {
+        /* phpdbg's finish command suppresses stops inside the current frame but
+         * ordinarily continues through its caller too. Arm one step at return. */
+        jec_step_out_frame = NULL;
+        PHPDBG_G(flags) |= PHPDBG_IS_STEPPING;
+    }
     /* Extended statement opcodes are enabled by phpdbg's existing -e switch. */
     if (!(++jec_stmt_count & 63u) && emscripten_get_now() >= jec_next_yield) {
         int command = jec_yield_control();
@@ -199,6 +239,23 @@ static int jec_statement(zend_execute_data *execute_data)
     user_opcode_handler_t previous = jec_original_handlers[execute_data->opline->opcode];
     return previous ? previous(execute_data) : ZEND_USER_OPCODE_DISPATCH;
 }
+
+PHP_FUNCTION(jec_debug_step_out)
+{
+    ZEND_PARSE_PARAMETERS_NONE();
+    if (!(PHPDBG_G(flags) & PHPDBG_IN_EVAL)) RETURN_FALSE;
+    zend_execute_data *frame = execute_data->prev_execute_data;
+    while (frame && (!frame->func || frame->func->type != ZEND_USER_FUNCTION)) frame = frame->prev_execute_data;
+    jec_step_out_frame = frame;
+    RETURN_BOOL(frame != NULL);
+}
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_jec_debug_step_out, 0, 0, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+static const zend_function_entry jec_functions[] = {
+    PHP_FE(jec_debug_step_out, arginfo_jec_debug_step_out)
+    PHP_FE_END
+};
 
 static PHP_MINIT_FUNCTION(jec_phpdbg_http)
 {
@@ -259,6 +316,8 @@ static PHP_MINIT_FUNCTION(jec_phpdbg_http)
     }
     jec_original_execute = zend_execute_ex;
     zend_execute_ex = jec_execute;
+    jec_original_error = zend_error_cb;
+    zend_error_cb = jec_error;
     jec_output_length = 0;
     jec_stmt_count = 0;
     jec_next_yield = 0;
@@ -274,6 +333,7 @@ static PHP_MSHUTDOWN_FUNCTION(jec_phpdbg_http)
             zend_set_user_opcode_handler(opcode, jec_original_handlers[opcode]);
         }
         zend_execute_ex = jec_original_execute;
+        zend_error_cb = jec_original_error;
         sapi_module = jec_original_sapi;
     }
     if (jec_input) fclose(jec_input);
@@ -287,7 +347,7 @@ static PHP_MSHUTDOWN_FUNCTION(jec_phpdbg_http)
 zend_module_entry jec_phpdbg_http_module_entry = {
     STANDARD_MODULE_HEADER,
     "jec_phpdbg_http",
-    NULL,
+    jec_functions,
     PHP_MINIT(jec_phpdbg_http),
     PHP_MSHUTDOWN(jec_phpdbg_http),
     NULL,
