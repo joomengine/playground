@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-7 -9 134 54" role="img" aria-labelledby="jec-compact-light-title jec-compact-light-description">
+  <title id="jec-compact-light-title">JoomEngine Code</title>
+  <desc id="jec-compact-light-description">JEC compact mark in geometric lettering with a restrained gold accent, for light backgrounds.</desc>
+  <defs>
+    <linearGradient id="jec-compact-light-ink" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="34">
+      <stop stop-color="#20264a"/>
+      <stop offset="1" stop-color="#323c63"/>
+    </linearGradient>
+    <linearGradient id="jec-compact-light-gold" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#d19730"/>
+      <stop offset=".4" stop-color="#8e5c05"/>
+      <stop offset="1" stop-color="#20264a"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#jec-compact-light-ink)" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="square">
+    <path transform="translate(0 0)" d="M28 0V22Q28 34 15 34H0"/>
+    <path transform="translate(41 0)" d="M31 0H0V34H31M0 17H29"/>
+    <path transform="translate(82 0)" d="M38 0H19C7 0 0 6 0 17S7 34 19 34H38"/>
+  </g>
+  <path d="M106 0H101Q86 0 83 11" fill="none" stroke="url(#jec-compact-light-gold)" stroke-width="5.6" stroke-linecap="square"/>
+</svg>

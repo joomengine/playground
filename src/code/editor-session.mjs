@@ -7,7 +7,14 @@ export function validateDrafts(value) {
   if (!value || value.version !== 1 || !Array.isArray(value.documents) || value.documents.length > MAX_DOCUMENTS) {
     throw new Error('The saved JoomEngine Code draft record is not supported.');
   }
-  let size = 0;
+  if (value.breakpoints !== undefined && (!Array.isArray(value.breakpoints) || value.breakpoints.length > 1000)) throw new Error('Invalid recovered breakpoints.');
+  for (const point of value.breakpoints || []) {
+    if (typeof point.path !== 'string' || !point.path.startsWith('/') || /[\0\\]/.test(point.path)
+      || point.path.split('/').some(part => part === '.' || part === '..')
+      || !Number.isSafeInteger(point.line) || point.line < 0 || !Number.isSafeInteger(point.column || 0) || (point.column || 0) < 0) throw new Error('Invalid recovered breakpoint location.');
+    for (const key of ['condition', 'hitCondition', 'logMessage']) if (point[key] !== undefined && (typeof point[key] !== 'string' || point[key].length > 4096)) throw new Error('Invalid recovered breakpoint expression.');
+  }
+  let size = encoder.encode(JSON.stringify(value.breakpoints || [])).byteLength;
   const paths = new Set();
   for (const document of value.documents) {
     if (typeof document.path !== 'string' || !document.path.startsWith('/') || /[\0\\]/.test(document.path)
@@ -15,6 +22,8 @@ export function validateDrafts(value) {
       throw new Error('The saved JoomEngine Code draft has an invalid file path.');
     }
     paths.add(document.path);
+    if (document.canonicalPath !== undefined && (typeof document.canonicalPath !== 'string' || !document.canonicalPath.startsWith('/') || /[\0\\]/.test(document.canonicalPath)
+      || document.canonicalPath.split('/').some(part => part === '.' || part === '..'))) throw new Error('Invalid recovered canonical file path.');
     if (document.text !== undefined && typeof document.text !== 'string') throw new Error('Invalid recovered draft contents.');
     if (document.revision !== undefined && typeof document.revision !== 'string') throw new Error('Invalid recovered draft revision.');
     size += encoder.encode(document.text || '').byteLength;
@@ -48,6 +57,11 @@ async function openDraftStore(storageId) {
   };
 }
 
+export async function clearEditorDrafts(storageId) {
+  const store = await openDraftStore(storageId);
+  try { await store.clear(); } finally { store.close(); }
+}
+
 /** Bind recovery to the existing workbench models; never create a second editor session. */
 export async function attachEditorRecovery({ storageId, workspace, provider, models, editors, api, onError }) {
   if (!storageId) return { dispose: async () => {} };
@@ -55,12 +69,17 @@ export async function attachEditorRecovery({ storageId, workspace, provider, mod
   let timer, disposed = false, erased = false, pending = Promise.resolve();
   const listeners = new Map();
   const unresolved = new Map();
+  const recoveredResources = new Map();
   const snapshot = () => {
     const documents = api.getOpenFiles().map(file => ({ path: file.path,
-      ...(file.dirty ? { text: file.text, revision: provider.revisions.get(file.path) } : {}) }));
+      ...(file.dirty ? { text: file.text, canonicalPath: file.canonicalPath, revision: provider.revisions.get(file.path) } : {}) }));
     const present = new Set(documents.map(document => document.path));
+    for (const [resource, path] of recoveredResources) {
+      const model = models.getModels().find(candidate => candidate.uri.toString() === resource);
+      if (model && unresolved.has(path)) unresolved.set(path, { ...unresolved.get(path), text: model.getValue() });
+    }
     for (const [path, value] of unresolved) if (!present.has(path)) documents.push(value);
-    return validateDrafts({ version: 1, documents, activePath: editors.activeEditor?.resource?.path });
+    return validateDrafts({ version: 1, documents, breakpoints: api.getBreakpoints?.() || [], activePath: editors.activeEditor?.resource?.path });
   };
   const flush = () => {
     clearTimeout(timer);
@@ -73,18 +92,20 @@ export async function attachEditorRecovery({ storageId, workspace, provider, mod
   };
   const schedule = () => { clearTimeout(timer); if (!disposed && !erased) timer = setTimeout(flush, 150); };
   const watch = model => {
-    if (model.uri.scheme !== 'jec' || model.uri.authority !== provider.siteId) return;
+    if (!recoveredResources.has(model.uri.toString()) && (model.uri.scheme !== 'jec' || model.uri.authority !== provider.siteId)) return;
     listeners.set(model, model.onDidChangeContent(schedule));
   };
   try {
     const saved = await store.read();
     if (saved) {
       validateDrafts(saved);
+      api.restoreBreakpoints?.(saved.breakpoints || []);
       for (const draft of saved.documents) {
         try {
           await api.openFile(draft.path);
           const model = models.getModel(provider.uri(draft.path));
           if (!model) throw new Error('The file cannot be opened as text.');
+          if (typeof draft.text === 'string' && draft.canonicalPath) provider.canonicalPaths.set(draft.path, draft.canonicalPath);
           if (typeof draft.text === 'string' && draft.text !== model.getValue()) {
             model.pushEditOperations([], [{ range: model.getFullModelRange(), text: draft.text }], () => null);
             if (draft.revision) provider.revisions.set(draft.path, draft.revision);
@@ -105,6 +126,15 @@ export async function attachEditorRecovery({ storageId, workspace, provider, mod
     models.onModelRemoved(model => { listeners.get(model)?.dispose(); listeners.delete(model); schedule(); }),
     editors.onDidEditorsChange(schedule),
     editors.onDidActiveEditorChange(schedule),
+    api.onBreakpointsChanged?.(schedule),
+    provider.onDidWriteFile?.(({ path, bytes }) => {
+      if (!unresolved.has(path)) return;
+      snapshot();
+      if (new TextDecoder().decode(bytes) !== unresolved.get(path).text) return;
+      unresolved.delete(path);
+      for (const [resource, original] of recoveredResources) if (original === path) recoveredResources.delete(resource);
+      schedule();
+    }),
   ];
   const unsubscribe = workspace.subscribe?.(event => {
     if (event.type === 'workspace-closed' && event.erased) {
@@ -121,8 +151,14 @@ export async function attachEditorRecovery({ storageId, workspace, provider, mod
     flush,
     async recoverMissing() {
       for (const [path, draft] of [...unresolved]) {
-        await editors.openEditor({ resource: provider.uri(path), forceUntitled: true, contents: draft.text,
+        const pane = await editors.openEditor({ resource: provider.uri(path), forceUntitled: true, contents: draft.text,
           options: { pinned: true } });
+        const resource = pane?.input?.resource;
+        if (resource) {
+          recoveredResources.set(resource.toString(), path);
+          const model = models.getModel(resource);
+          if (model) watch(model);
+        }
         // Keep the durable record until this recovered tab has been explicitly
         // saved at its intended path; closing a new untitled tab is not a write.
       }
@@ -132,11 +168,12 @@ export async function attachEditorRecovery({ storageId, workspace, provider, mod
       await flush().catch(() => {});
       disposed = true;
       clearTimeout(timer);
-      subscriptions.forEach(subscription => subscription.dispose());
+      subscriptions.forEach(subscription => subscription?.dispose());
       listeners.forEach(subscription => subscription.dispose());
       if (typeof unsubscribe === 'function') unsubscribe(); else unsubscribe?.dispose();
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('pagehide', hide);
+      await pending.catch(() => {});
       store.close();
     },
   };

@@ -9,7 +9,7 @@ import { stageCurl } from './curl.mjs';
 import { stageSodium } from './sodium.mjs';
 import { applyCgiRequestOverlay } from './cgi-request-overlay.mjs';
 import { stageCodeAssets } from './code-assets.mjs';
-import { stagePhpDebugHttp } from './phpdbg.mjs';
+import { stagePhpDebugHttp, applyPhpDebugWorkerOverlay } from './phpdbg.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const versions = JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
@@ -81,6 +81,7 @@ try {
   const packages = [];
   for (const name of ['php-cgi-wasm', 'php-dbg-wasm', ...extensionPackages]) packages.push(await copyPackage(name));
   const cgiRequestOverlay = await applyCgiRequestOverlay(path.join(assets, 'php-cgi-wasm'));
+  const debuggerWorkerOverlay = await applyPhpDebugWorkerOverlay(path.join(assets, 'php-dbg-wasm'));
   const fflatePin = lock.packages['node_modules/fflate'];
   if (fflatePin?.version !== pkg.dependencies.fflate) throw new Error('fflate lock mismatch');
   await mkdir(path.join(assets, 'fflate'));
@@ -190,7 +191,7 @@ try {
   const manifest = {
     schemaVersion: 1, projectVersion: pkg.version, sourceCommit, code,
     deployment: { canonicalUrl, domain },
-    upstream: { ...versions.upstream, cgiRequestOverlay }, nativeDriver: versions.nativeDriver, packages, php, joomla, deploys,
+    upstream: { ...versions.upstream, cgiRequestOverlay, debuggerWorkerOverlay }, nativeDriver: versions.nativeDriver, packages, php, joomla, deploys,
     bridge: {
       protocolVersion: versions.bridge.protocolVersion,
       sourceCommit: versions.nativeDriver.sourceCommit,

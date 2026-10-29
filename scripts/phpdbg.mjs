@@ -1,7 +1,37 @@
-import { cp, readFile } from 'node:fs/promises';
+import { cp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hashFile } from './assets.mjs';
+import { hashFile, sha256 } from './assets.mjs';
+
+const workerOriginals = {
+  'php8.3-dbg-web.mjs': 'ef7ff06e6ee4c3569ae80da8fbc6558b734e9b5d426747b22105ab2451102f49',
+  'php8.4-dbg-web.mjs': 'fae40f998ac8df21b5a9af0b7524e0dfb6d4963a0e240d0298739dc6ad865842',
+  'php8.5-dbg-web.mjs': 'b4ad4a4c70bd8d5794641cf94fd5710487453704f100ba9e03b9c04d0ca5f8c3',
+};
+
+/** The pinned web build eagerly registers DOM targets even in a worker. */
+export async function applyPhpDebugWorkerOverlay(directory) {
+  const prepared = [];
+  for (const [file, expected] of Object.entries(workerOriginals)) {
+    let source = await readFile(path.join(directory, file), 'utf8');
+    if (sha256(source) !== expected) throw new Error(`Review the upstream debugger worker correction for ${file}.`);
+    for (const [before, after] of [
+      ['var ENVIRONMENT_IS_WEB=true;var ENVIRONMENT_IS_WORKER=false;',
+        'var ENVIRONMENT_IS_WEB=typeof window!=="undefined";var ENVIRONMENT_IS_WORKER=typeof WorkerGlobalScope!=="undefined";'],
+      ['var specialHTMLTargets=[0,document,window];', 'var specialHTMLTargets=[0,globalThis.document,globalThis.window];'],
+    ]) {
+      if (source.split(before).length !== 2) throw new Error(`Upstream debugger worker structure changed in ${file}.`);
+      source = source.replace(before, after);
+    }
+    prepared.push({ file, source: `/* Modified by JoomEngine: worker environment and optional DOM target registration; PHP/WASM unchanged. */\n${source}` });
+  }
+  const files = [];
+  for (const { file, source } of prepared) {
+    await writeFile(path.join(directory, file), source);
+    files.push({ file, originalSha256: workerOriginals[file], sha256: sha256(source) });
+  }
+  return { name: 'phpdbg-dedicated-worker', upstreamVersion: '0.2.0', files };
+}
 
 /** Stage only the debugger extension built from this checkout and runtime pin. */
 export async function stagePhpDebugHttp({ directory, destination, version, upstream }) {

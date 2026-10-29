@@ -53,8 +53,12 @@ export function createPhpDebugOwner({ options, getPhp, getBinary, databaseCall, 
         const message = event.data;
         if (worker !== activeWorker) return;
         if (message?.type === 'database-call') {
-          try { const value = await databaseCall(message.payload); activeWorker.postMessage({ type: 'database-result', id: message.id, value }); }
-          catch (error) { activeWorker.postMessage({ type: 'database-result', id: message.id, error: error.message }); }
+          try {
+            const value = await databaseCall(message.payload);
+            if (worker === activeWorker) activeWorker.postMessage({ type: 'database-result', id: message.id, value });
+          } catch (error) {
+            if (worker === activeWorker) activeWorker.postMessage({ type: 'database-result', id: message.id, error: error.message });
+          }
         } else if (message?.type === 'debug-state') {
           clearTimeout(startupTimer); onState(message.state);
         } else if (message?.type === 'debug-event') {
@@ -101,7 +105,8 @@ export function createPhpDebugOwner({ options, getPhp, getBinary, databaseCall, 
     async maybeRequest(request) {
       if (!selection?.(request)) return null;
       selection = undefined; // Once-only selection, including failed and stopped POSTs.
-      return { response: await execute(request) };
+      try { return { response: await execute(request) }; }
+      catch (error) { onState('idle'); emit('terminated'); throw error; }
     },
     async command(command, args = {}) {
       if (command === 'setBreakpoints') {

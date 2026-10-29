@@ -6,7 +6,7 @@ function patterns(value) { return Object.entries(value || {}).filter(([, enabled
 
 /** Search pages execute in the PHP worker and yield between bounded chunks. */
 export class JoomlaSearchProvider {
-  constructor(provider) { this.provider = provider; }
+  constructor(provider) { this.provider = provider; this.revisions = new Map(); }
   getAIName() { return Promise.resolve(undefined); }
   clearCache() { return Promise.resolve(); }
   fileSearch(query, token) { return this.search('files', query, undefined, token); }
@@ -34,6 +34,7 @@ export class JoomlaSearchProvider {
         truncated ||= page.truncated;
         for (const item of page.results) {
           if (kind === 'files' && query.filePattern && !fuzzyContains(item.path, query.filePattern)) continue;
+          if (item.revision) this.revisions.set(item.path, item.revision);
           const match = matches.get(item.path) || { resource: this.provider.uri(item.path), results: [] };
           if (kind === 'text') {
             const result = { previewText: item.preview, rangeLocations: [{

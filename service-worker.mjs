@@ -23,6 +23,42 @@ self.addEventListener('message', event => {
   }
 });
 
+/** Intentional debugger pauses outlive background-tab timer throttling. */
+export function waitForPlaygroundResponse({ port, ownerAlive, setTimer = setTimeout, clearTimer = clearTimeout }) {
+  let timer, generation = 0, finished = false;
+  const close = () => {
+    finished = true; generation++;
+    clearTimer(timer); port.close();
+  };
+  const promise = new Promise((resolve, reject) => {
+    const wait = paused => {
+      clearTimer(timer);
+      const current = ++generation;
+      timer = setTimer(async () => {
+        if (finished || current !== generation) return;
+        if (paused) {
+          let alive = false;
+          try { alive = await ownerAlive(); } catch { /* A lost owner cannot resume this request. */ }
+          // A response/resume may arrive while the Clients lookup is pending.
+          if (finished || current !== generation) return;
+          if (alive) { wait(true); return; }
+        }
+        close();
+        reject(new Error(paused ? 'The paused PHP debugger lost its owner tab.' : 'The playground did not answer the request within 600 seconds'));
+      }, paused ? 15_000 : 600_000);
+    };
+    wait(false);
+    port.onmessage = event => {
+      if (finished) return;
+      if (event.data?.type === 'playground-request-state') { wait(event.data.state === 'paused'); return; }
+      close();
+      if (event.data?.error) reject(new Error(event.data.error));
+      else resolve(event.data);
+    };
+  });
+  return { promise, close };
+}
+
 async function routeToPlayground(request) {
   const url = new URL(request.url);
   const [ownerId, instanceId] = url.pathname.slice(sitePrefix.length).split('/');
@@ -32,35 +68,23 @@ async function routeToPlayground(request) {
   }
   const serialized = await serializeRequest(request);
   const channel = new MessageChannel();
-  let timer;
-  const result = new Promise((resolve, reject) => {
-    const wait = paused => {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-      channel.port1.close();
-      reject(new Error(paused ? 'The paused PHP debugger lost its owner tab.' : 'The playground did not answer the request within 600 seconds'));
-      }, paused ? 15_000 : 600_000);
-    };
-    wait(false);
-    channel.port1.onmessage = event => {
-      if (event.data?.type === 'playground-request-state') { wait(event.data.state === 'paused'); return; }
-      clearTimeout(timer);
-      channel.port1.close();
-      if (event.data?.error) reject(new Error(event.data.error));
-      else resolve(event.data);
-    };
+  const waiting = waitForPlaygroundResponse({
+    port: channel.port1,
+    async ownerAlive() {
+      const active = await self.clients.get(ownerId);
+      return Boolean(active && new URL(active.url).pathname.startsWith(scope.pathname));
+    },
   });
   try {
     const value = await staticAssets.respond(serialized, request => {
       owner.postMessage({ type: 'playground-request', instanceId, request }, [channel.port2]);
-      return result;
+      return waiting.promise;
     }, { cache: request.cache });
     const response = restoreResponse(value, request.method);
     response.headers.set('Cache-Control', value.staticAsset === true ? 'private, no-cache' : 'no-store');
     return response;
   } finally {
-    clearTimeout(timer);
-    channel.port1.close();
+    waiting.close();
     channel.port2.close();
   }
 }

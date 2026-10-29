@@ -65,6 +65,55 @@ test('reads, writes and recursive mutations cannot follow links outside the root
   const link = (await service.handle('list', { path: '/' })).find(item => item.name === 'escape');
   assert.equal(link.type, 'symlink');
   assert.equal(link.readonly, true);
+  assert.equal(link.canonicalPath, undefined, 'An escaped link must not disclose its physical target.');
+});
+
+test('canonical metadata exposes only workspace-relative targets for file and directory aliases', async () => {
+  const { service, root } = fixture();
+  fs.symlinkSync('index.php', path.join(root, 'alias.php'));
+  fs.symlinkSync('templates', path.join(root, 'theme'));
+  const stat = await service.handle('stat', { path: '/alias.php' });
+  assert.equal(stat.path, '/alias.php');
+  assert.equal(stat.canonicalPath, '/index.php');
+  const listed = (await service.handle('list', { path: '/' })).find(entry => entry.name === 'theme');
+  assert.equal(listed.canonicalPath, '/templates');
+  const read = await service.handle('read', { path: '/theme/site.css' });
+  assert.equal(read.path, '/theme/site.css');
+  assert.equal(read.canonicalPath, '/templates/site.css');
+  assert.equal(read.stat.canonicalPath, read.canonicalPath);
+  assert.equal(JSON.stringify([stat, listed, read.stat]).includes(root), false);
+});
+
+test('reviewed canonical targets cannot be exchanged through an equal-content directory alias', async () => {
+  const { service, root } = fixture();
+  fs.mkdirSync(path.join(root, 'other'));
+  fs.copyFileSync(path.join(root, 'templates/site.css'), path.join(root, 'other/site.css'));
+  fs.symlinkSync('templates', path.join(root, 'alias'));
+  const original = await service.handle('stat', { path: '/alias/site.css', revision: true });
+  fs.unlinkSync(path.join(root, 'alias'));
+  fs.symlinkSync('other', path.join(root, 'alias'));
+  await assert.rejects(service.handle('write', { path: '/alias/site.css', bytes: 'unreviewed write', overwrite: true,
+    expectedRevision: original.revision, expectedCanonicalPath: original.canonicalPath }), { code: 'CONFLICT' });
+  await assert.rejects(service.handle('write', { path: '/alias/new.txt', bytes: 'unreviewed create',
+    expectedRevision: null, expectedCanonicalPath: '/templates/new.txt' }), { code: 'CONFLICT' });
+  assert.equal(fs.readFileSync(path.join(root, 'other/site.css'), 'utf8'), 'body { color: red; }\r\n');
+  assert.equal(fs.existsSync(path.join(root, 'other/new.txt')), false);
+});
+
+test('recovery rejects a snapshot parent replaced by an equal-content directory alias', async () => {
+  const { service, root } = fixture();
+  const saved = await service.handle('write', { path: '/templates/site.css', bytes: 'saved change', overwrite: true });
+  fs.mkdirSync(path.join(root, 'other'));
+  fs.writeFileSync(path.join(root, 'other/site.css'), 'saved change');
+  fs.renameSync(path.join(root, 'templates'), path.join(root, 'original-templates'));
+  fs.symlinkSync('other', path.join(root, 'templates'));
+  await assert.rejects(service.handle('recover', { recoveryId: saved.recoveryId }), { code: 'CONFLICT' });
+  assert.equal(fs.readFileSync(path.join(root, 'other/site.css'), 'utf8'), 'saved change');
+  assert.equal(fs.readFileSync(path.join(root, 'original-templates/site.css'), 'utf8'), 'saved change');
+  fs.unlinkSync(path.join(root, 'templates'));
+  fs.renameSync(path.join(root, 'original-templates'), path.join(root, 'templates'));
+  assert.equal((await service.handle('recover', { recoveryId: saved.recoveryId })).ok, true);
+  assert.equal(fs.readFileSync(path.join(root, 'templates/site.css'), 'utf8'), 'body { color: red; }\r\n');
 });
 
 test('trusted persistence root symlink works but later root redirection is rejected', async () => {

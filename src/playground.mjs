@@ -1,5 +1,5 @@
 import { normalizeConfiguration, parseCatalog, normalizeInitialPath, resolveSiteURL } from './config.mjs';
-import { installJoomla, inspectJoomla, sha256, importJoomlaSnapshot, importJoomlaCheckpoint, checkJoomla, restoreJoomlaSession, applyJoomlaConfiguration, discoverJoomlaConfiguration, getMcpConnection, readJoomlaAdministrator, repairJoomlaConfiguration } from './joomla/index.mjs';
+import { installJoomla, inspectJoomla, sha256, importJoomlaSnapshot, importJoomlaCheckpoint, checkJoomla, restoreJoomlaSession, applyJoomlaConfiguration, discoverJoomlaConfiguration, getMcpConnection, readJoomlaAdministrator, repairJoomlaConfiguration, runStartupCommand } from './joomla/index.mjs';
 import { exportSite } from './export.mjs';
 import { serializeRequest, restoreResponse } from './http.mjs';
 import { normalizePhpSettings, phpRequestTimeoutMs } from './php-settings.mjs';
@@ -41,17 +41,14 @@ export function prepareEnvironment() {
 async function receiveSiteRequest(event) {
   if (event.source?.scriptURL !== new URL('service-worker.mjs', base).href || event.data?.type !== 'playground-request' || !event.ports[0]) return;
   const port = event.ports[0];
-  let heartbeat;
   try {
     const instance = instances.get(event.data.instanceId);
     if (!instance) throw new Error('This playground session is no longer open.');
     port.postMessage(await instance.send('request', event.data.request, state => {
-      clearInterval(heartbeat);
       port.postMessage({ type: 'playground-request-state', state });
-      if (state === 'paused') heartbeat = setInterval(() => port.postMessage({ type: 'playground-request-state', state: 'paused' }), 5000);
     }));
   } catch (error) { port.postMessage({ error: error.message }); }
-  finally { clearInterval(heartbeat); port.close(); }
+  finally { port.close(); }
 }
 async function clientIdentity() {
   const channel = new MessageChannel();
@@ -62,7 +59,7 @@ async function clientIdentity() {
   });
 }
 
-class PhpSession {
+export class PhpSession {
   constructor(database, onFailure, onDiagnostic) {
     this.database = database;
     this.onFailure = onFailure;
@@ -75,6 +72,8 @@ class PhpSession {
     this.failure = null;
     this.workspaceListeners = new Set();
     this.debugListeners = new Set();
+    this.requestProgress = new Set();
+    this.debugState = 'idle';
     this.worker.addEventListener('error', event => this.fail(new Error(event.message || 'The PHP worker failed.')));
     this.worker.addEventListener('messageerror', () => this.fail(new Error('The PHP worker sent an unreadable message.')));
     this.worker.addEventListener('message', event => this.receive(event.data));
@@ -82,11 +81,16 @@ class PhpSession {
   async receive(message) {
     if (message?.type === 'debug-state' || message?.type === 'debug-event') {
       if (message.type === 'debug-state') {
+        this.debugState = message.state;
         const pending = this.pending.get(message.requestId);
         if (pending?.operation === 'request') {
           if (message.state === 'paused') clearTimeout(pending.timer);
           else if (message.state === 'running' || message.state === 'idle') pending.armTimer();
-          pending.onProgress?.(message.state);
+        }
+        // A paused request also holds later HTTP requests in the owner queue.
+        // Suspend their service-worker deadlines before they start executing.
+        for (const listener of this.requestProgress) {
+          try { listener(message.state); } catch { /* A closed response port cannot interrupt PHP. */ }
         }
       }
       for (const listener of this.debugListeners) { try { listener(message); } catch { /* Debug views do not own PHP. */ } }
@@ -135,15 +139,22 @@ class PhpSession {
     if (this.failure) return Promise.reject(this.failure);
     if (!Number.isInteger(timeoutMs) || timeoutMs < 10 || timeoutMs > 600_000) return Promise.reject(new RangeError('Timeout must be between 10 and 600000 milliseconds.'));
     if (this.queued >= 64) return Promise.reject(new Error('The PHP request queue is full.'));
+    const progress = operation === 'request' && typeof onProgress === 'function' ? state => onProgress(state) : null;
+    if (progress) {
+      this.requestProgress.add(progress);
+      if (this.debugState === 'paused') {
+        try { progress('paused'); } catch { /* The caller may have abandoned this response. */ }
+      }
+    }
     this.queued++;
     const result = this.queue.then(() => {
       if (this.failure) throw this.failure;
-      return this.perform(operation, args, timeoutMs, onProgress);
-    }).finally(() => { this.queued--; });
+      return this.perform(operation, args, timeoutMs);
+    }).finally(() => { this.queued--; if (progress) this.requestProgress.delete(progress); });
     this.queue = result.catch(() => {});
     return result;
   }
-  perform(operation, args = {}, timeoutMs = 180_000, onProgress) {
+  perform(operation, args = {}, timeoutMs = 180_000) {
     if (this.failure) return Promise.reject(this.failure);
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
@@ -152,7 +163,7 @@ class PhpSession {
         error.code = 'TIMEOUT';
         this.fail(error);
       };
-      const pending = { resolve, reject, operation, onProgress,
+      const pending = { resolve, reject, operation,
         armTimer() { clearTimeout(this.timer); this.timer = setTimeout(timeout, timeoutMs); } };
       pending.armTimer();
       this.pending.set(id, pending);
@@ -221,7 +232,7 @@ class PhpSession {
   }
   async close() {
     try { if (!this.failure) { await this.debugCommand('stop').catch(() => {}); await this.send('close'); } }
-    finally { this.workspaceListeners.clear(); this.debugListeners.clear(); this.worker.terminate(); this.failure ??= new Error('This PHP session is closed.'); await this.recovery; }
+    finally { this.workspaceListeners.clear(); this.debugListeners.clear(); this.requestProgress.clear(); this.worker.terminate(); this.failure ??= new Error('This PHP session is closed.'); await this.recovery; }
   }
 }
 
@@ -252,6 +263,8 @@ async function deleteStore(name) {
 }
 async function eraseStoredSite(identity) {
   await Promise.all([deleteStore(`/joomengine-${identity}`), deleteStore(`/mariadb/idb/joomengine-${identity}`)]);
+  const { clearEditorDrafts } = await import('./code/editor-session.mjs');
+  await clearEditorDrafts(identity);
 }
 /** Erase a closed or incompletely installed saved site after user confirmation. */
 export async function resetPlayground({ storageKey = 'default' } = {}) {
@@ -360,7 +373,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       recovery: null,
       lastSavedAt: null,
       debugger: {
-        capabilities: { conditionalBreakpoints: false },
+        capabilities: { conditionalBreakpoints: true },
         get state() { return debugState; },
         async start(configuration = {}) {
           requireDatabase();
@@ -406,6 +419,14 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       fs: Object.fromEntries(['mkdir', 'readFile', 'writeFile', 'readdir', 'stat', 'unlink'].map(method => [method,
         (path, data) => session.send(`fs.${method}`, { path, data })])),
       runPhp: (source, options = {}) => session.send('runPhp', { source }, options.timeoutMs ?? 180_000),
+      async clearJoomlaCache() {
+        requireDatabase();
+        if (changing || closePromise) throw new Error('Wait for the current site operation before clearing Joomla caches.');
+        if (debugState === 'paused') throw new Error('Continue or stop the paused PHP request before clearing Joomla caches.');
+        const result = await runStartupCommand(handle, ['cache:clean']);
+        await session.flushTogether();
+        return result;
+      },
       async request(path = '/', init = {}) {
         requireDatabase();
         const target = normalizeInitialPath(`/${String(path).replace(/^\/+/, '')}`);

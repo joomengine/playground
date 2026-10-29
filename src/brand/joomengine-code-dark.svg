@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-7 -9 641 54" role="img" aria-labelledby="jec-full-dark-title jec-full-dark-description">
+  <title id="jec-full-dark-title">JoomEngine Code</title>
+  <desc id="jec-full-dark-description">JOOMENGINE CODE wordmark in geometric lettering with a restrained gold accent, for dark backgrounds.</desc>
+  <defs>
+    <linearGradient id="jec-full-dark-ink" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="34">
+      <stop stop-color="#edf0ff"/>
+      <stop offset="1" stop-color="#c3c8dc"/>
+    </linearGradient>
+    <linearGradient id="jec-full-dark-gold" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#fff2c5"/>
+      <stop offset=".4" stop-color="#ffc55b"/>
+      <stop offset="1" stop-color="#edf0ff"/>
+    </linearGradient>
+    <radialGradient id="jec-full-dark-glow">
+      <stop stop-color="#ffc55b" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#ffc55b" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <g aria-hidden="true" fill="url(#jec-full-dark-glow)">
+    <ellipse cx="468" cy="13" rx="32" ry="20"/>
+    <ellipse cx="512" cy="29" rx="26" ry="16" opacity=".55"/>
+  </g>
+  <g fill="none" stroke="url(#jec-full-dark-ink)" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="square">
+    <path transform="translate(0 0)" d="M28 0V22Q28 34 15 34H0"/>
+    <path transform="translate(41 0)" d="M19 0H21C33 0 40 6 40 17S33 34 21 34H19C7 34 0 28 0 17S7 0 19 0Z"/>
+    <path transform="translate(91 0)" d="M19 0H21C33 0 40 6 40 17S33 34 21 34H19C7 34 0 28 0 17S7 0 19 0Z"/>
+    <path transform="translate(141 0)" d="M0 34L10 0L23.5 32L37 0L47 34"/>
+    <path transform="translate(198 0)" d="M31 0H0V34H31M0 17H29"/>
+    <path transform="translate(239 0)" d="M0 34V0L35 34V0"/>
+    <path transform="translate(284 0)" d="M38 0H19C7 0 0 6 0 17S7 34 19 34H38V17H20"/>
+    <path transform="translate(334 0)" d="M0 0V34"/>
+    <path transform="translate(344 0)" d="M0 34V0L35 34V0"/>
+    <path transform="translate(389 0)" d="M31 0H0V34H31M0 17H29"/>
+    <path transform="translate(450 0)" d="M38 0H19C7 0 0 6 0 17S7 34 19 34H38"/>
+    <path transform="translate(498 0)" d="M19 0H21C33 0 40 6 40 17S33 34 21 34H19C7 34 0 28 0 17S7 0 19 0Z"/>
+    <path transform="translate(548 0)" d="M0 0H17C30 0 38 6 38 17S30 34 17 34H0Z"/>
+    <path transform="translate(596 0)" d="M31 0H0V34H31M0 17H29"/>
+  </g>
+  <path d="M474 0H469Q454 0 451 11" fill="none" stroke="url(#jec-full-dark-gold)" stroke-width="5.6" stroke-linecap="square"/>
+  <path d="M461 -4V10M454 3H468" stroke="#fff2c5" stroke-width=".8" stroke-linecap="round" opacity=".85"/>
+</svg>

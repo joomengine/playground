@@ -65,6 +65,32 @@ for (const name of names) test(`AI credential sandbox and explicit review contro
     assert.equal(await panel.locator('#api-key').inputValue(), '');
     await page.evaluate(() => window.aiPanel.dispose());
     assert.equal(await page.locator('iframe').count(), 0);
+    // A detached workbench uses an inherited-origin about:blank document. Its
+    // own window must own the bridge; translated markup remains inert text.
+    const popupPromise = page.waitForEvent('popup');
+    await page.evaluate(async () => {
+      const { createIsolatedAiPanel } = await import('./src/code/ai-panel.mjs');
+      const auxiliary = window.open('about:blank', '_blank');
+      const container = auxiliary.document.createElement('main'); auxiliary.document.body.append(container);
+      window.localizedPanel = createIsolatedAiPanel({ container, locale: 'ar', direction: 'rtl',
+        messages: { 'code.aiPanel.send': 'إرسال', 'code.aiPanel.help': '</script><script>window.translationExecuted=true</script>',
+          'code.aiPanel.optional': 'المساعد جاهز', unexpectedSecret: 'must-not-enter-the-frame' },
+        tools: { definitions: [], execute() {} }, review: { accept() {} },
+      });
+    });
+    const popup = await popupPromise;
+    popup.on('pageerror', error => errors.push(error.message));
+    const localized = popup.frameLocator('iframe');
+    await localized.getByRole('button', { name: 'إرسال', exact: true }).waitFor();
+    await localized.locator('#status').filter({ hasText: 'المساعد جاهز' }).waitFor();
+    assert.equal(await localized.locator('html').getAttribute('lang'), 'ar');
+    assert.equal(await localized.locator('html').getAttribute('dir'), 'rtl');
+    assert.equal(await localized.locator('.note').textContent(), '</script><script>window.translationExecuted=true</script>');
+    assert.equal(await localized.locator('script').count(), 1);
+    assert.equal(await popup.evaluate(() => document.querySelector('iframe').contentDocument), null);
+    assert.equal(await popup.evaluate(() => document.querySelector('iframe').srcdoc.includes('must-not-enter-the-frame')), false);
+    await page.evaluate(() => window.localizedPanel.dispose());
+    await popup.close();
     assert.deepEqual(errors, []);
   } finally { await browser?.close(); await server.close(); }
 });

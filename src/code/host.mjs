@@ -1,5 +1,6 @@
 import { createCodeLayout } from './layout.mjs';
 import { createRefreshController } from './refresh.mjs';
+import { mountFileActions } from './file-actions.mjs';
 
 const mutations = new Set(['write', 'batch', 'mkdir', 'copy', 'rename', 'delete', 'recover']);
 let stylesheet;
@@ -19,7 +20,11 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
   onError = () => {}, onState = () => {}, t = key => key, storage }) {
   await loadStyles();
   if (!runtime.healthy) throw new Error('Open a healthy Joomla site before opening JoomEngine Code.');
-  let workbench, opening, disposed = false, aiPanel, aiLoading, disposal;
+  let workbench, opening, disposed = false, aiPanel, aiLoading, disposal, fileActions, cancelFrameLoad;
+  let selectedAiPaths = [];
+  let aiServices;
+  const auxiliaryTools = new Set();
+  const aiPanels = new Set();
   const editor = document.createElement('div');
   const frame = document.createElement('iframe');
   frame.title = 'JoomEngine Code';
@@ -32,7 +37,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
   const refresh = createRefreshController({
     refresh: refreshSite, onError: report, t,
     onState(state) {
-      status.textContent = state.saving ? t('code.saving') : state.savedChanges ? t('code.savedChanges') : '';
+      status.textContent = state.saving ? t(state.paused ? 'code.savesQueued' : 'code.saving') : state.savedChanges ? t('code.savedChanges') : '';
       onState({ ...state, visible: layout?.state.visible ?? true });
     },
   });
@@ -65,15 +70,60 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
       return workbench.detach(options);
     },
   });
-  const button = (key, action) => {
-    const element = document.createElement('button'); element.type = 'button';
+  const button = (key, action, doc = document, onFailure = report) => {
+    const element = doc.createElement('button'); element.type = 'button';
     element.textContent = t(key); element.title = t(key);
-    element.addEventListener('click', () => { void Promise.resolve().then(action).catch(report); });
+    element.setAttribute('data-i18n', key); element.setAttribute('data-i18n-title', key);
+    element.addEventListener('click', () => { void Promise.resolve().then(action).catch(onFailure); });
     return element;
   };
+  async function clearJoomlaCache() {
+    if (runtime.debugger.state === 'paused') throw new Error(t('code.pausedRefresh'));
+    await refresh.waitForSaves();
+    await runtime.clearJoomlaCache();
+  }
+  async function armRequest(win = window) {
+    const input = win.prompt(t('code.debugURL'), getPreviewURL());
+    if (input === null) return;
+    const method = win.prompt(t('code.debugMethod'), 'GET')?.trim().toUpperCase();
+    if (!method) return;
+    const url = new URL(input, runtime.baseUrl).href;
+    await workbench.startDebugging({ url, method, refresh: false });
+    status.textContent = t('code.debugArmed');
+  }
+  async function createAiPanel(container) {
+    const [{ createAiReview, createAiWorkspaceTools }, { createIsolatedAiPanel }] = await Promise.all([
+      import('./ai-review.mjs'), import('./ai-panel.mjs'),
+    ]);
+    if (disposed) return;
+    if (!aiServices) {
+      const review = createAiReview({ workspace, isDirty: (path, recursive) => workbench.isDirty(path, recursive),
+        onApplied: result => workbench.reconcileApplied(result) });
+      aiServices = { review, tools: createAiWorkspaceTools({ workspace, review, selectedPaths: () => selectedAiPaths }) };
+    }
+    const { review, tools } = aiServices;
+    const isolated = createIsolatedAiPanel({ container, tools, review, t,
+      locale: document.documentElement.lang, direction: document.documentElement.dir,
+      getContext: ({ signal }) => tools.context({ ...workbench.getContext(), signal }) });
+    // Register before returning through an async boundary: disposal can run
+    // before the requesting main or auxiliary view receives this value.
+    const panel = Object.freeze({ element: isolated.element, dispose() {
+      aiPanels.delete(panel); isolated.dispose();
+    } });
+    aiPanels.add(panel);
+    return panel;
+  }
   const save = button('code.saveAll', () => workbench?.saveAll());
   const reload = button('code.refresh', () => refresh.refresh());
+  const clearCache = button('code.cacheClear', async () => {
+    clearCache.disabled = true;
+    try {
+      await clearJoomlaCache();
+      status.textContent = t('code.cacheCleared');
+    } finally { clearCache.disabled = false; }
+  });
   const debug = button('code.debugRefresh', () => workbench?.startDebugging({ url: getPreviewURL(), method: 'GET', refresh: true }));
+  const arm = button('code.debugArm', () => armRequest());
   const aiContainer = document.createElement('section');
   aiContainer.className = 'jec-ai-panel'; aiContainer.hidden = true;
   const ai = button('code.ai', async () => {
@@ -81,15 +131,9 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     if (aiPanel) { aiContainer.hidden = !aiContainer.hidden; ai.setAttribute('aria-expanded', String(!aiContainer.hidden)); return; }
     if (aiLoading) return aiLoading;
     aiLoading = (async () => {
-      const [{ createAiReview, createAiWorkspaceTools }, { createIsolatedAiPanel }] = await Promise.all([
-        import('./ai-review.mjs'), import('./ai-panel.mjs'),
-      ]);
-      if (disposed) return;
-      const review = createAiReview({ workspace, isDirty: (path, recursive) => workbench.isDirty(path, recursive) });
-      const tools = createAiWorkspaceTools({ workspace, review });
-      aiPanel = createIsolatedAiPanel({ container: aiContainer, tools, review,
-        getContext: ({ signal }) => tools.context({ ...workbench.getContext(), signal }),
-      });
+      const panel = await createAiPanel(aiContainer);
+      if (disposed) { panel?.dispose(); return; }
+      aiPanel = panel;
       editor.append(aiContainer);
       aiContainer.hidden = false;
       ai.setAttribute('aria-expanded', 'true');
@@ -97,12 +141,70 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     return aiLoading;
   });
   ai.setAttribute('aria-expanded', 'false');
+  const aiContext = button('code.aiContext', async () => {
+    const input = window.prompt(t('code.aiContextPrompt'), selectedAiPaths.join('\n'));
+    if (input === null) return;
+    const { normalizeWorkspacePath } = await import('./workspace-files.mjs');
+    const paths = [...new Set(input.split(/[\n,]/).map(path => path.trim()).filter(Boolean).map(normalizeWorkspacePath))];
+    if (paths.length > 16) throw new Error(t('code.aiContextLimit'));
+    for (const path of paths) {
+      const file = await workspace.request('stat', { path });
+      if (!file || file.type !== 'file' || file.size > 128 * 1024) throw new Error(`${path}: ${t('code.aiContextInvalid')}`);
+    }
+    selectedAiPaths = paths;
+    aiContext.title = paths.length ? `${t('code.aiContext')}: ${paths.join(', ')}` : t('code.aiContext');
+  });
   const autoLabel = document.createElement('label');
   const auto = document.createElement('input'); auto.type = 'checkbox';
   auto.addEventListener('change', () => refresh.setAutomatic(auto.checked));
   autoLabel.append(auto, document.createTextNode(t('code.autoRefresh')));
-  layout.toolbar.append(save, reload, debug, ai, autoLabel, status);
+  layout.toolbar.append(save, reload, clearCache, debug, arm, ai, aiContext, autoLabel, status);
   layout.show();
+
+  function mountDetachedTools({ window: win, toolbar, container, getActivePath, openFile }) {
+    const doc = win.document;
+    const output = doc.createElement('span'); output.setAttribute('role', 'status');
+    const notify = error => { output.textContent = error.message; report(error); };
+    const add = (key, action) => { const control = button(key, action, doc, notify); toolbar.append(control); return control; };
+    add('code.refresh', () => refresh.refresh());
+    add('code.cacheClear', async () => { await clearJoomlaCache(); output.textContent = t('code.cacheCleared'); });
+    add('code.debugRefresh', () => workbench.startDebugging({ url: getPreviewURL(), method: 'GET', refresh: true }));
+    add('code.debugArm', () => armRequest(win));
+    const debugControls = [
+      ['code.debugContinue', 'continue', 'stopped'], ['code.debugPause', 'pause', 'running'],
+      ['code.debugStepOver', 'stepOver', 'stopped'], ['code.debugStepInto', 'stepInto', 'stopped'],
+      ['code.debugStepOut', 'stepOut', 'stopped'], ['code.debugStop', 'stop', 'active'],
+    ].map(([key, command, state]) => ({ state, control: add(key, () => workbench.command(`workbench.action.debug.${command}`)) }));
+    const debugStatus = workbench.subscribeDebugState(state => {
+      for (const entry of debugControls) entry.control.disabled = entry.state === 'active' ? state === 'inactive' : state !== entry.state;
+    });
+    const aiMount = doc.createElement('section'); aiMount.hidden = true;
+    aiMount.style.cssText = 'height:600px;max-height:75vh;width:100%;overflow:auto';
+    container.append(aiMount);
+    let panel, loadingPanel, closed = false;
+    const aiButton = add('code.ai', async () => {
+      if (panel) { aiMount.hidden = !aiMount.hidden; aiButton.setAttribute('aria-expanded', String(!aiMount.hidden)); return; }
+      if (loadingPanel) return loadingPanel;
+      loadingPanel = createAiPanel(aiMount).then(value => {
+        if (closed) { value?.dispose(); return; }
+        panel = value; aiMount.hidden = false; aiButton.setAttribute('aria-expanded', 'true');
+      }).finally(() => { loadingPanel = undefined; });
+      return loadingPanel;
+    });
+    aiButton.setAttribute('aria-expanded', 'false');
+    const files = mountFileActions({ toolbar, workspace, getActivePath, openFile,
+      isDirty: (path, recursive) => workbench.isDirty(path, recursive), onError: notify, t });
+    toolbar.append(output);
+    const stopStatus = refresh.subscribe(state => {
+      output.textContent = state.saving ? t(state.paused ? 'code.savesQueued' : 'code.saving') : state.savedChanges ? t('code.savedChanges') : '';
+    });
+    const tools = { dispose() {
+      if (closed) return; closed = true;
+      stopStatus(); debugStatus?.dispose(); panel?.dispose(); files.dispose(); aiMount.remove(); auxiliaryTools.delete(tools);
+    } };
+    auxiliaryTools.add(tools);
+    return tools;
+  }
 
   function open() {
     if (disposed) return Promise.reject(new Error('This JoomEngine Code workspace is closed.'));
@@ -110,9 +212,11 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     if (opening) return opening;
     opening = (async () => {
       await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('JoomEngine Code did not load. Close and retry the editor.')), 60_000);
-        frame.onload = () => { clearTimeout(timeout); resolve(); };
-        frame.onerror = () => { clearTimeout(timeout); reject(new Error('JoomEngine Code assets could not load. Retry opening the editor.')); };
+        const cleanup = () => { clearTimeout(timeout); frame.onload = frame.onerror = null; cancelFrameLoad = undefined; };
+        const timeout = setTimeout(() => { cleanup(); reject(new Error('JoomEngine Code did not load. Close and retry the editor.')); }, 60_000);
+        cancelFrameLoad = () => { cleanup(); resolve(); };
+        frame.onload = () => { cleanup(); resolve(); };
+        frame.onerror = () => { cleanup(); reject(new Error('JoomEngine Code assets could not load. Retry opening the editor.')); };
         frame.src = new URL('../../assets/code/editor.html', import.meta.url).href;
         editor.replaceChildren(frame);
       });
@@ -120,14 +224,19 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
       if (!frame.contentWindow.JoomEngineCode?.mount) throw new Error('JoomEngine Code assets are missing or incompatible. Rebuild the Playground distribution.');
       workbench = await frame.contentWindow.JoomEngineCode.mount({
         workspace, siteId: runtime.workspace.id, storageId: runtime.workspace.storageId,
-        onError: report,
+        phpVersion: runtime.configuration.phpVersion,
+        onError: report, t,
+        onDetachedTools: mountDetachedTools,
         debuggerBackend: { ...runtime.debugger, async start(config) {
           await runtime.debugger.start(config);
           if (config.refresh) await refresh.refresh();
         } },
         getDebugConfiguration: () => ({ url: getPreviewURL(), method: 'GET', refresh: false }),
       });
-      if (disposed) { workbench?.dispose?.(); return; }
+      if (disposed) { await workbench?.dispose?.(); return; }
+      fileActions = mountFileActions({ toolbar: layout.toolbar, workspace,
+        getActivePath: () => workbench.getActivePath(), openFile: path => workbench.openFile(path),
+        isDirty: (path, recursive) => workbench.isDirty(path, recursive), onError: report, t });
       workbench.layout?.();
     })().catch(error => {
       opening = undefined;
@@ -150,16 +259,24 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
   function dispose() {
     if (disposed) return disposal;
     disposed = true;
+    cancelFrameLoad?.();
     unsubscribe();
     window.removeEventListener('beforeunload', beforeUnload);
     refresh.dispose();
-    aiPanel?.dispose();
+    for (const panel of aiPanels) panel.dispose();
+    aiPanel = undefined; aiServices = undefined; selectedAiPaths = [];
+    fileActions?.dispose();
+    for (const tools of auxiliaryTools) tools.dispose();
     // Return auxiliary editor parts before disposing their owner realm.
     disposal = (async () => {
-      try { await layout.redock(); await workbench?.dispose?.(); }
-      finally { layout.dispose(); }
+      const failures = [];
+      for (const cleanup of [() => layout.redock(), () => workbench?.dispose?.(), () => layout.dispose()]) {
+        try { await cleanup(); } catch (error) { failures.push(error); }
+      }
+      if (failures.length === 1) throw failures[0];
+      if (failures.length) throw new AggregateError(failures, failures.map(error => error.message).join('; '));
     })();
-    disposal.catch(report);
+    disposal.catch(error => { try { onError(error); } catch { /* Cleanup reporting cannot retain the editor realm. */ } });
     onState({ closed: true, visible: false });
     return disposal;
   }
