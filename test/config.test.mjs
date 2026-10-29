@@ -61,6 +61,7 @@ test('configuration validates credentials, storage and booleans', () => {
   assert.throws(() => normalizeConfiguration({ admin, storageKey: 123 }), /Site key/);
   assert.throws(() => normalizeConfiguration({ admin: { ...admin, email: 'bad' } }), /email address/);
   const config = normalizeConfiguration({ admin, persistence: false, extensions: [], startupCommands: [] });
+  assert.equal(config.phpVersion, '8.4');
   assert.equal(config.persistence, false);
   assert.equal(config.admin.username, 'admin');
 });

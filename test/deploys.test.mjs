@@ -10,7 +10,7 @@ const sourceCatalog = JSON.parse(await readFile(new URL('catalog.json', root), '
 const catalog = parseCatalog({
   php: [{ version: '8.3' }, { version: '8.4' }, { version: '8.5' }],
   joomla: [{ version: '5.4.10', php: ['8.3', '8.4', '8.5'] }, { version: '6.2.0', php: ['8.3', '8.4', '8.5'] }],
-  defaults: { phpVersion: '8.5', joomlaVersion: '6.2.0' },
+  defaults: { phpVersion: '8.4', joomlaVersion: '6.2.0' },
 });
 const admin = { password: 'Deploy-contract-password-123!' };
 const files = new Map(await Promise.all(['catalog', ...sourceCatalog.deploys.map((entry) => entry.id)].map(async (name) => [
@@ -31,11 +31,11 @@ test('repository catalog and every manifest validate with required integrity pin
   }
 });
 
-test('defaults select prepared JCB on PHP 8.5 for Joomla 5 and 6', async () => {
+test('defaults select prepared JCB on PHP 8.4 for Joomla 5 and 6', async () => {
   for (const [requested, expected, packageVersion] of [['5.4', '5.4.10', '5.2.0'], ['6.2', '6.2.0', '6.2.0']]) {
     const { configuration, deploy } = await resolveDeployConfiguration({ admin, joomlaVersion: requested }, options);
     assert.equal(configuration.deployId, 'jcb');
-    assert.equal(configuration.phpVersion, '8.5');
+    assert.equal(configuration.phpVersion, '8.4');
     assert.equal(deploy.prebuild, true);
     assert.equal(configuration.joomlaVersion, expected);
     assert.equal(configuration.extensions.length, 1);
