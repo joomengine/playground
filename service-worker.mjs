@@ -1,7 +1,9 @@
 import { serializeRequest, restoreResponse } from './src/http.mjs';
+import { StaticAssetCache } from './src/static-assets.mjs';
 
 const scope = new URL(self.registration.scope);
 const sitePrefix = `${scope.pathname}__site/`;
+const staticAssets = new StaticAssetCache();
 const isolationHeaders = headers => {
   const result = new Headers(headers);
   result.set('Cross-Origin-Opener-Policy', 'same-origin');
@@ -26,7 +28,7 @@ async function routeToPlayground(request) {
   const [ownerId, instanceId] = url.pathname.slice(sitePrefix.length).split('/');
   const owner = await self.clients.get(ownerId);
   if (!owner || !new URL(owner.url).pathname.startsWith(scope.pathname)) {
-    return new Response('This playground is closed. Open the playground page to start the site.', { status: 503 });
+    return new Response('This playground is closed. Open the playground page to start the site.', { status: 503, headers: { 'Cache-Control': 'no-store' } });
   }
   const serialized = await serializeRequest(request);
   const channel = new MessageChannel();
@@ -44,8 +46,13 @@ async function routeToPlayground(request) {
     };
   });
   try {
-    owner.postMessage({ type: 'playground-request', instanceId, request: serialized }, [channel.port2]);
-    return restoreResponse(await result, request.method);
+    const value = await staticAssets.respond(serialized, request => {
+      owner.postMessage({ type: 'playground-request', instanceId, request }, [channel.port2]);
+      return result;
+    }, { cache: request.cache });
+    const response = restoreResponse(value, request.method);
+    response.headers.set('Cache-Control', value.staticAsset === true ? 'private, no-cache' : 'no-store');
+    return response;
   } finally {
     clearTimeout(timer);
     channel.port1.close();
@@ -61,10 +68,14 @@ self.addEventListener('fetch', event => {
     try {
       const response = url.pathname.startsWith(sitePrefix)
         ? await routeToPlayground(event.request)
-        : await fetch(event.request);
+        : await fetch(event.request, {
+          // Revalidate the shell/module graph and catalog after a release. Large
+          // runtime binaries use versioned/content-hashed URLs in the manifest.
+          ...(!url.pathname.startsWith(`${scope.pathname}assets/`) || url.pathname === `${scope.pathname}assets/manifest.json`
+            ? { cache: event.request.cache === 'no-store' ? 'no-store' : 'no-cache' } : {}),
+        });
       if (response.type === 'opaque' || response.status === 0) return response;
       const headers = isolationHeaders(response.headers);
-      if (url.pathname.startsWith(sitePrefix)) headers.set('Cache-Control', 'no-store');
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     } catch (error) {
       return new Response(error.message, { status: 503, headers: isolationHeaders({ 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }) });

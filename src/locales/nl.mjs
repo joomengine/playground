@@ -178,5 +178,16 @@ export default Object.freeze({
   "help.setupSteps": "Deze stappen volgen de gekozen implementatie bij een nieuwe installatie. Je kunt daarna ook uitbreidingen via Joomla installeren.",
   "help.compatibility": "Beschikbare runtimecombinaties worden samen getest.",
   "license.notices": "meegeleverde vermeldingen",
-  "confirm.temporary": "Dit verandert de actieve tijdelijke website. Sla je werk op of download het als je het wilt behouden. Doorgaan?"
+  "confirm.temporary": "Dit verandert de actieve tijdelijke website. Sla je werk op of download het als je het wilt behouden. Doorgaan?",
+  "status.countdown": "Lancering over {seconds} seconden",
+  "status.countdownPaused": "Lancering gepauzeerd. Configureer je implementatie en kies daarna Starten.",
+  "action.recover": "Opgeslagen site herstellen",
+  "action.repair": "Veilige foutinstellingen herstellen",
+  "action.resetStart": "Resetten en starten",
+  "title.recovery": "Je opgeslagen site is geopend voor herstel",
+  "help.recovery": "Download je bestanden en database voordat je wijzigingen aanbrengt. Je kunt veilige Joomla-foutinstellingen herstellen zonder de site opnieuw te installeren.",
+  "help.customSetup": "Deze gedeelde implementatie bevat aangepaste code of opdrachten. Controleer de configuratie voordat je start.",
+  "confirm.customSetup": "Deze implementatie voert aangepaste code of opdrachten uit. Ze kan toegang krijgen tot sites die onder hetzelfde playground-webadres zijn opgeslagen. Ga alleen verder als je deze bronnen vertrouwt:",
+  "status.repaired": "Veilige Joomla-foutinstellingen zijn hersteld. Van je oorspronkelijke configuratie is een back-up gemaakt. Kies Opnieuw proberen om de site weer te openen.",
+  "format.recovery": "Opgeslagen bestanden (herstelarchief)"
 });

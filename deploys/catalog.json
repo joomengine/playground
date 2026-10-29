@@ -1,17 +1,8 @@
 {
   "$schema": "./catalog.schema.json",
   "schemaVersion": 1,
-  "default": "jcb-mcp",
+  "default": "jcb",
   "deploys": [
-    {
-      "id": "jcb-mcp",
-      "title": "JCB + MCP",
-      "description": "Joomla 6 with Joomla Component Builder and the JoomEngine MCP package.",
-      "joomla": [
-        "6"
-      ],
-      "file": "./jcb-mcp.json"
-    },
     {
       "id": "jcb",
       "title": "Joomla Component Builder",
@@ -21,6 +12,15 @@
         "5",
         "6"
       ]
+    },
+    {
+      "id": "jcb-mcp",
+      "title": "JCB + MCP",
+      "description": "Joomla 6 with Joomla Component Builder and the JoomEngine MCP package.",
+      "joomla": [
+        "6"
+      ],
+      "file": "./jcb-mcp.json"
     },
     {
       "id": "servicedirectory",
@@ -151,6 +151,6 @@
   },
   "defaultsByJoomla": {
     "5": "jcb",
-    "6": "jcb-mcp"
+    "6": "jcb"
   }
 }

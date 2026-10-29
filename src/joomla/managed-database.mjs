@@ -17,7 +17,7 @@ async function digest(value) {
 function original(reference) {
   return `            ${reference.connection}\n            ${reference.kind === 'console' ? '$db' : '$revisedDbo'}->getVersion();`;
 }
-function replacement(reference) {
+function previousReplacement(reference) {
   const data = reference.kind === 'console' ? '$options' : '$data';
   const database = reference.kind === 'console' ? '$db' : '$revisedDbo';
   const driver = reference.kind === 'console' ? '\\Joomla\\CMS\\Factory::getContainer()->get(\\Joomla\\Database\\DatabaseInterface::class)' : '$this->getDatabase()';
@@ -41,12 +41,34 @@ function replacement(reference) {
             }`;
 }
 
-/** Preserve Joomla's native save flow while validating its existing managed browser connection. */
+function replacement(reference) {
+  const data = reference.kind === 'console' ? '$options' : '$data';
+  return `            ${marker}
+            if (\\extension_loaded('pdo_mariadb_wasm')) {
+                $managed = new \\JConfig();
+                foreach (['dbtype', 'host', 'user', 'password', 'db', 'dbprefix', 'dbencryption',
+                    'dbsslverifyservercert', 'dbsslkey', 'dbsslcert', 'dbsslca', 'dbsslcipher',
+                    'session_handler', 'session_filesystem_path'] as $field) {
+                    $expected = $managed->$field ?? '';
+                    if (array_key_exists($field, ${data}) && ${data}[$field] != $expected) {
+                        throw new \\RuntimeException('The browser manages the database and session settings. Export the site to change them on another server.');
+                    }
+                    ${data}[$field] = $expected;
+                }
+            }
+${original(reference)}`;
+}
+
+/** Protect browser-owned connection settings while preserving Joomla's own connection validation. */
 export async function managedDatabaseSource(source, version, kind = 'model') {
   const reference = REFERENCES.find(item => item.version === version && item.kind === kind);
   if (!reference) throw new Error('This Joomla release has no reviewed browser database configuration adapter.');
   const before = original(reference);
   const after = replacement(reference);
+  const previous = previousReplacement(reference);
+  if (source.includes(previous) && await digest(source.replace(previous, before)) === reference.sha256) {
+    return { source: source.replace(previous, after), changed: true, sourceSha256: reference.sha256 };
+  }
   if (source.includes(marker)) {
     if (!source.includes(after) || await digest(source.replace(after, before)) !== reference.sha256) {
       throw new Error('The managed Joomla configuration model has changed; its source must be reviewed before adapting it.');

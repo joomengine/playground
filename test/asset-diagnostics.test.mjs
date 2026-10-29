@@ -5,12 +5,12 @@ import { classifyAssetDiagnostics } from './asset-diagnostics.mjs';
 const url = 'https://site.test/image';
 const message = 'Failed to load resource: the server responded with a status of 404 (Not Found)';
 
-test('an observed missing image retains its exact HTTP console diagnostic', () => {
+test('a missing image retains its diagnostic and fails the asset and console gates', () => {
   const response = Object.freeze({ url, status: 404, resourceType: 'image', step: 'dashboard' });
   const diagnostic = Object.freeze({ url, message, step: 'dashboard' });
   const result = classifyAssetDiagnostics(Object.freeze([response]), Object.freeze([diagnostic]));
   assert.deepEqual(result, {
-    missingImages: [{ ...response, consoleErrors: [diagnostic] }], unexpectedAssets: [], consoleErrors: [],
+    missingImages: [{ ...response, consoleErrors: [diagnostic] }], unexpectedAssets: [response], consoleErrors: [diagnostic],
   });
   assert.equal(response.consoleErrors, undefined, 'The original HTTP evidence must remain unchanged.');
   const serviceWorkerDiagnostic = { url, message: 'Failed to load resource: the server responded with a status of 404 ()' };
@@ -41,5 +41,5 @@ test('unrelated URLs, other messages and ambiguous resource failures stay in the
   const diagnostic = { url, message };
   const ambiguous = classifyAssetDiagnostics([missing, { url, status: 404, resourceType: 'script' }], [diagnostic]);
   assert.deepEqual(ambiguous.consoleErrors, [diagnostic]);
-  assert.equal(ambiguous.unexpectedAssets.length, 1);
+  assert.equal(ambiguous.unexpectedAssets.length, 2);
 });

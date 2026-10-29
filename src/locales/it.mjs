@@ -178,5 +178,16 @@ export default Object.freeze({
   "help.setupSteps": "Questi passaggi seguono la distribuzione scelta su una nuova installazione. Puoi anche installare estensioni da Joomla dopo l’apertura.",
   "help.compatibility": "Le combinazioni disponibili degli ambienti vengono testate insieme.",
   "license.notices": "avvisi distribuiti",
-  "confirm.temporary": "Questo modifica il sito temporaneo in esecuzione. Salva o scarica il lavoro per conservarlo. Continuare?"
+  "confirm.temporary": "Questo modifica il sito temporaneo in esecuzione. Salva o scarica il lavoro per conservarlo. Continuare?",
+  "status.countdown": "Avvio tra {seconds} secondi",
+  "status.countdownPaused": "Avvio in pausa. Configura la distribuzione, poi seleziona Avvia.",
+  "action.recover": "Recupera sito salvato",
+  "action.repair": "Ripristina impostazioni degli errori sicure",
+  "action.resetStart": "Reimposta e avvia",
+  "title.recovery": "Il sito salvato è aperto per il recupero",
+  "help.recovery": "Scarica i file e il database prima di apportare modifiche. Puoi ripristinare impostazioni degli errori Joomla sicure senza reinstallare il sito.",
+  "help.customSetup": "Questa distribuzione condivisa contiene codice o comandi personalizzati. Controlla la configurazione prima di avviarla.",
+  "confirm.customSetup": "Questa distribuzione eseguirà codice o comandi personalizzati. Può accedere ai siti salvati sotto questo stesso indirizzo del playground. Continua solo se ti fidi di queste fonti:",
+  "status.repaired": "Le impostazioni degli errori Joomla sicure sono state ripristinate. È stata creata una copia della configurazione originale. Seleziona Riprova per riaprire il sito.",
+  "format.recovery": "File salvati (archivio di recupero)"
 });

@@ -178,5 +178,16 @@ export default Object.freeze({
   "help.setupSteps": "Estes passos seguem a implantação escolhida numa nova instalação. Também pode instalar extensões pelo Joomla depois de abrir.",
   "help.compatibility": "As combinações de ambientes disponíveis são testadas em conjunto.",
   "license.notices": "avisos distribuídos",
-  "confirm.temporary": "Isto altera o site temporário em execução. Guarde ou transfira o trabalho primeiro para o conservar. Continuar?"
+  "confirm.temporary": "Isto altera o site temporário em execução. Guarde ou transfira o trabalho primeiro para o conservar. Continuar?",
+  "status.countdown": "Lançamento em {seconds} segundos",
+  "status.countdownPaused": "Lançamento pausado. Configure a implantação e selecione Iniciar.",
+  "action.recover": "Recuperar site salvo",
+  "action.repair": "Restaurar configurações de erro seguras",
+  "action.resetStart": "Redefinir e iniciar",
+  "title.recovery": "Seu site salvo está aberto para recuperação",
+  "help.recovery": "Baixe seus arquivos e o banco de dados antes de fazer alterações. Você pode restaurar configurações de erro seguras do Joomla sem reinstalar o site.",
+  "help.customSetup": "Esta implantação compartilhada contém código ou comandos personalizados. Revise a configuração antes de iniciar.",
+  "confirm.customSetup": "Esta implantação executará código ou comandos personalizados. Ela pode acessar sites salvos neste mesmo endereço do playground. Continue somente se confiar nestas fontes:",
+  "status.repaired": "As configurações de erro seguras do Joomla foram restauradas. Foi criada uma cópia da configuração original. Selecione Tentar novamente para reabrir o site.",
+  "format.recovery": "Arquivos salvos (arquivo de recuperação)"
 });

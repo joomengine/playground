@@ -5,6 +5,10 @@ const PLAYGROUND_EXPORT_LIMIT = 768 * 1024 * 1024;
 const PLAYGROUND_DOWNLOAD_LIMIT = 512 * 1024 * 1024;
 const PLAYGROUND_EXPORT_FILES = 100000;
 const PLAYGROUND_EXPORT_ENTRIES = 100000;
+// Bound bridge results and import statements independently of the total database.
+const PLAYGROUND_EXPORT_BATCH_BYTES = 512 * 1024;
+const PLAYGROUND_EXPORT_CHUNK_BYTES = 128 * 1024;
+const PLAYGROUND_EXPORT_STATEMENT_BYTES = 4 * 1024 * 1024;
 
 function exportFinish(array $result): void
 {
@@ -53,7 +57,7 @@ function exportWrite($stream, string $contents, int &$size): void
 function exportStatement(array $streams, string $statement, int &$size): void
 {
     $statement = rtrim($statement, "; \t\r\n");
-    if (strlen($statement) > 4 * 1024 * 1024) throw new RuntimeException('One exported SQL statement exceeds the 4 MiB snapshot import limit.');
+    if (strlen($statement) > PLAYGROUND_EXPORT_STATEMENT_BYTES) throw new RuntimeException('One database schema statement exceeds the 4 MiB export limit. Large data values are exported in chunks.');
     exportWrite($streams['sql'], $statement . ";\n", $size);
     $record = json_encode($statement, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n";
     $recordSize = 0;
@@ -197,6 +201,67 @@ function exportCheckTableDefinition(string $definition): void
     }
 }
 
+/** Encode a row without depending on the source connection's quoting mode. */
+function exportRowTuple(array $row, array $encodings, bool $references = false): string
+{
+    $cells = [];
+    $position = 0;
+    foreach ($encodings as $encoding) {
+        $cell = $row[$position++];
+        if ($encoding === 'geometry') {
+            $srid = $row[$position++];
+            if ($references) $cells[] = 'ST_GeomFromWKB(' . $cell . ',' . $srid . ')';
+            else {
+                if ($cell !== null && (!is_string($srid) || !preg_match('/^[0-9]+$/D', $srid))) throw new RuntimeException('Cannot export a geometry SRID.');
+                $cells[] = $cell === null ? 'NULL' : "ST_GeomFromWKB(X'" . bin2hex((string) $cell) . "'," . $srid . ')';
+            }
+        } elseif ($references) $cells[] = $encoding === 'hex' ? 'UNHEX(' . $cell . ')' : $cell;
+        elseif ($encoding === 'hex') {
+            if ($cell !== null && (!is_string($cell) || !preg_match('/^[a-f0-9]*$/Di', $cell))) throw new RuntimeException('Cannot export a bit column.');
+            $cells[] = $cell === null ? 'NULL' : "X'" . (strlen($cell) % 2 ? '0' : '') . $cell . "'";
+        } else $cells[] = $cell === null ? 'NULL' : "X'" . bin2hex((string) $cell) . "'";
+    }
+    return '(' . implode(',', $cells) . ')';
+}
+
+/** A large value never crosses the bridge, or the SQL importer, in one piece. */
+function exportLargeRow(PDO $database, array $streams, string $insert, string $selection, array $projection, array $lengths, array $encodings, int &$size): void
+{
+    exportPacketGuard($streams, (int) max($lengths), $size);
+    $references = [];
+    foreach ($projection as $index => $expression) {
+        $variable = '@__joomengine_export_' . $index;
+        $references[] = $variable;
+        $length = $lengths[$index];
+        if ($length === null) {
+            exportStatement($streams, 'SET ' . $variable . '=NULL', $size);
+            continue;
+        }
+        exportStatement($streams, 'SET ' . $variable . "=X''", $size);
+        for ($offset = 0; $offset < (int) $length; $offset += PLAYGROUND_EXPORT_CHUNK_BYTES) {
+            $chunk = $database->query('SELECT SUBSTRING(CAST(' . $expression . ' AS BINARY),'
+                . ($offset + 1) . ',' . PLAYGROUND_EXPORT_CHUNK_BYTES . ')' . $selection)->fetchColumn();
+            if (!is_string($chunk) || strlen($chunk) !== min(PLAYGROUND_EXPORT_CHUNK_BYTES, (int) $length - $offset)) {
+                throw new RuntimeException('A database value changed or could not be read completely during export.');
+            }
+            exportStatement($streams, 'SET ' . $variable . '=CONCAT(' . $variable . ",X'" . bin2hex($chunk) . "')", $size);
+        }
+    }
+    exportStatement($streams, $insert . exportRowTuple($references, $encodings, true), $size);
+    exportStatement($streams, 'SET ' . implode(',', array_map(static fn (string $variable): string => $variable . '=NULL', $references)), $size);
+}
+
+/** CONCAT would otherwise return NULL with a warning on a smaller destination. */
+function exportPacketGuard(array $streams, int $required, int &$size): void
+{
+    $failure = "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Import requires max_allowed_packet of at least " . $required . " bytes.'";
+    exportStatement($streams, "SET @__joomengine_export_guard=IF(@@max_allowed_packet>=" . $required . ", 'DO 0', '" . str_replace("'", "''", $failure) . "')", $size);
+    exportStatement($streams, 'PREPARE joomengine_export_guard FROM @__joomengine_export_guard', $size);
+    exportStatement($streams, 'EXECUTE joomengine_export_guard', $size);
+    exportStatement($streams, 'DEALLOCATE PREPARE joomengine_export_guard', $size);
+    exportStatement($streams, 'SET @__joomengine_export_guard=NULL', $size);
+}
+
 function exportDatabase(JConfig $config, string $path): array
 {
     if (!preg_match('/^[A-Za-z0-9_]+$/D', $config->db)) throw new RuntimeException('The database name cannot be exported.');
@@ -225,6 +290,7 @@ function exportDatabase(JConfig $config, string $path): array
     if (in_array(false, $streams, true)) throw new RuntimeException('Cannot create the database export.');
     $size = 0;
     $rows = 0;
+    $largestValueBytes = 0;
     $tables = [];
     $omitted = [];
     $views = [];
@@ -276,42 +342,54 @@ function exportDatabase(JConfig $config, string $path): array
             $primaryKey = $database->query("SHOW KEYS FROM " . $identifier . " WHERE Key_name='PRIMARY'")->fetchAll(PDO::FETCH_ASSOC);
             usort($primaryKey, static fn (array $left, array $right): int => (int) $left['Seq_in_index'] <=> (int) $right['Seq_in_index']);
             $ordering = $primaryKey ? implode(',', array_map(static fn (array $key): string => exportIdentifier($key['Column_name']), $primaryKey)) : $columnNames;
+            $selection = ' FROM ' . $identifier . ' ORDER BY ' . $ordering;
+            $lengthProjection = implode(',', array_map(static fn (string $expression): string => 'OCTET_LENGTH(CAST(' . $expression . ' AS BINARY))', $projection));
+            $insert = 'INSERT INTO ' . $identifier . ' (' . $columnNames . ') VALUES ';
             $offset = 0;
             do {
-                $batch = $database->query('SELECT ' . implode(',', $projection) . ' FROM ' . $identifier . ' ORDER BY ' . $ordering . ' LIMIT 250 OFFSET ' . $offset)->fetchAll(PDO::FETCH_NUM);
-                $insert = 'INSERT INTO ' . $identifier . ' (' . $columnNames . ') VALUES ';
-                $values = [];
-                $valueBytes = 0;
-                foreach ($batch as $row) {
-                    $cells = [];
-                    $position = 0;
-                    foreach ($encodings as $encoding) {
-                        $cell = $row[$position++];
-                        if ($encoding === 'geometry') {
-                            $srid = $row[$position++];
-                            if ($cell !== null && (!is_string($srid) || !preg_match('/^[0-9]+$/D', $srid))) throw new RuntimeException('Cannot export a geometry SRID.');
-                            $cells[] = $cell === null ? 'NULL' : "ST_GeomFromWKB(X'" . bin2hex((string) $cell) . "'," . $srid . ')';
-                        } elseif ($encoding === 'hex') {
-                            if ($cell !== null && (!is_string($cell) || !preg_match('/^[a-f0-9]*$/Di', $cell))) throw new RuntimeException('Cannot export a bit column.');
-                            $cells[] = $cell === null ? 'NULL' : "X'" . (strlen($cell) % 2 ? '0' : '') . $cell . "'";
-                        } else $cells[] = $cell === null ? 'NULL' : "X'" . bin2hex((string) $cell) . "'";
+                // Fetch sizes first: LIMIT by row count alone can materialize hundreds
+                // of large text values before the bridge can reject the response.
+                $lengths = $database->query('SELECT ' . $lengthProjection . $selection . ' LIMIT 250 OFFSET ' . $offset)->fetchAll(PDO::FETCH_NUM);
+                foreach ($lengths as $rowLengths) $largestValueBytes = max($largestValueBytes, (int) max($rowLengths));
+                $position = 0;
+                while ($position < count($lengths)) {
+                    $count = 0;
+                    $bytes = 0;
+                    while ($position + $count < count($lengths)) {
+                        $rowBytes = array_sum($lengths[$position + $count]);
+                        if ($bytes + $rowBytes > PLAYGROUND_EXPORT_BATCH_BYTES) break;
+                        $bytes += $rowBytes;
+                        ++$count;
                     }
-                    $tuple = '(' . implode(',', $cells) . ')';
-                    // Keep the embedded server's parser stack bounded during
-                    // snapshot replay; a single large value stays in one row.
-                    if ($values && (count($values) >= 10 || (count($values) + 1) * count($columns) > 256
-                        || $valueBytes + strlen($tuple) > 32 * 1024)) {
-                        exportStatement($streams, $insert . implode(',', $values), $size);
-                        $values = [];
-                        $valueBytes = 0;
+                    if ($count === 0) {
+                        exportLargeRow($database, $streams, $insert, $selection . ' LIMIT 1 OFFSET ' . ($offset + $position), $projection, $lengths[$position], $encodings, $size);
+                        ++$position;
+                        ++$rows;
+                        continue;
                     }
-                    $values[] = $tuple;
-                    $valueBytes += strlen($tuple);
-                    ++$rows;
+                    $batch = $database->query('SELECT ' . implode(',', $projection) . $selection . ' LIMIT ' . $count . ' OFFSET ' . ($offset + $position))->fetchAll(PDO::FETCH_NUM);
+                    if (count($batch) !== $count) throw new RuntimeException('Database rows changed while exporting the site.');
+                    $values = [];
+                    $valueBytes = 0;
+                    foreach ($batch as $row) {
+                        $tuple = exportRowTuple($row, $encodings);
+                        // Bound the embedded parser stack as well as SQL bytes.
+                        if ($values && (count($values) >= 10 || (count($values) + 1) * count($columns) > 256
+                            || $valueBytes + strlen($tuple) > 32 * 1024)) {
+                            exportStatement($streams, $insert . implode(',', $values), $size);
+                            $values = [];
+                            $valueBytes = 0;
+                        }
+                        $values[] = $tuple;
+                        $valueBytes += strlen($tuple);
+                        ++$rows;
+                    }
+                    if ($values) exportStatement($streams, $insert . implode(',', $values), $size);
+                    $position += $count;
+                    unset($batch);
                 }
-                if ($values) exportStatement($streams, $insert . implode(',', $values), $size);
-                $offset += count($batch);
-            } while (count($batch) === 250);
+                $offset += count($lengths);
+            } while (count($lengths) === 250);
             exportWrite($streams['sql'], "\n", $size);
         }
         foreach ($viewNames as $name) {
@@ -350,7 +428,7 @@ function exportDatabase(JConfig $config, string $path): array
             $database->exec('SET SESSION sql_quote_show_create=' . ((int) $originalSettings['quote_identifiers'] ? '1' : '0'));
         } finally { foreach ($streams as $stream) fclose($stream); }
     }
-    return ['name' => $config->db, 'tablePrefix' => $config->dbprefix ?? '', 'tables' => $tables, 'views' => $orderedViews, 'triggers' => $triggers, 'rows' => $rows, 'bytes' => $size, 'omittedData' => $omitted, 'format' => 'mysql', 'statements' => 'database.ndjson'];
+    return ['name' => $config->db, 'tablePrefix' => $config->dbprefix ?? '', 'tables' => $tables, 'views' => $orderedViews, 'triggers' => $triggers, 'rows' => $rows, 'bytes' => $size, 'largestValueBytes' => $largestValueBytes, 'omittedData' => $omitted, 'format' => 'mysql', 'statements' => 'database.ndjson'];
 }
 
 function exportConfiguration(JConfig $config, array $overrides): string
@@ -427,6 +505,7 @@ function exportInstructions(string $format): string
         . "5. Ensure PHP can write cache/, administrator/cache/, administrator/logs/ and tmp/. The exported configuration resolves its temporary and log paths relative to its own location.\n"
         . "6. Sign in using the site’s existing Joomla administrator account. Browser login sessions and the playground’s private credential metadata are excluded.\n\n"
         . "The archive uses ordinary Joomla files and SQL. The browser runtime and MariaDB bridge are not required on the destination server. Database sessions are enabled in the portable configuration. Views and triggers are owned by the account importing the dump; their SQL SECURITY mode is preserved. database.ndjson is the equivalent statement stream for verified playground snapshot imports.\n\n"
+        . "Large database values are transferred in bounded SQL chunks. The destination server's max_allowed_packet must still accommodate the complete value; imports stop with the required size if that setting is too small. export.json records the largest value size. An upload limit is not a guarantee that a database row or the complete site fits available browser memory.\n\n"
         . "This export contains site content, account password hashes and configuration values. Store it as a site backup.\n";
 }
 

@@ -21,7 +21,8 @@ original behavior on conventional PHP. Its exact source inventory and scope are
 documented in dependencies/joomla/README.md.
 
 Joomla Component Builder is provided by Llewellyn van der Merwe and Vast
-Development Method through https://github.com/joomengine/pkg-component-builder .
+Development Method through https://github.com/joomengine/Joomla-Component-Builder .
+JCB is the core development tool and default deployment of JoomEngine.
 Its GPL-2.0-or-later license and copyright notices remain in the derived browser
 packages. The reviewed reader-interface adjustment preserves its source header.
 The upstream fixture license is included at test/fixtures/LICENSE.jcb.txt.
@@ -48,13 +49,17 @@ sources and include libmagic. Their PHP and libmagic licenses and compiled-sourc
 copyright notices are distributed beside each module, with source checksums and
 build provenance.
 
-The loadable cURL extensions use PHP's unchanged ext/curl and Sean Morris's
+The loadable cURL extensions use PHP's ext/curl with a small source-verified
+request initialization hook for browser HTTP streams, and Sean Morris's
 https://github.com/seanmorris/php-wasm-curl implementation of libcurl over Fetch,
 revision 6085917954da9682c32ebcbea27a626d2308381b. php-wasm-curl is copyright 2026
 Sean Morris, offered under Apache-2.0 or GPL-2.0-only. Its vendored curl 8.22.0 public
 headers are copyright 1996-2026 Daniel Stenberg and contributors under the curl
 license. PHP's license and the implementation's LICENSE, LICENSE-GPL, NOTICE,
 and COPYING.curl notices accompany the compiled modules and their provenance.
+The local native/http-stream.c adapter and its initialization hook are recorded
+in that provenance. They route PHP HTTP/HTTPS streams through the same browser
+Fetch transport without modifying the upstream PHP WebAssembly binary.
 
 The Sodium modules compile PHP's ext/sodium against the official libsodium
 1.0.22-RELEASE sources from https://github.com/jedisct1/libsodium . The libsodium

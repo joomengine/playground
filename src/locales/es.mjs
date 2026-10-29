@@ -178,5 +178,16 @@ export default Object.freeze({
   "help.setupSteps": "Estos pasos se ejecutan después del despliegue seleccionado en una instalación nueva. También puedes instalar extensiones desde Joomla una vez abierto.",
   "help.compatibility": "Las combinaciones de entornos disponibles se prueban juntas.",
   "license.notices": "avisos distribuidos",
-  "confirm.temporary": "Esto cambia el sitio temporal en ejecución. Guarda o descarga tu trabajo antes si quieres conservarlo. ¿Continuar?"
+  "confirm.temporary": "Esto cambia el sitio temporal en ejecución. Guarda o descarga tu trabajo antes si quieres conservarlo. ¿Continuar?",
+  "status.countdown": "Lanzamiento en {seconds} segundos",
+  "status.countdownPaused": "Lanzamiento en pausa. Configura el despliegue y selecciona Iniciar.",
+  "action.recover": "Recuperar sitio guardado",
+  "action.repair": "Restaurar ajustes de errores seguros",
+  "action.resetStart": "Restablecer e iniciar",
+  "title.recovery": "Tu sitio guardado está abierto para su recuperación",
+  "help.recovery": "Descarga tus archivos y la base de datos antes de hacer cambios. Puedes restaurar ajustes de errores seguros de Joomla sin reinstalar el sitio.",
+  "help.customSetup": "Este despliegue compartido contiene código o comandos personalizados. Revisa la configuración antes de iniciarlo.",
+  "confirm.customSetup": "Este despliegue ejecutará código o comandos personalizados. Puede acceder a sitios guardados bajo esta misma dirección del playground. Continúa solo si confías en estas fuentes:",
+  "status.repaired": "Se han restaurado los ajustes de errores seguros de Joomla. Se ha guardado una copia de la configuración original. Selecciona Reintentar para volver a abrir el sitio.",
+  "format.recovery": "Archivos guardados (archivo de recuperación)"
 });

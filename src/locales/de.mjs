@@ -178,5 +178,16 @@ export default Object.freeze({
   "help.setupSteps": "Diese Schritte folgen der ausgewählten Bereitstellung bei einer Neuinstallation. Erweiterungen können anschließend auch über Joomla installiert werden.",
   "help.compatibility": "Verfügbare Laufzeitkombinationen werden gemeinsam getestet.",
   "license.notices": "mitgelieferte Hinweise",
-  "confirm.temporary": "Dies ändert die laufende temporäre Website. Speichern oder laden Sie Ihre Arbeit zuerst herunter, wenn Sie sie behalten möchten. Fortfahren?"
+  "confirm.temporary": "Dies ändert die laufende temporäre Website. Speichern oder laden Sie Ihre Arbeit zuerst herunter, wenn Sie sie behalten möchten. Fortfahren?",
+  "status.countdown": "Start in {seconds} Sekunden",
+  "status.countdownPaused": "Start pausiert. Konfiguriere deine Bereitstellung und wähle dann Starten.",
+  "action.recover": "Gespeicherte Website wiederherstellen",
+  "action.repair": "Sichere Fehlereinstellungen wiederherstellen",
+  "action.resetStart": "Zurücksetzen und starten",
+  "title.recovery": "Deine gespeicherte Website ist zur Wiederherstellung geöffnet",
+  "help.recovery": "Lade vor Änderungen deine Dateien und Datenbank herunter. Du kannst sichere Joomla-Fehlereinstellungen ohne Neuinstallation der Website wiederherstellen.",
+  "help.customSetup": "Diese geteilte Bereitstellung enthält eigenen Code oder Befehle. Prüfe die Konfiguration vor dem Start.",
+  "confirm.customSetup": "Diese Bereitstellung führt eigenen Code oder Befehle aus. Sie kann auf Websites zugreifen, die unter derselben Playground-Webadresse gespeichert sind. Fahre nur fort, wenn du diesen Quellen vertraust:",
+  "status.repaired": "Sichere Joomla-Fehlereinstellungen wiederhergestellt. Deine ursprüngliche Konfiguration wurde gesichert. Wähle Erneut versuchen, um die Website wieder zu öffnen.",
+  "format.recovery": "Gespeicherte Dateien (Wiederherstellungsarchiv)"
 });

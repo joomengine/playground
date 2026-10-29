@@ -3,6 +3,9 @@ import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeHealthSource,
 import { checkpointSource, restoreCheckpointSource } from './checkpoint-program.mjs';
 import { configurePhpRouting } from './php-routing.mjs';
 import { createPhpFetch } from './php-network.mjs';
+import { installPhpRecovery } from './php-recovery.mjs';
+import { applyJcbRuntimeCompatibility } from './jcb-compatibility.mjs';
+import { staticAssetResponse } from './static-assets.mjs';
 
 const MAX_OPERATIONS = 64;
 const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
@@ -20,6 +23,7 @@ let mountPath;
 let phpSettings;
 let requestBodyLimit = MAX_BODY_BYTES;
 let requestActive = false;
+let issuedDatabaseCalls = 0;
 
 class FatalRuntimeError extends Error {
   fatal = true;
@@ -29,6 +33,7 @@ function databaseCall(payload) {
   if (terminal) return Promise.reject(new Error('The PHP worker is closed.'));
   if (typeof payload !== 'string') return Promise.reject(new TypeError('Database payload must be a string.'));
   const id = `database-${++nextDatabaseId}`;
+  issuedDatabaseCalls++;
   return new Promise((resolve, reject) => {
     databaseCalls.set(id, { resolve, reject });
     self.postMessage({ type: 'database-call', id, payload });
@@ -86,6 +91,10 @@ async function request(value) {
   }
   php.error = [];
   const captured = php.binary;
+  const executionsBeforeRequest = php.count;
+  const callsBeforeRequest = issuedDatabaseCalls;
+  let recoveryMessage = '';
+  applyJcbRuntimeCompatibility(binary, php.docroot);
   let response;
   requestActive = true;
   try {
@@ -94,12 +103,22 @@ async function request(value) {
     }));
   } finally { requestActive = false; }
   if (php.binary !== captured) {
-    const diagnostics = new TextDecoder().decode(new Uint8Array(php.error || [])).trim().slice(0, 2000);
-    throw new FatalRuntimeError(`PHP stopped abnormally. Restart the playground before continuing.${diagnostics ? ` ${diagnostics}` : ''}`);
+    try { await php.binary; }
+    catch (error) {
+      const details = response instanceof Response ? (await response.clone().text()).slice(0, 2000) : '';
+      throw new FatalRuntimeError(`PHP could not recover after an application error: ${error.message}.${details ? ` Original response: ${details}` : ''}`);
+    }
+    recoveryMessage = 'PHP restarted after an application error. The original response is preserved; the request was not replayed.';
+    console.warn(recoveryMessage);
+    if (response instanceof Response && response.status < 400) response = new Response(response.body, { status: 500, headers: response.headers });
   }
   const diagnostics = new TextDecoder().decode(new Uint8Array(php.error || [])).trim();
   if (diagnostics) console.warn(`[PHP ${php.phpVersion}] ${diagnostics.slice(0, 8000)}`);
-  return serializeResponse(response);
+  const serialized = await staticAssetResponse(await serializeResponse(response), value, {
+    staticAsset: php.binary === captured && php.count === executionsBeforeRequest && response.headers.has('x-php-wasm-cache-time'),
+  });
+  return { ...serialized, databaseUsed: issuedDatabaseCalls !== callsBeforeRequest,
+    diagnostic: [recoveryMessage, diagnostics ? `[PHP ${php.phpVersion}] ${diagnostics.slice(0, 8000)}` : ''].filter(Boolean).join('\n') || undefined };
 }
 
 async function runPhp(source) {
@@ -151,10 +170,12 @@ async function initialize(args) {
     docroot: '/persist/www',
     persist: persistent ? [{ mountPath }] : [],
     sharedLibs: args.sharedLibs || [],
-    files: [...(args.files || []), ...adapter.files],
-    staticFS: !persistent,
+    files: [...(args.files || []), ...adapter.files,
+      { parent: '/internal', name: 'rocket-http.php', url: new URL('./php-http-stream.php', import.meta.url).href }],
+    // Provisioning commits both stores once before the site becomes available.
+    staticFS: true,
     autoTransaction: false,
-    ini: `${adapter.ini}${phpIni(phpSettings)}`,
+    ini: `${adapter.ini}${phpIni(phpSettings)}\nauto_prepend_file=/internal/rocket-http.php\n`,
     types: {
       css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8',
       json: 'application/json', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
@@ -163,20 +184,32 @@ async function initialize(args) {
       html: 'text/html; charset=utf-8', xml: 'application/xml', pdf: 'application/pdf', wasm: 'application/wasm',
     },
   });
-  binary = await php.binary;
-  configurePhpRouting(php, binary);
-  if (persistent) {
-    mkdir(`${mountPath}/data`);
-    mkdir(`${mountPath}/config`);
-    for (const [name, destination] of [['/persist', `${mountPath}/data`], ['/config', `${mountPath}/config`]]) {
-      if (exists(name)) throw new Error(`The PHP runtime unexpectedly created ${name} before storage initialization.`);
-      binary.FS.symlink(destination, name);
+  const prepareFilesystem = current => {
+    const fs = current.FS;
+    if (persistent) {
+      fs.mkdirTree(`${mountPath}/data`);
+      fs.mkdirTree(`${mountPath}/config`);
+      for (const [name, destination] of [['/persist', `${mountPath}/data`], ['/config', `${mountPath}/config`]]) {
+        if (fs.analyzePath(name).exists) throw new Error(`The PHP runtime unexpectedly created ${name} before storage initialization.`);
+        fs.symlink(destination, name);
+      }
+    } else {
+      fs.mkdirTree('/persist');
+      fs.mkdirTree('/config');
     }
-  } else {
-    mkdir('/persist');
-    mkdir('/config');
-  }
-  for (const path of ['/persist/www', '/persist/sessions', '/persist/meta', '/internal']) mkdir(path);
+    for (const path of ['/persist/www', '/persist/sessions', '/persist/meta', '/internal']) fs.mkdirTree(path);
+  };
+  binary = await php.binary;
+  prepareFilesystem(binary);
+  configurePhpRouting(php, binary);
+  installPhpRecovery(php, {
+    currentBinary: () => binary,
+    prepare: prepareFilesystem,
+    beforeRefresh: flush,
+    // Persisted files are hydrated by upstream; temporary sites must copy their files.
+    roots: persistent ? ['/tmp', '/internal'] : ['/persist', '/config', '/tmp', '/internal'],
+    restored: next => { binary = next; configurePhpRouting(php, binary); },
+  });
   if (exists('/config/.cookies')) php.cookieJar.load(binary.FS.readFile('/config/.cookies', { encoding: 'utf8' }));
   php.initialized = true;
   php.staticCacheTime = 0;
@@ -222,6 +255,7 @@ async function operation(name, args = {}) {
     case 'request': return request(args);
     case 'runPhp': return runPhp(args.source ?? args.code);
     case 'flush': await flush(); return null;
+    case 'enablePersistence': php.phpArgs.staticFS = !persistent; return null;
     case 'checkpoint': {
       binary.FS.writeFile('/config/.cookies', php.cookieJar.dump());
       await flush();

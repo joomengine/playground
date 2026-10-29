@@ -178,5 +178,16 @@ export default Object.freeze({
   "help.setupSteps": "Hierdie stappe loop ná die gekose ontplooiing op ’n nuwe installasie. Jy kan ook uitbreidings deur Joomla installeer nadat dit oopgemaak het.",
   "help.compatibility": "Beskikbare loopomgewingkombinasies word saam getoets.",
   "license.notices": "verspreide kennisgewings",
-  "confirm.temporary": "Dit verander die lopende tydelike webwerf. Stoor of laai eers jou werk af as jy dit wil behou. Gaan voort?"
+  "confirm.temporary": "Dit verander die lopende tydelike webwerf. Stoor of laai eers jou werk af as jy dit wil behou. Gaan voort?",
+  "status.countdown": "Lansering oor {seconds} sekondes",
+  "status.countdownPaused": "Lansering onderbreek. Stel jou ontplooiing op en kies dan Lanseer.",
+  "action.recover": "Herstel gestoorde werf",
+  "action.repair": "Herstel veilige foutinstellings",
+  "action.resetStart": "Stel terug en lanseer",
+  "title.recovery": "Jou gestoorde werf is oop vir herstel",
+  "help.recovery": "Laai jou lêers en databasis af voordat jy veranderings aanbring. Jy kan veilige Joomla-foutinstellings herstel sonder om die werf weer te installeer.",
+  "help.customSetup": "Hierdie gedeelde ontplooiing bevat pasgemaakte kode of opdragte. Gaan die opstelling na voordat jy lanseer.",
+  "confirm.customSetup": "Hierdie ontplooiing sal pasgemaakte kode of opdragte uitvoer. Dit kan toegang kry tot werwe wat onder hierdie speelgrond se webadres gestoor is. Gaan slegs voort as jy hierdie bronne vertrou:",
+  "status.repaired": "Veilige Joomla-foutinstellings is herstel. Jou oorspronklike opstelling is gerugsteun. Kies Probeer weer om die werf weer oop te maak.",
+  "format.recovery": "Gestoorde lêers (herstelargief)"
 });

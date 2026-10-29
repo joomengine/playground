@@ -178,5 +178,16 @@ export default Object.freeze({
   "help.setupSteps": "Langkah ini berjalan setelah penerapan yang dipilih pada instalasi baru. Ekstensi juga dapat dipasang melalui Joomla setelah dibuka.",
   "help.compatibility": "Kombinasi runtime yang tersedia diuji bersama.",
   "license.notices": "pemberitahuan yang disertakan",
-  "confirm.temporary": "Ini mengubah situs sementara yang berjalan. Simpan atau unduh pekerjaan lebih dahulu jika ingin menyimpannya. Lanjutkan?"
+  "confirm.temporary": "Ini mengubah situs sementara yang berjalan. Simpan atau unduh pekerjaan lebih dahulu jika ingin menyimpannya. Lanjutkan?",
+  "status.countdown": "Diluncurkan dalam {seconds} detik",
+  "status.countdownPaused": "Peluncuran dijeda. Atur penerapan Anda, lalu pilih Luncurkan.",
+  "action.recover": "Pulihkan situs tersimpan",
+  "action.repair": "Pulihkan pengaturan galat yang aman",
+  "action.resetStart": "Atur ulang dan luncurkan",
+  "title.recovery": "Situs tersimpan Anda terbuka untuk pemulihan",
+  "help.recovery": "Unduh berkas dan basis data sebelum membuat perubahan. Anda dapat memulihkan pengaturan galat Joomla yang aman tanpa memasang ulang situs.",
+  "help.customSetup": "Penerapan bersama ini berisi kode atau perintah khusus. Tinjau konfigurasi sebelum meluncurkan.",
+  "confirm.customSetup": "Penerapan ini akan menjalankan kode atau perintah khusus. Penerapan ini dapat mengakses situs yang disimpan pada alamat web playground yang sama. Lanjutkan hanya jika Anda memercayai sumber berikut:",
+  "status.repaired": "Pengaturan galat Joomla yang aman telah dipulihkan. Konfigurasi asli Anda telah dicadangkan. Pilih Coba lagi untuk membuka kembali situs.",
+  "format.recovery": "Berkas tersimpan (arsip pemulihan)"
 });

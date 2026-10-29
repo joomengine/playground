@@ -178,5 +178,16 @@ export default Object.freeze({
   "help.setupSteps": "Bu adımlar yeni kurulumda seçilen dağıtımdan sonra çalışır. Site açılınca Joomla üzerinden de eklenti kurabilirsin.",
   "help.compatibility": "Kullanılabilir çalışma ortamı birleşimleri birlikte test edilir.",
   "license.notices": "dağıtılan bildirimler",
-  "confirm.temporary": "Bu işlem çalışan geçici siteyi değiştirir. Korumak istediğin çalışmayı önce kaydet veya indir. Devam edilsin mi?"
+  "confirm.temporary": "Bu işlem çalışan geçici siteyi değiştirir. Korumak istediğin çalışmayı önce kaydet veya indir. Devam edilsin mi?",
+  "status.countdown": "{seconds} saniye içinde başlatılıyor",
+  "status.countdownPaused": "Başlatma duraklatıldı. Dağıtımınızı yapılandırın, ardından Başlat seçeneğini seçin.",
+  "action.recover": "Kaydedilen siteyi kurtar",
+  "action.repair": "Güvenli hata ayarlarını geri yükle",
+  "action.resetStart": "Sıfırla ve başlat",
+  "title.recovery": "Kaydedilen siteniz kurtarma için açıldı",
+  "help.recovery": "Değişiklik yapmadan önce dosyalarınızı ve veritabanınızı indirin. Siteyi yeniden yüklemeden güvenli Joomla hata ayarlarını geri yükleyebilirsiniz.",
+  "help.customSetup": "Bu paylaşılan dağıtım özel kod veya komutlar içeriyor. Başlatmadan önce yapılandırmayı inceleyin.",
+  "confirm.customSetup": "Bu dağıtım özel kod veya komutlar çalıştıracak. Bu playground ile aynı web adresinde kaydedilen sitelere erişebilir. Yalnızca bu kaynaklara güveniyorsanız devam edin:",
+  "status.repaired": "Güvenli Joomla hata ayarları geri yüklendi. Özgün yapılandırmanız yedeklendi. Siteyi yeniden açmak için Tekrar dene seçeneğini seçin.",
+  "format.recovery": "Kaydedilen dosyalar (kurtarma arşivi)"
 });

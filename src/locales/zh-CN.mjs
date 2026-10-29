@@ -178,5 +178,16 @@ export default Object.freeze({
   "help.setupSteps": "这些步骤在新安装中于所选部署之后执行。站点打开后，也可通过 Joomla 安装扩展。",
   "help.compatibility": "可用的运行环境组合均经过联合测试。",
   "license.notices": "随附声明",
-  "confirm.temporary": "此操作会更改正在运行的临时站点。如需保留，请先保存或下载您的工作。继续吗？"
+  "confirm.temporary": "此操作会更改正在运行的临时站点。如需保留，请先保存或下载您的工作。继续吗？",
+  "status.countdown": "{seconds} 秒后启动",
+  "status.countdownPaused": "启动已暂停。请配置部署，然后选择启动。",
+  "action.recover": "恢复已保存的网站",
+  "action.repair": "恢复安全的错误设置",
+  "action.resetStart": "重置并启动",
+  "title.recovery": "已保存的网站已在恢复模式下打开",
+  "help.recovery": "更改之前，请下载文件和数据库。无需重新安装网站，即可恢复 Joomla 的安全错误设置。",
+  "help.customSetup": "此共享部署包含自定义代码或命令。启动前请检查配置。",
+  "confirm.customSetup": "此部署将运行自定义代码或命令。它可以访问保存在同一体验环境网址下的网站。仅在信任以下来源时继续：",
+  "status.repaired": "已恢复 Joomla 的安全错误设置。原始配置已备份。请选择重试以重新打开网站。",
+  "format.recovery": "已保存的文件（恢复归档）"
 });

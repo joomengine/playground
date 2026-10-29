@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from '../src/ui-state.mjs';
+import { customSetupDetails, defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from '../src/ui-state.mjs';
 
 const configuration = {
   deployId: 'jcb', joomlaVersion: '6.2.0', phpVersion: '8.4', siteName: 'Saved work',
@@ -12,6 +12,19 @@ const configuration = {
   runtime: { internal: 'Do not save runtime state' },
 };
 const empty = () => readSavedState({ getItem() { return null; } }, 'settings');
+
+test('custom deployment approval distinguishes commands with colliding display text', () => {
+  const reviewed = { startupCommands: [['config:set', 'sitename', 'Demo Site']] };
+  const changed = { startupCommands: [['config:set', 'sitename Demo', 'Site']] };
+  assert.equal(reviewed.startupCommands[0].join(' '), changed.startupCommands[0].join(' '));
+  const details = customSetupDetails(reviewed);
+  assert.deepEqual(details.commands, reviewed.startupCommands);
+  assert.notEqual(JSON.stringify(details), JSON.stringify(customSetupDetails(changed)),
+    'Changing argument boundaries must require a new deployment approval.');
+  assert.equal(JSON.stringify(details), JSON.stringify(customSetupDetails(structuredClone(reviewed))));
+  details.commands[0].push('changed');
+  assert.equal(reviewed.startupCommands[0].length, 3);
+});
 
 test('saved launch preferences whitelist public settings and consume fresh requests', () => {
   const value = publicConfiguration(configuration);

@@ -178,5 +178,16 @@ export default Object.freeze({
   "help.setupSteps": "These steps run after the selected deployment on a new installation. You can also install extensions through Joomla once it opens.",
   "help.compatibility": "Available runtime combinations are tested together.",
   "license.notices": "distributed notices",
-  "confirm.temporary": "This changes the running temporary site. Save or download your work first if you want to keep it. Continue?"
+  "confirm.temporary": "This changes the running temporary site. Save or download your work first if you want to keep it. Continue?",
+  "status.countdown": "Launching in {seconds} seconds",
+  "status.countdownPaused": "Launch paused. Configure your deployment, then select Launch.",
+  "action.recover": "Recover saved site",
+  "action.repair": "Restore safe error settings",
+  "action.resetStart": "Reset and launch",
+  "title.recovery": "Your saved site is open for recovery",
+  "help.recovery": "Download your files and database before making changes. You can restore safe Joomla error settings without reinstalling the site.",
+  "help.customSetup": "This shared deployment contains custom code or commands. Review the configuration before launching.",
+  "confirm.customSetup": "This deployment will run custom code or commands. It can access sites saved on this playground origin. Continue only if you trust these sources:",
+  "status.repaired": "Safe Joomla error settings restored. Your original configuration was backed up. Select Try again to reopen the site.",
+  "format.recovery": "Saved files (recovery archive)"
 });

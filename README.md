@@ -1,12 +1,14 @@
 # JoomEngine Playground
 
-Run Joomla in your browser with Sean Morris’s PHP WebAssembly runtime and a real
-MariaDB WebAssembly database. The playground assembles published upstream PHP
-packages, the MariaDB bridge, and a separately compiled native PDO extension into
+Build Joomla extensions with **Joomla Component Builder (JCB)** in your browser.
+JCB is the development engine at the heart of JoomEngine. Sean Morris’s PHP
+WebAssembly runtime and a real MariaDB WebAssembly database run the site. The
+playground assembles published upstream PHP packages, the MariaDB bridge, and a separately compiled native PDO extension into
 a static site. PHP requests and SQL execute in browser workers.
 
 The deployment address is **https://playground.joomengine.org/**. The default
-deploy installs **JCB + MCP on Joomla 6** and **JCB only on Joomla 5**. Select
+deploy opens the **JCB dashboard on Joomla 6 with PHP 8.5**. JCB is also the
+default on Joomla 5; **JCB + MCP** remains an optional Joomla 6 deployment. Select
 **Joomla only** to start without additional extensions. Rocket is the compact,
 multilingual interface around the running Joomla site.
 
@@ -14,6 +16,8 @@ multilingual interface around the running Joomla site.
 
 This project builds directly on the work of these maintainers and contributors:
 
+- **[Joomla Component Builder](https://github.com/joomengine/Joomla-Component-Builder)**
+  is JoomEngine’s core development tool and default deployment.
 - **[seanmorris/php-wasm](https://github.com/seanmorris/php-wasm)** — Sean Morris
   and the project’s contributors provide the PHP runtime, CGI implementation,
   filesystem, asynchronous JavaScript integration, and loadable extension
@@ -50,12 +54,13 @@ The native build compiles the PDO, fileinfo, cURL, and Sodium extensions against
 matching PHP headers. Fileinfo supplies MIME detection with its embedded magic
 database.
 cURL uses Sean Morris’s [php-wasm-curl](https://github.com/seanmorris/php-wasm-curl)
-to connect PHP’s unchanged `ext/curl` to the host’s Fetch API. The implementation
+to connect PHP’s `ext/curl` to the host’s Fetch API. The implementation
 is pinned to [6085917954da9682c32ebcbea27a626d2308381b](https://github.com/seanmorris/php-wasm-curl/tree/6085917954da9682c32ebcbea27a626d2308381b)
 and loaded alongside the published `0.2.0` PHP runtime. Sodium uses the official
 libsodium 1.0.22 release and Web Crypto for its random source. A checksum-verified
-JavaScript CGI input adapter preserves binary request bodies and uses indexed
-input reads for large uploads; the upstream PHP WebAssembly binary is unchanged.
+JavaScript CGI adapter preserves binary request bodies, uses indexed input reads
+for large uploads, and waits for preloaded files before starting or restoring PHP.
+The upstream PHP WebAssembly binary is unchanged.
 The distributed `.so`
 files are WebAssembly extensions for these specific upstream builds, not native
 Linux PHP modules.
@@ -70,7 +75,7 @@ The current pinned catalog is:
 These are the patch versions contained in the selected upstream `0.2.0`
 packages. They are recorded explicitly for ABI compatibility; the minor-version
 selector does not imply a newer PHP patch release. Defaults are Joomla 6.2.0 and
-PHP 8.4.1. [versions.json](versions.json) is the authoritative build catalog.
+PHP 8.5.2. [versions.json](versions.json) is the authoritative build catalog.
 
 ## Build and run locally
 
@@ -112,6 +117,10 @@ external/emsdk/emsdk install "$compiler_version"
 external/emsdk/emsdk activate "$compiler_version"
 source external/emsdk/emsdk_env.sh
 
+npm ci --prefix external/bridge --ignore-scripts
+node scripts/prepare-bridge-engine.mjs external/bridge
+npm run prepare:engine --prefix external/bridge
+
 while IFS= read -r minor; do
   bash external/bridge/native/build-upstream.sh "$minor" "$PWD/.cache/native"
   BRIDGE_SOURCE_DIR=external/bridge node scripts/build-fileinfo.mjs "$minor"
@@ -141,7 +150,7 @@ directory; all bridge JavaScript and engine assets come from the verified releas
 release archive checksum, native and adapter source hashes, Joomla distributions,
 and compatible runtime combinations.
 
-The build verifies every entry in the MariaDB bridge 0.1.5 release inventory and
+The build verifies every entry in the MariaDB bridge 0.1.7 release inventory and
 stages its runtime, PHP adapter, engine JavaScript and WebAssembly directly from
 that release. Native driver source hashes must match the same release. The
 PDO extension’s compiler, PHP version, source hashes, upstream revision, and
@@ -153,7 +162,7 @@ verified before staging. A missing driver or mismatched input fails the build.
 `dist/assets/manifest.json` records the selected runtimes, extension assets,
 preload files, source revisions, and dependency identities. Its `bridge.release`
 entry identifies the published release archive. Its complete inventory is retained
-as `assets/mariadb/release-manifest.json`; copied runtime and engine assets retain
+under the bridge's versioned asset directory; copied runtime and engine assets retain
 their released hashes.
 `dist/asset-inventory.json` records the files, sizes, and SHA-256 values in the
 assembled site. Updating a dependency means updating its pins, rebuilding its
@@ -166,6 +175,17 @@ through the upstream Fetch integration. cURL supports request methods, headers,
 binary bodies, status codes, redirects, timeouts, and streaming response
 callbacks. The native extension is exercised on every supported PHP build,
 including the HTTP patterns used by JCB’s file and API helpers.
+
+A small native HTTP stream adapter is compiled into the loadable cURL extension.
+It preserves `file_get_contents()`, `fopen()`, `get_headers()`, stream contexts,
+response-header metadata and caller-local `$http_response_header`, using the same
+browser transport. The upstream PHP binary remains unchanged. A version-independent
+JCB compatibility guard skips unavailable image-format identifiers instead of
+claiming support for decoders absent from the runtime. If JCB cannot cache a public
+image, its image helper can display the original HTTPS URL directly. A missing
+cache reference can use the existing file verified against its metadata checksum.
+These corrections use the installed component’s own metadata; no artwork copies or host lists are
+maintained, and PHP reads still require CORS permission.
 
 In a browser, remote servers must permit the playground origin through CORS.
 Only HTTP and HTTPS are supported. The browser controls certificate validation,
@@ -183,9 +203,10 @@ provide a public CORS proxy.
 
 ## Using Rocket
 
-The default page automatically launches the selected deploy. Use `?start=0` to
-configure it first. The slim header scrolls away with the page; its expandable
-controls and dialogs leave the Joomla site the full available width. The launch
+The default page shows a ten-second rocket countdown before launching JCB.
+Choose **Configure** during the countdown to pause and edit the deployment, or
+launch immediately. Use `?start=0` to load setup without a countdown. The slim
+header scrolls away with the page; its expandable controls and dialogs leave the Joomla site the full available width. The launch
 view shows the rocket animation and deployment progress. Activity remains
 available below the site, and the footer information button lists dependency
 credits and licenses.
@@ -210,6 +231,9 @@ for the complete document format and advanced parameters.
 - **Close** shuts down the workers and releases the site lock. Closing a temporary
   site discards its state after confirmation.
 - **Reset** deletes the selected site's saved data after confirmation.
+- **Recover saved site** opens storage without booting Joomla. Download a backup,
+  then restore safe error settings if needed; the original configuration is kept
+  privately. **Reset and launch** provides an explicit fresh start from the failure screen.
 - **New site** starts an independent installation; saved sites remain selectable.
 - **Download** exports the complete site, its files, or its SQL database.
 - **Open site** transfers the running site to a standalone tab without Rocket's
@@ -236,6 +260,10 @@ browser access through CORS. Packages are limited to 128 MiB. An optional SHA-25
 is verified before installation; repository packages always have pinned digests.
 When a host blocks downloads, provide a permitted URL or stage the package on the
 playground origin. There is no public download proxy.
+
+Shared configurations with custom packages, commands or site content pause for
+review before launching. Installed code shares the playground origin and can access
+other sites saved on that origin; separate site keys are an organizational feature.
 
 Startup commands are arrays of Joomla console arguments, executed in order after
 package installation and without a shell. For example:
@@ -313,6 +341,14 @@ Service Directory allows 180 seconds for its large initial geographic-data impor
 A PHP memory limit is not a guarantee that a particular browser or device can
 allocate that much memory.
 
+MariaDB uses a 128 MiB server packet limit and a 64 MiB initial InnoDB buffer pool.
+Transport bounds are 32 MiB per JSON request, 64 MiB per JSON response and 128 MiB
+of queued requests. These are operation limits, not a small total-database quota:
+base64 encoding, PHP memory and the database heap still constrain individual results.
+Exports transfer large values in bounded chunks and report destination packet limits.
+Database-limit controls in Rocket are deferred; the bridge already exposes bounded
+startup options and MariaDB's supported settings for future integration.
+
 Runtime health checks require the real PDO MySQL bridge, cURL, fileinfo, Sodium,
 GD, Intl, mbstring, OpenSSL, DOM, SimpleXML, XML/reader/writer, JSON, ZIP and zlib
 extensions. Provisioning checks exercise image decoding, Unicode/XML, archives,
@@ -331,12 +367,12 @@ processes and stdio are outside this integration. See [the MCP integration notes
 
 Repository deploys define packages, language packs, content, and console
 commands. See the [contributor guide and schemas](deploys/README.md) to add
-another recipe. The default is `jcb-mcp` on Joomla 6 and `jcb` on Joomla 5;
+another recipe. The default is `jcb` on both Joomla 5 and Joomla 6;
 `blank` installs Joomla alone. Deployment documents can also be composed entirely
 in the interface without changing this repository.
 
-- [JCB + MCP — Joomla 6](https://playground.joomengine.org/?deploy=jcb-mcp)
-- [JCB only — Joomla 5 or 6](https://playground.joomengine.org/?deploy=jcb)
+- [JCB — default on Joomla 5 or 6](https://playground.joomengine.org/?deploy=jcb)
+- [JCB + MCP — optional on Joomla 6](https://playground.joomengine.org/?deploy=jcb-mcp)
 - [Service Directory — Joomla 5 or 6](https://playground.joomengine.org/?deploy=servicedirectory)
 - [Joomla only](https://playground.joomengine.org/?deploy=blank)
 - [Multilingual heritage site](https://playground.joomengine.org/?deploy=heritage-demo)
@@ -355,16 +391,27 @@ site explicitly.
 The build stages verified packages on the same origin. For `prebuild: true`
 recipes, `npm run build:deploys` installs real Joomla, exports it, and imports
 the archive into a second runtime with new credentials before publishing it.
-Prepared copies match an exact Joomla release. The heritage demonstration is
-prepared for both catalog releases; `fresh=1` builds its original recipe instead.
+Prepared copies match an exact Joomla release. JCB and the heritage demonstration
+are prepared for both catalog releases. Opening JCB restores the installed files
+and database instead of repeating its installer. Administrator credentials are
+rotated on every new import; PHP settings and explicit extension, language, menu
+and template choices still apply. `fresh=1` builds the original recipe instead.
+
+Prepared JCB copies use the stable package releases pinned in
+[deploys/jcb.json](deploys/jcb.json): currently JCB 5.2.0 and 6.2.0. To adopt a new
+stable release, update its versioned URL and SHA-256 in that recipe and the
+optional MCP recipe, update any applicable compatibility inputs, and rebuild.
+CI installs and independently restores the new copies before publishing them.
+Existing saved sites are preserved; a new deployment receives the new prepared
+version. There is no unverified latest-release download during launch.
 
 The interface recognizes these query parameters:
 
 | Parameter | Meaning |
 | --- | --- |
-| `deploy=jcb-mcp` | Choose a repository deploy; `blank` installs Joomla alone |
+| `deploy=jcb` | Choose a repository deploy; `blank` installs Joomla alone |
 | `joomla=5.4` | Resolve a minor or exact version to a tested catalog release |
-| `php=8.4` | Select the PHP minor whose patch version is pinned in the catalog |
+| `php=8.5` | Select the PHP minor whose patch version is pinned in the catalog |
 | `path=/administrator/` | Initial page inside Joomla |
 | `toolbar=0` | Hide the configuration toolbar |
 | `persist=0` | Use a temporary site |
@@ -376,7 +423,7 @@ The interface recognizes these query parameters:
 | `key=example` | Reopen a saved site in this browser |
 | `extensions=[...]` | Additional objects containing `url` and optional `sha256` |
 | `commands=[["cache:clean"]]` | Additional Joomla console argument arrays |
-| `start=0` | Show setup first; the default page starts automatically |
+| `start=0` | Show setup first; the default page offers a ten-second countdown |
 | `config=https://example.org/deploy.json` | Load a public deployment document, optionally verified with `sha256` |
 
 For a deployment hosted at `/playground/`, this same-origin iframe opens an
@@ -384,7 +431,7 @@ administrator playground with the toolbar hidden:
 
 ```html
 <iframe
-  src="/playground/?joomla=6.2.0&php=8.4&path=%2Fadministrator%2F&toolbar=0&start=1"
+  src="/playground/?joomla=6.2.0&php=8.5&path=%2Fadministrator%2F&toolbar=0&start=1"
   title="Joomla Playground"
   allow="cross-origin-isolated"
   style="width:100%;height:800px;border:0"
@@ -444,7 +491,7 @@ try {
   } else {
     const password = `Jp!${crypto.randomUUID()}`;
     const site = await createPlayground({
-      phpVersion: '8.4',
+      phpVersion: '8.5',
       joomlaVersion: '6.2.0',
       siteName: 'API demonstration',
       initialPath: '/administrator/',
@@ -507,6 +554,9 @@ provisioning completes:
 | `applyConfiguration(configuration)` | Apply additions and site settings with a recovery checkpoint |
 | `openStandalone({ path })` | Transfer ownership to an independent tab; call from a user gesture |
 | `exportSite({ format })` | Return `{ bytes, filename, mimeType, metadata }`; format is `bundle`, `files`, or `database` |
+| `recovery` | Recovery metadata when opened with `createPlayground(config, { recovery: true })` |
+| `repairConfiguration()` | Back up configuration and restore safe Joomla debugging/error settings |
+| `exportRecoveryFiles()` | Download raw saved files, including private credentials and sessions; does not include SQL |
 | `close()` | Close the instance while keeping saved data |
 | `reset()` | Close the instance and delete its saved data |
 
@@ -603,7 +653,7 @@ standalone ownership transfer, responsive controls and timeout recovery.
 
 CI runs source checks and unit tests first. Documentation-only pull requests skip
 native/browser jobs. Presentation-only changes run the default Joomla 6.2.0 / PHP
-8.4 combination with deployment, lifecycle and Rocket checks. Runtime, deployment,
+8.5 combination with deployment, lifecycle and Rocket checks. Runtime, deployment,
 configuration and unclassified changes run the full supported matrix, as do
 `main` and manual builds. Chromium and Firefox validate in parallel jobs against
 the same built artifact. Native/compiler caches require exact source and toolchain
@@ -616,12 +666,10 @@ still execute those contracts.
 
 An installed fixture extension must render its own nested image, stylesheet and
 script; a separate fixture verifies external resources alongside native database
-queries. Third-party image 404 responses are retained as content diagnostics,
-including any exactly correlated browser message. Scripts, styles, fonts, other
-image failures and unrelated console errors still fail validation. The pinned JCB
-packages contain a rotating banner filename mismatch, so that optional image can
-be missing on ordinary hosting too. Its package and URLs remain unchanged; the
-playground does not replace artwork or hide production errors.
+queries. Missing images, scripts, styles and fonts fail validation, with their
+URLs and browser diagnostics retained. A controlled cross-origin PHP read also
+verifies that a denied request reports its error promptly and leaves PHP and the
+database usable. The playground does not replace artwork or hide production errors.
 
 Firefox 157 emits an empty-URL service-worker diagnostic for some successful native
 redirects, including a minimal `Response.redirect()` with no playground runtime.
@@ -638,17 +686,20 @@ Installed extensions and PHP code run with access to that playground’s files a
 database. Keep independent applications in separate site keys; this is not a
 multi-tenant hosting boundary.
 
-The bridge exposes one native connection per MariaDB instance, uses PDO emulated
-prepares, and does not implement `mysqli` or remote database connections. Integer
+The bridge supports up to 32 independent PDO connections per MariaDB instance,
+uses PDO emulated prepares, and does not implement `mysqli` or remote database connections. Integer
 values within PHP’s integer range are returned as integers; larger integers and
 DECIMAL values remain exact strings. `PDO::ATTR_STRINGIFY_FETCHES` requests
 numeric strings explicitly. Files and database state are separate stores; they
 are not committed together as one transaction.
 
-The verified JavaScript CGI input adapter supports binary POST, PUT, PATCH and
-DELETE bodies, including large multipart uploads. Request queues, source size,
-body size and execution time remain bounded. On timeout, PHP is terminated and the database lease is reset; uncertain writes are never replayed.
-Restart the instance before continuing after a runtime failure.
+The verified JavaScript CGI adapter supports binary POST, PUT, PATCH and
+DELETE bodies, including large multipart uploads. It awaits preload completion
+before restoring a restarted runtime’s files. Request queues, source size,
+body size and execution time remain bounded. A recoverable PHP application error
+preserves its HTTP error response and files, resets abandoned database sessions,
+and prepares PHP for the next request without replaying uncertain writes. On a
+worker timeout, use the recovery controls or restart the instance.
 
 Host processes, system executables, arbitrary socket services, and a production
 mail server are not supplied by this static playground. Extensions that require

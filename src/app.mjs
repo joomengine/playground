@@ -1,11 +1,12 @@
 import { resolveSiteURL, createShareURL, createDeploymentDocument, parseDeploymentDocument, loadDeploymentDocument, normalizeConfiguration, parseCatalog, readURLConfiguration } from './config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from './deploys.mjs';
 import { createPlayground, prepareEnvironment, resetPlayground } from './playground.mjs';
-import { defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from './ui-state.mjs';
+import { customSetupDetails, defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from './ui-state.mjs';
 
 import { connectFrame } from './frame-view.mjs';
 import { DEFAULT_PHP_SETTINGS, normalizePhpSettings } from './php-settings.mjs';
 import { UI_LANGUAGES, getLocale, initializeLocale, setLocale, t } from './i18n.mjs';
+import { createLaunchCountdown, deploymentNeedsReview } from './launch-countdown.mjs';
 
 const $ = (id) => document.getElementById(id);
 const deploymentURL = new URL('../', import.meta.url).href;
@@ -19,6 +20,7 @@ const controls = ['save-button', 'restart-button', 'close-button', 'reset-button
 const drafts = new Map();
 let catalog, deployCatalog, runtime, currentConfig, currentInput;
 let busy = false;
+let initialized = false;
 let disconnectFrame = () => {};
 let phpSettings = { ...DEFAULT_PHP_SETTINGS };
 let lastSavedAt;
@@ -32,6 +34,16 @@ let selectedProfile;
 let hideToolbar = false;
 let pendingFresh = false;
 let freshKeyPending = false;
+let automaticLaunchPaused = false;
+let approvedCustomSetup;
+const launchCountdown = createLaunchCountdown({
+  onTick(seconds) {
+    $('launch-countdown').hidden = false;
+    $('countdown-value').textContent = String(seconds);
+    $('countdown-message').textContent = t('status.countdown', { seconds });
+  },
+  onLaunch: () => launch(),
+});
 let preferences;
 try { preferences = localStorage; } catch { /* A temporary site can run without preference storage. */ }
 let savedState = readSavedState(preferences, preferenceKey);
@@ -72,12 +84,35 @@ function feedback(message, { error = false, persistent = false } = {}) {
   node.textContent = messageOf(message); node.dataset.error = String(error); node.hidden = false;
   if (!persistent) feedbackTimer = setTimeout(() => { node.hidden = true; }, 7000);
 }
+function clearFeedback() {
+  clearTimeout(feedbackTimer);
+  $('header-feedback').hidden = true;
+  $('header-feedback').textContent = '';
+}
+function pauseAutomaticLaunch() {
+  automaticLaunchPaused = true;
+  if (!launchCountdown.active) return;
+  launchCountdown.stop();
+  $('launch-countdown').hidden = true;
+  activity(t('status.countdownPaused'));
+}
+function approveCustomSetup(input) {
+  if (!deploymentNeedsReview(input)) return true;
+  const custom = customSetupDetails(input);
+  const identity = JSON.stringify(custom);
+  if (identity === approvedCustomSetup) return true;
+  if (!confirm(`${t('confirm.customSetup')}\n\n${JSON.stringify(custom, null, 2)}`)) return false;
+  approvedCustomSetup = identity;
+  return true;
+}
 function openDialog(id) {
+  pauseAutomaticLaunch();
   $('site-actions').open = false;
   const dialog = $(id);
   if (!dialog.open) dialog.showModal();
 }
 function setDrawer(open) {
+  if (open) pauseAutomaticLaunch();
   $('settings').hidden = !open;
   $('settings-toggle').setAttribute('aria-expanded', String(open));
   $('settings-toggle').setAttribute('aria-label', t(open ? 'action.collapse' : 'action.expand'));
@@ -118,13 +153,17 @@ function updateMcpPreview() {
 }
 function setBusy(value) {
   busy = value;
-  const unavailable = !catalog || !deployCatalog;
+  const unavailable = !initialized || !catalog || !deployCatalog;
   $('configuration-fields').disabled = busy || unavailable;
   $('installation-fields').disabled = busy || unavailable;
   fields.persistence.disabled = busy || unavailable;
   $('launch-button').disabled = busy || Boolean(runtime) || unavailable;
   $('embedded-launch').disabled = busy || Boolean(runtime) || unavailable;
   $('retry-button').disabled = busy || unavailable;
+  $('recover-button').disabled = busy || unavailable || !fields.persistence.checked;
+  $('repair-button').hidden = !runtime?.recovery?.configured;
+  $('repair-button').disabled = busy;
+  $('error-reset-button').disabled = busy || unavailable || !fields.persistence.checked;
   $('new-site-button').disabled = busy || unavailable;
   $('saved-site').disabled = busy || unavailable || Object.keys(savedState.sites).length === 0;
   for (const id of controls) $(id).disabled = busy || !runtime;
@@ -132,11 +171,16 @@ function setBusy(value) {
   $('reset-button').disabled = busy || (!runtime && (unavailable || !fields.persistence.checked));
   $('save-button').disabled = busy || !runtime;
   $('download-dialog-button').disabled = busy || !runtime;
-  $('credentials-button').disabled = busy || !runtime;
+  const recoveryFormat = $('export-format').querySelector('[value="recovery"]');
+  recoveryFormat.hidden = !runtime?.recovery;
+  recoveryFormat.disabled = !runtime?.recovery;
+  if (runtime?.recovery && !runtime.recovery.configured) $('export-format').value = 'recovery';
+  else if (!runtime?.recovery && $('export-format').value === 'recovery') $('export-format').value = 'bundle';
+  $('credentials-button').disabled = busy || !runtime || Boolean(runtime.recovery);
   $('php-settings-button').disabled = busy || unavailable;
   $('use-deploy').disabled = busy || unavailable;
-  $('apply-deploy').disabled = busy || !runtime;
-  $('open-link').setAttribute('aria-disabled', String(busy || !runtime));
+  $('apply-deploy').disabled = busy || !runtime || Boolean(runtime.recovery);
+  $('open-link').setAttribute('aria-disabled', String(Boolean(busy || !runtime || runtime.recovery)));
   $('preview-dot').className = `status-dot${busy ? ' busy' : runtime ? '' : ' muted'}`;
   $('launch-button').querySelector('span').textContent = t(busy ? 'status.working' : runtime ? 'status.running' : 'action.launch');
   $('launch-hint').textContent = t('help.firstLaunch');
@@ -171,6 +215,30 @@ function displayError(error, title = t('title.error')) {
   show('error-view');
   activity(error);
   $('error-view').focus();
+}
+async function recoverSite() {
+  if (busy || !catalog || !deployCatalog || !fields.persistence.checked) return;
+  pauseAutomaticLaunch();
+  if (runtime) {
+    try { await runtime.close(); } catch (error) { activity(error); }
+    runtime = undefined;
+  }
+  setBusy(true);
+  destroyPreview();
+  show('loading-view');
+  try {
+    const input = currentInput || formInput();
+    const resolved = await resolve(input);
+    currentInput = input;
+    currentConfig = resolved.configuration;
+    runtime = await createPlayground(currentConfig, { recovery: true, onProgress: progress });
+    clearFeedback();
+    $('error-title').textContent = t('title.recovery');
+    $('error-message').textContent = t('help.recovery');
+    show('error-view');
+    activity(t('help.recovery'));
+  } catch (error) { displayError(error); }
+  finally { setBusy(false); }
 }
 function administrator() {
   return {
@@ -298,14 +366,18 @@ function findProfile(deployId, joomlaVersion) {
     || Object.values(savedState.sites).reverse().find((item) => item.deployId === deployId && item.joomlaVersion === joomlaVersion);
 }
 async function launch() {
-  if (busy || runtime || !catalog || !deployCatalog) return;
+  if (busy || runtime || !initialized || !catalog || !deployCatalog) return;
+  launchCountdown.stop();
+  $('launch-countdown').hidden = true;
   try {
     if (!$('launch-form').checkValidity()) { setDrawer(true); openDialog('deploy-dialog'); $('advanced-settings').open = true; $('launch-form').reportValidity(); return; }
+    let input = formInput();
+    if (!approveCustomSetup(input)) return;
+    clearFeedback();
     setBusy(true);
     show('loading-view');
     $('loading-title').textContent = t('title.loading');
     $('loading-progress').removeAttribute('value');
-    let input = formInput();
     if (freshKeyPending) {
       input.storageKey = `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-fresh-${crypto.randomUUID().slice(0, 8)}`;
       fields.storageKey.value = input.storageKey;
@@ -379,10 +451,11 @@ async function closeSite({ reset = false, save = false } = {}) {
     if (reset) {
       savedState = forgetSite(savedState, currentConfig.storageKey);
       writePreferences();
-      pendingFresh = true;
+      pendingFresh = false;
       freshKeyPending = false;
     }
     $('preview-label').textContent = t('title.site');
+    clearFeedback();
     show('welcome');
     activity(reset ? 'Site files and database deleted. Launch to build a fresh site from its deploy.' : 'Site closed. Its saved data remains available.');
     return true;
@@ -403,7 +476,7 @@ async function newSite() {
   fields.storageKey.value = `${defaultSiteKey(fields.deployId.value, fields.joomlaVersion.value).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`;
   fields.siteName.value = `${label.slice(0, 88)} ${Object.keys(savedState.sites).length + 1}`;
   $('admin-password').value = password();
-  pendingFresh = true;
+  pendingFresh = false;
   freshKeyPending = false;
   renderSavedSites('');
   show('welcome');
@@ -488,22 +561,44 @@ $('restart-button').addEventListener('click', async () => {
   catch (error) { if (runtime?.healthy) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl)); else displayError(error); feedback(error, { error: true }); }
   finally { setBusy(false); }
 });
-$('reset-button').addEventListener('click', async () => {
+$('reset-button').addEventListener('click', () => void resetSite());
+$('error-reset-button').addEventListener('click', () => void resetSite({ start: true }));
+$('recover-button').addEventListener('click', () => void recoverSite());
+$('repair-button').addEventListener('click', async () => {
+  if (busy || !runtime?.recovery) return;
+  setBusy(true);
+  try {
+    await runtime.repairConfiguration();
+    clearFeedback();
+    $('error-message').textContent = t('status.repaired');
+    activity(t('status.repaired'));
+  } catch (error) { feedback(error, { error: true, persistent: true }); }
+  finally { setBusy(false); }
+});
+async function resetSite({ start = false } = {}) {
   if (busy) return;
   if (!confirm(t('confirm.reset'))) return;
-  if (runtime) { await closeSite({ reset: true }); return; }
+  pauseAutomaticLaunch();
+  if (runtime) {
+    if (await closeSite({ reset: true }) && start) await launch();
+    return;
+  }
   setBusy(true);
+  let reset = false;
   try {
     await resetPlayground({ storageKey: fields.storageKey.value });
     savedState = forgetSite(savedState, fields.storageKey.value);
     writePreferences();
-    pendingFresh = true;
+    pendingFresh = false;
     freshKeyPending = false;
+    clearFeedback();
     show('welcome');
     activity('Saved data deleted. Launch to build a fresh site from its deploy.');
+    reset = true;
   } catch (error) { displayError(error, t('title.error')); }
   finally { setBusy(false); }
-});
+  if (reset && start) await launch();
+}
 $('save-button').addEventListener('click', () => void saveSite());
 $('export-button').addEventListener('click', async () => {
   if (!runtime || busy) return;
@@ -511,7 +606,9 @@ $('export-button').addEventListener('click', async () => {
   const format = $('export-format').value;
   activity('Preparing your download…');
   try {
-    const result = await runtime.exportSite({ format, onProgress: (event) => activity(event.message || event) });
+    const result = format === 'recovery' || (runtime.recovery && !runtime.recovery.configured)
+      ? await runtime.exportRecoveryFiles()
+      : await runtime.exportSite({ format, onProgress: (event) => activity(event.message || event) });
     if (!result || typeof result.filename !== 'string' || !result.filename
         || (!(result.blob instanceof Blob) && !(result.bytes instanceof Uint8Array))) {
       throw new Error('The export did not produce a downloadable file.');
@@ -681,12 +778,12 @@ async function useDeployment() {
   $('deploy-error').hidden = true;
   try {
     let input = formInput();
-    if (input.extensions.length && !confirm(t('confirm.customPackages'))) return;
+    if (!approveCustomSetup(input)) return;
     const wasRunning = Boolean(runtime);
     if (wasRunning) {
       if (!await saveSite()) return;
       if (!await closeSite()) return;
-      input = { ...input, storageKey: `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`, fresh: true, admin: { ...input.admin, password: password() } };
+      input = { ...input, storageKey: `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`, admin: { ...input.admin, password: password() } };
     }
     const resolved = await resolve(input);
     applyConfiguration(resolved.configuration, input, resolved.deploy); applyAdministrator(input.admin);
@@ -700,7 +797,7 @@ async function applyDeployment() {
   $('deploy-error').hidden = true;
   try {
     const input = formInput({ storageKey: currentConfig.storageKey, persistence: currentConfig.persistence, fresh: false });
-    if (input.extensions.length && !confirm(t('confirm.customPackages'))) return;
+    if (!approveCustomSetup(input)) return;
     const resolved = await resolve(input);
     setBusy(true); destroyPreview(); show('loading-view');
     await runtime.applyConfiguration(resolved.configuration);
@@ -812,7 +909,7 @@ function setupInterface() {
     finally { setBusy(false); }
   });
   $('open-link').addEventListener('click', async event => {
-    event.preventDefault(); if (!runtime || busy) return;
+    event.preventDefault(); if (!runtime || runtime.recovery || busy) return;
     try {
       setBusy(true); destroyPreview(); show('loading-view'); await runtime.openStandalone({ path: currentSitePath });
       destroyPreview(); runtime = undefined; show('welcome'); feedback(t('status.closed'));
@@ -831,7 +928,9 @@ function setupInterface() {
     }
     finally { setBusy(false); }
   });
-  setInterval(() => { if (runtime && !runtime.changing && currentConfig?.persistence && !busy && document.visibilityState === 'visible') void saveSite({ quiet: true }); }, 60000);
+  for (const event of ['input', 'change']) $('launch-form').addEventListener(event, pauseAutomaticLaunch);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) pauseAutomaticLaunch(); });
+  setInterval(() => { if (runtime && !runtime.recovery && !runtime.changing && currentConfig?.persistence && !busy && document.visibilityState === 'visible') void saveSite({ quiet: true }); }, 60000);
 }
 
 async function initialize() {
@@ -883,10 +982,19 @@ async function initialize() {
     resolved = await resolve(input);
     applyConfiguration(resolved.configuration, input, resolved.deploy);
     freshKeyPending = Boolean(parsed.config.fresh);
+    initialized = true;
     setBusy(false);
     const shouldResume = Boolean(previous) && (!params.has('start') || parsed.autostart);
+    // A saved installation already ran this exact reviewed setup. A shared link
+    // that changes any executable source or custom content still needs consent.
+    const reviewedSavedSetup = previous && JSON.stringify(customSetupDetails(previous)) === JSON.stringify(customSetupDetails(input));
+    if (reviewedSavedSetup) approvedCustomSetup = JSON.stringify(customSetupDetails(input));
     activity(shouldResume ? 'Reopening your saved site…' : 'Ready to launch. Choose a starting point and your runtime versions.');
-    if (!params.has('start') || parsed.autostart) await launch();
+    if (deploymentNeedsReview(parsed.config) && !reviewedSavedSetup) {
+      automaticLaunchPaused = true;
+      feedback(t('help.customSetup'), { persistent: true });
+      openEditor();
+    } else if ((!params.has('start') || parsed.autostart) && !automaticLaunchPaused && !document.hidden) launchCountdown.start();
   } catch (error) {
     setBusy(false);
     displayError(error, t('title.error'));
@@ -895,4 +1003,5 @@ async function initialize() {
 }
 
 setupInterface();
+setBusy(false);
 void initialize();

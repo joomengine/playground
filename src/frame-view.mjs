@@ -1,3 +1,5 @@
+import { hasLayoutMutation } from './frame-mutations.mjs';
+
 /** Keep Joomla's document separate while allowing the outer page to own scrolling. */
 export function connectFrame(frame, { onNavigate = () => {} } = {}) {
   let cleanupDocument = () => {};
@@ -45,8 +47,12 @@ export function connectFrame(frame, { onNavigate = () => {} } = {}) {
     style.textContent = 'html{scroll-behavior:auto!important}.modal.show,.modal.in,.offcanvas.show{top:var(--rocket-visible-top,0px)!important;height:var(--rocket-visible-height,100vh)!important;bottom:auto!important}';
     doc.head?.append(style);
     // The frame is a document boundary, not a security sandbox for extension code.
-    const changed = new MutationObserver(schedule);
-    changed.observe(doc.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open'] });
+    // Joomla's responsive handlers rewrite classes on every iframe resize, even
+    // when their final values do not change. Treating those writes as a layout
+    // change would resize the frame again forever and make the footer flicker.
+    const changed = new MutationObserver(records => { if (hasLayoutMutation(records)) schedule(); });
+    changed.observe(doc.body, { childList: true, subtree: true, characterData: true, characterDataOldValue: true,
+      attributes: true, attributeOldValue: true, attributeFilter: ['class', 'style', 'hidden', 'open'] });
     observer = new ResizeObserver(() => { if (!measuring && Math.abs(doc.body.getBoundingClientRect().height - observedBodyHeight) > 1) schedule(); });
     const viewport = () => {
       const bounds = frame.getBoundingClientRect();

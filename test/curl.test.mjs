@@ -29,6 +29,8 @@ test('curl staging verifies PHP and fetch transport identities, binary checksum 
     upstream: { commit: upstream.commit, runtimeVersion: upstream.version }, emscriptenVersion: upstream.emscripten,
     phpSource: { sha256: version.sourceSha256 }, extension: { file, sha256: sha256(bytes) }, curlSource: { ...curlSource },
     phpSourceInventory: [{ path: 'interface.c', sha256: 'c'.repeat(64) }],
+    httpStreams: { sourceSha256: await hashFile(fileURLToPath(new URL('../native/http-stream.c', import.meta.url))),
+      originalInterfaceSha256: 'f'.repeat(64), interfaceSha256: 'c'.repeat(64) },
     curlSourceInventory: [{ path: 'src/fetch_js.c', sha256: 'd'.repeat(64) }], licenses,
     buildScriptSha256: await hashFile(fileURLToPath(new URL('../scripts/build-curl.mjs', import.meta.url))) };
   const save = () => writeFile(path.join(directory, 'php8.4-curl.json'), JSON.stringify(provenance));

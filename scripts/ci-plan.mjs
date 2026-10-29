@@ -1,6 +1,15 @@
 import { appendFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+
+/** Native ABI inputs exclude deploy choices and database engine-only releases. */
+export function nativeCacheKey(pins) {
+  return createHash('sha256').update(JSON.stringify({
+    upstream: pins.upstream, php: pins.php,
+    protocol: pins.bridge.protocolVersion, sources: pins.nativeDriver.nativeSources,
+  })).digest('hex');
+}
 
 /** Unknown paths receive the full matrix; only presentation-only edits narrow it. */
 export function validationPlan(paths, { full = false } = {}) {
@@ -28,6 +37,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     joomla: plan.full ? '' : pins.defaults.joomlaVersion,
     bridge: pins.nativeDriver.sourceCommit, emsdk: pins.upstream.emsdkCommit,
     emscripten: pins.upstream.emscripten,
+    native: nativeCacheKey(pins),
   };
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(output).map(([key, value]) => `${key}=${value}\n`).join(''));
   console.log(JSON.stringify({ changed: paths, ...output }, null, 2));

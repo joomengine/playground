@@ -4,11 +4,13 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeHealthSource, runtimeRandomValue, assertRuntimeHealth } from '../src/php-settings.mjs';
 import { configurePhpRouting } from '../src/php-routing.mjs';
+import { installPhpRecovery } from '../src/php-recovery.mjs';
+import { applyJcbRuntimeCompatibility } from '../src/jcb-compatibility.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
 /** Run the verified upstream PHP binary and staged CGI adapter for build tasks. */
-export async function createNodeRuntime({ directory = path.join(root, 'dist'), phpVersion, database = 'joomla', phpSettings: requestedPhpSettings } = {}) {
+export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIST || path.join(root, 'dist'), phpVersion, database = 'joomla', phpSettings: requestedPhpSettings } = {}) {
   const phpSettings = normalizePhpSettings(requestedPhpSettings);
   const bodyLimit = phpRequestBodyLimit(phpSettings);
   const distribution = path.resolve(directory);
@@ -84,11 +86,17 @@ export async function createNodeRuntime({ directory = path.join(root, 'dist'), p
     if (input.headers.has('content-type')) headers.set('Content-Type', input.headers.get('content-type'));
     php.error = [];
     const original = php.binary;
+    applyJcbRuntimeCompatibility(binary, php.docroot);
     try {
-      const response = await php.request({ url: `${url.pathname}${url.search}`, method: input.method, headers, body: inputBody ? new Blob([inputBody]).stream() : null });
+      let response = await php.request({ url: `${url.pathname}${url.search}`, method: input.method, headers, body: inputBody ? new Blob([inputBody]).stream() : null });
       if (php.binary !== original) {
-        failed = new Error(`PHP stopped abnormally during build execution: ${new TextDecoder().decode(new Uint8Array(php.error || [])).slice(0, 2000)}`);
-        throw failed;
+        try { await php.binary; }
+        catch (error) {
+          const detail = response instanceof Response ? (await response.clone().text()).slice(0, 2000) : '';
+          failed = new Error(`PHP could not recover after an application error: ${error.message}.${detail ? ` Original response: ${detail}` : ''}`);
+          throw failed;
+        }
+        if (response instanceof Response && response.status < 400) response = new Response(response.body, { status: 500, headers: response.headers });
       }
       if (!(response instanceof Response)) throw new Error('The upstream PHP runtime did not return a response.');
       const diagnostics = new TextDecoder().decode(new Uint8Array(php.error || [])).trim();
@@ -158,16 +166,24 @@ export async function createNodeRuntime({ directory = path.join(root, 'dist'), p
     },
   };
   try {
-    const adapter = createPhpWasmAdapter(databaseRuntime.hostCalls, { shimUrl: assetURL('mariadb/adapters/php-wasm.php') });
+    const adapter = createPhpWasmAdapter(databaseRuntime.hostCalls, { shimUrl: new URL('./php-wasm.php', assetURL(manifest.bridge.adapterUrl)) });
     php = new PhpCgiNode({
       ...adapter, phpArgs: { ...adapter.phpArgs, getRandomValue: runtimeRandomValue }, version: entry.version, prefix, docroot: raw.documentRoot, persist: [], staticFS: true, autoTransaction: false,
       sharedLibs: entry.sharedLibs.map((library) => ({ ...library, url: assetURL(library.url).href })),
-      files: [...(entry.files || []).map((file) => ({ ...file, url: assetURL(file.url).href })), ...adapter.files],
-      ini: `${adapter.ini}${phpIni(phpSettings)}`,
+      files: [...(entry.files || []).map((file) => ({ ...file, url: assetURL(file.url).href })), ...adapter.files,
+        { parent: '/internal', name: 'rocket-http.php', url: new URL('../src/php-http-stream.php', import.meta.url).href }],
+      ini: `${adapter.ini}${phpIni(phpSettings)}\nauto_prepend_file=/internal/rocket-http.php\n`,
     });
     binary = await php.binary;
     configurePhpRouting(php, binary);
     for (const directory of ['/persist/www', '/persist/sessions', '/persist/meta', '/config', '/internal']) binary.FS.mkdirTree(directory);
+    installPhpRecovery(php, {
+      currentBinary: () => binary,
+      prepare: next => {
+        for (const directory of ['/persist/www', '/persist/sessions', '/persist/meta', '/config', '/internal']) next.FS.mkdirTree(directory);
+      },
+      restored: next => { binary = next; configurePhpRouting(php, binary); },
+    });
     php.initialized = true;
     php.staticCacheTime = 0;
     php.dynamicCacheTime = 0;
