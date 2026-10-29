@@ -322,6 +322,7 @@ export function createWorkspaceFileService(FS, root = '/persist/www', options = 
     const roots = affected.filter((path, index) => !affected.slice(0, index).some(ancestor => within(path, ancestor)));
     const budget = { bytes: 0, entries: 0 };
     const before = roots.map(path => ({ path, snapshot: snapshot(path, budget) }));
+    if (budget.bytes > limits.maxHistoryBytes) error('LIMIT_EXCEEDED', 'The change cannot fit in the bounded recovery history.');
     const results = [];
     const notifications = [];
     let failed;

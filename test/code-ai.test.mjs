@@ -1,0 +1,185 @@
+import assert from 'node:assert/strict';
+import { afterEach, test } from 'node:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createChatProvider, AI_PROVIDER_CANDIDATES } from '../src/code/ai-provider.mjs';
+import { createAiReview, createAiWorkspaceTools, isSensitiveAiPath } from '../src/code/ai-review.mjs';
+import { createWorkspaceFileService } from '../src/code/workspace-files.mjs';
+
+const encoder = new TextEncoder();
+const temporary = [];
+afterEach(() => { for (const directory of temporary.splice(0)) fs.rmSync(directory, { recursive: true, force: true }); });
+function streamResponse(events, { chunkSize = 7, done = true } = {}) {
+  const text = ': heartbeat\r\n\r\n' + events.map(event => `data: ${JSON.stringify(event)}\r\n\r\n`).join('') + (done ? 'data: [DONE]\r\n\r\n' : '');
+  const bytes = encoder.encode(text);
+  return new Response(new ReadableStream({ start(controller) {
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) controller.enqueue(bytes.slice(offset, offset + chunkSize));
+    controller.close();
+  } }), { headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } });
+}
+const delta = (value, finish = null) => ({ choices: [{ index: 0, delta: value, finish_reason: finish }] });
+const settings = { baseURL: 'https://provider.invalid/v1/', model: 'tool-model', apiKey: 'secret-session-key' };
+function fixture({ dirty = () => false, overrides = {} } = {}) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'jec-ai-')); temporary.push(directory);
+  fs.mkdirSync(path.join(directory, 'templates'));
+  fs.writeFileSync(path.join(directory, 'index.php'), '<?php echo "before";\r\n');
+  fs.writeFileSync(path.join(directory, 'templates/site.css'), 'body { color: red; }');
+  fs.writeFileSync(path.join(directory, 'configuration.php'), '<?php $password="secret";');
+  fs.writeFileSync(path.join(directory, '.env'), 'TOKEN=secret');
+  const adapter = { lstat: fs.lstatSync, stat: fs.statSync, readlink: fs.readlinkSync, readdir: fs.readdirSync,
+    readFile: filename => new Uint8Array(fs.readFileSync(filename)), writeFile: fs.writeFileSync,
+    mkdir: fs.mkdirSync, rmdir: fs.rmdirSync, unlink: fs.unlinkSync, rename: fs.renameSync, symlink: fs.symlinkSync,
+    chmod: fs.chmodSync, utime: (filename, atime, mtime) => fs.utimesSync(filename, new Date(atime), new Date(mtime)), ...overrides };
+  const service = createWorkspaceFileService(adapter, directory);
+  let applied = 0;
+  const workspace = { request: (operation, args) => service.handle(operation, args) };
+  const review = createAiReview({ workspace, isDirty: dirty, onApplied: () => { applied++; } });
+  return { directory, workspace, review, applied: () => applied };
+}
+
+test('provider assembles fragmented UTF-8 SSE text and streamed tool calls without executing them', async () => {
+  let request, text = '';
+  const provider = createChatProvider({ ...settings, fetcher: async (url, init) => {
+    request = { url, ...init };
+    return streamResponse([
+      delta({ content: 'Joomla ✓' }),
+      delta({ tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"pa' } }] }),
+      delta({ tool_calls: [{ index: 0, function: { arguments: 'th":"/index.php"}' } }] }),
+      delta({}, 'tool_calls'), { choices: [], usage: { total_tokens: 10 } },
+    ], { chunkSize: 1 });
+  } });
+  const result = await provider.stream({ messages: [{ role: 'user', content: 'Read the file' }], onDelta: value => { text += value; } });
+  assert.equal(request.url, 'https://provider.invalid/v1/chat/completions');
+  assert.equal(request.headers.Authorization, 'Bearer secret-session-key');
+  assert.equal(request.credentials, 'omit'); assert.equal(request.redirect, 'error');
+  assert.equal(text, 'Joomla ✓');
+  assert.deepEqual(result.tool_calls[0], { id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"path":"/index.php"}' } });
+  assert.equal(JSON.stringify(result).includes(settings.apiKey), false);
+  provider.dispose();
+  await assert.rejects(provider.stream({ messages: [{ role: 'user', content: 'again' }] }), { code: 'CLOSED' });
+});
+
+test('provider rejects incomplete or truncated tool streams and redacts HTTP error bodies', async () => {
+  const messages = [{ role: 'user', content: 'test' }];
+  for (const response of [streamResponse([delta({ content: 'partial' })], { done: false }), streamResponse([delta({}, 'length')])]) {
+    const provider = createChatProvider({ ...settings, fetcher: async () => response });
+    await assert.rejects(provider.stream({ messages }), { code: 'INCOMPLETE_STREAM' });
+  }
+  const provider = createChatProvider({ ...settings, fetcher: async () => new Response(`bad ${settings.apiKey}`, { status: 401 }) });
+  await assert.rejects(provider.stream({ messages }), error => error.code === 'HTTP_401' && !error.message.includes(settings.apiKey));
+  const network = createChatProvider({ ...settings, fetcher: async () => { throw Object.assign(new Error(settings.apiKey), { code: 'ERR_NETWORK' }); } });
+  await assert.rejects(network.stream({ messages }), error => error.code === 'NETWORK_ERROR' && !error.message.includes(settings.apiKey));
+});
+
+test('provider cancels the underlying streaming fetch and never treats cancellation as success', async () => {
+  let actualSignal;
+  const controller = new AbortController();
+  const provider = createChatProvider({ ...settings, fetcher: async (_url, { signal }) => {
+    actualSignal = signal;
+    return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true }));
+  } });
+  const pending = provider.stream({ messages: [{ role: 'user', content: 'test' }], signal: controller.signal });
+  controller.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
+  assert.equal(actualSignal.aborted, true);
+});
+
+test('provider validates endpoints and context bounds before sending credentials', async () => {
+  for (const baseURL of ['http://provider.invalid/v1', 'https://key:secret@provider.invalid/v1', 'https://provider.invalid/v1?key=abc']) {
+    assert.throws(() => createChatProvider({ ...settings, baseURL }), TypeError);
+  }
+  let fetched = false;
+  const provider = createChatProvider({ ...settings, maxRequestBytes: 1024, fetcher: () => { fetched = true; } });
+  await assert.rejects(provider.stream({ messages: [{ role: 'user', content: 'x'.repeat(2048) }] }), { code: 'REQUEST_LIMIT' });
+  assert.equal(fetched, false);
+  assert.equal(AI_PROVIDER_CANDIDATES.every(candidate => candidate.verified === false), true);
+});
+
+test('prepare/reject is read-only; accept uses one recoverable batch and cannot be replayed', async () => {
+  const { directory, review, applied } = fixture();
+  const proposal = { summary: 'Update the Joomla page', changes: [
+    { operation: 'write', path: '/index.php', content: '<?php echo "after";\r\n' },
+    { operation: 'mkdir', path: '/docs' }, { operation: 'write', path: '/docs/note.txt', content: 'note' },
+  ] };
+  const rejected = await review.prepare(proposal);
+  assert.equal(fs.readFileSync(path.join(directory, 'index.php'), 'utf8'), '<?php echo "before";\r\n');
+  review.reject(rejected.id);
+  await assert.rejects(review.accept(rejected.id), /resolved/);
+  assert.equal(applied(), 0);
+  const prepared = await review.prepare(proposal);
+  assert.equal(prepared.operations[0].before, '<?php echo "before";\r\n');
+  const result = await review.accept(prepared.id);
+  assert.equal(result.status, 'applied'); assert.ok(result.recoveryId); assert.equal(applied(), 1);
+  assert.equal(fs.readFileSync(path.join(directory, 'docs/note.txt'), 'utf8'), 'note');
+  await assert.rejects(review.accept(prepared.id), /resolved/);
+  assert.equal((await review.undo(prepared.id)).status, 'recovered');
+  assert.equal(fs.existsSync(path.join(directory, 'docs')), false);
+  assert.equal(fs.readFileSync(path.join(directory, 'index.php'), 'utf8'), '<?php echo "before";\r\n');
+  assert.equal(applied(), 2);
+});
+
+test('disk, dirty-buffer and folder membership conflicts prevent all AI writes', async () => {
+  let dirty = false;
+  const { directory, review } = fixture({ dirty: () => dirty });
+  const first = await review.prepare({ summary: 'Update', changes: [{ operation: 'write', path: '/index.php', content: 'after' }] });
+  dirty = true;
+  await assert.rejects(review.accept(first.id), /Unsaved/);
+  dirty = false;
+  fs.writeFileSync(path.join(directory, 'index.php'), 'external');
+  await assert.rejects(review.accept(first.id), { code: 'CONFLICT' });
+  assert.equal(fs.readFileSync(path.join(directory, 'index.php'), 'utf8'), 'external');
+  const deletion = await review.prepare({ summary: 'Remove old template', changes: [
+    { operation: 'write', path: '/new.txt', content: 'first write' }, { operation: 'delete', path: '/templates' },
+  ] });
+  assert.equal(deletion.operations[1].entries[0].path, '/templates/site.css');
+  fs.writeFileSync(path.join(directory, 'templates/new.txt'), 'unreviewed');
+  await assert.rejects(review.accept(deletion.id), { code: 'CONFLICT' });
+  assert.equal(fs.existsSync(path.join(directory, 'new.txt')), false);
+});
+
+test('partial AI apply reports failure, prevents blind retry and recovers completed writes', async () => {
+  const { directory, review } = fixture({ overrides: { writeFile(filename, bytes) {
+    fs.writeFileSync(filename, bytes);
+    if (filename.endsWith('/failed.txt')) throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+  } } });
+  const prepared = await review.prepare({ summary: 'Add files', changes: [
+    { operation: 'write', path: '/saved.txt', content: 'saved' },
+    { operation: 'write', path: '/failed.txt', content: 'partial' },
+    { operation: 'write', path: '/unwritten.txt', content: 'never' },
+  ] });
+  const result = await review.accept(prepared.id);
+  assert.equal(result.status, 'partial'); assert.equal(result.result.failed.index, 1);
+  assert.equal(fs.existsSync(path.join(directory, 'unwritten.txt')), false);
+  await assert.rejects(review.accept(prepared.id), /resolved/);
+  await review.undo(prepared.id);
+  assert.equal(fs.existsSync(path.join(directory, 'saved.txt')), false);
+  assert.equal(fs.existsSync(path.join(directory, 'failed.txt')), false);
+});
+
+test('AI tools exclude sensitive automatic context, enforce bounds and have no accept or shell tool', async () => {
+  const { directory, review, workspace } = fixture();
+  let selected = [];
+  const tools = createAiWorkspaceTools({ workspace, review, selectedPaths: () => selected });
+  const listing = await tools.execute('list_files', { path: '/' });
+  assert.equal(listing.entries.some(item => isSensitiveAiPath(item.path)), false);
+  await assert.rejects(tools.execute('read_file', { path: '/configuration.php' }), /Explicitly select/);
+  const found = await tools.execute('search_files', { path: '/', query: 'secret' });
+  assert.deepEqual(found.matches, []);
+  selected = ['/configuration.php'];
+  assert.match((await tools.execute('read_file', { path: '/configuration.php' })).content, /password/);
+  const context = await tools.context({ openFiles: [{ path: '/index.php', content: 'unsaved editor text', unsaved: true }, '/.env'] });
+  assert.equal(context.files.find(file => file.path === '/index.php').unsaved, true);
+  assert.equal(context.files.some(file => file.path === '/.env'), false);
+  assert.equal(context.excluded[0].path, '/.env');
+  assert.equal(context.files.some(file => file.path === '/configuration.php'), true);
+  fs.writeFileSync(path.join(directory, 'index.php'), 'const API_KEY = "embedded-secret-token";');
+  await assert.rejects(tools.execute('read_file', { path: '/index.php' }), /Explicitly select/);
+  selected = ['/index.php'];
+  assert.match((await tools.execute('read_file', { path: '/index.php' })).content, /embedded-secret-token/);
+  assert.equal(tools.definitions.some(item => /accept|shell/.test(item.function.name)), false);
+  await assert.rejects(tools.execute('accept', { path: '/index.php' }), /unsupported/);
+  await assert.rejects(tools.execute('read_file', { path: '/../private' }), /traversal/);
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(tools.execute('search_files', { path: '/', query: 'echo' }, { signal: controller.signal }), { name: 'AbortError' });
+});

@@ -28,6 +28,19 @@ let requestActive = false;
 let issuedDatabaseCalls = 0;
 let workspaceFiles;
 let workspaceFilesystem;
+let debugOptions;
+let debugOwner;
+let debugOwnerLoading;
+let activeOperationId;
+
+async function getDebugOwner() {
+  if (!debugOptions) throw new Error('This distribution does not include PHP debugger assets.');
+  return debugOwner ??= await (debugOwnerLoading ??= import('./code/debug-owner.mjs').then(({ createPhpDebugOwner }) => createPhpDebugOwner({
+    options: debugOptions, getPhp: () => php, getBinary: () => binary, databaseCall, flush,
+    onState: state => self.postMessage({ type: 'debug-state', state, requestId: activeOperationId }),
+    onEvent: event => self.postMessage({ type: 'debug-event', ...event }),
+  })));
+}
 
 async function workspaceOperation(name, args) {
   // Initialize only when the editor is used. Recovery can replace the entire
@@ -109,7 +122,16 @@ function clearHeaders() {
 }
 
 async function request(value) {
-  try { return await requestResponse(value); }
+  try {
+    if (debugOwner && php.docroot === '/persist/www') {
+      const bytes = value.body?.byteLength ?? 0;
+      if (bytes > requestBodyLimit) throw new RangeError(`The HTTP request exceeds post_max_size (${phpSettings.post_max_size}).`);
+      if (!readOnly) applyJcbRuntimeCompatibility(binary, php.docroot);
+      const result = await debugOwner.maybeRequest(value);
+      if (result) return result.response;
+    }
+    return await requestResponse(value);
+  }
   finally {
     if (workspaceFiles) self.postMessage({ type: 'workspace-invalidated' });
     if (readOnly && binary) {
@@ -213,6 +235,11 @@ async function initialize(args) {
   Object.defineProperty(globalThis, 'caches', { value: undefined, configurable: true });
   const [{ PhpCgiWorker }, { createPhpWasmAdapter }] = await Promise.all([import(moduleURL.href), import(adapterURL.href)]);
   const adapter = createPhpWasmAdapter({ 'mariadb.v1': databaseCall });
+  if (args.debugger) debugOptions = {
+    moduleUrl: args.debugger.moduleUrl, adapterUrl: adapterURL.href, phpVersion: args.phpVersion,
+    sharedLibs: args.debugger.sharedLibs, files: args.files || [],
+    ini: `${adapter.ini}${phpIni(phpSettings)}`, siteURL: new URL(routePrefix, self.location.origin).href,
+  };
   php = new PhpCgiWorker({
     ...adapter,
     phpArgs: { ...adapter.phpArgs, getRandomValue: runtimeRandomValue },
@@ -308,6 +335,10 @@ async function operation(name, args = {}) {
   if (!php || !binary) throw new Error('Initialize PHP before using the worker.');
   if (name.startsWith('fs.')) return filesystem(name.slice(3), args);
   if (name.startsWith('workspace.')) return workspaceOperation(name.slice('workspace.'.length), args);
+  if (name === 'debug.arm') {
+    if (readOnly) throw new Error('PHP debugging is unavailable in read-only file recovery.');
+    return (await getDebugOwner()).arm(args);
+  }
   switch (name) {
     case 'request': return request(args);
     case 'runPhp': return runPhp(args.source ?? args.code);
@@ -341,7 +372,7 @@ async function operation(name, args = {}) {
         return { ok: true, entries: result.entries };
       } finally { if (exists(archive)) binary.FS.unlink(archive); }
     }
-    case 'close': await flush(); terminal = true; return null;
+    case 'close': debugOwner?.dispose(); await flush(); terminal = true; return null;
     case 'reset': {
       if (readOnly) throw new Error('Saved files cannot be modified in read-only recovery.');
       for (const root of ['/persist', '/config']) {
@@ -367,6 +398,17 @@ self.addEventListener('message', (event) => {
     else pending.resolve(message.value);
     return;
   }
+  if (message?.type === 'debug-command') {
+    // A paused HTTP operation owns the ordinary queue. Debugger controls need a
+    // separate lane so inspecting, stepping and stopping cannot deadlock it.
+    const command = message.command === 'stop' && !debugOwner && !debugOwnerLoading
+      ? Promise.resolve() : getDebugOwner().then(owner => owner.command(message.command, message.args));
+    void command.then(
+      value => self.postMessage({ type: 'result', id: message.id, value }),
+      error => self.postMessage({ type: 'result', id: message.id, error: error.message, code: error.code, fatal: false }),
+    );
+    return;
+  }
   if (message?.type !== 'operation' || typeof message.operation !== 'string') return;
   if (queued >= MAX_OPERATIONS) {
     self.postMessage({ type: 'result', id: message.id, error: 'The PHP operation queue is full.', fatal: false });
@@ -375,12 +417,13 @@ self.addEventListener('message', (event) => {
   queued++;
   queue = queue.then(async () => {
     try {
+      activeOperationId = message.id;
       const value = await operation(message.operation, message.args);
       self.postMessage({ type: 'result', id: message.id, value });
     } catch (error) {
       const fatal = error?.fatal === true || message.operation === 'initialize';
       if (fatal) terminal = true;
       self.postMessage({ type: 'result', id: message.id, error: error instanceof Error ? error.message : String(error), code: error?.code, fatal });
-    } finally { queued--; }
+    } finally { activeOperationId = undefined; queued--; }
   });
 });

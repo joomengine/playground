@@ -41,12 +41,17 @@ export function prepareEnvironment() {
 async function receiveSiteRequest(event) {
   if (event.source?.scriptURL !== new URL('service-worker.mjs', base).href || event.data?.type !== 'playground-request' || !event.ports[0]) return;
   const port = event.ports[0];
+  let heartbeat;
   try {
     const instance = instances.get(event.data.instanceId);
     if (!instance) throw new Error('This playground session is no longer open.');
-    port.postMessage(await instance.send('request', event.data.request));
+    port.postMessage(await instance.send('request', event.data.request, state => {
+      clearInterval(heartbeat);
+      port.postMessage({ type: 'playground-request-state', state });
+      if (state === 'paused') heartbeat = setInterval(() => port.postMessage({ type: 'playground-request-state', state: 'paused' }), 5000);
+    }));
   } catch (error) { port.postMessage({ error: error.message }); }
-  finally { port.close(); }
+  finally { clearInterval(heartbeat); port.close(); }
 }
 async function clientIdentity() {
   const channel = new MessageChannel();
@@ -69,11 +74,24 @@ class PhpSession {
     this.queued = 0;
     this.failure = null;
     this.workspaceListeners = new Set();
+    this.debugListeners = new Set();
     this.worker.addEventListener('error', event => this.fail(new Error(event.message || 'The PHP worker failed.')));
     this.worker.addEventListener('messageerror', () => this.fail(new Error('The PHP worker sent an unreadable message.')));
     this.worker.addEventListener('message', event => this.receive(event.data));
   }
   async receive(message) {
+    if (message?.type === 'debug-state' || message?.type === 'debug-event') {
+      if (message.type === 'debug-state') {
+        const pending = this.pending.get(message.requestId);
+        if (pending?.operation === 'request') {
+          if (message.state === 'paused') clearTimeout(pending.timer);
+          else if (message.state === 'running' || message.state === 'idle') pending.armTimer();
+          pending.onProgress?.(message.state);
+        }
+      }
+      for (const listener of this.debugListeners) { try { listener(message); } catch { /* Debug views do not own PHP. */ } }
+      return;
+    }
     if (message?.type === 'workspace-change' || message?.type === 'workspace-invalidated') {
       for (const listener of this.workspaceListeners) {
         try { listener(message); } catch { /* A view cannot fail the site owner. */ }
@@ -113,25 +131,62 @@ class PhpSession {
       } catch (error) { await this.fail(error); pending.reject(error); }
     }
   }
-  send(operation, args = {}, timeoutMs = 180_000) {
+  send(operation, args = {}, timeoutMs = 180_000, onProgress) {
     if (this.failure) return Promise.reject(this.failure);
     if (!Number.isInteger(timeoutMs) || timeoutMs < 10 || timeoutMs > 600_000) return Promise.reject(new RangeError('Timeout must be between 10 and 600000 milliseconds.'));
     if (this.queued >= 64) return Promise.reject(new Error('The PHP request queue is full.'));
     this.queued++;
     const result = this.queue.then(() => {
       if (this.failure) throw this.failure;
-      const id = ++this.sequence;
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          const error = new Error(`PHP ${operation} timed out after ${timeoutMs} ms. Restart the playground; the operation was not replayed.`);
-          error.code = 'TIMEOUT';
-          this.fail(error);
-        }, timeoutMs);
-        this.pending.set(id, { resolve, reject, timer, operation });
-        try { this.worker.postMessage({ type: 'operation', id, operation, args }); }
-        catch (error) { this.fail(error); }
-      });
+      return this.perform(operation, args, timeoutMs, onProgress);
     }).finally(() => { this.queued--; });
+    this.queue = result.catch(() => {});
+    return result;
+  }
+  perform(operation, args = {}, timeoutMs = 180_000, onProgress) {
+    if (this.failure) return Promise.reject(this.failure);
+    const id = ++this.sequence;
+    return new Promise((resolve, reject) => {
+      const timeout = () => {
+        const error = new Error(`PHP ${operation} timed out after ${timeoutMs} ms. Restart the playground; the operation was not replayed.`);
+        error.code = 'TIMEOUT';
+        this.fail(error);
+      };
+      const pending = { resolve, reject, operation, onProgress,
+        armTimer() { clearTimeout(this.timer); this.timer = setTimeout(timeout, timeoutMs); } };
+      pending.armTimer();
+      this.pending.set(id, pending);
+      try { this.worker.postMessage({ type: 'operation', id, operation, args }); }
+      catch (error) { this.fail(error); }
+    });
+  }
+  debugCommand(command, args = {}) {
+    if (this.failure) return Promise.reject(this.failure);
+    const id = ++this.sequence;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`PHP debugger ${command} did not respond.`)); }, 30_000);
+      this.pending.set(id, { resolve, reject, timer, operation: 'debug-command' });
+      this.worker.postMessage({ type: 'debug-command', id, command, args });
+    });
+  }
+  withWorkspaceBatch(callback) {
+    if (this.failure) return Promise.reject(this.failure);
+    if (this.queued >= 64) return Promise.reject(new Error('The PHP request queue is full.'));
+    this.queued++;
+    const result = this.queue.then(async () => {
+      if (this.failure) throw this.failure;
+      let active = true, writes = Promise.resolve();
+      const request = (operation, args) => {
+        if (!active) return Promise.reject(new Error('This workspace write batch has finished.'));
+        if (!/^[a-zA-Z]+$/.test(operation)) return Promise.reject(new TypeError('Invalid workspace operation.'));
+        const pending = writes.then(() => this.perform(`workspace.${operation}`, args));
+        writes = pending.catch(() => {});
+        return pending;
+      };
+      try { return await callback(request); }
+      finally { active = false; await writes; }
+    }).finally(() => { this.queued--; });
+    // HTTP and persistence work enqueued after Save All cannot split its files.
     this.queue = result.catch(() => {});
     return result;
   }
@@ -165,8 +220,8 @@ class PhpSession {
     return this.recovery;
   }
   async close() {
-    try { if (!this.failure) await this.send('close'); }
-    finally { this.workspaceListeners.clear(); this.worker.terminate(); this.failure ??= new Error('This PHP session is closed.'); await this.recovery; }
+    try { if (!this.failure) { await this.debugCommand('stop').catch(() => {}); await this.send('close'); } }
+    finally { this.workspaceListeners.clear(); this.debugListeners.clear(); this.worker.terminate(); this.failure ??= new Error('This PHP session is closed.'); await this.recovery; }
   }
 }
 
@@ -224,6 +279,8 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   const instanceId = crypto.randomUUID();
   let database, session, closePromise, changing = false, databaseError = null;
   const workspaceListeners = new Set();
+  const debugListeners = new Set();
+  let debugState = 'idle';
   const workspaceEvent = event => {
     for (const listener of workspaceListeners) {
       try { listener(event); } catch { /* Listener errors must not stop the runtime. */ }
@@ -233,12 +290,13 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   const prefix = `${base.pathname}__site/${clientId}/${instanceId}/`;
   const siteUrl = new URL(prefix, base).href;
   const registerSession = () => instances.set(instanceId, {
-    send: (operation, args) => session.send(operation, args, phpRequestTimeoutMs(config.phpSettings)),
+    send: (operation, args, onProgress) => session.send(operation, args, phpRequestTimeoutMs(config.phpSettings), onProgress),
   });
   const finish = erase => closePromise ??= (async () => {
     instances.delete(instanceId);
     workspaceEvent({ type: 'workspace-closed', erased: Boolean(erase) });
     workspaceListeners.clear();
+    debugListeners.clear();
     try {
       try { await session?.close(); } finally { await database?.close(); }
       if (erase && config.persistence) await eraseStoredSite(identity);
@@ -274,6 +332,10 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         error => { workspaceEvent({ type: 'workspace-failed', message: error.message }); progress({ phase: 'failed', message: error.message }); },
         message => progress({ phase: 'warning', message }));
       created.workspaceListeners.add(workspaceEvent);
+      created.debugListeners.add(message => {
+        if (message.type === 'debug-state') { debugState = message.state; workspaceEvent(message); }
+        else for (const listener of debugListeners) { try { listener({ event: message.event, body: message.body }); } catch { /* Isolate view errors. */ } }
+      });
       return created;
     };
     session = createSession();
@@ -284,6 +346,8 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       phpSettings: settings,
       sharedLibs: phpEntry.sharedLibs.map(lib => ({ ...lib, url: resolveAsset(lib.url) })),
       files: (phpEntry.files ?? []).map(file => ({ ...file, url: resolveAsset(file.url) })),
+      debugger: phpEntry.debugger ? { moduleUrl: resolveAsset(phpEntry.debugger.moduleUrl),
+        sharedLibs: phpEntry.debugger.sharedLibs.map(lib => ({ ...lib, url: resolveAsset(lib.url) })) } : undefined,
     });
     const runtimeInfo = await initializeSession(session);
     const handle = {
@@ -295,6 +359,29 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       get changing() { return changing; },
       recovery: null,
       lastSavedAt: null,
+      debugger: {
+        capabilities: { conditionalBreakpoints: false },
+        get state() { return debugState; },
+        async start(configuration = {}) {
+          requireDatabase();
+          if (changing || closePromise) throw new Error('Wait for the current site operation before debugging.');
+          if (!phpEntry.debugger) throw new Error('Rebuild Playground with the PHP debugger assets before starting a debug session.');
+          return session.send('debug.arm', { method: configuration.method || 'GET',
+            url: configuration.url || handle.url, headers: configuration.headers || [], destination: configuration.destination });
+        },
+        subscribe(listener) { debugListeners.add(listener); return () => debugListeners.delete(listener); },
+        setBreakpoints: (path, breakpoints) => session.debugCommand('setBreakpoints', { path, breakpoints }),
+        continue: () => session.debugCommand('continue'),
+        next: () => session.debugCommand('next'),
+        stepIn: () => session.debugCommand('stepIn'),
+        stepOut: () => session.debugCommand('stepOut'),
+        pause: () => session.debugCommand('pause'),
+        stop: () => session.debugCommand('stop'),
+        stackTrace: () => session.debugCommand('stackTrace'),
+        scopes: frameId => session.debugCommand('scopes', { frameId }),
+        variables: (reference, options) => session.debugCommand('variables', { reference, ...options }),
+        evaluate: (expression, frameId) => session.debugCommand('evaluate', { expression, frameId }),
+      },
       workspace: {
         id: instanceId,
         storageId: config.persistence ? identity : null,
@@ -309,6 +396,11 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           if (typeof listener !== 'function') throw new TypeError('A workspace listener is required.');
           workspaceListeners.add(listener);
           return () => workspaceListeners.delete(listener);
+        },
+        withBatch(callback) {
+          if (closePromise || changing) return Promise.reject(new Error('Wait for the current site operation before saving files.'));
+          if (typeof callback !== 'function') return Promise.reject(new TypeError('A workspace batch callback is required.'));
+          return session.withWorkspaceBatch(request => callback({ ...handle.workspace, request, withBatch: undefined }));
         },
       },
       fs: Object.fromEntries(['mkdir', 'readFile', 'writeFile', 'readdir', 'stat', 'unlink'].map(method => [method,
