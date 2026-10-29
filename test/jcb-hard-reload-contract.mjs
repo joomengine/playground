@@ -16,6 +16,20 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
     return match[1];
   };
   const adminPage = query => new URL(`administrator/index.php?${query}`, siteBase()).href;
+  const waitForDashboard = async () => {
+    // JCB starts its documentation and version fetches on delayed timers. Wait
+    // for their consumed bodies before leaving, including an already-loaded
+    // dashboard, so navigation does not cancel them and create unrelated errors.
+    await frame.waitForFunction(() => {
+      const readme = document.getElementById('readme-md');
+      const documentation = document.getElementById('JcbDoc-page-md');
+      const documentationError = document.getElementById('JcbDoc-page-md-error');
+      const version = document.getElementById('component-update-notice');
+      return readme && !readme.querySelector('.loading-dots')
+        && documentation && (!documentation.querySelector('.loading-dots') || documentationError?.textContent.trim())
+        && version?.innerHTML.trim();
+    }, undefined, { timeout });
+  };
   const credentials = async () => {
     if (await page.locator('#site-actions').getAttribute('open') === null) await page.locator('#site-actions > summary').click();
     await page.locator('#credentials-button').click();
@@ -40,6 +54,7 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
   };
 
   page.testStep = 'prepared JCB creates a committed Joomla record before saving';
+  await waitForDashboard();
   const administrator = await credentials();
   assert.ok(administrator.username && administrator.password.length >= 16);
   await frame.goto(adminPage('option=com_content&view=article&layout=edit'), { waitUntil: 'load', timeout });
@@ -64,6 +79,7 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
   await saveJoomla('application.apply');
   assert.equal(await frame.locator('#jform_sitename').inputValue(), siteName);
   await frame.goto(new URL(`.${initialPath}`, siteBase()).href, { waitUntil: 'load', timeout });
+  await waitForDashboard();
 
   for (let saved = 1; saved <= 2; saved++) {
     page.testStep = `prepared JCB save ${saved} then whole-page reload without Close`;
@@ -82,6 +98,7 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
     await frame.locator('body').waitFor();
     assert.equal(await frame.locator('input[name="passwd"]').count(), 0, 'Administrator access must survive reload.');
     assert.deepEqual(await credentials(), administrator, 'Saved administrator credentials must remain unchanged.');
+    await waitForDashboard();
     await frame.goto(adminPage('option=com_config'), { waitUntil: 'load', timeout });
     assert.equal(await frame.locator('#jform_sitename').inputValue(), siteName, 'The saved configuration.php marker must survive reload.');
     await frame.goto(adminPage('option=com_content&view=articles'), { waitUntil: 'load', timeout });
@@ -93,11 +110,13 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
     assert.equal(await frame.getByRole('link', { name: articleTitle, exact: true }).count(), 1,
       'The committed Joomla article must survive reload.');
     await frame.goto(new URL(`.${initialPath}`, siteBase()).href, { waitUntil: 'load', timeout });
+    await waitForDashboard();
   }
   page.testStep = 'restore the prepared JCB site name after hard-reload validation';
   await frame.goto(adminPage('option=com_config'), { waitUntil: 'load', timeout });
   await frame.locator('#jform_sitename').fill(originalSiteName);
   await saveJoomla('application.apply');
   await frame.goto(new URL(`.${initialPath}`, siteBase()).href, { waitUntil: 'load', timeout });
+  await waitForDashboard();
   return { preparedJcb: true, hardReloadsWithoutClose: 2, committedRecord: true, savedConfigurationFile: true, administrator: true };
 }
