@@ -123,6 +123,27 @@ echo $value;
   } finally { await runtime.stop(); await execution.catch(() => {}); }
 });
 
+test(`native PHP ${version} continues through a call-site breakpoint without hitting it again on return`, { timeout: 20_000 }, async () => {
+  const runtime = runtimeFor(`<?php
+function nested() {
+    return 9;
+}
+$value = nested();
+echo $value;
+`);
+  await runtime.setBreakpoints('/persist/www/index.php', [{ line: 5 }]);
+  const stopped = nextStop(runtime);
+  const execution = runtime.execute(request);
+  execution.catch(() => {});
+  try {
+    await Promise.race([stopped, execution.then(() => { throw new Error('Breakpoint was not reached.'); })]);
+    const repeated = nextStop(runtime).then(() => { throw new Error('Returning from the call must not hit the same breakpoint again.'); });
+    await runtime.continue();
+    const response = await Promise.race([execution, repeated]);
+    assert.equal(new TextDecoder().decode(response.body), '9');
+  } finally { await runtime.stop(); await execution.catch(() => {}); }
+});
+
 test(`native PHP ${version} evaluates conditional breakpoints and paged recursive values`, { timeout: 20_000 }, async () => {
   const runtime = runtimeFor(`<?php
 class DebugValue { public $label = 'root'; public $self; protected $secret = 'hidden'; public function __get($name) { throw new RuntimeException('Inspection invoked __get'); } public function __debugInfo() { throw new RuntimeException('Inspection invoked __debugInfo'); } } $object = new DebugValue(); $object->self = $object;
