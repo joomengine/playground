@@ -719,7 +719,7 @@ for (const name of browserNames) {
             assert.ok(spreadsheet.bytes > 0);
             assert.equal(spreadsheet.integerSize, 4, 'The official dependency solution must actually operate on upstream wasm32 PHP.');
             if (item.id === 'jcb' && item.phpVersion === manifest.defaults.phpVersion) {
-              proof.push({ id: 'jcb-compiler', ...(await assertJcbCompiler(page)) });
+              proof.push({ id: 'jcb-compiler', ...(await assertJcbCompiler(page, { redirectProbe: syntheticRedirectProbe })) });
             }
           }
           proof.push({ ...item, administrator: true });

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { probeSyntheticRedirect, startRedirectTrace, recordVerifiedRedirectDiagnostic } from './firefox-redirect-probe.mjs';
 
 /** Component selection loads details and applies its preferred Joomla version asynchronously. */
 export async function selectJcbCompilerComponent(page, frame, { joomlaVersion, timeoutMs = 30_000 } = {}) {
@@ -31,7 +32,8 @@ export async function selectJcbCompilerComponent(page, frame, { joomlaVersion, t
 }
 
 /** Exercise the real compiler form and its downloadable, independently readable package. */
-export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, compileTimeoutMs = 180_000 } = {}) {
+export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, compileTimeoutMs = 180_000, redirectProbe } = {}) {
+  const probe = redirectProbe ?? await probeSyntheticRedirect(page.context().browser());
   const { site, joomlaVersion, phpVersion, maxExecutionTime } = await page.evaluate(async () => {
     const result = await window.playground.runPhp('<?php echo ini_get("max_execution_time");');
     if (result.status !== 200) throw new Error(result.text);
@@ -67,6 +69,8 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
     await selectJcbCompilerComponent(page, frame, { joomlaVersion });
     const started = Date.now();
     page.testStep = `compile ${demo} through the administrator form`;
+    const from = page.consoleErrors?.length ?? 0;
+    const traceFrom = await startRedirectTrace(page);
     const [compiled] = await Promise.all([
       frame.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: compileTimeoutMs }),
       frame.getByRole('button', { name: /Compile Component$/ }).click({ noWaitAfter: true }),
@@ -114,6 +118,11 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
     assert.equal(proof.manifest?.type, 'component');
     assert.match(proof.manifest.name, /demo/i);
     assert.ok(proof.manifest.version);
+    if (page.consoleErrors) await recordVerifiedRedirectDiagnostic(page, {
+      probe, kind: 'post303', from, traceFrom,
+      sourceURL: new URL('service-worker.mjs', page.url()).href, step: page.testStep,
+      finalURL: frame.url(), responseStatus: compiled.status(), methodAfterRedirect: compiled.request().method(),
+    });
     completed = true;
     return { demo, joomlaVersion, phpVersion, maxExecutionTime, compilerImage: true,
       durationMs: Date.now() - started, zipBytes: downloaded.length, entries: proof.entries,
