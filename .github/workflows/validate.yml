@@ -73,7 +73,8 @@ jobs:
             .cache/fileinfo
             .cache/curl
             .cache/sodium
-          key: native-v2-${{ runner.os }}-${{ runner.arch }}-${{ needs.checks.outputs.native }}-${{ hashFiles('scripts/build-fileinfo.mjs', 'scripts/build-curl.mjs', 'scripts/build-sodium.mjs', 'scripts/fileinfo.mjs', 'scripts/curl.mjs', 'scripts/sodium.mjs', 'native/**') }}
+            .cache/phpdbg
+          key: native-v2-${{ runner.os }}-${{ runner.arch }}-${{ needs.checks.outputs.native }}-${{ hashFiles('scripts/build-fileinfo.mjs', 'scripts/build-curl.mjs', 'scripts/build-sodium.mjs', 'scripts/fileinfo.mjs', 'scripts/curl.mjs', 'scripts/sodium.mjs', 'scripts/phpdbg-build.mjs', 'scripts/phpdbg.mjs', 'native/**') }}
       - name: Restore verified download archives
         id: archives
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -125,6 +126,7 @@ jobs:
             BRIDGE_SOURCE_DIR=external/bridge node scripts/build-fileinfo.mjs "$minor"
             BRIDGE_SOURCE_DIR=external/bridge node scripts/build-curl.mjs "$minor"
             BRIDGE_SOURCE_DIR=external/bridge node scripts/build-sodium.mjs "$minor"
+            BRIDGE_SOURCE_DIR=external/bridge node scripts/phpdbg-build.mjs "$minor"
           done < <(node --input-type=module -e "import p from './versions.json' with {type:'json'}; for (const v of p.php) console.log(v.version)")
       - name: Cache pinned compiler after successful compilation
         if: steps.native.outputs.cache-hit != 'true' && steps.compiler.outputs.cache-hit != 'true'
@@ -154,6 +156,7 @@ jobs:
             .cache/fileinfo
             .cache/curl
             .cache/sodium
+            .cache/phpdbg
           key: ${{ steps.native.outputs.cache-primary-key }}
       - name: Build verified static distribution
         env:
@@ -211,6 +214,12 @@ jobs:
           path: dist
       - name: Install selected browser engine
         run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Validate JoomEngine Code workbench and isolated AI review
+        env:
+          PLAYGROUND_BROWSERS: ${{ matrix.browser }}
+        run: |
+          npm run test:code-browser
+          node --test test/code-ai-browser.mjs
       - name: Validate the exact candidate build
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}

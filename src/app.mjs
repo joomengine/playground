@@ -16,7 +16,7 @@ const fields = {
   language: $('language'), siteName: $('site-name'), initialPath: $('initial-path'), storageKey: $('storage-key'),
   persistence: $('persistence'), autoLogin: $('auto-login'), extensions: $('extensions'), startupCommands: $('startup-commands'),
 };
-const controls = ['save-button', 'restart-button', 'close-button', 'reset-button', 'share-button', 'export-button', 'export-format'];
+const controls = ['save-button', 'restart-button', 'close-button', 'reset-button', 'share-button', 'export-button', 'export-format', 'code-button', 'code-refresh-button'];
 const drafts = new Map();
 let catalog, deployCatalog, runtime, currentConfig, currentInput;
 let busy = false;
@@ -36,6 +36,8 @@ let pendingFresh = false;
 let freshKeyPending = false;
 let automaticLaunchPaused = false;
 let approvedCustomSetup;
+let codeHost;
+let openingCode;
 const launchCountdown = createLaunchCountdown({
   onTick(seconds) {
     $('launch-countdown').hidden = false;
@@ -168,6 +170,39 @@ function mountPreview(url) {
   } });
   $('site-mount').replaceChildren(frame);
   show('site-mount');
+}
+async function openCode() {
+  if (busy || !runtime || openingCode) return;
+  const owner = runtime;
+  openingCode = (async () => {
+    if (!codeHost || codeHost.closed) {
+      const { createCodeHost } = await import('./code/host.mjs');
+      if (runtime !== owner || owner.closed) return;
+      codeHost = await createCodeHost({
+        runtime: owner, host: document.querySelector('.workspace'), preview: document.querySelector('.preview-panel'),
+        t, storage: preferences,
+        getPreviewURL: () => resolveSiteURL(currentSitePath, owner.baseUrl),
+        refreshSite() {
+          if (runtime !== owner || !owner.healthy) throw new Error('Open the active Joomla site before refreshing.');
+          // currentSitePath follows Joomla navigation. Refresh never restarts PHP,
+          // reuses the launch URL, or implicitly saves an editor buffer.
+          mountPreview(resolveSiteURL(currentSitePath, owner.baseUrl));
+        },
+        onError: error => feedback(error, { error: true, persistent: true }),
+        onState(state) {
+          $('code-refresh-button').hidden = Boolean(state.closed);
+          $('code-button').setAttribute('aria-expanded', String(Boolean(state.visible)));
+          $('code-refresh-button').dataset.changed = String(Boolean(state.savedChanges));
+          $('code-refresh-button').title = t(state.savedChanges ? 'code.savedChanges' : 'code.refresh');
+        },
+      });
+    }
+    await codeHost.open();
+  })();
+  $('code-button').disabled = true;
+  try { await openingCode; }
+  catch (error) { feedback(error, { error: true, persistent: true }); }
+  finally { openingCode = undefined; setBusy(busy); }
 }
 function updateMcpPreview() {
   $('deploy-mcp-preview').hidden = fields.deployId.value !== 'jcb-mcp';
@@ -468,6 +503,12 @@ async function launch() {
 }
 async function closeSite({ reset = false, save = false } = {}) {
   if (busy || !runtime) return false;
+  if (openingCode) { feedback(t('code.loading')); return false; }
+  if (runtime.debugger.state !== 'idle') {
+    try { await runtime.debugger.stop(); } catch (error) { feedback(error, { error: true }); return false; }
+  }
+  try { if (codeHost && !codeHost.closed && !await codeHost.beforeClose()) return false; }
+  catch (error) { feedback(error, { error: true, persistent: true }); return false; }
   setBusy(true);
   closing = true;
   const handle = runtime;
@@ -476,6 +517,7 @@ async function closeSite({ reset = false, save = false } = {}) {
     if (save && !handle.recovery?.filesOnly) { activity('Saving the current site before closing…'); await handle.flush(); }
     if (reset) await handle.reset();
     else await handle.close();
+    await codeHost?.dispose(); codeHost = undefined;
     runtime = undefined;
     if (reset) {
       savedState = forgetSite(savedState, currentConfig.storageKey);
@@ -580,6 +622,8 @@ async function changeProfile() {
 $('launch-form').addEventListener('submit', (event) => { event.preventDefault(); void launch(); });
 $('embedded-launch').addEventListener('click', () => void launch());
 $('retry-button').addEventListener('click', async () => { if (runtime && !await closeSite()) return; await launch(); });
+$('code-button').addEventListener('click', () => { void openCode(); });
+$('code-refresh-button').addEventListener('click', () => { void codeHost?.refresh().catch(error => feedback(error, { error: true, persistent: true })); });
 $('close-button').addEventListener('click', () => { if (runtime && !currentConfig.persistence && !confirm(t('confirm.temporary'))) return; void closeSite(); });
 $('new-site-button').addEventListener('click', () => void newSite());
 $('saved-site').addEventListener('change', (event) => void openSavedSite(event.target.value));

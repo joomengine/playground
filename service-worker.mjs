@@ -34,11 +34,16 @@ async function routeToPlayground(request) {
   const channel = new MessageChannel();
   let timer;
   const result = new Promise((resolve, reject) => {
-    timer = setTimeout(() => {
+    const wait = paused => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
       channel.port1.close();
-      reject(new Error('The playground did not answer the request within 600 seconds'));
-    }, 600_000);
+      reject(new Error(paused ? 'The paused PHP debugger lost its owner tab.' : 'The playground did not answer the request within 600 seconds'));
+      }, paused ? 15_000 : 600_000);
+    };
+    wait(false);
     channel.port1.onmessage = event => {
+      if (event.data?.type === 'playground-request-state') { wait(event.data.state === 'paused'); return; }
       clearTimeout(timer);
       channel.port1.close();
       if (event.data?.error) reject(new Error(event.data.error));

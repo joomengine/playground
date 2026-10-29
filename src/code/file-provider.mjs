@@ -1,0 +1,204 @@
+import { URI } from '@codingame/monaco-vscode-api/vscode/vs/base/common/uri';
+import { Emitter, Event } from '@codingame/monaco-vscode-api/vscode/vs/base/common/event';
+import { FileChangeType, FilePermission, FileSystemProviderCapabilities, FileSystemProviderError,
+  FileSystemProviderErrorCode, FileType, FileOperationError, FileOperationResult } from '@codingame/monaco-vscode-api/vscode/vs/platform/files/common/files';
+
+const errors = {
+  ENOENT: FileSystemProviderErrorCode.FileNotFound,
+  EEXIST: FileSystemProviderErrorCode.FileExists,
+  ENOTDIR: FileSystemProviderErrorCode.FileNotADirectory,
+  EISDIR: FileSystemProviderErrorCode.FileIsADirectory,
+  PATH_OUTSIDE_WORKSPACE: FileSystemProviderErrorCode.NoPermissions,
+  ROOT_PROTECTED: FileSystemProviderErrorCode.NoPermissions,
+  NOT_FOUND: FileSystemProviderErrorCode.FileNotFound,
+  EXISTS: FileSystemProviderErrorCode.FileExists,
+  NOT_DIRECTORY: FileSystemProviderErrorCode.FileNotADirectory,
+  IS_DIRECTORY: FileSystemProviderErrorCode.FileIsADirectory,
+  FORBIDDEN: FileSystemProviderErrorCode.NoPermissions,
+  READ_ONLY: FileSystemProviderErrorCode.NoPermissions,
+};
+const types = { file: FileType.File, directory: FileType.Directory, symlink: FileType.SymbolicLink };
+
+/** The editor uses site-relative URIs; only the worker knows the PHP document root. */
+export function workspaceUri(siteId, path = '/') {
+  if (!/^[a-zA-Z0-9._-]{1,128}$/.test(siteId)) throw new TypeError('Invalid JoomEngine Code site identity.');
+  validatePath(path);
+  return URI.from({ scheme: 'jec', authority: siteId, path });
+}
+
+function validatePath(path) {
+  if (typeof path !== 'string' || !path.startsWith('/') || /[\0\\]/.test(path)
+    || path.split('/').some(part => part === '.' || part === '..')) {
+    throw new TypeError('The file must be inside the active JoomEngine Code workspace.');
+  }
+}
+
+export function workspacePath(uri, siteId) {
+  if (uri.scheme !== 'jec' || uri.authority !== siteId || uri.query || uri.fragment) {
+    throw new TypeError('The file belongs to a different JoomEngine Code workspace.');
+  }
+  validatePath(uri.path);
+  return uri.path;
+}
+
+/** A lazy VS Code provider backed by authoritative worker operations, never a mirrored tree. */
+export class JoomlaFileSystemProvider {
+  capabilities = FileSystemProviderCapabilities.FileReadWrite | FileSystemProviderCapabilities.PathCaseSensitive
+    | FileSystemProviderCapabilities.FileFolderCopy;
+  onDidChangeCapabilities = Event.None;
+  changes = new Emitter();
+  onDidChangeFile = this.changes.event;
+  revisions = new Map();
+
+  constructor(workspace, siteId, { onSave = () => {}, onError = () => {} } = {}) {
+    this.workspace = workspace;
+    this.siteId = siteId;
+    this.onSave = onSave;
+    this.onError = onError;
+    this.listed = new Set();
+    this.observed = new Map();
+    this.waiting = [];
+    this.activeRequests = 0;
+    this.inflight = new Map();
+    this.subscription = workspace.subscribe?.(event => {
+      if (event.type === 'workspace-invalidated') void this.revalidate().catch(onError);
+      else this.notify(event.changes || event);
+    });
+  }
+
+  uri(path) { return workspaceUri(this.siteId, path); }
+  path(uri) { return workspacePath(uri, this.siteId); }
+  async request(operation, args) {
+    // Explorer resolves sibling metadata concurrently. Apply backpressure here,
+    // before the owner's shared PHP/HTTP queue, rather than increasing its limit.
+    const key = ['stat', 'list'].includes(operation) ? `${operation}:${JSON.stringify(args)}` : null;
+    if (key && this.inflight.has(key)) return this.inflight.get(key);
+    const pending = new Promise((resolve, reject) => {
+      if (this.disposed) { reject(new Error('This JoomEngine Code file service is closed.')); return; }
+      this.waiting.push({ operation, args, resolve, reject });
+      this.drain();
+    });
+    if (key) this.inflight.set(key, pending);
+    try { return await pending; }
+    catch (error) {
+      if (error.code === 'CONFLICT') throw new FileOperationError(error.message, FileOperationResult.FILE_MODIFIED_SINCE);
+      throw new FileSystemProviderError(error.message, errors[error.code] || FileSystemProviderErrorCode.Unknown);
+    }
+    finally { if (key && this.inflight.get(key) === pending) this.inflight.delete(key); }
+  }
+  drain() {
+    while (!this.disposed && this.activeRequests < 4 && this.waiting.length) {
+      const { operation, args, resolve, reject } = this.waiting.shift();
+      this.activeRequests++;
+      Promise.resolve().then(() => (this.batchWorkspace || this.workspace).request(operation, args))
+        .then(resolve, reject).finally(() => { this.activeRequests--; this.drain(); });
+    }
+  }
+  notify(changes) {
+    if (!Array.isArray(changes)) return;
+    const events = changes.map(change => ({ resource: this.uri(change.path), type: {
+      created: FileChangeType.ADDED, changed: FileChangeType.UPDATED, deleted: FileChangeType.DELETED,
+    }[change.type] })).filter(change => change.type !== undefined);
+    if (events.length) this.changes.fire(events);
+  }
+  async mutation(operation, args) {
+    const result = await this.request(operation, args);
+    // A durability failure does not undo a successful live write. Remember exactly
+    // those revisions so retrying that save cannot conflict with our own write.
+    for (const entry of result.results || []) {
+      if (entry.operation === 'write' && entry.revision) {
+        this.revisions.set(entry.path, entry.revision);
+        this.observed.set(entry.path, entry.revision);
+      }
+    }
+    if (!this.subscription) this.notify(result.changes);
+    if (result.ok === false) {
+      const message = result.failed?.error?.message || result.failed?.message || 'Some file changes could not be applied. Review recovery before retrying.';
+      this.onError({ ...result, message });
+      throw new FileSystemProviderError(message, FileSystemProviderErrorCode.Unknown);
+    }
+    await this.onSave(result);
+    if (result.persistence?.enabled && result.persistence.saved === false) {
+      const message = `Files changed in the running site, but durable storage failed: ${result.persistence.error || 'storage unavailable'}. Keep this tab open and save the site again.`;
+      this.onError({ ...result, message });
+      throw new FileSystemProviderError(message, FileSystemProviderErrorCode.Unavailable);
+    }
+    return result;
+  }
+  async stat(uri) {
+    const value = await this.request('stat', { path: this.path(uri) });
+    if (!value) throw new FileSystemProviderError('File does not exist.', FileSystemProviderErrorCode.FileNotFound);
+    return { type: types[value.type] || FileType.Unknown, size: value.size, mtime: value.mtime,
+      ctime: value.ctime, permissions: value.readonly ? FilePermission.Readonly : undefined };
+  }
+  async readdir(uri) {
+    const path = this.path(uri);
+    const entries = await this.request('list', { path });
+    this.listed.add(path);
+    return entries.map(entry => [entry.name, types[entry.type] || FileType.Unknown]);
+  }
+  async readFile(uri) {
+    const path = this.path(uri);
+    const result = await this.request('read', { path });
+    this.revisions.set(path, result.revision);
+    this.observed.set(path, result.revision);
+    return new Uint8Array(result.bytes);
+  }
+  async writeFile(uri, bytes, options) {
+    const path = this.path(uri);
+    const result = await this.mutation('write', { path, bytes: new Uint8Array(bytes), create: options.create,
+      overwrite: options.overwrite, expectedRevision: this.revisions.get(path) });
+    // Do not cache a post-write read: a Joomla request may already have changed it again.
+    const written = result.results?.find(entry => entry.path === path && entry.operation === 'write');
+    if (written?.revision) this.revisions.set(path, written.revision);
+  }
+  mkdir(uri) { return this.mutation('mkdir', { path: this.path(uri) }); }
+  delete(uri, options) { return this.mutation('delete', { path: this.path(uri), recursive: options.recursive }); }
+  rename(from, to, options) {
+    return this.mutation('rename', { path: this.path(from), target: this.path(to), overwrite: options.overwrite });
+  }
+  copy(from, to, options) {
+    return this.mutation('copy', { path: this.path(from), target: this.path(to), overwrite: options.overwrite });
+  }
+  watch() { return { dispose() {} }; }
+  async withBatch(callback) {
+    if (!this.workspace.withBatch) throw new Error('This runtime does not support coordinated Save All. Save files individually or reload the updated Playground.');
+    return this.workspace.withBatch(async workspace => {
+      this.batchWorkspace = workspace;
+      try { return await callback(); }
+      finally { this.batchWorkspace = null; }
+    });
+  }
+  revalidate() {
+    if (this.disposed) return Promise.resolve();
+    if (this.revalidating) { this.checkAgain = true; return this.revalidating; }
+    this.revalidating = (async () => {
+      do {
+        this.checkAgain = false;
+        const changes = [];
+        for (const [path, previous] of [...this.observed]) {
+          if (this.disposed) return;
+          const current = await this.request('stat', { path, revision: true });
+          if (current?.revision !== previous) {
+            this.observed.set(path, current?.revision);
+            changes.push({ path, type: current ? 'changed' : 'deleted' });
+          }
+        }
+        // Only already-expanded directories are refreshed; no eager tree walk.
+        for (const path of this.listed) changes.push({ path, type: 'changed' });
+        this.notify(changes);
+      } while (this.checkAgain && !this.disposed);
+    })().finally(() => { this.revalidating = null; });
+    return this.revalidating;
+  }
+  dispose() {
+    this.disposed = true;
+    for (const pending of this.waiting.splice(0)) pending.reject(new Error('This JoomEngine Code file service is closed.'));
+    if (typeof this.subscription === 'function') this.subscription();
+    else this.subscription?.dispose();
+    this.changes.dispose();
+    this.revisions.clear();
+    this.observed.clear();
+    this.listed.clear();
+  }
+}

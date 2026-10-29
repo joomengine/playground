@@ -8,6 +8,8 @@ import { stageFileinfo } from './fileinfo.mjs';
 import { stageCurl } from './curl.mjs';
 import { stageSodium } from './sodium.mjs';
 import { applyCgiRequestOverlay } from './cgi-request-overlay.mjs';
+import { stageCodeAssets } from './code-assets.mjs';
+import { stagePhpDebugHttp } from './phpdbg.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const versions = JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
@@ -24,6 +26,7 @@ const driverDirectory = path.resolve(root, process.env.MARIADB_DRIVER_DIR || '..
 const fileinfoDirectory = path.resolve(root, process.env.FILEINFO_EXTENSION_DIR || '.cache/fileinfo');
 const sodiumDirectory = path.resolve(root, process.env.SODIUM_EXTENSION_DIR || '.cache/sodium');
 const curlDirectory = path.resolve(root, process.env.CURL_EXTENSION_DIR || '.cache/curl');
+const phpdbgDirectory = path.resolve(root, process.env.PHPDBG_EXTENSION_DIR || '.cache/phpdbg');
 const extensionPackages = [
   'php-wasm-zlib', 'php-wasm-libxml', 'php-wasm-xml', 'php-wasm-dom',
   'php-wasm-simplexml', 'php-wasm-xmlreader', 'php-wasm-xmlwriter',
@@ -73,8 +76,10 @@ async function relativeLibraryFile(url) {
 try {
   console.log('Staging pinned upstream PHP runtime and extensions…');
   await mkdir(assets, { recursive: true });
+  console.log('Bundling the lazy-loaded JoomEngine Code workbench…');
+  const code = await stageCodeAssets({ root, assets });
   const packages = [];
-  for (const name of ['php-cgi-wasm', ...extensionPackages]) packages.push(await copyPackage(name));
+  for (const name of ['php-cgi-wasm', 'php-dbg-wasm', ...extensionPackages]) packages.push(await copyPackage(name));
   const cgiRequestOverlay = await applyCgiRequestOverlay(path.join(assets, 'php-cgi-wasm'));
   const fflatePin = lock.packages['node_modules/fflate'];
   if (fflatePin?.version !== pkg.dependencies.fflate) throw new Error('fflate lock mismatch');
@@ -157,8 +162,11 @@ try {
     sharedLibs.push({ name: `php${version.version}-curl.so`, url: curl.url, ini: true });
     const sodium = await versionNativeArtifact(await stageSodium({ directory: sodiumDirectory, destination: path.join(assets, 'extensions'), version, upstream: versions.upstream }));
     sharedLibs.push({ name: `php${version.version}-sodium.so`, url: sodium.url, ini: true });
+    const debugHttp = await versionNativeArtifact(await stagePhpDebugHttp({ directory: phpdbgDirectory, destination: path.join(assets, 'extensions'), version, upstream: versions.upstream }));
     php.push({ ...version, label: `PHP ${version.patchVersion}`, moduleUrl: 'php-cgi-wasm/PhpCgiWorker.mjs', sharedLibs, files,
       fileinfo, curl, sodium,
+      debugger: { moduleUrl: 'php-dbg-wasm/PhpDbgWeb.mjs', http: debugHttp,
+        sharedLibs: [...sharedLibs, { name: `php${version.version}-jec-phpdbg-http.so`, url: debugHttp.url, ini: true }] },
       driver: driverArtifact });
   }
 
@@ -180,7 +188,7 @@ try {
   try { sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(); }
   catch { throw new Error('Build requires a Git checkout to record source provenance'); }
   const manifest = {
-    schemaVersion: 1, projectVersion: pkg.version, sourceCommit,
+    schemaVersion: 1, projectVersion: pkg.version, sourceCommit, code,
     deployment: { canonicalUrl, domain },
     upstream: { ...versions.upstream, cgiRequestOverlay }, nativeDriver: versions.nativeDriver, packages, php, joomla, deploys,
     bridge: {

@@ -6,7 +6,7 @@ export const MAX_RESPONSE_BYTES = MAX_HTTP_BODY_BYTES;
 export async function serializeRequest(request) {
   const body = ['GET', 'HEAD'].includes(request.method) ? null : new Uint8Array(await request.arrayBuffer());
   if (body?.byteLength > MAX_BODY_BYTES) throw new RangeError('The HTTP request exceeds the 320 MiB transport limit');
-  return { url: request.url, method: request.method, headers: [...request.headers], body };
+  return { url: request.url, method: request.method, headers: [...request.headers], body, destination: request.destination };
 }
 
 export async function serializeResponse(response) {
