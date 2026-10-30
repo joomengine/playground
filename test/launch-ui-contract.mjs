@@ -14,6 +14,12 @@ export async function assertLaunchCountdown(page, url) {
     assert.equal(await page.locator('#php-version').inputValue(), '8.4');
     await page.locator('#stop-countdown').click();
     assert.equal(await page.locator('#launch-countdown').isVisible(), false);
+    await page.locator('#settings-toggle').click();
+    assert.equal(await page.locator('#settings #dashboard-countdown').isVisible(), true);
+    assert.equal(await page.locator('#stop-countdown-button').isDisabled(), true);
+    assert.match(await page.locator('#dashboard-countdown-message').textContent(), /paused/i);
+    assert.equal(await page.locator('#dashboard-countdown-value').textContent(), await page.locator('#countdown-value').textContent());
+    await page.locator('#settings-toggle').click();
     await page.locator('#welcome-configure').click();
     assert.equal(await page.locator('#deploy-dialog').evaluate(dialog => dialog.open), true);
     // Cross the real countdown deadline: opening configuration must cancel it.

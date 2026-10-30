@@ -420,11 +420,11 @@ export default Object.freeze({
   "code.aiProvider.nvidia.description": "Katalog model terkelola yang dipublikasikan. Untuk server NIM milik sendiri, gunakan Lainnya / API AI Lokal.",
   "code.aiProvider.azure.description": "Gunakan nama penerapan Anda sebagai ID model jika berbeda dari nama model dalam katalog.",
   "code.aiProvider.field.resource": "Nama sumber daya Azure",
-  "code.aiProvider.bedrock.description": "Gunakan kunci API Bedrock. Pilih titik akhir yang diwajibkan kartu model Anda; Runtime tidak menyediakan katalog model melalui kunci API.",
+  "code.aiProvider.bedrock.description": "Gunakan kunci API Bedrock untuk percakapan. Kredensial AWS opsional memungkinkan penemuan model dan profil Runtime. Pastikan dukungan Chat Completions pada kartu model sebelum memilih model Runtime.",
   "code.aiProvider.field.route": "Titik akhir Bedrock",
   "code.aiProvider.option.mantle": "Mantle — katalog model dan inferensi /v1",
   "code.aiProvider.option.mantle-openai": "Mantle — inferensi /openai/v1",
-  "code.aiProvider.option.runtime": "Runtime — model atau ID profil inferensi secara manual",
+  "code.aiProvider.option.runtime": "Runtime — model dan profil inferensi melalui API asli",
   "code.aiProvider.other": "Lainnya / API AI Lokal",
   "code.aiProvider.other.description": "Hubungkan server API Anda sendiri. Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1",
   "label.siteNavigation": "Navigasi situs",
@@ -461,5 +461,8 @@ export default Object.freeze({
   "code.accounts": "Akun",
   "help.technologyIntro": "Proyek-proyek ini bekerja bersama untuk menjalankan Joomla, PHP, MariaDB, dan ruang kerja kode di browser Anda. File dan basis data situs Playground Anda disimpan secara lokal di browser ini.",
   "confirm.unsavedSiteForm": "Halaman Joomla ini memiliki perubahan formulir yang belum disimpan. Tinggalkan halaman dan lanjutkan?",
-  "code.aiPanel.scopeChanged": "Konteks berubah. Percakapan baru hanya akan menggunakan cakupan ini."
+  "code.aiPanel.scopeChanged": "Konteks berubah. Percakapan baru hanya akan menggunakan cakupan ini.",
+  "code.aiProvider.field.accessKeyId": "ID kunci akses AWS (opsional untuk penemuan model)",
+  "code.aiProvider.field.secretAccessKey": "Kunci akses rahasia AWS (opsional untuk penemuan model)",
+  "code.aiProvider.field.sessionToken": "Token sesi AWS (kredensial sementara)"
 });

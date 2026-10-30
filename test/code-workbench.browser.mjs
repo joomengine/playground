@@ -19,6 +19,12 @@ test('bundled JoomEngine Code preserves native document models through edits and
   const receipts = path.join(root, 'test-results');
   await mkdir(receipts, { recursive: true });
   const started = Date.now(), phases = [];
+  // Success evidence uses the real bundled editor and native auxiliary window.
+  // The workspace files are the deterministic test fixture, never user data.
+  const captureVisual = (page, browser, state) => page.screenshot({
+    path: path.join(receipts, `code-native-${browser}-${state}.png`),
+    animations: 'disabled', caret: 'hide', timeout: 10_000,
+  });
   let server, activeBrowser, activePage, browserName = 'setup', phase = 'prepare assets', failureCapture;
   const receipt = (status, error) => ({ browser: browserName, phase, status, elapsedMs: Date.now() - started,
     phases, ...(error ? { error: error.stack || error.message || String(error) } : {}) });
@@ -165,6 +171,7 @@ test('bundled JoomEngine Code preserves native document models through edits and
         const editorLayout = await page.evaluate(() => window.code.getEditorLayout());
         const editorGroups = await page.evaluate(() => window.code.getEditorGroups());
         assert.equal(editorLayout.groups.length, 2);
+        await captureVisual(page, name, 'embedded-wide-dark');
         await checkpoint('detach and redock native groups');
         const popupPromise = page.waitForEvent('popup');
         await page.evaluate(() => window.code.detach());
@@ -180,12 +187,20 @@ test('bundled JoomEngine Code preserves native document models through edits and
         await page.evaluate(() => window.code.setTheme('light'));
         await popup.waitForFunction(() => document.documentElement.dataset.theme === 'light' && document.querySelector('.monaco-workbench')?.classList.contains('vs'));
         assert.equal(await popup.locator('html').evaluate(node => getComputedStyle(node).colorScheme), 'light');
+        await captureVisual(popup, name, 'detached-wide-light');
         await page.evaluate(() => window.code.setTheme('dark'));
         await popup.waitForFunction(() => document.documentElement.dataset.theme === 'dark' && document.querySelector('.monaco-workbench')?.classList.contains('vs-dark'));
+        await captureVisual(popup, name, 'detached-wide-dark');
         await popup.setViewportSize({ width: 500, height: 560 });
         const narrowHeader = await popup.locator('.jec-detached-header').boundingBox();
         const narrowEditor = await popup.locator('.part.editor').boundingBox();
         assert.ok(narrowEditor.y >= narrowHeader.y + narrowHeader.height - 1, 'Action wrapping never overlaps the native editor.');
+        await captureVisual(popup, name, 'detached-narrow-dark');
+        await page.evaluate(() => window.code.setTheme('light'));
+        await popup.waitForFunction(() => document.documentElement.dataset.theme === 'light' && document.querySelector('.monaco-workbench')?.classList.contains('vs'));
+        await captureVisual(popup, name, 'detached-narrow-light');
+        await page.evaluate(() => window.code.setTheme('dark'));
+        await popup.waitForFunction(() => document.documentElement.dataset.theme === 'dark' && document.querySelector('.monaco-workbench')?.classList.contains('vs-dark'));
         const fileArea = popup.locator('.jec-detached-nav');
         await fileArea.evaluate(node => { const spacer = document.createElement('div'); spacer.style.height = '1600px'; node.append(spacer); });
         await fileArea.hover(); await popup.mouse.wheel(0, 450);
@@ -196,6 +211,7 @@ test('bundled JoomEngine Code preserves native document models through edits and
         assert.deepEqual(await page.evaluate(() => window.code.getEditorLayout()), editorLayout, 'Redocked groups preserve split layout');
         assert.deepEqual(await page.evaluate(() => window.readNativeView()), viewBeforeMoving, 'Redocking retains the native selection, cursor and scroll position');
         assert.equal(await page.evaluate(() => window.code.getDirtyCount()), 2);
+        await captureVisual(page, name, 'redocked-wide-dark');
         await checkpoint('save all and preserve undo');
         const saved = await page.evaluate(() => window.code.saveAll());
         assert.equal(saved.success, true);

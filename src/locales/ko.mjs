@@ -420,11 +420,11 @@ export default Object.freeze({
   "code.aiProvider.nvidia.description": "공개된 호스팅 모델 카탈로그입니다. 자체 호스팅 NIM 서버는 기타 / 로컬 AI API를 사용하세요.",
   "code.aiProvider.azure.description": "배포 이름이 카탈로그 모델 이름과 다르면 배포 이름을 모델 ID로 사용하세요.",
   "code.aiProvider.field.resource": "Azure 리소스 이름",
-  "code.aiProvider.bedrock.description": "Bedrock API 키를 사용하세요. 모델 카드에서 요구하는 엔드포인트를 선택하세요. Runtime에는 API 키로 접근할 수 있는 모델 카탈로그가 없습니다.",
+  "code.aiProvider.bedrock.description": "채팅에는 Bedrock API 키를 사용하세요. 선택 사항인 AWS 자격 증명을 입력하면 Runtime 모델과 추론 프로필을 검색할 수 있습니다. Runtime 모델을 선택하기 전에 모델 카드에서 Chat Completions 지원 여부를 확인하세요.",
   "code.aiProvider.field.route": "Bedrock 엔드포인트",
   "code.aiProvider.option.mantle": "Mantle — 모델 카탈로그 및 /v1 추론",
   "code.aiProvider.option.mantle-openai": "Mantle — /openai/v1 추론",
-  "code.aiProvider.option.runtime": "Runtime — 모델 또는 추론 프로필 ID 직접 입력",
+  "code.aiProvider.option.runtime": "Runtime — 네이티브 모델 및 추론 프로필",
   "code.aiProvider.other": "기타 / 로컬 AI API",
   "code.aiProvider.other.description": "자체 API 서버를 연결하세요. Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1",
   "label.siteNavigation": "사이트 탐색",
@@ -461,5 +461,8 @@ export default Object.freeze({
   "code.accounts": "계정",
   "help.technologyIntro": "이 프로젝트들이 함께 작동하여 브라우저에서 Joomla, PHP, MariaDB 및 코드 작업 영역을 실행합니다. Playground 사이트의 파일과 데이터베이스는 이 브라우저에 로컬로 저장됩니다.",
   "confirm.unsavedSiteForm": "이 Joomla 페이지에 저장하지 않은 양식 변경 사항이 있습니다. 페이지를 나가서 계속할까요?",
-  "code.aiPanel.scopeChanged": "컨텍스트가 변경되었습니다. 새 대화에서는 이 범위만 사용합니다."
+  "code.aiPanel.scopeChanged": "컨텍스트가 변경되었습니다. 새 대화에서는 이 범위만 사용합니다.",
+  "code.aiProvider.field.accessKeyId": "AWS 액세스 키 ID(선택 사항, 모델 검색용)",
+  "code.aiProvider.field.secretAccessKey": "AWS 보안 액세스 키(선택 사항, 모델 검색용)",
+  "code.aiProvider.field.sessionToken": "AWS 세션 토큰(임시 자격 증명)"
 });

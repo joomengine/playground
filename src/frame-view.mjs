@@ -1,5 +1,46 @@
 import { hasLayoutMutation } from './frame-mutations.mjs';
 
+/** Observe same-document navigation without changing native history behavior. */
+export function observeFrameNavigation(win, onNavigate) {
+  const doc = win.document, history = win.history;
+  const restore = [];
+  let disposed = false, previousURL;
+  const notify = () => {
+    if (disposed) return;
+    try {
+      if (win.document !== doc || previousURL === win.location.href) return;
+      previousURL = win.location.href;
+      onNavigate({ url: previousURL, title: doc.title, administrator: /\/administrator\//.test(win.location.pathname),
+        signedOut: Boolean(doc.querySelector('form#form-login, form#login-form, input[name="passwd"]')) });
+    } catch { /* Cross-origin documents and observer failures must not affect Joomla navigation. */ }
+  };
+  for (const name of ['pushState', 'replaceState']) {
+    const original = history[name], descriptor = Object.getOwnPropertyDescriptor(history, name);
+    const observed = function (...args) {
+      const result = Reflect.apply(original, this, args);
+      notify();
+      return result;
+    };
+    try {
+      Object.defineProperty(history, name, { configurable: true, writable: true, value: observed });
+      restore.push(() => {
+        if (history[name] !== observed) return;
+        if (descriptor) Object.defineProperty(history, name, descriptor);
+        else delete history[name];
+      });
+    } catch { /* Event-based navigation still works when history methods cannot be wrapped. */ }
+  }
+  win.addEventListener('popstate', notify);
+  win.addEventListener('hashchange', notify);
+  notify();
+  return () => {
+    disposed = true;
+    win.removeEventListener('popstate', notify);
+    win.removeEventListener('hashchange', notify);
+    for (const reset of restore) { try { reset(); } catch { /* A later owner controls its methods. */ } }
+  };
+}
+
 /** Keep Joomla's document separate while allowing the outer page to own scrolling. */
 export function connectFrame(frame, { onNavigate = () => {} } = {}) {
   let cleanupDocument = () => {};
@@ -67,11 +108,12 @@ export function connectFrame(frame, { onNavigate = () => {} } = {}) {
     const hash = () => { let id; try { id = decodeURIComponent(win.location.hash.slice(1)); } catch { return; } if (id) bringIntoView(doc.getElementById(id)); };
     doc.addEventListener('load', schedule, true);
     win.addEventListener('hashchange', hash);
+    const stopNavigation = observeFrameNavigation(win, onNavigate);
     doc.fonts?.ready.then(schedule).catch(() => {});
     cleanupDocument = () => {
+      stopNavigation();
       if (parentReplaced) { try { if (win.document === doc) { if (originalParent) Object.defineProperty(win, 'parent', originalParent); else delete win.parent; } } catch { /* A cross-origin navigation owns its new document. */ } }
       changed.disconnect(); observer?.disconnect(); style.remove(); doc.removeEventListener('load', schedule, true); win.removeEventListener('hashchange', hash); window.removeEventListener('scroll', viewport); window.removeEventListener('resize', viewport); };
-    try { onNavigate({ url: win.location.href, title: doc.title, administrator: /\/administrator\//.test(win.location.pathname), signedOut: Boolean(doc.querySelector('form#form-login, form#login-form, input[name="passwd"]')) }); } catch { /* Cross-origin navigation cannot expose its document. */ }
     if (navigated && !win.location.hash) window.scrollTo({ top: Math.max(0, frame.getBoundingClientRect().top + window.scrollY), behavior: 'instant' });
     navigated = true;
     schedule(); requestAnimationFrame(hash);

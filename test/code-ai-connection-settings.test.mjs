@@ -35,3 +35,17 @@ test('catalog cancellation aborts and disposes the previous client and ignores s
   requests[2].resolve({ models: [{ id: 'obsolete-model' }] });
   assert.equal(await third, null); assert.equal(requests[2].signal.aborted, true);
 });
+
+test('AWS discovery credentials never enter public connection identity', () => {
+  const settings = { provider: { id: 'bedrock', protocol: 'openai', fields: [
+    { id: 'region' }, { id: 'route' }, { id: 'accessKeyId', credential: true },
+    { id: 'secretAccessKey', credential: true, secret: true }, { id: 'sessionToken', credential: true, secret: true },
+  ] }, region: 'us-east-1', route: 'runtime', accessKeyId: 'AKIAEXAMPLE', secretAccessKey: 'aws-secret', sessionToken: 'temporary-session' };
+  const identity = aiConnectionIdentity(settings);
+  assert.equal(identity.includes('AKIAEXAMPLE'), false);
+  assert.equal(identity.includes('aws-secret'), false);
+  assert.equal(identity.includes('temporary-session'), false);
+  assert.equal(identity, aiConnectionIdentity({ ...settings, accessKeyId: 'OTHER', secretAccessKey: 'changed', sessionToken: '' }));
+  assert.notEqual(identity, aiConnectionIdentity({ ...settings, region: 'eu-west-1' }));
+  assert.notEqual(identity, aiConnectionIdentity({ ...settings, route: 'mantle' }));
+});

@@ -964,6 +964,26 @@ for (const name of browserNames) {
         await page.waitForFunction(() => document.getElementById('nav-admin').getAttribute('aria-pressed') === 'true');
         assert.equal(await page.evaluate(() => document.getElementById('site-frame') === window.__navigationFrame), true);
         assert.deepEqual(await previewContract(page), marker);
+        page.testStep = 'same-document navigation updates safe resume routes without changing Joomla URLs';
+        const navigationFrame = await renderedSiteFrame(page);
+        const originalNavigation = await navigationFrame.evaluate(() => ({ url: location.href, state: history.state }));
+        await navigationFrame.evaluate(() => {
+          window.__navigationDocument = document;
+          history.pushState({ routeProof: true }, '', `${location.pathname}?option=com_content&view=articles&task=article.save&token=secret#preview-tab`);
+        });
+        await page.waitForFunction(() => new URL(location.href).searchParams.get('path')?.endsWith('?option=com_content&view=articles#preview-tab'));
+        assert.match(navigationFrame.url(), /task=article.save&token=secret/, 'Only saved resume state is sanitized; Joomla retains its current URL.');
+        await navigationFrame.evaluate(() => { location.hash = '#second-tab'; });
+        await page.waitForFunction(() => new URL(location.href).searchParams.get('path')?.endsWith('#second-tab'));
+        await navigationFrame.evaluate(() => {
+          history.pushState({ routeProof: 'frontend' }, '', location.pathname.slice(0, location.pathname.indexOf('/administrator/') + 1));
+        });
+        await page.waitForFunction(() => document.getElementById('nav-site').getAttribute('aria-pressed') === 'true');
+        await navigationFrame.evaluate(() => history.back());
+        await page.waitForFunction(() => document.getElementById('nav-admin').getAttribute('aria-pressed') === 'true'
+          && new URL(location.href).searchParams.get('path')?.endsWith('#second-tab'));
+        await navigationFrame.evaluate(original => { history.replaceState(original.state, '', original.url); }, originalNavigation);
+        assert.equal(await navigationFrame.evaluate(() => document === window.__navigationDocument), true);
         assert.deepEqual(navigationWorkers, [], 'Site/Admin never creates replacement runtime workers.');
         page.off('worker', observeNavigationWorker);
         page.testStep = 'save site';
@@ -1284,7 +1304,10 @@ for (const name of browserNames) {
         await page.waitForFunction(() => scrollY > 1000);
         assert.equal(await actualFrame.locator('#rocket-focus-proof').evaluate(button => button === document.activeElement), true);
         page.testStep = 'header and footer hide together without replacing the live site';
-        const focus = await assertLiveFocusMode(page, actualFrame);
+        await mkdir(path.join(root, 'test-results'), { recursive: true });
+        const focus = await assertLiveFocusMode(page, actualFrame, { capture: state => page.screenshot({
+          path: path.join(root, 'test-results', `rocket-${name}-${state}.png`), fullPage: false,
+        }) });
         assert.deepEqual(await previewContract(page), marker);
         await actualFrame.locator('#rocket-scroll-proof').evaluate(element => element.remove());
         await page.evaluate(() => window.scrollTo(0, 0));

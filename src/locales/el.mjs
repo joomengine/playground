@@ -420,11 +420,11 @@ export default Object.freeze({
   "code.aiProvider.nvidia.description": "Δημοσιευμένος κατάλογος φιλοξενούμενων μοντέλων. Για αυτοφιλοξενούμενους διακομιστές NIM χρησιμοποιήστε την επιλογή Άλλο / Τοπικό API AI.",
   "code.aiProvider.azure.description": "Χρησιμοποιήστε το όνομα της ανάπτυξής σας ως αναγνωριστικό μοντέλου όταν διαφέρει από το όνομα του μοντέλου στον κατάλογο.",
   "code.aiProvider.field.resource": "Όνομα πόρου Azure",
-  "code.aiProvider.bedrock.description": "Χρησιμοποιήστε κλειδί API Bedrock. Επιλέξτε το τελικό σημείο που απαιτεί η κάρτα του μοντέλου σας· το Runtime δεν διαθέτει κατάλογο μοντέλων με πρόσβαση μέσω κλειδιού API.",
+  "code.aiProvider.bedrock.description": "Χρησιμοποιήστε κλειδί API Bedrock για συνομιλία. Τα προαιρετικά διαπιστευτήρια AWS επιτρέπουν την εύρεση μοντέλων και προφίλ Runtime. Πριν επιλέξετε μοντέλο Runtime, επιβεβαιώστε την υποστήριξη Chat Completions στην κάρτα του μοντέλου.",
   "code.aiProvider.field.route": "Τελικό σημείο Bedrock",
   "code.aiProvider.option.mantle": "Mantle — κατάλογος μοντέλων και εκτέλεση μέσω /v1",
   "code.aiProvider.option.mantle-openai": "Mantle — εκτέλεση μέσω /openai/v1",
-  "code.aiProvider.option.runtime": "Runtime — χειροκίνητο αναγνωριστικό μοντέλου ή προφίλ εκτέλεσης",
+  "code.aiProvider.option.runtime": "Runtime — μοντέλα και προφίλ εκτέλεσης μέσω εγγενούς API",
   "code.aiProvider.other": "Άλλο / Τοπικό API AI",
   "code.aiProvider.other.description": "Συνδέστε τον δικό σας διακομιστή API. Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1",
   "label.siteNavigation": "Πλοήγηση ιστοτόπου",
@@ -461,5 +461,8 @@ export default Object.freeze({
   "code.accounts": "Λογαριασμοί",
   "help.technologyIntro": "Αυτά τα έργα συνεργάζονται για να εκτελούν Joomla, PHP, MariaDB και τον χώρο εργασίας κώδικα στο πρόγραμμα περιήγησής σας. Τα αρχεία και η βάση δεδομένων του ιστοτόπου Playground αποθηκεύονται τοπικά σε αυτό το πρόγραμμα περιήγησης.",
   "confirm.unsavedSiteForm": "Αυτή η σελίδα Joomla περιέχει μη αποθηκευμένες αλλαγές φόρμας. Να αποχωρήσετε και να συνεχίσετε;",
-  "code.aiPanel.scopeChanged": "Το περιεχόμενο αναφοράς άλλαξε. Μια νέα συνομιλία θα χρησιμοποιεί μόνο αυτό το πεδίο πρόσβασης."
+  "code.aiPanel.scopeChanged": "Το περιεχόμενο αναφοράς άλλαξε. Μια νέα συνομιλία θα χρησιμοποιεί μόνο αυτό το πεδίο πρόσβασης.",
+  "code.aiProvider.field.accessKeyId": "Αναγνωριστικό κλειδιού πρόσβασης AWS (προαιρετικό για εύρεση μοντέλων)",
+  "code.aiProvider.field.secretAccessKey": "Μυστικό κλειδί πρόσβασης AWS (προαιρετικό για εύρεση μοντέλων)",
+  "code.aiProvider.field.sessionToken": "Διακριτικό συνεδρίας AWS (προσωρινά διαπιστευτήρια)"
 });

@@ -86,9 +86,12 @@ export const AI_PROVIDERS = Object.freeze([
       { id: 'route', label: 'Bedrock endpoint', default: 'mantle', options: [
         { value: 'mantle', label: 'Mantle — model catalog and /v1 inference' },
         { value: 'mantle-openai', label: 'Mantle — /openai/v1 inference' },
-        { value: 'runtime', label: 'Runtime — manual model or inference profile ID' },
+        { value: 'runtime', label: 'Runtime — native models and inference profiles' },
       ] },
-    ], description: 'Use a Bedrock API key. Select the endpoint required by your model card; Runtime has no API-key model catalog.',
+      { id: 'accessKeyId', label: 'AWS access key ID (optional discovery)', credential: true },
+      { id: 'secretAccessKey', label: 'AWS secret access key (optional discovery)', credential: true, secret: true },
+      { id: 'sessionToken', label: 'AWS session token (temporary credentials)', credential: true, secret: true },
+    ], description: 'Use a Bedrock API key for chat. Optional AWS credentials discover Runtime models and profiles. Confirm Chat Completions support on the model card before choosing a Runtime model.',
     documentation: 'https://docs.aws.amazon.com/bedrock/latest/userguide/inference-chat-completions.html',
   }),
   preset('other', 'Other / Local AI API', '', {

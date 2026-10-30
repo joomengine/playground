@@ -22,7 +22,7 @@ Implementation review: 30 October 2026. This document records engineering covera
 | Hugging Face Inference Providers | Routed Chat Completions | `/models`, text and live tool-capable provider filters |
 | NVIDIA hosted APIs | Hosted Chat Completions | Published model fallback plus editable ID; self-hosted NIM uses Other |
 | Azure / Foundry | Resource-specific v1 Chat Completions using `api-key` | Resource v1 models; editable deployment ID |
-| Bedrock | Explicit Runtime, Mantle `/v1`, or Mantle `/openai/v1` route using a Bedrock API key | Mantle catalog always `/v1/models`; Runtime uses a manual model/profile ID |
+| Bedrock | Explicit Runtime, Mantle `/v1`, or Mantle `/openai/v1` route using a Bedrock API key | Mantle catalog always `/v1/models`; Runtime has native foundation-model/profile discovery using optional AWS SigV4 credentials, plus manual IDs |
 | Other / Local AI API | User-selected Chat Completions, Responses, Messages, Gemini, or Cohere format | Native format catalog; optional credentials and editable model ID |
 
 Standard presets derive endpoints internally. Changing a named preset's visible settings cannot substitute an arbitrary base URL. Other accepts HTTPS and explicit local/private HTTP addresses; its HTTP support does not bypass browser mixed-content, local-network permission, or CORS rules. No local ports are probed automatically, no proxy is added, and redirects are rejected before credentials can be forwarded.
@@ -48,6 +48,7 @@ The provider suite covers:
 - Cancellation, provider failures, truncation and error-body redaction for native adapters.
 - Anthropic, Google, Cohere, Qwen and Fireworks pagination, regional routing, capability filtering, and retained selections.
 - Bedrock inference/catalog route separation; static/manual discovery without fictitious `/models` calls.
+- Bedrock native discovery signed with WebCrypto; fixed signatures independently checked with curl's SigV4 implementation, temporary session tokens, encoded pagination cursors, model/profile filtering, cancellation and secret redaction.
 - API-key authentication for Azure and independent compatible/local authentication.
 
 These tests use protocol fixtures. They verify implemented behavior without generating paid completions. Existing AI review tests separately exercise bounded workspace access, dirty-buffer protection, review/accept/reject and recoverable writes.
@@ -56,7 +57,9 @@ These tests use protocol fixtures. They verify implemented behavior without gene
 
 No provider API keys were supplied for this implementation. Authenticated catalog, generation, tools, quota and cancellation checks against real cloud accounts have **not** been run. A passing fixture does not establish that a provider allows the browser's opaque `Origin: null`, or that a particular account has the model enabled. Chromium/Firefox checks against deployed HTTPS Playground with one actual provider and a configured Ollama/LM Studio endpoint remain necessary before claiming live compatibility.
 
-Bedrock Runtime has no compatible model-list endpoint. Its native control-plane discovery requires separate SigV4 AWS credentials; this implementation deliberately does not collect AWS access-key credentials. Use the explicit Mantle option when a compatible catalog is desired, or supply the Runtime model/profile ID. No runtime model is silently rerouted to Mantle. Dedicated Fireworks deployments and Azure deployment aliases also remain explicit manual IDs rather than an inferred callable catalog entry.
+Bedrock Runtime has no compatible model-list endpoint. Optional AWS access-key ID, secret access key and temporary session token enable native `ListFoundationModels` and paginated `ListInferenceProfiles` calls. These credentials stay in the opaque session vault; secrets and tokens are masked, excluded from public connection identity, cleared when endpoint routing changes, and never used as bearer chat credentials. WebCrypto signs read-only catalog requests for the selected region. The AWS principal needs `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles`; actual IAM permissions, expiry, clock skew and browser CORS remain live-account checks that were not run.
+
+Native Runtime listings filter inactive, non-text and non-streaming models, list on-demand foundation IDs and active profiles targeting known suitable models, and retain explicit manual IDs. AWS's native catalog does not state Chat Completions or tool support, so it does not automatically select an unknown-capability model: confirm the model card before choosing. Profiles whose underlying models are absent from the regional catalog remain manual. With no AWS discovery credentials, Runtime keeps manual model/profile entry; Mantle uses its own compatible catalog. No Runtime model is silently rerouted to Mantle. Dedicated Fireworks deployments and Azure deployment aliases also remain explicit manual IDs rather than an inferred callable catalog entry.
 
 ## Official references rechecked
 
@@ -71,5 +74,6 @@ Bedrock Runtime has no compatible model-list endpoint. Its native control-plane 
 - [xAI models](https://docs.x.ai/developers/rest-api-reference/inference/models), [Kimi models](https://platform.kimi.ai/docs/api/list-models), [Groq API](https://console.groq.com/docs/api-reference), [Cerebras models](https://inference-docs.cerebras.ai/api-reference/models/list-models), [Together compatibility](https://docs.together.ai/docs/inference/openai-compatibility).
 - [Fireworks models](https://docs.fireworks.ai/api-reference/list-models), [Hugging Face router catalog](https://huggingface.co/docs/inference-providers/hub-api), [NVIDIA hosted APIs](https://docs.api.nvidia.com/nim/reference/llm-apis), [Azure models](https://learn.microsoft.com/en-us/rest/api/microsoft-foundry/azureopenai/models).
 - [Bedrock endpoint routing](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-chat-completions.html), [discovery distinction](https://docs.aws.amazon.com/bedrock/latest/userguide/models-get-info.html).
+- [Bedrock foundation catalog](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_ListFoundationModels.html), [inference profiles](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_ListInferenceProfiles.html), [AWS Signature Version 4](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html).
 - [OpenRouter reasoning continuation](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
 - [Ollama compatibility](https://docs.ollama.com/api/openai-compatibility), [LM Studio compatibility](https://lmstudio.ai/docs/developer/openai-compat).

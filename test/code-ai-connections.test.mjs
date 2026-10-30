@@ -61,3 +61,20 @@ test('credentials are loaded only by exact connection identity and changing a ke
   const changed = call(view, 'save', { id: 'local-openai-A', settings: { provider: 'other', apiKey: 'second-key' } });
   assert.notEqual(original.revision, changed.revision);
 });
+
+test('AWS discovery secrets remain in direct isolated channels and each credential change rotates revision', () => {
+  const { attach, call, notices } = brokerFixture();
+  const view = attach();
+  const settings = { provider: 'bedrock', apiKey: 'inference-only-key', accessKeyId: 'AKIAEXAMPLE', secretAccessKey: 'discovery-secret', sessionToken: 'temporary-token' };
+  const first = call(view, 'save', { id: 'bedrock-runtime-us', settings });
+  assert.equal(call(view, 'read', { id: 'bedrock-runtime-us' }).secretAccessKey, 'discovery-secret');
+  let previous = first;
+  for (const [key, value] of [['accessKeyId', 'AKIACHANGED'], ['secretAccessKey', 'rotated-secret'], ['sessionToken', 'new-token']]) {
+    settings[key] = value;
+    const changed = call(view, 'save', { id: 'bedrock-runtime-us', settings });
+    assert.notEqual(changed.revision, previous.revision); previous = changed;
+  }
+  assert.equal(call(view, 'read', { id: 'bedrock-mantle-us' }), null);
+  for (const secret of ['discovery-secret', 'temporary-token', 'inference-only-key']) assert.equal(JSON.stringify(notices).includes(secret), false);
+  call(view, 'clear'); assert.equal(call(view, 'read', { id: 'bedrock-runtime-us' }), null);
+});

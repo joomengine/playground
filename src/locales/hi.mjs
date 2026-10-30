@@ -420,11 +420,11 @@ export default Object.freeze({
   "code.aiProvider.nvidia.description": "होस्ट किए गए मॉडलों का प्रकाशित कैटलॉग। स्वयं होस्ट किए गए NIM सर्वर के लिए अन्य / स्थानीय AI API का उपयोग करें।",
   "code.aiProvider.azure.description": "जब आपके डिप्लॉयमेंट का नाम कैटलॉग के मॉडल नाम से अलग हो, तो मॉडल ID के रूप में डिप्लॉयमेंट का नाम उपयोग करें।",
   "code.aiProvider.field.resource": "Azure संसाधन का नाम",
-  "code.aiProvider.bedrock.description": "Bedrock API कुंजी का उपयोग करें। अपने मॉडल कार्ड के लिए आवश्यक एंडपॉइंट चुनें; Runtime में API कुंजी से उपलब्ध मॉडल कैटलॉग नहीं है।",
+  "code.aiProvider.bedrock.description": "चैट के लिए Bedrock API कुंजी का उपयोग करें। वैकल्पिक AWS क्रेडेंशियल से Runtime मॉडल और इन्फ़रेंस प्रोफ़ाइल खोजी जा सकती हैं। Runtime मॉडल चुनने से पहले मॉडल कार्ड में Chat Completions समर्थन की पुष्टि करें।",
   "code.aiProvider.field.route": "Bedrock एंडपॉइंट",
   "code.aiProvider.option.mantle": "Mantle — मॉडल कैटलॉग और /v1 इन्फ़रेंस",
   "code.aiProvider.option.mantle-openai": "Mantle — /openai/v1 इन्फ़रेंस",
-  "code.aiProvider.option.runtime": "Runtime — मॉडल या इन्फ़रेंस प्रोफ़ाइल ID मैन्युअल रूप से दर्ज करें",
+  "code.aiProvider.option.runtime": "Runtime — नेटिव मॉडल और इन्फ़रेंस प्रोफ़ाइल",
   "code.aiProvider.other": "अन्य / स्थानीय AI API",
   "code.aiProvider.other.description": "अपना API सर्वर जोड़ें। Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1",
   "label.siteNavigation": "साइट नेविगेशन",
@@ -461,5 +461,8 @@ export default Object.freeze({
   "code.accounts": "खाते",
   "help.technologyIntro": "ये प्रोजेक्ट मिलकर आपके ब्राउज़र में Joomla, PHP, MariaDB और कोड कार्यस्थान चलाते हैं। आपकी Playground साइट की फ़ाइलें और डेटाबेस इसी ब्राउज़र में स्थानीय रूप से सहेजे जाते हैं।",
   "confirm.unsavedSiteForm": "इस Joomla पृष्ठ के फ़ॉर्म में सहेजे नहीं गए बदलाव हैं। इसे छोड़कर आगे बढ़ें?",
-  "code.aiPanel.scopeChanged": "संदर्भ बदल गया है। नई बातचीत केवल इसी दायरे का उपयोग करेगी।"
+  "code.aiPanel.scopeChanged": "संदर्भ बदल गया है। नई बातचीत केवल इसी दायरे का उपयोग करेगी।",
+  "code.aiProvider.field.accessKeyId": "AWS ऐक्सेस कुंजी ID (मॉडल खोज के लिए वैकल्पिक)",
+  "code.aiProvider.field.secretAccessKey": "AWS सीक्रेट ऐक्सेस कुंजी (मॉडल खोज के लिए वैकल्पिक)",
+  "code.aiProvider.field.sessionToken": "AWS सत्र टोकन (अस्थायी क्रेडेंशियल)"
 });

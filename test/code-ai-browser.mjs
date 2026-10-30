@@ -17,7 +17,13 @@ for (const name of names) test(`AI credential sandbox and explicit review contro
     const page = await browser.newPage();
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     let sent = 0;
-    await page.route('https://ai-provider.test/v1/models', route => route.fulfill({ status: 200, headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }, body: JSON.stringify({ data: [{ id: 'tool-model' }] }) }));
+    await page.route('https://ai-provider.test/v1/models', route => {
+      const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS',
+        'Access-Control-Allow-Headers': 'Authorization,Content-Type' };
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      return route.fulfill({ status: 200, headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: [{ id: 'tool-model' }] }) });
+    });
     await page.route('https://ai-provider.test/v1/chat/completions', route => {
       const request = route.request();
       if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Authorization,Content-Type' } });
@@ -41,7 +47,7 @@ for (const name of names) test(`AI credential sandbox and explicit review contro
         execute(name, args) { window.hostRequests.push({ name, args }); return prepared; } };
       const review = { accept(id) { window.accepted++; return { ...prepared, id, status: 'applied', recoveryId: 'snapshot-1' }; },
         reject(id) { return { ...prepared, id, status: 'rejected' }; }, undo(id) { return { ...prepared, id, status: 'recovered' }; } };
-      window.aiPanel = createIsolatedAiPanel({ container: document.querySelector('main'), tools, review, getContext: () => ({ selection: 'echo "test";' }) });
+      window.aiPanel = createIsolatedAiPanel({ container: document.querySelector('main'), tools, review, getContext: ({ scope }) => ({ scope, files: [{ path: '/index.php', content: 'echo "test";' }], bytes: 12, maxContextBytes: 524288 }) });
       window.aiPanel.showSettings();
     });
     const panel = page.frameLocator('iframe.jec-ai-frame');
@@ -120,8 +126,7 @@ for (const name of names) test(`AI local optional-key transport, model selection
     response.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
     response.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
     if (request.method === 'OPTIONS') return response.writeHead(204).end();
-    authHeaders.push({ path: request.url, authorization: request.headers.authorization });
-    assert.equal(request.headers.origin, 'null');
+    authHeaders.push({ path: request.url, authorization: request.headers.authorization, origin: request.headers.origin });
     if (request.url === '/v1/models' || request.url === '/other/v1/models') {
       catalogues++; response.setHeader('Content-Type', 'application/json');
       return response.end(JSON.stringify({ data: [{ id: 'local-coder' }] }));
@@ -137,6 +142,7 @@ for (const name of names) test(`AI local optional-key transport, model selection
   try {
     browser = await { chromium, firefox }[name].launch({ headless: true, ...(process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`] ? { executablePath: process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`] } : {}) });
     const page = await browser.newPage();
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
     await page.goto(`${server.url}__test__.html`);
     await page.evaluate(async () => {
       const { createIsolatedAiPanel } = await import('./src/code/ai-panel.mjs');
@@ -147,6 +153,9 @@ for (const name of names) test(`AI local optional-key transport, model selection
     });
     const panel = page.frameLocator('.jec-ai-frame');
     await panel.locator('#provider').selectOption('other');
+    await page.waitForTimeout(650); // Exercise the automatic discovery debounce with incomplete settings.
+    assert.equal(catalogues, 0); assert.equal(chats, 0);
+    assert.doesNotMatch(await panel.locator('#status').textContent(), /Enter the AI API base URL/);
     await panel.locator('#base-url').fill(`http://127.0.0.1:${api.address().port}/v1`);
     await panel.locator('#fetch-models').click();
     await panel.locator('#status').filter({ hasText: 'Available models refreshed.' }).waitFor();
@@ -157,6 +166,7 @@ for (const name of names) test(`AI local optional-key transport, model selection
     await panel.getByText('Local connection works.', { exact: true }).waitFor();
     assert.equal(chats, 1);
     assert.ok(authHeaders.every(request => request.authorization === undefined), 'blank local key never creates an Authorization header');
+    assert.ok(authHeaders.every(request => request.origin === 'null'), 'local requests originate inside the opaque credential sandbox');
     await page.evaluate(() => window.localPanel.setTheme('dark'));
     await panel.locator('html[data-theme="dark"]').waitFor();
     await page.evaluate(() => window.localPanel.setTheme('light'));
@@ -167,7 +177,9 @@ for (const name of names) test(`AI local optional-key transport, model selection
     assert.equal(await panel.locator('#api-key').inputValue(), '', 'typing a new URL immediately removes the previous key');
     await panel.locator('#fetch-models').click();
     await panel.locator('#status').filter({ hasText: 'Available models refreshed.' }).waitFor();
-    assert.ok(authHeaders.filter(request => request.path.startsWith('/other/')).every(request => request.authorization === undefined), 'new endpoint receives no previous connection key');
+    const changedEndpoint = authHeaders.filter(request => request.path.startsWith('/other/'));
+    assert.ok(changedEndpoint.length > 0, 'the new endpoint was actually exercised');
+    assert.ok(changedEndpoint.every(request => request.authorization === undefined), 'new endpoint receives no previous connection key');
     await panel.locator('#base-url').fill(`http://127.0.0.1:${api.address().port}/v1`);
     await panel.locator('#model').click();
     await panel.locator('#api-key').waitFor();
@@ -194,9 +206,66 @@ for (const name of names) test(`AI local optional-key transport, model selection
     assert.equal(await restored.locator('#exclude-generated').isChecked(), false);
     assert.equal(await restored.locator('#context-tree input[type="checkbox"]').isChecked(), true);
     assert.deepEqual(await page.evaluate(() => window.restoredScopes.at(-1).excluded), []);
+    assert.deepEqual(errors, []);
 
   } finally {
     await browser?.close(); await server.close(); api.closeAllConnections();
     await new Promise(resolve => api.close(resolve));
   }
+});
+
+for (const name of names) test(`AI Bedrock discovery credentials remain masked and isolated in ${name}`, { timeout: 45_000 }, async () => {
+  const server = await createStaticServer({ directory: root });
+  let browser;
+  const calls = [];
+  try {
+    browser = await { chromium, firefox }[name].launch({ headless: true, ...(process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`] ? { executablePath: process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`] } : {}) });
+    const page = await browser.newPage();
+    await page.route('https://bedrock.us-east-1.amazonaws.com/**', route => {
+      const request = route.request();
+      const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS',
+        'Access-Control-Allow-Headers': 'Authorization,X-Amz-Date,X-Amz-Security-Token,X-Amz-Content-Sha256' };
+      if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      calls.push({ url: request.url(), headers: request.headers() });
+      const body = new URL(request.url()).pathname === '/foundation-models' ? {
+        modelSummaries: [{ modelId: 'anthropic.claude-test', modelName: 'Claude test catalog entry', outputModalities: ['TEXT'],
+          responseStreamingSupported: true, modelLifecycle: { status: 'ACTIVE' }, inferenceTypesSupported: ['ON_DEMAND'] }],
+      } : { inferenceProfileSummaries: [] };
+      return route.fulfill({ status: 200, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    });
+    await page.goto(`${server.url}__test__.html`);
+    await page.evaluate(async () => {
+      const { createIsolatedAiPanel } = await import('./src/code/ai-panel.mjs');
+      window.awsPanel = createIsolatedAiPanel({ container: document.querySelector('main'),
+        tools: { definitions: [], execute() {} }, review: { accept() {} } });
+      window.awsPanel.showSettings();
+    });
+    const panel = page.frameLocator('.jec-ai-frame');
+    await panel.locator('#provider').selectOption('bedrock');
+    await panel.locator('[data-connection-field="route"]').selectOption('runtime');
+    await panel.locator('[data-connection-field="accessKeyId"]').fill('AKIAEXAMPLE1234567890');
+    await panel.locator('[data-connection-field="secretAccessKey"]').fill('aws-discovery-test-secret');
+    await panel.locator('[data-connection-field="sessionToken"]').fill('aws-discovery-test-token');
+    assert.equal(await panel.locator('[data-connection-field="secretAccessKey"]').getAttribute('type'), 'password');
+    assert.equal(await panel.locator('[data-connection-field="sessionToken"]').getAttribute('type'), 'password');
+    assert.equal(await panel.locator('#api-key').inputValue(), '', 'native discovery does not require an inference API key');
+    await panel.locator('#fetch-models').click();
+    await panel.locator('#status').filter({ hasText: 'Available models refreshed.' }).waitFor();
+    assert.equal(await panel.locator('#models option[value="anthropic.claude-test"]').count(), 1);
+    assert.equal(await panel.locator('#model').inputValue(), '', 'unknown Runtime Chat capability requires deliberate model selection');
+    assert.ok(calls.some(call => new URL(call.url).pathname === '/foundation-models'));
+    assert.ok(calls.some(call => new URL(call.url).pathname === '/inference-profiles'));
+    for (const call of calls) {
+      assert.match(call.headers.authorization, /^AWS4-HMAC-SHA256 Credential=AKIAEXAMPLE1234567890\//);
+      assert.equal(call.headers['x-amz-security-token'], 'aws-discovery-test-token');
+      assert.equal(call.headers.origin, 'null');
+      assert.equal(call.headers.authorization.includes('aws-discovery-test-secret'), false);
+    }
+    assert.equal(await page.evaluate(() => document.documentElement.outerHTML.includes('aws-discovery-test-secret')), false);
+    assert.equal(await page.evaluate(() => document.documentElement.outerHTML.includes('aws-discovery-test-token')), false);
+    await panel.locator('[data-connection-field="region"]').fill('eu-west-1');
+    for (const id of ['accessKeyId', 'secretAccessKey', 'sessionToken']) {
+      assert.equal(await panel.locator(`[data-connection-field="${id}"]`).inputValue(), '', 'changing regional endpoint clears discovery credentials');
+    }
+  } finally { await browser?.close(); await server.close(); }
 });

@@ -420,11 +420,11 @@ export default Object.freeze({
   "code.aiProvider.nvidia.description": "كتالوج النماذج المستضافة المنشور. تستخدم خوادم NIM المستضافة ذاتيًا خيار أخرى / AI API محلية.",
   "code.aiProvider.azure.description": "استخدم اسم عملية النشر كمعرّف للنموذج عندما يختلف عن اسم النموذج في الكتالوج.",
   "code.aiProvider.field.resource": "اسم مورد Azure",
-  "code.aiProvider.bedrock.description": "استخدم مفتاح Bedrock API. اختر نقطة النهاية المطلوبة في بطاقة النموذج؛ لا يوفر Runtime كتالوج نماذج يمكن الوصول إليه بمفتاح API.",
+  "code.aiProvider.bedrock.description": "استخدم مفتاح Bedrock API للمحادثة. تتيح بيانات اعتماد AWS الاختيارية اكتشاف نماذج Runtime وملفات تعريف الاستدلال. تأكد من دعم Chat Completions في بطاقة النموذج قبل اختيار نموذج Runtime.",
   "code.aiProvider.field.route": "نقطة نهاية Bedrock",
   "code.aiProvider.option.mantle": "Mantle — كتالوج النماذج والاستدلال عبر /v1",
   "code.aiProvider.option.mantle-openai": "Mantle — الاستدلال عبر /openai/v1",
-  "code.aiProvider.option.runtime": "Runtime — إدخال معرّف النموذج أو ملف تعريف الاستدلال يدويًا",
+  "code.aiProvider.option.runtime": "Runtime — النماذج الأصلية وملفات تعريف الاستدلال",
   "code.aiProvider.other": "أخرى / AI API محلية",
   "code.aiProvider.other.description": "اتصل بخادم API الخاص بك. Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1",
   "label.siteNavigation": "التنقل في الموقع",
@@ -461,5 +461,8 @@ export default Object.freeze({
   "code.accounts": "الحسابات",
   "help.technologyIntro": "تعمل هذه المشاريع معًا لتشغيل Joomla وPHP وMariaDB ومساحة عمل التعليمات البرمجية في متصفحك. تُخزّن ملفات موقع Playground وقاعدة بياناته محليًا في هذا المتصفح.",
   "confirm.unsavedSiteForm": "تحتوي صفحة Joomla هذه على تغييرات غير محفوظة في النموذج. هل تريد مغادرتها والمتابعة؟",
-  "code.aiPanel.scopeChanged": "تم تغيير السياق. ستستخدم المحادثة الجديدة هذا النطاق فقط."
+  "code.aiPanel.scopeChanged": "تم تغيير السياق. ستستخدم المحادثة الجديدة هذا النطاق فقط.",
+  "code.aiProvider.field.accessKeyId": "معرّف مفتاح وصول AWS (اختياري لاكتشاف النماذج)",
+  "code.aiProvider.field.secretAccessKey": "مفتاح الوصول السري لـ AWS (اختياري لاكتشاف النماذج)",
+  "code.aiProvider.field.sessionToken": "رمز جلسة AWS (بيانات اعتماد مؤقتة)"
 });

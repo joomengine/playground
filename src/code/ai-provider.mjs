@@ -7,6 +7,7 @@ export { AI_PROVIDERS, AI_PROVIDER_CANDIDATES, AI_PROVIDER_MESSAGES } from './ai
  */
 export function createChatProvider({ provider = {}, baseURL, protocol = provider.protocol || 'openai',
   model = '', apiKey = '', region, workspaceId = '', resource = '', accountId = '', route,
+  accessKeyId = '', secretAccessKey = '', sessionToken = '', clock = () => new Date(),
   fetcher = globalThis.fetch, maxRequestBytes = 512 * 1024, maxResponseBytes = 2 * 1024 * 1024,
   timeoutMs = 120_000 } = {}) {
   const id = provider.id || 'other';
@@ -40,6 +41,9 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
   if (/\/(?:chat\/completions|responses|messages|models)$/.test(base.pathname)) throw new TypeError('Enter the API base URL, without the chat, messages, responses or models operation.');
   if (typeof model !== 'string' || model.length > 256 || /[\r\n]/.test(model)) throw new TypeError('Choose a provider model.');
   if (typeof apiKey !== 'string' || apiKey.length > 4096 || /[\r\n]/.test(apiKey)) throw new TypeError('Enter a valid AI API key.');
+  for (const value of [accessKeyId, secretAccessKey, sessionToken]) {
+    if (typeof value !== 'string' || value.length > 4096 || /[\r\n]/.test(value)) throw new TypeError('Enter valid AWS discovery credentials.');
+  }
   if (typeof fetcher !== 'function') throw new TypeError('Fetch is unavailable.');
   for (const [value, minimum, maximum] of [[maxRequestBytes, 1024, 2 ** 22], [maxResponseBytes, 1024, 2 ** 24], [timeoutMs, 1, 600_000]]) {
     if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw new RangeError('Invalid provider limit.');
@@ -105,6 +109,80 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
       try { return JSON.parse(text); } catch { throw failure('The API returned an invalid model catalog.', 'INVALID_CATALOG'); }
     } finally { try { await reader.cancel(); } catch { /* closed */ } reader.releaseLock(); }
   }
+  // The only AWS operations signed here are read-only Bedrock control-plane
+  // catalogs. This implementation stays inside the serialized credential realm.
+  async function awsCatalogHeaders(endpoint) {
+    if (!accessKeyId.trim() || !secretAccessKey.trim()) throw failure('Provide both the AWS access key ID and secret access key, or leave AWS discovery credentials empty and enter a model ID.', 'AWS_CREDENTIALS_REQUIRED');
+    if (!/^[A-Z0-9]{16,128}$/.test(accessKeyId.trim()) || /\s/.test(secretAccessKey.trim()) || /\s/.test(sessionToken.trim())) throw failure('Enter valid AWS discovery credentials.', 'AWS_CREDENTIALS_REQUIRED');
+    const subtle = globalThis.crypto?.subtle;
+    if (!subtle) throw failure('AWS model discovery requires WebCrypto in a secure browser context.', 'CRYPTO_UNAVAILABLE');
+    const hex = buffer => [...new Uint8Array(buffer)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+    const digest = async value => hex(await subtle.digest('SHA-256', encoder.encode(value)));
+    const hmac = async (key, value) => {
+      const imported = await subtle.importKey('raw', typeof key === 'string' ? encoder.encode(key) : key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+      return subtle.sign('HMAC', imported, encoder.encode(value));
+    };
+    const encode = value => encodeURIComponent(value).replace(/[!'()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+    const timestamp = clock().toISOString().replace(/[:-]|\.\d{3}/g, ''), date = timestamp.slice(0, 8);
+    const payloadHash = await digest('');
+    const signed = { host: endpoint.host, 'x-amz-content-sha256': payloadHash, 'x-amz-date': timestamp,
+      ...(sessionToken.trim() ? { 'x-amz-security-token': sessionToken.trim() } : {}) };
+    const names = Object.keys(signed).sort(), signedNames = names.join(';');
+    const query = [...endpoint.searchParams].map(([name, value]) => [encode(name), encode(value)])
+      .sort(([a, av], [b, bv]) => a < b ? -1 : a > b ? 1 : av < bv ? -1 : av > bv ? 1 : 0)
+      .map(([name, value]) => `${name}=${value}`).join('&');
+    const canonical = ['GET', endpoint.pathname, query, names.map(name => `${name}:${signed[name]}\n`).join(''), signedNames, payloadHash].join('\n');
+    const scope = `${date}/${region}/bedrock/aws4_request`;
+    const stringToSign = ['AWS4-HMAC-SHA256', timestamp, scope, await digest(canonical)].join('\n');
+    let signingKey = await hmac(`AWS4${secretAccessKey.trim()}`, date);
+    for (const value of [region, 'bedrock', 'aws4_request']) signingKey = await hmac(signingKey, value);
+    const signature = hex(await hmac(signingKey, stringToSign));
+    // Fetch supplies Host; attempting to set this forbidden header is not portable.
+    delete signed.host;
+    return { Accept: 'application/json', ...signed,
+      Authorization: `AWS4-HMAC-SHA256 Credential=${accessKeyId.trim()}/${scope}, SignedHeaders=${signedNames}, Signature=${signature}` };
+  }
+  async function runtimeModels(active) {
+    const endpoint = new URL(`https://bedrock.${region}.amazonaws.com/foundation-models?byOutputModality=TEXT`);
+    const get = async endpoint => {
+      active.throwIfAborted();
+      const authorization = await awsCatalogHeaders(endpoint);
+      active.throwIfAborted();
+      return jsonResponse(await checkedFetch(endpoint, { method: 'GET', headers: authorization, signal: active }));
+    };
+    const foundation = await get(endpoint);
+    if (!Array.isArray(foundation.modelSummaries)) throw failure('The API returned an invalid foundation model catalog.', 'INVALID_CATALOG');
+    if (foundation.modelSummaries.length > 10000) throw failure('The model catalog exceeded its entry limit.', 'RESPONSE_LIMIT');
+    // The native catalog cannot prove Chat Completions or tool support. Keep
+    // these unknown and require a deliberate model choice instead of guessing.
+    const available = foundation.modelSummaries.filter(item => typeof item.modelId === 'string'
+      && item.modelLifecycle?.status === 'ACTIVE' && item.responseStreamingSupported === true
+      && item.outputModalities?.includes('TEXT'));
+    const byId = new Map(available.map(item => [item.modelId, item]));
+    const items = available.filter(item => item.inferenceTypesSupported?.includes('ON_DEMAND'))
+      .map(item => ({ id: item.modelId, display_name: item.modelName }));
+    endpoint.pathname = '/inference-profiles'; endpoint.search = '?maxResults=100';
+    const visited = new Set(); let entryCount = foundation.modelSummaries.length;
+    for (let page = 0; page < 50; page++) {
+      if (visited.has(endpoint.href)) throw failure('The model catalog repeated a pagination cursor.', 'INVALID_CATALOG');
+      visited.add(endpoint.href);
+      const data = await get(endpoint);
+      if (!Array.isArray(data.inferenceProfileSummaries)) throw failure('The API returned an invalid inference profile catalog.', 'INVALID_CATALOG');
+      entryCount += data.inferenceProfileSummaries.length;
+      if (entryCount > 10000) throw failure('The model catalog exceeded its entry limit.', 'RESPONSE_LIMIT');
+      for (const profile of data.inferenceProfileSummaries) {
+        if (profile.status !== 'ACTIVE' || !Array.isArray(profile.models) || !profile.models.length
+          || !profile.models.every(item => byId.has(item.modelArn?.split(':foundation-model/')[1]))) continue;
+        items.push({ id: profile.inferenceProfileId, display_name: profile.inferenceProfileName });
+      }
+      if (items.length > 10000) throw failure('The model catalog exceeded its entry limit.', 'RESPONSE_LIMIT');
+      if (!data.nextToken) break;
+      if (typeof data.nextToken !== 'string' || data.nextToken.length > 2048 || /\s/.test(data.nextToken)) throw failure('The API returned an invalid pagination cursor.', 'INVALID_CATALOG');
+      if (page === 49) throw failure('The model catalog has too many pages. Enter a model ID manually.', 'RESPONSE_LIMIT');
+      endpoint.searchParams.set('nextToken', data.nextToken);
+    }
+    return items;
+  }
   function usable(item) {
     const id = item.id || item.name || item.model;
     if (typeof id !== 'string' || !id.trim() || id.length > 256) return null;
@@ -134,7 +212,9 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
     const catalog = provider.catalog || (protocol === 'anthropic' ? 'anthropic' : protocol === 'gemini' ? 'gemini' : protocol === 'cohere' ? 'cohere' : 'openai');
     return bounded(signal, async active => {
       let source = 'live', items = [];
-      if (catalog === 'static' || catalog === 'manual' || (id === 'bedrock' && route === 'runtime')) {
+      if (id === 'bedrock' && route === 'runtime' && (accessKeyId || secretAccessKey || sessionToken)) {
+        items = await runtimeModels(active);
+      } else if (catalog === 'static' || catalog === 'manual' || (id === 'bedrock' && route === 'runtime')) {
         source = catalog === 'static' ? 'catalog' : 'manual';
         items = (provider.models || []).map(id => ({ id }));
       } else {
@@ -171,7 +251,8 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
       const preferences = provider.preferences || ['coder', 'code', 'instruct', 'chat'];
       const rank = item => { const index = preferences.findIndex(value => item.id.toLowerCase().includes(value.toLowerCase())); return index < 0 ? preferences.length : index; };
       models.sort((a, b) => Number(b.tools === true) - Number(a.tools === true) || rank(a) - rank(b) || a.id.localeCompare(b.id, 'en', { numeric: true }));
-      return { models, selectedModel: models.some(item => item.id === currentModel) ? currentModel : (source === 'manual' ? currentModel : models[0]?.id || ''), source };
+      return { models, selectedModel: models.some(item => item.id === currentModel) ? currentModel
+        : (source === 'manual' || (id === 'bedrock' && route === 'runtime') ? currentModel : models[0]?.id || ''), source };
     });
   }
   function checkedMessages(messages, tools) {
@@ -370,5 +451,5 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
       } finally { try { await reader.cancel(); } catch { /* Already closed or aborted. */ } reader.releaseLock(); }
     });
   }
-  return Object.freeze({ stream, listModels, dispose() { disposed = true; apiKey = ''; for (const request of requests) request.abort(); requests.clear(); } });
+  return Object.freeze({ stream, listModels, dispose() { disposed = true; apiKey = accessKeyId = secretAccessKey = sessionToken = ''; for (const request of requests) request.abort(); requests.clear(); } });
 }

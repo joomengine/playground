@@ -420,11 +420,11 @@ export default Object.freeze({
   "code.aiProvider.nvidia.description": "קטלוג שפורסם של מודלים מתארחים. עבור שרתי NIM באירוח עצמי, בחרו אחר / API מקומי של AI.",
   "code.aiProvider.azure.description": "השתמשו בשם הפריסה שלכם בתור מזהה המודל כאשר הוא שונה משם המודל בקטלוג.",
   "code.aiProvider.field.resource": "שם משאב Azure",
-  "code.aiProvider.bedrock.description": "השתמשו במפתח API של Bedrock. בחרו את נקודת הקצה הנדרשת בכרטיס המודל; Runtime אינו מספק קטלוג מודלים באמצעות מפתח API.",
+  "code.aiProvider.bedrock.description": "השתמשו במפתח API של Bedrock לצ׳אט. פרטי גישה אופציונליים של AWS מאפשרים לגלות מודלים ופרופילים של Runtime. לפני בחירת מודל Runtime, ודאו בכרטיס המודל שהוא תומך ב-Chat Completions.",
   "code.aiProvider.field.route": "נקודת קצה של Bedrock",
   "code.aiProvider.option.mantle": "Mantle — קטלוג מודלים והסקה דרך /v1",
   "code.aiProvider.option.mantle-openai": "Mantle — הסקה דרך /openai/v1",
-  "code.aiProvider.option.runtime": "Runtime — מזהה מודל או פרופיל הסקה בהזנה ידנית",
+  "code.aiProvider.option.runtime": "Runtime — מודלים ופרופילי הסקה דרך ה-API המקורי",
   "code.aiProvider.other": "אחר / API מקומי של AI",
   "code.aiProvider.other.description": "חברו שרת API משלכם. Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1",
   "label.siteNavigation": "ניווט באתר",
@@ -461,5 +461,8 @@ export default Object.freeze({
   "code.accounts": "חשבונות",
   "help.technologyIntro": "הפרויקטים האלה פועלים יחד כדי להריץ את Joomla, PHP, MariaDB ואת סביבת עבודת הקוד בדפדפן שלכם. הקבצים ומסד הנתונים של אתר ה-Playground שלכם נשמרים מקומית בדפדפן זה.",
   "confirm.unsavedSiteForm": "דף Joomla זה מכיל שינויי טופס שלא נשמרו. לעזוב ולהמשיך?",
-  "code.aiPanel.scopeChanged": "ההקשר השתנה. שיחה חדשה תשתמש רק בטווח הגישה הזה."
+  "code.aiPanel.scopeChanged": "ההקשר השתנה. שיחה חדשה תשתמש רק בטווח הגישה הזה.",
+  "code.aiProvider.field.accessKeyId": "מזהה מפתח גישה של AWS (אופציונלי לגילוי מודלים)",
+  "code.aiProvider.field.secretAccessKey": "מפתח גישה סודי של AWS (אופציונלי לגילוי מודלים)",
+  "code.aiProvider.field.sessionToken": "אסימון הפעלה של AWS (פרטי גישה זמניים)"
 });

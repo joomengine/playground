@@ -420,11 +420,11 @@ export default Object.freeze({
   "code.aiProvider.nvidia.description": "Опубликованный каталог облачных моделей. Для собственного сервера NIM выберите «Другой / локальный API ИИ».",
   "code.aiProvider.azure.description": "Используйте имя своего развёртывания как идентификатор модели, если оно отличается от имени модели в каталоге.",
   "code.aiProvider.field.resource": "Имя ресурса Azure",
-  "code.aiProvider.bedrock.description": "Используйте ключ API Bedrock. Выберите адрес API, указанный в карточке модели; Runtime не предоставляет каталог моделей по ключу API.",
+  "code.aiProvider.bedrock.description": "Используйте ключ API Bedrock для чата. Дополнительные учётные данные AWS позволяют получить модели и профили Runtime. Перед выбором модели Runtime проверьте поддержку Chat Completions в её карточке.",
   "code.aiProvider.field.route": "Адрес API Bedrock",
   "code.aiProvider.option.mantle": "Mantle — каталог моделей и выполнение через /v1",
   "code.aiProvider.option.mantle-openai": "Mantle — выполнение через /openai/v1",
-  "code.aiProvider.option.runtime": "Runtime — модель или идентификатор профиля выполнения вручную",
+  "code.aiProvider.option.runtime": "Runtime — модели и профили выполнения через собственный API",
   "code.aiProvider.other": "Другой / локальный API ИИ",
   "code.aiProvider.other.description": "Подключите собственный сервер API. Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1",
   "label.siteNavigation": "Навигация по сайту",
@@ -461,5 +461,8 @@ export default Object.freeze({
   "code.accounts": "Учётные записи",
   "help.technologyIntro": "Эти проекты вместе обеспечивают работу Joomla, PHP, MariaDB и редактора кода в браузере. Файлы и база данных вашего сайта Playground хранятся локально в этом браузере.",
   "confirm.unsavedSiteForm": "На этой странице Joomla есть несохранённые изменения формы. Покинуть страницу и продолжить?",
-  "code.aiPanel.scopeChanged": "Контекст изменён. Новый разговор будет использовать только эту область доступа."
+  "code.aiPanel.scopeChanged": "Контекст изменён. Новый разговор будет использовать только эту область доступа.",
+  "code.aiProvider.field.accessKeyId": "Идентификатор ключа доступа AWS (необязательно, для поиска моделей)",
+  "code.aiProvider.field.secretAccessKey": "Секретный ключ доступа AWS (необязательно, для поиска моделей)",
+  "code.aiProvider.field.sessionToken": "Токен сеанса AWS (временные учётные данные)"
 });

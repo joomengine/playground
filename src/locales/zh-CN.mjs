@@ -420,11 +420,11 @@ export default Object.freeze({
   "code.aiProvider.nvidia.description": "已发布的托管模型目录。自托管 NIM 服务器请选择“其他 / 本地 AI API”。",
   "code.aiProvider.azure.description": "当部署名称与目录中的模型名称不同时，请使用您的部署名称作为模型 ID。",
   "code.aiProvider.field.resource": "Azure 资源名称",
-  "code.aiProvider.bedrock.description": "使用 Bedrock API 密钥。选择模型说明卡要求的端点；Runtime 不提供通过 API 密钥访问的模型目录。",
+  "code.aiProvider.bedrock.description": "聊天使用 Bedrock API 密钥。可选的 AWS 凭据用于发现 Runtime 模型和推理配置文件。选择 Runtime 模型前，请在模型说明卡中确认其支持 Chat Completions。",
   "code.aiProvider.field.route": "Bedrock 端点",
   "code.aiProvider.option.mantle": "Mantle — 模型目录和 /v1 推理",
   "code.aiProvider.option.mantle-openai": "Mantle — /openai/v1 推理",
-  "code.aiProvider.option.runtime": "Runtime — 手动输入模型或推理配置文件 ID",
+  "code.aiProvider.option.runtime": "Runtime — 原生模型和推理配置文件",
   "code.aiProvider.other": "其他 / 本地 AI API",
   "code.aiProvider.other.description": "连接您自己的 API 服务器。Ollama：http://localhost:11434/v1 · LM Studio：http://localhost:1234/v1",
   "label.siteNavigation": "网站导航",
@@ -461,5 +461,8 @@ export default Object.freeze({
   "code.accounts": "账户",
   "help.technologyIntro": "这些项目协同工作，让 Joomla、PHP、MariaDB 和代码工作区在您的浏览器中运行。您的 Playground 网站文件和数据库保存在本浏览器的本地存储中。",
   "confirm.unsavedSiteForm": "此 Joomla 页面有未保存的表单更改。要离开并继续吗？",
-  "code.aiPanel.scopeChanged": "上下文已更改。新对话将仅使用此范围。"
+  "code.aiPanel.scopeChanged": "上下文已更改。新对话将仅使用此范围。",
+  "code.aiProvider.field.accessKeyId": "AWS 访问密钥 ID（可选，用于发现模型）",
+  "code.aiProvider.field.secretAccessKey": "AWS 秘密访问密钥（可选，用于发现模型）",
+  "code.aiProvider.field.sessionToken": "AWS 会话令牌（临时凭据）"
 });

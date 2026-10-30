@@ -266,3 +266,93 @@ test('OpenRouter preserves the exact signed reasoning chunk sequence through a t
   const invalid = create(() => sse([{ choices: [{ index: 0, delta: { reasoning_details: { invalid: true } }, finish_reason: 'stop' }] }], true));
   await assert.rejects(invalid.stream({ messages }), { code: 'INVALID_STREAM' });
 });
+
+const awsDiscovery = {
+  region: 'us-east-1', route: 'runtime', accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+  secretAccessKey: 'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY',
+  clock: () => new Date('2015-08-30T12:36:00Z'),
+};
+const foundationModel = (modelId, fields = {}) => ({ modelId, modelName: modelId,
+  modelLifecycle: { status: 'ACTIVE' }, outputModalities: ['TEXT'], responseStreamingSupported: true,
+  inferenceTypesSupported: ['ON_DEMAND'], ...fields });
+const inferenceProfile = (inferenceProfileId, modelId, fields = {}) => ({ inferenceProfileId, inferenceProfileName: inferenceProfileId,
+  status: 'ACTIVE', models: [{ modelArn: `arn:aws:bedrock:us-west-2::foundation-model/${modelId}` }], ...fields });
+
+test('Bedrock native discovery signs with WebCrypto and matches independent curl SigV4 vectors', async () => {
+  // Independently generated using curl --aws-sigv4 aws:amz:us-east-1:bedrock,
+  // fixed x-amz-date/content-sha256 headers, and AWS's public example credentials.
+  const vectors = [
+    ['', '1c3e35e2e6ecd349046982e2b0aaf8b8db575209b48cf0f4ff08a8869328a356'],
+    ['temporary+session/token=', 'db8f66c49e99e65da2cc96f4a8b1e551822d834e991497929dd0d480ecfff827'],
+  ];
+  for (const [sessionToken, signature] of vectors) {
+    const { requests, create } = fixture('bedrock', { ...awsDiscovery, sessionToken });
+    const provider = create((url, init) => init.method === 'POST' ? sse(openaiEvents, true)
+      : json(new URL(url).pathname === '/foundation-models' ? { modelSummaries: [foundationModel('openai.gpt-oss-120b-1:0')] } : { inferenceProfileSummaries: [] }));
+    const result = await provider.listModels({ currentModel: '' });
+    assert.equal(result.source, 'live'); assert.equal(result.selectedModel, '');
+    assert.equal(result.models[0].tools, null, 'native list cannot prove Chat or tool support');
+    assert.equal(requests[0].url, 'https://bedrock.us-east-1.amazonaws.com/foundation-models?byOutputModality=TEXT');
+    assert.equal(requests[0].headers.Authorization, `AWS4-HMAC-SHA256 Credential=${awsDiscovery.accessKeyId}/20150830/us-east-1/bedrock/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date${sessionToken ? ';x-amz-security-token' : ''}, Signature=${signature}`);
+    assert.equal(requests[0].headers['x-amz-security-token'], sessionToken || undefined);
+    assert.equal(requests[0].headers.host, undefined);
+    assert.equal(requests[0].headers['x-amz-date'], '20150830T123600Z');
+    assert.equal(JSON.stringify(requests).includes(awsDiscovery.secretAccessKey), false);
+    await provider.stream({ messages });
+    assert.equal(requests.at(-1).headers.Authorization, `Bearer ${key}`);
+    assert.equal(requests.at(-1).headers['x-amz-security-token'], undefined);
+    assert.equal(requests.at(-1).url, 'https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1/chat/completions');
+  }
+});
+
+test('Bedrock native catalog joins active streaming models with paginated profiles without guessing compatibility', async () => {
+  const { requests, create } = fixture('bedrock', { ...awsDiscovery, sessionToken: 'temporary+session/token=' });
+  const provider = create(url => {
+    const endpoint = new URL(url);
+    if (endpoint.pathname === '/foundation-models') return json({ modelSummaries: [
+      foundationModel('openai.gpt-oss-120b-1:0'), foundationModel('anthropic.profile-only', { inferenceTypesSupported: [] }),
+      foundationModel('legacy', { modelLifecycle: { status: 'LEGACY' } }),
+      foundationModel('no-stream', { responseStreamingSupported: false }),
+      foundationModel('image', { outputModalities: ['IMAGE'] }),
+    ] });
+    if (!endpoint.searchParams.has('nextToken')) return json({ inferenceProfileSummaries: [
+      inferenceProfile('us.anthropic.profile-only', 'anthropic.profile-only'),
+      inferenceProfile('inactive', 'openai.gpt-oss-120b-1:0', { status: 'INACTIVE' }),
+      inferenceProfile('invalid-target', 'image'), inferenceProfile('unknown-target', 'not-listed'),
+    ], nextToken: 'a+b/c=' });
+    return json({ inferenceProfileSummaries: [inferenceProfile('application-profile', 'openai.gpt-oss-120b-1:0')] });
+  });
+  const result = await provider.listModels({ currentModel: 'us.anthropic.profile-only' });
+  assert.deepEqual(result.models.map(item => item.id).sort(), ['application-profile', 'openai.gpt-oss-120b-1:0', 'us.anthropic.profile-only']);
+  assert.equal(result.selectedModel, 'us.anthropic.profile-only');
+  assert.equal(requests[2].headers.Authorization.split('Signature=')[1], '03c3791674fa5075cd1bb3297de6bd79da9bcf4a9bfadc106555dfe245f9aeb7');
+  assert.equal(new URL(requests[2].url).searchParams.get('nextToken'), 'a+b/c=');
+  assert.ok(requests.every(request => request.method === 'GET' && request.body === undefined));
+});
+
+test('Bedrock discovery rejects partial credentials, redacts failures and cancels before signed fetch', async () => {
+  let fetched = false;
+  const partial = createChatProvider({ provider: preset('bedrock'), region: 'us-east-1', route: 'runtime', accessKeyId: awsDiscovery.accessKeyId,
+    fetcher: async () => { fetched = true; } });
+  await assert.rejects(partial.listModels(), { code: 'AWS_CREDENTIALS_REQUIRED' });
+  assert.equal(fetched, false);
+  const broken = createChatProvider({ provider: preset('bedrock'), ...awsDiscovery,
+    fetcher: async () => { throw new Error(awsDiscovery.secretAccessKey); } });
+  await assert.rejects(broken.listModels(), error => error.code === 'NETWORK_ERROR' && !error.message.includes(awsDiscovery.secretAccessKey));
+  const cancelled = createChatProvider({ provider: preset('bedrock'), ...awsDiscovery, fetcher: async () => { fetched = true; } });
+  const controller = new AbortController();
+  const pending = cancelled.listModels({ signal: controller.signal }); controller.abort();
+  await assert.rejects(pending, { name: 'AbortError' }); assert.equal(fetched, false);
+  const cyclic = createChatProvider({ provider: preset('bedrock'), ...awsDiscovery, fetcher: async url => json(new URL(url).pathname === '/foundation-models'
+    ? { modelSummaries: [] } : { inferenceProfileSummaries: [], nextToken: 'repeated' }) });
+  await assert.rejects(cyclic.listModels(), { code: 'INVALID_CATALOG' });
+});
+
+test('Bedrock discovery remains self-contained when the factory is serialized in the secure sandbox', async () => {
+  const factory = vm.runInNewContext(`(${createChatProvider.toString()})`, { crypto: globalThis.crypto, URL, TextEncoder, TextDecoder, AbortController, DOMException, setTimeout, clearTimeout });
+  const provider = factory({ provider: preset('bedrock'), ...awsDiscovery, fetcher: async url => json(new URL(url).pathname === '/foundation-models'
+    ? { modelSummaries: [foundationModel('example.chat')] } : { inferenceProfileSummaries: [] }) });
+  const result = await provider.listModels();
+  assert.equal(result.models[0].id, 'example.chat');
+  assert.equal(result.selectedModel, '');
+});
