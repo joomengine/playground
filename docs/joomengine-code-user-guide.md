@@ -48,6 +48,8 @@ Use **File recovery** to inspect and restore recent saved-file changes while the
 
 Select **AI assistant** in the editor toolbar and expand **Provider settings**. Enter an HTTPS OpenAI-compatible API base URL, a tool-capable model and your API key. The initial implementation labels endpoints as unverified until authenticated browser checks have been recorded. OpenRouter is a documented candidate, not yet a verified supported preset.
 
+AI text edits support UTF-8 files and preserve an existing byte-order mark and uniform line-ending style before displaying the review. New files retain the proposed format. If an existing file has mixed line endings, choose its intended line endings in the editor, save it, and prepare the AI proposal again. Use the editor for deliberate encoding or line-ending conversion.
+
 The AI can read bounded relevant context and propose changes. Review the operation list and before/after content before selecting Accept. Reject makes no filesystem changes. Accepted changes use the normal file-save workflow and recovery history; manual refresh remains manual. A partial failure reports completed and failed operations instead of silently repeating the proposal.
 
 Use **Cancel request** to stop an in-progress provider request. Cancellation does not undo changes you already accepted. Use **Recover previous files** on an accepted proposal for the supported recovery path, and resolve any conflicting disk or unsaved-buffer changes first.

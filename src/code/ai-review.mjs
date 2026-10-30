@@ -41,6 +41,19 @@ function textOf(bytes, path) {
     return text;
   } catch { throw new Error(`${path} is binary or has an unsupported encoding. AI text editing cannot safely rewrite it.`); }
 }
+function preserveTextFormat(content, before, path) {
+  let ending;
+  for (const match of before.matchAll(/\r\n|\r|\n/g)) {
+    if (ending && ending !== match[0]) {
+      throw new Error(`${path} has mixed line endings. Choose its intended line endings in the editor, save the file, and prepare the AI changes again.`);
+    }
+    ending = match[0];
+  }
+  // The model supplies text, not an intentional encoding/line-ending change.
+  // Preserve the existing format before showing the exact content for review.
+  const body = content.startsWith('\ufeff') ? content.slice(1) : content;
+  return (before.startsWith('\ufeff') ? '\ufeff' : '') + (ending ? body.replace(/\r\n|\r|\n/g, ending) : body);
+}
 
 /**
  * AI can prepare changes, never accept them. The UI owns accept/reject controls.
@@ -110,15 +123,20 @@ export function createAiReview({ workspace, isDirty = () => false, onApplied = (
       if (input.operation === 'write') {
         if (typeof input.content !== 'string' || input.content.includes('\0')) throw new TypeError('AI writes require complete text contents.');
         if (stat && stat.type !== 'file') throw new Error(`Cannot write text over a directory: ${path}`);
-        const bytes = encoder.encode(input.content);
-        totalBytes += bytes.byteLength;
+        let content = input.content;
         if (stat) {
           const read = await workspace.request('read', { path });
           if (read.revision !== originalRevision) throw new Error(`${path} changed while the AI review was being prepared. Prepare it again.`);
           totalBytes += read.bytes.byteLength;
           operation.before = textOf(read.bytes, path);
+          content = preserveTextFormat(content, operation.before, path);
         }
-        operation.after = input.content;
+        const bytes = encoder.encode(content);
+        // TextEncoder replaces unpaired surrogates. Do not review one string
+        // and silently apply different characters to the user's file.
+        if (decoder.decode(bytes) !== content) throw new TypeError('AI writes require valid Unicode text without unpaired surrogates.');
+        totalBytes += bytes.byteLength;
+        operation.after = content;
         operation.bytes = bytes.byteLength;
         changes.push({ operation: 'write', path, bytes, create: true, overwrite: Boolean(stat), expectedRevision: originalRevision, expectedCanonicalPath: canonical });
       } else if (input.operation === 'mkdir') {
