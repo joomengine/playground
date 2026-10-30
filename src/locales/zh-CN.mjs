@@ -478,5 +478,7 @@ export default Object.freeze({
   "code.aiPanel.contextTruncated": "上下文列表已达到上限。请选择更小的文件夹或缩小搜索范围。",
   "code.aiProvider.group.providers": "模型提供商",
   "code.aiProvider.group.services": "推理服务",
-  "code.aiProvider.group.custom": "自定义和本地 API"
+  "code.aiProvider.group.custom": "自定义和本地 API",
+  "code.aiPanel.omittedScope": "不在所选范围内，或已被您的设置排除。",
+  "code.aiPanel.omittedFile": "无法包含此文件。请选择位于原始工作区路径下的受支持文本文件。"
 });

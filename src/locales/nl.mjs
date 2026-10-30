@@ -1,4 +1,6 @@
 export default Object.freeze({
+  "code.aiPanel.omittedScope": "Buiten het geselecteerde bereik of uitgesloten door je instellingen.",
+  "code.aiPanel.omittedFile": "Dit bestand kon niet worden opgenomen. Kies een ondersteund tekstbestand op het oorspronkelijke pad in de werkruimte.",
   "code.aiPanel.connections": "Opgeslagen aangepaste verbindingen",
   "code.aiPanel.connectionName": "Verbindingsnaam",
   "code.aiPanel.newConnection": "Nieuwe aangepaste verbinding",

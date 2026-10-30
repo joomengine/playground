@@ -478,5 +478,7 @@ export default Object.freeze({
   "code.aiPanel.contextTruncated": "संदर्भ सूची अपनी सीमा तक पहुँच गई है। छोटा फ़ोल्डर चुनें या खोज का दायरा सीमित करें।",
   "code.aiProvider.group.providers": "मॉडल प्रदाता",
   "code.aiProvider.group.services": "इन्फ़रेंस सेवाएँ",
-  "code.aiProvider.group.custom": "कस्टम और लोकल API"
+  "code.aiProvider.group.custom": "कस्टम और लोकल API",
+  "code.aiPanel.omittedScope": "चयनित दायरे से बाहर है या आपकी सेटिंग्स के अनुसार बाहर रखा गया है।",
+  "code.aiPanel.omittedFile": "इस फ़ाइल को शामिल नहीं किया जा सका। कार्यक्षेत्र में उसके मूल पथ पर मौजूद समर्थित टेक्स्ट फ़ाइल चुनें।"
 });

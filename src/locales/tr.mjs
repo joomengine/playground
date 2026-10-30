@@ -1,4 +1,6 @@
 export default Object.freeze({
+  "code.aiPanel.omittedScope": "Seçilen kapsamın dışında veya ayarlarınız tarafından hariç tutuluyor.",
+  "code.aiPanel.omittedFile": "Bu dosya eklenemedi. Çalışma alanındaki özgün yolunda bulunan, desteklenen bir metin dosyası seçin.",
   "code.aiPanel.connections": "Kaydedilmiş özel bağlantılar",
   "code.aiPanel.connectionName": "Bağlantı adı",
   "code.aiPanel.newConnection": "Yeni özel bağlantı",

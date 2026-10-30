@@ -1,4 +1,6 @@
 export default Object.freeze({
+  "code.aiPanel.omittedScope": "Hors du périmètre sélectionné ou exclu par vos paramètres.",
+  "code.aiPanel.omittedFile": "Ce fichier n’a pas pu être inclus. Choisissez un fichier texte pris en charge à son emplacement d’origine dans l’espace de travail.",
   "code.aiPanel.connections": "Connexions personnalisées enregistrées",
   "code.aiPanel.connectionName": "Nom de la connexion",
   "code.aiPanel.newConnection": "Nouvelle connexion personnalisée",

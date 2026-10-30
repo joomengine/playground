@@ -1,4 +1,6 @@
 export default Object.freeze({
+  "code.aiPanel.omittedScope": "Εκτός του επιλεγμένου πεδίου πρόσβασης ή εξαιρείται από τις ρυθμίσεις σας.",
+  "code.aiPanel.omittedFile": "Δεν ήταν δυνατή η συμπερίληψη αυτού του αρχείου. Επιλέξτε ένα υποστηριζόμενο αρχείο κειμένου στην αρχική του διαδρομή στον χώρο εργασίας.",
   "code.aiPanel.connections": "Αποθηκευμένες προσαρμοσμένες συνδέσεις",
   "code.aiPanel.connectionName": "Όνομα σύνδεσης",
   "code.aiPanel.newConnection": "Νέα προσαρμοσμένη σύνδεση",

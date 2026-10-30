@@ -1,4 +1,6 @@
 export default Object.freeze({
+  "code.aiPanel.omittedScope": "מחוץ לטווח הגישה שנבחר או מוחרג לפי ההגדרות שלכם.",
+  "code.aiPanel.omittedFile": "לא ניתן היה לכלול את הקובץ הזה. בחרו קובץ טקסט נתמך בנתיב המקורי שלו בסביבת העבודה.",
   "code.aiPanel.connections": "חיבורים מותאמים אישית שנשמרו",
   "code.aiPanel.connectionName": "שם החיבור",
   "code.aiPanel.newConnection": "חיבור מותאם אישית חדש",
