@@ -264,7 +264,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
       workbench = await frame.contentWindow.JoomEngineCode.mount({
         workspace, siteId: runtime.workspace.id, storageId: runtime.workspace.storageId,
         phpVersion: runtime.configuration.phpVersion,
-        onError: report, t, theme: currentTheme, shellStylesheet, favicon: new URL('../brand/favicon.svg', import.meta.url).href,
+        onError: report, t, theme: currentTheme, shellStylesheet, favicon: new URL('../brand/favicon.svg?v=pearl-20261030', import.meta.url).href,
         onDetachedTools: mountDetachedTools,
         debuggerBackend: {
           ...Object.fromEntries(['stop', 'setBreakpoints', 'continue', 'next', 'stepIn', 'stepOut', 'pause',
