@@ -17,7 +17,7 @@ import { assertLaunchCountdown, assertFailedDeploymentRecovery } from './launch-
 import { assertLiveFocusMode, assertInitialFocusMode } from './focus-ui-contract.mjs';
 import { assertJcbHardReload } from './jcb-hard-reload-contract.mjs';
 import { assertSavedSiteRecovery } from './saved-site-recovery-contract.mjs';
-import { classifyAssetDiagnostics } from './asset-diagnostics.mjs';
+import { classifyAssetDiagnostics, classifyNavigationAbortDiagnostics } from './asset-diagnostics.mjs';
 import { assertMcpHttp } from './mcp-http.mjs';
 import { probeSyntheticRedirect, startRedirectTrace, recordVerifiedRedirectDiagnostic } from './firefox-redirect-probe.mjs';
 import { inventory } from '../scripts/assets.mjs';
@@ -115,6 +115,12 @@ async function bounded(promise, label, timeoutMs = requestTimeout) {
 function observePage(page) {
   let step;
   const started = Date.now();
+  const frameStates = new WeakMap(), requestOrigins = new WeakMap();
+  let nextFrameId = 0;
+  const frameState = frame => {
+    if (!frameStates.has(frame)) frameStates.set(frame, { frameId: ++nextFrameId, documentId: 0, url: frame.url() });
+    return frameStates.get(frame);
+  };
   Object.defineProperty(page, 'testStep', {
     get: () => step,
     set(value) {
@@ -133,16 +139,34 @@ function observePage(page) {
   page.responseErrors = [];
   page.pendingSiteRequests = new Map();
   page.responseChecks = new Set();
+  page.frameNavigations = [];
+  page.on('framenavigated', frame => {
+    const previous = frameState(frame);
+    const navigation = page.frameNavigations.findLast(value => value.frameId === previous.frameId
+      && value.documentId === previous.documentId && value.kind === 'navigation' && value.committed === undefined);
+    if (navigation) navigation.committed = Date.now();
+    frameStates.set(frame, { ...previous, documentId: previous.documentId + 1, url: frame.url() });
+  });
+  page.on('framedetached', frame => {
+    const previous = frameState(frame), time = Date.now();
+    page.frameNavigations.push({ ...previous, fromURL: previous.url, kind: 'detach', started: time, committed: time });
+  });
   page.on('pageerror', (error) => page.errors.push(error.stack || error.message));
   page.on('console', (message) => {
     if (['warning', 'error'].includes(message.type())) page.logs.push(message.text());
     if (message.type() === 'error') {
       const location = message.location();
       const expected = [...page.expectedConsoleURLs].some((url) => location.url === url || message.text().includes(url));
-      if (!expected) page.consoleErrors.push({ message: message.text(), url: location.url, step: page.testStep });
+      if (!expected) page.consoleErrors.push({ message: message.text(), url: location.url, step: page.testStep, time: Date.now() });
     }
   });
   page.on('request', (request) => {
+    try {
+      const frame = request.frame(), state = frameState(frame), time = Date.now();
+      requestOrigins.set(request, { frameId: state.frameId, documentId: state.documentId, documentURL: frame.url() });
+      if (request.isNavigationRequest()) page.frameNavigations.push({ ...state, fromURL: state.url,
+        toURL: request.url(), kind: 'navigation', started: time });
+    } catch { /* Service-worker requests have no frame and cannot qualify. */ }
     if (request.url().includes('/__site/')) page.pendingSiteRequests.set(request, {
       url: request.url(), method: request.method(), type: request.resourceType(), started: Date.now(),
     });
@@ -150,9 +174,11 @@ function observePage(page) {
   page.on('requestfinished', (request) => page.pendingSiteRequests.delete(request));
   page.on('requestfailed', (request) => {
     page.pendingSiteRequests.delete(request);
-    page.failedRequests.push({ url: request.url(), method: request.method(), type: request.resourceType(), error: request.failure()?.errorText, step: page.testStep });
+    page.failedRequests.push({ ...requestOrigins.get(request), url: request.url(), method: request.method(), type: request.resourceType(), error: request.failure()?.errorText, step: page.testStep, time: Date.now() });
   });
   page.on('response', (response) => {
+    const origin = requestOrigins.get(response.request());
+    if (origin) origin.status = response.status();
     const siteResponse = response.url().includes('/__site/');
     const staticResponse = ['image', 'script', 'stylesheet', 'font'].includes(response.request().resourceType());
     if (!siteResponse && !staticResponse) return;
@@ -190,7 +216,7 @@ async function saveBrowserDiagnostics(page, name, error) {
   const diagnostics = {
     message: error.stack || error.message, step: page.testStep, state, frames,
     errors: page.errors, logs: page.logs?.slice(-30), consoleErrors: page.consoleErrors, knownBrowserDiagnostics: page.knownBrowserDiagnostics, contentDiagnostics: page.contentDiagnostics, failedSiteRequests: page.failedSiteRequests, failedRequests: page.failedRequests,
-    responseErrors: page.responseErrors, pendingSiteRequests: [...(page.pendingSiteRequests?.values() || [])],
+    responseErrors: page.responseErrors, frameNavigations: page.frameNavigations, pendingSiteRequests: [...(page.pendingSiteRequests?.values() || [])],
   };
   await mkdir(path.join(root, 'test-results'), { recursive: true });
   await writeFile(path.join(root, 'test-results', `${name}-failure.json`), `${JSON.stringify(diagnostics, null, 2)}\n`);
@@ -200,9 +226,11 @@ async function saveBrowserDiagnostics(page, name, error) {
 
 async function assertCleanConsole(page, { contentImages = false } = {}) {
   await bounded(Promise.allSettled([...page.responseChecks]), 'Read browser responses', 10_000);
-  let consoleErrors = page.consoleErrors;
+  const navigation = classifyNavigationAbortDiagnostics(page.consoleErrors, page.failedRequests, page.frameNavigations);
+  page.knownBrowserDiagnostics.push(...navigation.navigationAborts);
+  let consoleErrors = navigation.consoleErrors;
   if (contentImages) {
-    const diagnostics = classifyAssetDiagnostics(page.failedSiteRequests, page.consoleErrors);
+    const diagnostics = classifyAssetDiagnostics(page.failedSiteRequests, consoleErrors);
     page.contentDiagnostics = diagnostics.missingImages;
     assert.deepEqual(diagnostics.unexpectedAssets, [], 'Installed images, scripts, styles and fonts must load successfully.');
     consoleErrors = diagnostics.consoleErrors;

@@ -72,21 +72,67 @@ async function assertNativeDebugWorkbench(page, browserName, phpVersion) {
   assert.deepEqual(await page.evaluate(() => window.debugUiErrors), []);
   await mkdir(path.join(root, 'test-results'), { recursive: true });
   await page.screenshot({ path: path.join(root, 'test-results', `debug-native-ui-${browserName}-${phpVersion}.png`) });
-  const before = await page.evaluate(() => window.debugEvents.filter(event => event.event === 'stopped').length);
+  const originalFrames = await page.evaluate(() => window.playground.debugger.stackTrace());
+  const originalPath = originalFrames[0].source.path;
+  const marker = '// JoomEngine paused buffer survives cross-file stepping';
+  await editor.locator('.monaco-editor .view-lines').first().click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.insertText(marker);
+  await editor.locator('.tab.dirty').getByText('AdministratorApplication.php', { exact: true }).waitFor();
+  let frames = originalFrames;
+  for (let attempt = 0; frames[0].source.path === originalPath && attempt < 12; attempt++) {
+    const before = await page.evaluate(() => window.debugEvents.filter(event => event.event === 'stopped').length);
+    await editor.locator('.debug-toolbar .codicon-debug-step-into').click();
+    await page.waitForFunction(count => window.debugEvents.filter(event => event.event === 'stopped').length > count, before);
+    frames = await page.evaluate(() => window.playground.debugger.stackTrace());
+  }
+  assert.notEqual(frames[0].source.path, originalPath, 'Step Into must reach an unopened Joomla source file.');
+  assert.ok(frames.length > originalFrames.length, 'The new file must be a real callee.');
+  const calleePath = frames[0].source.path.slice('/persist/www'.length);
+  const calleeName = calleePath.split('/').at(-1);
+  await editor.locator('.tab.active').getByText(calleeName, { exact: true }).waitFor();
+  await editor.locator('.monaco-editor [class*="debug-top-stack-frame"]').first().waitFor();
+  await page.screenshot({ path: path.join(root, 'test-results', `debug-cross-file-${browserName}-${phpVersion}.png`) });
+  await editor.locator('.monaco-editor .view-lines').first().click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.insertText(marker);
+  await editor.locator('.tab.dirty').getByText(calleeName, { exact: true }).waitFor();
+  await page.locator('button[data-i18n="code.saveAll"]').click();
+  const pausedSources = await page.evaluate(async paths => Promise.all(paths.map(path => window.playground.workspace.request('read', { path })
+    .then(value => new TextDecoder().decode(value.bytes)))), [originalPath.slice('/persist/www'.length), calleePath]);
+  assert.ok(pausedSources.every(source => !source.includes(marker)), 'Queued saves cannot change the active PHP snapshot while paused.');
+  assert.equal(await editor.locator('.tab.dirty').count(), 2, 'Both unsaved editor buffers must remain intact while saves wait.');
+  let before = await page.evaluate(() => window.debugEvents.filter(event => event.event === 'stopped').length);
   await editor.locator('.debug-toolbar .codicon-debug-step-over').click();
   await page.waitForFunction(count => window.debugEvents.filter(event => event.event === 'stopped').length > count, before);
-  const frames = await page.evaluate(() => window.playground.debugger.stackTrace());
-  assert.equal(frames[0].source.path, '/persist/www/libraries/src/Application/AdministratorApplication.php');
-  assert.ok(frames[0].line > await page.evaluate(() => window.debugDispatchLine), 'Native Step Over must finish dispatch without entering its callee.');
+  frames = await page.evaluate(() => window.playground.debugger.stackTrace());
+  assert.equal(frames[0].source.path, `/persist/www${calleePath}`, 'Step Over must retain the current callee source.');
   await editor.locator('.monaco-editor [class*="debug-top-stack-frame"]').first().waitFor();
+  for (let attempt = 0; frames.length > originalFrames.length && attempt < 12; attempt++) {
+    before = await page.evaluate(() => window.debugEvents.filter(event => event.event === 'stopped').length);
+    await editor.locator('.debug-toolbar .codicon-debug-step-out').click();
+    await page.waitForFunction(count => window.debugEvents.filter(event => event.event === 'stopped').length > count, before);
+    frames = await page.evaluate(() => window.playground.debugger.stackTrace());
+  }
+  assert.equal(frames[0].source.path, originalPath);
+  await editor.locator('.tab.active.dirty').getByText('AdministratorApplication.php', { exact: true }).waitFor();
   await editor.locator('.debug-toolbar .codicon-debug-continue').click();
   const response = await responsePromise;
   assert.equal(response.status(), 200);
   assert.match(await response.text(), /JoomEngine Debug Contract/);
   await page.waitForFunction(() => window.playground.debugger.state === 'idle');
   await editor.locator('.debug-toolbar').waitFor({ state: 'hidden' });
+  await editor.locator('.tab.dirty').first().waitFor({ state: 'hidden' });
+  const savedSources = await page.evaluate(async paths => Promise.all(paths.map(path => window.playground.workspace.request('read', { path })
+    .then(value => new TextDecoder().decode(value.bytes)))), [originalPath.slice('/persist/www'.length), calleePath]);
+  assert.ok(savedSources.every(source => source.includes(marker)), 'Both dirty buffers must save only after PHP releases the request.');
   assert.deepEqual(await page.evaluate(() => window.debugUiErrors), []);
   await page.evaluate(() => window.codeHost.dispose());
+  return { calleePath, dirtyBuffersPreserved: 2, pausedSaveQueued: true };
 }
 
 for (const name of browsers) for (const phpVersion of versions) test(
@@ -246,7 +292,7 @@ echo json_encode(['rows' => (int) $db->query('SELECT COUNT(*) FROM ' . $config->
       assert.doesNotMatch(recovered.text, /id="mod-login-username"/);
       assert.deepEqual(recovered.effects, { rows: 2, files: 2 }, 'Stopped POST is never automatically replayed.');
       assert.equal(recovered.state, 'idle');
-      if (phpVersion === manifest.defaults.phpVersion) await assertNativeDebugWorkbench(page, name, phpVersion);
+      const nativeSourceProof = phpVersion === manifest.defaults.phpVersion ? await assertNativeDebugWorkbench(page, name, phpVersion) : null;
       assert.deepEqual(errors, []);
       assert.doesNotMatch(logs.join('\n'), /(?:TypeError|RuntimeError):/, 'The native debug UI must render without JavaScript or WebAssembly errors.');
       await mkdir(path.join(root, 'test-results'), { recursive: true });
@@ -255,6 +301,7 @@ echo json_encode(['rows' => (int) $db->query('SELECT COUNT(*) FROM ' . $config->
         authenticatedGet: true, appObjectAndCaller: true, stepped: true, postOnce: once.rows === 1,
         pausedWriteQueued: true, stopAndRecovery: true, databaseEffects: recovered.effects.rows, filesystemEffects: recovered.effects.files,
         nativeWorkbenchDebugUI: phpVersion === manifest.defaults.phpVersion,
+        nativeSourceProof,
       }, null, 2));
     } catch (error) {
       await mkdir(path.join(root, 'test-results'), { recursive: true });

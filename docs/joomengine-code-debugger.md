@@ -29,6 +29,14 @@ debugger worker after ten seconds. A forced termination keeps the last confirmed
 filesystem. Completed database writes remain; stopped POST requests are never
 replayed automatically.
 
+Source reads also remain available during a pause. A bounded read lane uses the
+paused debugger's actual filesystem and the normal workspace confinement,
+canonical-path and revision checks. This includes source files created by PHP
+before the pause. Newly opened callee files retain their normal editor identity;
+clean models revalidate and dirty buffers keep their content and original save
+revision. Read operations cannot mutate the debug filesystem. Save All retains
+its position in the owner's write queue until the request finishes.
+
 ## Native bridge and reproducible builds
 
 `native/phpdbg/jec_phpdbg_http.c` is an Apache-2.0 PHP extension loaded only in
@@ -91,6 +99,8 @@ authenticated page still works. On the default PHP version it also opens the
 actual workbench, sets a gutter breakpoint with F9, starts Debug and Refresh,
 checks the native call stack, current-line marker and expanded application
 properties, then uses the native Step Over and Continue toolbar buttons to
-complete the real Joomla response. Browser selection uses
+complete the real Joomla response. It steps into an unopened callee file, edits
+both source buffers while paused, queues Save All, steps back to the original
+dirty model and verifies both files save after the HTTP response. Browser selection uses
 `PLAYGROUND_BROWSERS`; PHP selection uses `PLAYGROUND_PHP_VERSIONS`.
 Without a PHP selector the browser contract covers every supported PHP minor.

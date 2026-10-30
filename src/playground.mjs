@@ -71,9 +71,11 @@ export class PhpSession {
     this.queued = 0;
     this.failure = null;
     this.workspaceListeners = new Set();
+    this.workspaceReads = new Set();
     this.debugListeners = new Set();
     this.requestProgress = new Set();
     this.debugState = 'idle';
+    this.debugPauseGeneration = 0;
     this.worker.addEventListener('error', event => this.fail(new Error(event.message || 'The PHP worker failed.')));
     this.worker.addEventListener('messageerror', () => this.fail(new Error('The PHP worker sent an unreadable message.')));
     this.worker.addEventListener('message', event => this.receive(event.data));
@@ -91,6 +93,10 @@ export class PhpSession {
         // Suspend their service-worker deadlines before they start executing.
         for (const listener of this.requestProgress) {
           try { listener(message.state); } catch { /* A closed response port cannot interrupt PHP. */ }
+        }
+        if (message.state === 'paused') {
+          this.debugPauseGeneration++;
+          for (const read of this.workspaceReads) this.dispatchPausedWorkspaceRead(read);
         }
       }
       for (const listener of this.debugListeners) { try { listener(message); } catch { /* Debug views do not own PHP. */ } }
@@ -180,6 +186,61 @@ export class PhpSession {
       this.worker.postMessage({ type: 'debug-command', id, command, args });
     });
   }
+  workspaceRequest(operation, args = {}) {
+    if (!['read', 'stat', 'list', 'search', 'cancelSearch'].includes(operation)) return this.send(`workspace.${operation}`, args);
+    if (this.failure) return Promise.reject(this.failure);
+    // Paused source inspection must remain available even when HTTP/writes fill
+    // the ordinary FIFO. Both lanes remain bounded independently.
+    if (this.workspaceReads.size >= 64 || (this.debugState !== 'paused' && this.queued >= 64)) return Promise.reject(new Error('The PHP request queue is full.'));
+    let resolve, reject;
+    const result = new Promise((yes, no) => { resolve = yes; reject = no; });
+    const read = { operation, args, state: 'queued', queued: false,
+      finish: (error, value) => {
+        if (read.state === 'finished') return;
+        read.state = 'finished'; this.workspaceReads.delete(read); this.queued--;
+        if (error) reject(error); else resolve(value);
+      },
+    };
+    this.queued++; this.workspaceReads.add(read);
+    if (this.debugState === 'paused') this.dispatchPausedWorkspaceRead(read);
+    else this.queueWorkspaceRead(read);
+    return result;
+  }
+  queueWorkspaceRead(read) {
+    if (read.queued || read.state === 'finished') return;
+    read.queued = true;
+    const queued = this.queue.then(async () => {
+      // A pause may have moved this read to the debugger's live filesystem.
+      // Keep its original FIFO position as a no-op so writes never move ahead.
+      while (read.state === 'direct') await read.direct;
+      if (read.state !== 'queued' && read.state !== 'retry') return;
+      read.state = 'normal';
+      try { read.finish(null, await this.perform(`workspace.${read.operation}`, read.args)); }
+      catch (error) { read.finish(error); }
+    });
+    this.queue = queued.catch(error => { read.finish(error); });
+  }
+  dispatchPausedWorkspaceRead(read) {
+    if (read.state !== 'queued' && read.state !== 'retry') return;
+    read.state = 'direct';
+    const pauseGeneration = this.debugPauseGeneration;
+    read.direct = this.debugCommand('workspaceRead', { operation: read.operation, args: read.args }).then(
+      value => { read.finish(null, value); },
+      error => {
+        if (read.state === 'finished') return;
+        if (error.code === 'DEBUG_NOT_PAUSED' && !this.failure) {
+          // Continue/stop won the race. Read only after the normal owner queue
+          // regains the returned filesystem; never fall back to a stale copy.
+          read.state = 'retry';
+          // A step may already have reached a newer pause before the old read's
+          // rejection arrives. Retry that new snapshot once per pause, rather
+          // than leaving source navigation behind the still-running request.
+          if (this.debugState === 'paused' && this.debugPauseGeneration !== pauseGeneration) this.dispatchPausedWorkspaceRead(read);
+          else this.queueWorkspaceRead(read);
+        } else read.finish(error);
+      },
+    );
+  }
   withWorkspaceBatch(callback) {
     if (this.failure) return Promise.reject(this.failure);
     if (this.queued >= 64) return Promise.reject(new Error('The PHP request queue is full.'));
@@ -227,12 +288,20 @@ export class PhpSession {
     try { this.onFailure?.(error); } catch { /* Cleanup still completes if a UI callback fails. */ }
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
     this.pending.clear();
+    for (const read of this.workspaceReads) read.finish(error);
     this.recovery = this.database?.reset().catch(() => {});
     return this.recovery;
   }
   async close() {
     try { if (!this.failure) { await this.debugCommand('stop').catch(() => {}); await this.send('close'); } }
-    finally { this.workspaceListeners.clear(); this.debugListeners.clear(); this.requestProgress.clear(); this.worker.terminate(); this.failure ??= new Error('This PHP session is closed.'); await this.recovery; }
+    finally {
+      this.workspaceListeners.clear(); this.debugListeners.clear(); this.requestProgress.clear();
+      this.worker.terminate(); this.failure ??= new Error('This PHP session is closed.');
+      for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(this.failure); }
+      this.pending.clear();
+      for (const read of this.workspaceReads) read.finish(this.failure);
+      await this.recovery;
+    }
   }
 }
 
@@ -403,7 +472,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           if (closePromise) throw new Error('This JoomEngine Code workspace is closed.');
           if (changing) throw new Error('Wait for the current site operation before using JoomEngine Code.');
           if (!/^[a-zA-Z]+$/.test(operation)) throw new TypeError('Invalid workspace operation.');
-          return session.send(`workspace.${operation}`, args);
+          return session.workspaceRequest(operation, args);
         },
         subscribe(listener) {
           if (typeof listener !== 'function') throw new TypeError('A workspace listener is required.');

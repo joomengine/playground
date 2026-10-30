@@ -1,3 +1,5 @@
+import { createWorkspaceFileService } from './workspace-files.mjs';
+
 const ROOTS = ['/persist', '/config', '/tmp', '/internal'];
 const INTERNAL_PREFIX = '/internal/jec-';
 const MAX_RESPONSE_BYTES = 320 * 1024 * 1024;
@@ -240,6 +242,7 @@ export class PhpDebugRuntime {
       }
       this.rejectPrompts(new Error('The PHP debug request has ended.'));
       this.references.clear();
+      this.workspaceReader = null; this.workspaceReadFS = null;
       this.php = null; this.binary = null; this.phase = 'idle';
       this.emit('terminated', {});
     }
@@ -326,12 +329,18 @@ export class PhpDebugRuntime {
   async resume(command, { prepare, step = command !== 'continue' } = {}) {
     await this.inspectionQueue;
     this.requirePaused();
-    await this.send('ev jec_debug_clear()');
-    if (prepare) await this.send(`ev ${prepare}`);
-    this.binary.jecDebugResume();
-    this.phase = 'running'; this.resumeReason = step ? 'step' : undefined; this.references.clear(); this.callbacks.resumed?.();
-    this.emit('continued', { threadId: 1, allThreadsContinued: true });
-    await this.php.provideInput(command);
+    this.phase = 'resuming';
+    try {
+      await this.send('ev jec_debug_clear()');
+      if (prepare) await this.send(`ev ${prepare}`);
+      this.binary.jecDebugResume();
+      this.phase = 'running'; this.resumeReason = step ? 'step' : undefined; this.references.clear(); this.callbacks.resumed?.();
+      this.emit('continued', { threadId: 1, allThreadsContinued: true });
+      await this.php.provideInput(command);
+    } catch (error) {
+      if (this.phase === 'resuming') this.phase = 'paused';
+      throw error;
+    }
   }
   continue() { return this.resume('continue'); }
   next() { return this.resume('continue', { prepare: 'jec_debug_step_over()', step: true }); }
@@ -353,6 +362,27 @@ export class PhpDebugRuntime {
     this.requirePaused();
     return (await this.php.dumpBacktrace()).filter(frame => frame.filename.startsWith('/persist/www/')).map(frame => ({ id: frame.frame,
       name: frame.filename.split('/').at(-1) || 'PHP', source: { path: frame.filename }, line: frame.lineNo || 1, column: 1 }));
+  }
+  workspaceRead(operation, args = {}) {
+    if (!['stat', 'list', 'read', 'search', 'cancelSearch'].includes(operation)) {
+      return Promise.reject(Object.assign(new Error('Only source reads are allowed through the paused debugger.'), { code: 'INVALID_OPERATION' }));
+    }
+    const read = () => {
+      if (!this.binary || this.phase !== 'paused') throw Object.assign(new Error('The PHP request is no longer paused.'), { code: 'DEBUG_NOT_PAUSED' });
+      if (this.workspaceReadFS !== this.binary.FS) {
+        this.workspaceReadFS = this.binary.FS;
+        // Preserve actual writable metadata for editor buffers. The operation
+        // allowlist above is the write boundary; saves still use the CGI owner.
+        this.workspaceReader = createWorkspaceFileService(this.binary.FS, '/persist/www');
+      }
+      return this.workspaceReader.handle(operation, args);
+    };
+    // Cancelling a search changes only its cursor token and must not wait for
+    // that search's bounded scan before the cancellation can be observed.
+    if (operation === 'cancelSearch') return Promise.resolve().then(read);
+    const result = this.inspectionQueue.then(read);
+    this.inspectionQueue = result.catch(() => {});
+    return result;
   }
   reference(value) { const id = this.nextReference++; this.references.set(id, value); return id; }
   async withFrame(frame, action) {
@@ -406,7 +436,8 @@ export class PhpDebugRuntime {
       continue: () => this.continue(), next: () => this.next(), stepIn: () => this.stepIn(), stepOut: () => this.stepOut(),
       pause: () => this.pause(), stop: () => this.stop(), stackTrace: () => this.stackTrace(),
       scopes: () => this.scopes(args.frameId), variables: () => this.variables(args.reference, args),
-      evaluate: () => this.evaluate(args.expression, args.frameId) };
+      evaluate: () => this.evaluate(args.expression, args.frameId),
+      workspaceRead: () => this.workspaceRead(args.operation, args.args) };
     if (!Object.hasOwn(allowed, name)) throw new TypeError(`Unsupported PHP debugger operation: ${name}`);
     return allowed[name]();
   }

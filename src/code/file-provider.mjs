@@ -18,6 +18,7 @@ const errors = {
   READ_ONLY: FileSystemProviderErrorCode.NoPermissions,
 };
 const types = { file: FileType.File, directory: FileType.Directory, symlink: FileType.SymbolicLink };
+const sourceReads = new Set(['stat', 'list', 'read', 'search', 'cancelSearch']);
 
 /** The editor uses site-relative URIs; only the worker knows the PHP document root. */
 export function workspaceUri(siteId, path = '/') {
@@ -65,9 +66,12 @@ export class JoomlaFileSystemProvider {
     this.observed = new Map();
     this.waiting = [];
     this.activeRequests = 0;
+    this.activeReads = 0;
     this.inflight = new Map();
     this.subscription = workspace.subscribe?.(event => {
-      if (event.type === 'workspace-invalidated') void this.revalidate().catch(onError);
+      if (event.type === 'workspace-invalidated' || (event.type === 'debug-state' && event.state === 'paused')) {
+        void this.revalidate().catch(onError);
+      }
       else this.notify(event.changes || event);
     });
   }
@@ -75,8 +79,8 @@ export class JoomlaFileSystemProvider {
   uri(path) { return workspaceUri(this.siteId, path); }
   path(uri) { return workspacePath(uri, this.siteId); }
   async request(operation, args) {
-    // Explorer resolves sibling metadata concurrently. Apply backpressure here,
-    // before the owner's shared PHP/HTTP queue, rather than increasing its limit.
+    // Explorer resolves sibling metadata concurrently. Bound source reads
+    // independently so queued saves cannot prevent opening a paused stack frame.
     const key = ['stat', 'list'].includes(operation) ? `${operation}:${JSON.stringify(args)}` : null;
     if (key && this.inflight.has(key)) return this.inflight.get(key);
     const pending = new Promise((resolve, reject) => {
@@ -85,18 +89,28 @@ export class JoomlaFileSystemProvider {
       this.drain();
     });
     const translated = pending.catch(error => {
-      if (error.code === 'CONFLICT') throw new FileOperationError(error.message, FileOperationResult.FILE_MODIFIED_SINCE);
-      throw new FileSystemProviderError(error.message, errors[error.code] || FileSystemProviderErrorCode.Unknown);
+      const failure = error.code === 'CONFLICT'
+        ? new FileOperationError(error.message, FileOperationResult.FILE_MODIFIED_SINCE)
+        : new FileSystemProviderError(error.message, errors[error.code] || FileSystemProviderErrorCode.Unknown);
+      // Keep VS Code's public code while allowing workspace clients to handle
+      // recoverable protocol errors such as a cursor from another PHP runtime.
+      failure.cause = error;
+      failure.workspaceCode = error.code;
+      throw failure;
     }).finally(() => { if (key && this.inflight.get(key) === translated) this.inflight.delete(key); });
     if (key) this.inflight.set(key, translated);
     return translated;
   }
   drain() {
-    while (!this.disposed && this.activeRequests < 4 && this.waiting.length) {
-      const { operation, args, resolve, reject } = this.waiting.shift();
-      this.activeRequests++;
+    while (!this.disposed && this.waiting.length) {
+      const index = this.waiting.findIndex(({ operation }) => sourceReads.has(operation)
+        ? this.activeReads < 4 : this.activeRequests < 4);
+      if (index < 0) break;
+      const { operation, args, resolve, reject } = this.waiting.splice(index, 1)[0];
+      const active = sourceReads.has(operation) ? 'activeReads' : 'activeRequests';
+      this[active]++;
       Promise.resolve().then(() => (this.batchWorkspace || this.workspace).request(operation, args))
-        .then(resolve, reject).finally(() => { this.activeRequests--; this.drain(); });
+        .then(resolve, reject).finally(() => { this[active]--; this.drain(); });
     }
   }
   notify(changes) {

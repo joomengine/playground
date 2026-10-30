@@ -33,7 +33,10 @@ export function createPhpDebugOwner({ options, getPhp, getBinary, databaseCall, 
   function cleanup() {
     clearTimeout(startupTimer);
     worker?.terminate(); worker = undefined; stopping = undefined;
-    for (const task of pending.values()) { clearTimeout(task.timer); task.reject(new Error('The PHP debug request ended.')); }
+    for (const task of pending.values()) {
+      clearTimeout(task.timer);
+      task.reject(Object.assign(new Error('The PHP debug request ended.'), { ...(task.command === 'workspaceRead' ? { code: 'DEBUG_NOT_PAUSED' } : {}) }));
+    }
     pending.clear(); requestReject = undefined;
     onState('idle');
   }
@@ -67,7 +70,7 @@ export function createPhpDebugOwner({ options, getPhp, getBinary, databaseCall, 
           const task = pending.get(message.id);
           if (!task) return;
           clearTimeout(task.timer); pending.delete(message.id);
-          if (message.error) task.reject(new Error(message.error)); else task.resolve(message.value);
+          if (message.error) task.reject(Object.assign(new Error(message.error), { code: message.code })); else task.resolve(message.value);
         } else if (message?.type === 'debug-result') {
           try {
             if (message.snapshot) applyDebugFilesystem(fs, snapshot, message.snapshot);
@@ -87,11 +90,13 @@ export function createPhpDebugOwner({ options, getPhp, getBinary, databaseCall, 
     finally { cleanup(); }
   }
   function send(command, args = {}) {
-    if (!worker) return Promise.reject(new Error('A matching Joomla request has not started under the debugger.'));
+    if (!worker) return Promise.reject(Object.assign(new Error('A matching Joomla request has not started under the debugger.'), {
+      ...(command === 'workspaceRead' ? { code: 'DEBUG_NOT_PAUSED' } : {}),
+    }));
     const id = ++sequence;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { pending.delete(id); reject(new Error(`PHP debugger ${command} timed out.`)); }, 15_000);
-      pending.set(id, { resolve, reject, timer });
+      pending.set(id, { resolve, reject, timer, command });
       worker.postMessage({ type: 'debug-command', id, command, args });
     });
   }
