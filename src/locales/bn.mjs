@@ -478,5 +478,7 @@ export default Object.freeze({
   "code.aiPanel.contextTruncated": "প্রসঙ্গ তালিকা সীমায় পৌঁছেছে। ছোট কোনো ফোল্ডার বেছে নিন অথবা অনুসন্ধানের পরিসর কমান।",
   "code.aiProvider.group.providers": "মডেল সরবরাহকারী",
   "code.aiProvider.group.services": "ইনফারেন্স সেবা",
-  "code.aiProvider.group.custom": "কাস্টম ও লোকাল API"
+  "code.aiProvider.group.custom": "কাস্টম ও লোকাল API",
+  "code.aiPanel.omittedScope": "নির্বাচিত পরিসরের বাইরে রয়েছে অথবা আপনার সেটিংস অনুযায়ী বাদ দেওয়া হয়েছে।",
+  "code.aiPanel.omittedFile": "এই ফাইলটি অন্তর্ভুক্ত করা যায়নি। কর্মক্ষেত্রে ফাইলটির মূল পাথে থাকা সমর্থিত কোনো টেক্সট ফাইল বেছে নিন।"
 });

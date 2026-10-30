@@ -23,7 +23,8 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
   await loadStyles();
   if (!runtime.healthy) throw new Error('Open a healthy Joomla site before opening JoomEngine Code.');
   let workbench, opening, disposed = false, aiPanel, aiLoading, disposal, fileActions, cancelFrameLoad;
-  let aiServices, transferring = false;
+  let aiServices, transferring = false, aiGeneration = 0, clearAiSession;
+  const aiSessionOwner = crypto.randomUUID();
   const workspaceListeners = new Set();
   const auxiliaryTools = new Set();
   const auxiliaryDocuments = new Set();
@@ -115,27 +116,51 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     status.textContent = t('code.debugArmed');
   }
   async function createAiPanel(container) {
-    const [{ createAiReview, createAiWorkspaceTools }, { createIsolatedAiPanel }] = await Promise.all([
+    const generation = aiGeneration, owner = runtime.workspace;
+    const [{ createAiReview, createAiWorkspaceTools }, { createIsolatedAiPanel, clearIsolatedAiSession }] = await Promise.all([
       import('./ai-review.mjs'), import('./ai-panel.mjs'),
     ]);
-    if (disposed) return;
+    if (disposed || generation !== aiGeneration || owner !== runtime.workspace) return;
+    clearAiSession = clearIsolatedAiSession;
     if (!aiServices) {
-      const review = createAiReview({ workspace, isDirty: (path, recursive) => workbench.isDirty(path, recursive),
-        onApplied: result => workbench.reconcileApplied(result) });
-      aiServices = { review, scope: { mode: 'current', paths: [], excluded: [] } };
+      const current = () => {
+        if (disposed || transferring || generation !== aiGeneration || owner !== runtime.workspace) {
+          throw new DOMException(t('code.aiPanel.scopeChanged'), 'AbortError');
+        }
+      };
+      // Reviews retain the runtime that produced their revisions. Every queued
+      // reservation is checked again before it can write, including recovery.
+      const boundWorkspace = { ...owner,
+        request(operation, args) { current(); return trackRequest(owner, operation, args); },
+        withBatch(callback) {
+          current();
+          return refresh.trackSave(owner.withBatch(batch => {
+            current();
+            return callback({ ...batch, request(operation, args) { current(); return trackRequest(batch, operation, args); } });
+          }), { changed: false });
+        },
+      };
+      const review = createAiReview({ workspace: boundWorkspace,
+        isDirty: (path, recursive) => { current(); return workbench.isDirty(path, recursive); },
+        onApplied: result => { current(); return workbench.reconcileApplied(result); } });
+      aiServices = { review, workspace: boundWorkspace, current,
+        sessionKey: `${owner.id}:${aiSessionOwner}:${generation}`, scope: { mode: 'current', paths: [], excluded: [] } };
     }
-    const { review } = aiServices;
+    const services = aiServices, { review } = services;
     // Each isolated view owns its scope. A second window must never broaden an
     // in-flight conversation's tool permissions by changing a shared mutable service.
-    const tools = createAiWorkspaceTools({ workspace, review, scope: aiServices.scope });
+    const tools = createAiWorkspaceTools({ workspace: services.workspace, review, scope: services.scope });
     let contextQueue = Promise.resolve();
-    const isolated = createIsolatedAiPanel({ container, tools, review, t, sessionKey: runtime.workspace.id,
+    const isolated = createIsolatedAiPanel({ container, tools, review, t, sessionKey: services.sessionKey,
       locale: document.documentElement.lang, direction: document.documentElement.dir,
       getContext: ({ signal, scope }) => {
+        services.current();
         const snapshot = workbench.getContext();
         const task = contextQueue.catch(() => {}).then(async () => {
+          services.current();
           const context = await tools.context({ ...snapshot, scope, signal });
-          if (aiServices) aiServices.scope = tools.getScope();
+          services.current();
+          services.scope = tools.getScope();
           return context;
         });
         contextQueue = task; return task;
@@ -143,7 +168,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     // Register before returning through an async boundary: disposal can run
     // before the requesting main or auxiliary view receives this value.
     const panel = Object.freeze({ element: isolated.element, showSettings: isolated.showSettings, setTheme: isolated.setTheme, dispose() {
-      aiPanels.delete(panel); isolated.dispose();
+      aiPanels.delete(panel); return isolated.dispose();
     } });
     aiPanels.add(panel);
     return panel;
@@ -165,14 +190,16 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     if (!workbench) throw new Error('Wait for JoomEngine Code to finish opening.');
     if (aiPanel) { aiContainer.hidden = !aiContainer.hidden; ai.setAttribute('aria-expanded', String(!aiContainer.hidden)); return; }
     if (aiLoading) return aiLoading;
-    aiLoading = (async () => {
+    const generation = aiGeneration;
+    const loadingPanel = (async () => {
       const panel = await createAiPanel(aiContainer);
-      if (disposed) { panel?.dispose(); return; }
+      if (disposed || generation !== aiGeneration || !panel) { await panel?.dispose(); return; }
       aiPanel = panel;
       editor.append(aiContainer);
       aiContainer.hidden = false;
       ai.setAttribute('aria-expanded', 'true');
-    })().finally(() => { aiLoading = undefined; });
+    })().finally(() => { if (aiLoading === loadingPanel) aiLoading = undefined; });
+    aiLoading = loadingPanel;
     return aiLoading;
   }
   const ai = button('code.ai', toggleAi);
@@ -219,10 +246,12 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     async function toggleDetachedAi() {
       if (panel) { aiMount.hidden = !aiMount.hidden; aiButton.setAttribute('aria-expanded', String(!aiMount.hidden)); return; }
       if (loadingPanel) return loadingPanel;
-      loadingPanel = createAiPanel(aiMount).then(value => {
-        if (closed) { value?.dispose(); return; }
+      const generation = aiGeneration;
+      const pending = createAiPanel(aiMount).then(value => {
+        if (closed || generation !== aiGeneration || !value) { return value?.dispose(); }
         panel = value; aiMount.hidden = false; aiButton.setAttribute('aria-expanded', 'true');
-      }).finally(() => { loadingPanel = undefined; });
+      }).finally(() => { if (loadingPanel === pending) loadingPanel = undefined; });
+      loadingPanel = pending;
       return loadingPanel;
     }
     const aiButton = add('code.ai', toggleDetachedAi);
@@ -236,7 +265,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     const stopStatus = refresh.subscribe(state => {
       output.textContent = state.saving ? t(state.paused ? 'code.savesQueued' : 'code.saving') : state.savedChanges ? t('code.savedChanges') : '';
     });
-    const tools = { resetAi() { panel?.dispose(); panel = undefined; aiMount.hidden = true; aiButton.setAttribute('aria-expanded', 'false'); }, dispose() {
+    const tools = { resetAi() { panel?.dispose(); panel = undefined; loadingPanel = undefined; aiMount.hidden = true; aiButton.setAttribute('aria-expanded', 'false'); }, dispose() {
       if (closed) return; closed = true;
       auxiliaryDocuments.delete(doc);
       stopStatus(); debugStatus?.dispose(); panel?.dispose(); files.dispose(); aiMount.remove(); auxiliaryTools.delete(tools);
@@ -294,10 +323,23 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     });
     return opening;
   }
+  function resetAi() {
+    const previous = aiServices;
+    aiGeneration++; aiServices = undefined; aiPanel = undefined; aiLoading = undefined;
+    previous?.review.clear();
+    const closing = [...aiPanels].map(panel => panel.dispose());
+    aiContainer.hidden = true; ai.setAttribute('aria-expanded', 'false');
+    for (const tools of auxiliaryTools) tools.resetAi?.();
+    // Clear before closing to cancel sibling work, then after checkpointed
+    // disposal so an old view cannot leave a stale transcript in the vault.
+    const clear = () => previous && clearAiSession?.(previous.sessionKey);
+    return Promise.all([clear(), ...closing]).then(clear);
+  }
   const receiveWorkspaceEvent = event => {
     // Saving a temporary site creates a verified replacement runtime. That
     // specific close must not destroy the native editor models we are moving.
     if (transferring && event.type === 'workspace-closed') return;
+    if (event.type === 'workspace-invalidated') void resetAi().catch(report);
     for (const listener of workspaceListeners) { try { listener(event); } catch (error) { report(error); } }
     if (event.type === 'workspace-closed') void dispose();
     if (event.type === 'debug-state' && !disposed) refresh.setPaused(event.state === 'paused');
@@ -315,15 +357,12 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
       unsubscribe(); runtime = replacement;
       unsubscribe = runtime.workspace.subscribe(receiveWorkspaceEvent);
       transferring = false;
-      // Worker recovery snapshots belong to the old runtime. Preserve the
-      // connection vault, but never let an old review target the replacement.
-      for (const panel of aiPanels) panel.dispose();
-      aiPanel = undefined; aiServices = undefined; aiContainer.hidden = true;
-      ai.setAttribute('aria-expanded', 'false');
-      for (const tools of auxiliaryTools) tools.resetAi?.();
+      // Editor models remain continuous; old review snapshots/session state do
+      // not follow the replacement runtime. The isolated credentials survive.
+      await resetAi().catch(report);
       try { await workbench?.rebindStorage?.(runtime.workspace.storageId); }
       catch (error) { report(error); }
-      receiveWorkspaceEvent({ type: 'workspace-invalidated' });
+      for (const listener of workspaceListeners) { try { listener({ type: 'workspace-invalidated' }); } catch (error) { report(error); } }
       return runtime;
     } finally { transferring = false; }
   }
@@ -339,14 +378,13 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     window.removeEventListener('beforeunload', beforeUnload);
     document.removeEventListener('joomengine:themechange', applyTheme);
     refresh.dispose(); workspaceListeners.clear();
-    for (const panel of aiPanels) panel.dispose();
-    aiPanel = undefined; aiServices = undefined;
+    const aiCleanup = resetAi();
     fileActions?.dispose();
     for (const tools of auxiliaryTools) tools.dispose();
     // Return auxiliary editor parts before disposing their owner realm.
     disposal = (async () => {
       const failures = [];
-      for (const cleanup of [() => layout.redock(), () => workbench?.dispose?.(), () => layout.dispose()]) {
+      for (const cleanup of [() => aiCleanup, () => layout.redock(), () => workbench?.dispose?.(), () => layout.dispose()]) {
         try { await cleanup(); } catch (error) { failures.push(error); }
       }
       if (failures.length === 1) throw failures[0];

@@ -249,6 +249,93 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
     } finally { await browser?.close(); await server.close(); }
   });
 
+  test(`AI reviews cannot cross runtime generations (${name})`, { timeout: 45_000 }, async () => {
+    const server = await createStaticServer({ directory, fixtures: {
+      'assets/code/editor.html': '<!doctype html><script>window.JoomEngineCode={mount:options=>parent.mockAiMount(options)}</script>',
+      'src/code/ai-panel.mjs': `
+        export function clearIsolatedAiSession(key) { window.clearedAiSessions.push(key); }
+        export function createIsolatedAiPanel(options) {
+          window.aiViews.push(options);
+          const element = document.createElement('iframe'); options.container.append(element);
+          return { element, showSettings() {}, setTheme() {}, async dispose() { element.remove(); } };
+        }`,
+    } });
+    const launcher = { chromium, firefox }[name];
+    let browser;
+    try {
+      browser = await launcher.launch({ headless: true,
+        ...(process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`] ? { executablePath: process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`] } : {}) });
+      const page = await browser.newPage();
+      await page.goto(`${server.url}__test__.html`);
+      await page.evaluate(async () => {
+        const { createCodeHost } = await import('./src/code/host.mjs');
+        const { default: english } = await import('./src/locales/en.mjs');
+        window.aiViews = []; window.clearedAiSessions = []; window.aiWrites = [];
+        const listeners = new Set();
+        const makeWorkspace = id => {
+          const workspace = { id, storageId: null,
+            subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+            async request(operation, args) {
+              if (operation === 'stat') return args.path === '/' ? { type: 'directory', canonicalPath: '/' } : null;
+              if (operation === 'batch') { window.aiWrites.push(id); return { ok: true, changes: [{ type: 'created', path: '/draft.php' }] }; }
+              throw new Error(`Unexpected AI lifecycle fixture request: ${operation}`);
+            },
+            async withBatch(callback) {
+              if (window.holdAiBatch) await new Promise(resolve => { window.releaseAiBatch = resolve; });
+              return callback(workspace);
+            },
+          }; return workspace;
+        };
+        const initial = makeWorkspace('temporary-ai'), saved = makeWorkspace('saved-ai');
+        window.invalidateAiWorkspace = () => { for (const listener of [...listeners]) listener({ type: 'workspace-invalidated' }); };
+        window.mockAiMount = async () => ({ layout() {}, hasDirty: () => false, isDirty: () => false,
+          getActivePath: () => '/', getContext: () => ({ files: [], openFiles: [] }), reconcileApplied() {},
+          async dispose() {}, async rebindStorage() {} });
+        const container = document.createElement('div'), preview = document.createElement('section');
+        container.append(preview); document.querySelector('main').append(container);
+        const runtime = { healthy: true, workspace: initial, configuration: { phpVersion: '8.5' }, debugger: { state: 'idle' },
+          async keep() { for (const listener of [...listeners]) listener({ type: 'workspace-closed' }); return { ...runtime, workspace: saved }; } };
+        window.aiHost = await createCodeHost({ host: container, preview, runtime, refreshSite() {}, t: key => english[key] || key });
+        await window.aiHost.open();
+        window.aiProposal = { summary: 'Create a reviewed file', changes: [{ operation: 'write', path: '/draft.php', content: '<?php // reviewed' }] };
+      });
+      const openAi = async count => {
+        await page.locator('button[data-i18n-title="code.ai"]').click();
+        await page.waitForFunction(count => window.aiViews.length === count, count);
+      };
+      await openAi(1);
+      await page.evaluate(async () => {
+        const first = window.aiViews[0];
+        const review = await first.review.prepare(window.aiProposal);
+        window.holdAiBatch = true;
+        window.oldAccept = first.review.accept(review.id).then(() => 'applied', error => error.name);
+      });
+      await page.waitForFunction(() => typeof window.releaseAiBatch === 'function');
+      await page.evaluate(() => { window.invalidateAiWorkspace(); window.holdAiBatch = false; window.releaseAiBatch(); });
+      assert.equal(await page.evaluate(() => window.oldAccept), 'AbortError', 'Invalidation blocks a queued old review before its write reservation runs.');
+      assert.deepEqual(await page.evaluate(() => window.aiWrites), []);
+      await openAi(2);
+      await page.evaluate(async () => {
+        window.beforeKeepReview = await window.aiViews[1].review.prepare(window.aiProposal);
+        await window.aiHost.keepSite();
+      });
+      assert.equal(await page.evaluate(() => window.aiHost.closed), false);
+      assert.equal(await page.evaluate(async () => {
+        try { await window.aiViews[1].review.accept(window.beforeKeepReview.id); return false; } catch { return true; }
+      }), true, 'Keep Site expires pending reviews while preserving the editor.');
+      await openAi(3);
+      const result = await page.evaluate(async () => {
+        const current = window.aiViews[2];
+        const review = await current.review.prepare(window.aiProposal); await current.review.accept(review.id);
+        return { keys: window.aiViews.map(view => view.sessionKey), cleared: window.clearedAiSessions, writes: window.aiWrites };
+      });
+      assert.equal(new Set(result.keys).size, 3, 'Each invalidation uses a fresh nonsecret conversation key.');
+      assert.ok(result.cleared.includes(result.keys[0]) && result.cleared.includes(result.keys[1]));
+      assert.deepEqual(result.writes, ['saved-ai'], 'Only a fresh review reaches the saved runtime.');
+      await page.evaluate(() => window.aiHost.dispose());
+    } finally { await browser?.close(); await server.close(); }
+  });
+
   test(`Code host disposes pending panels and contains teardown failures (${name})`, { timeout: 45_000 }, async () => {
     const server = await createStaticServer({ directory, fixtures: {
       'assets/code/editor.html': '<!doctype html><script>window.JoomEngineCode={mount:options=>parent.mockCodeMount(options)}</script>',

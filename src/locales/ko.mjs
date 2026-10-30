@@ -478,5 +478,7 @@ export default Object.freeze({
   "code.aiPanel.contextTruncated": "컨텍스트 목록이 한도에 도달했습니다. 더 작은 폴더를 선택하거나 검색 범위를 좁히세요.",
   "code.aiProvider.group.providers": "모델 제공업체",
   "code.aiProvider.group.services": "추론 서비스",
-  "code.aiProvider.group.custom": "사용자 지정 및 로컬 API"
+  "code.aiProvider.group.custom": "사용자 지정 및 로컬 API",
+  "code.aiPanel.omittedScope": "선택한 범위 밖에 있거나 설정에 따라 제외되었습니다.",
+  "code.aiPanel.omittedFile": "이 파일을 포함할 수 없습니다. 작업 공간의 원래 경로에 있는 지원되는 텍스트 파일을 선택하세요."
 });

@@ -478,5 +478,7 @@ export default Object.freeze({
   "code.aiPanel.contextTruncated": "بلغت قائمة السياق الحد الأقصى. اختر مجلدًا أصغر أو ضيّق نطاق البحث.",
   "code.aiProvider.group.providers": "موفرو النماذج",
   "code.aiProvider.group.services": "خدمات الاستدلال",
-  "code.aiProvider.group.custom": "واجهات API مخصصة ومحلية"
+  "code.aiProvider.group.custom": "واجهات API مخصصة ومحلية",
+  "code.aiPanel.omittedScope": "خارج النطاق المحدد أو مستبعد حسب إعداداتك.",
+  "code.aiPanel.omittedFile": "تعذّر تضمين هذا الملف. اختر ملفًا نصيًا مدعومًا في مساره الأصلي ضمن مساحة العمل."
 });

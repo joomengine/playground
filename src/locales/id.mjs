@@ -1,4 +1,6 @@
 export default Object.freeze({
+  "code.aiPanel.omittedScope": "Di luar cakupan yang dipilih atau dikecualikan oleh pengaturan Anda.",
+  "code.aiPanel.omittedFile": "File ini tidak dapat disertakan. Pilih file teks yang didukung pada jalur aslinya di ruang kerja.",
   "code.aiPanel.connections": "Koneksi kustom tersimpan",
   "code.aiPanel.connectionName": "Nama koneksi",
   "code.aiPanel.newConnection": "Koneksi kustom baru",

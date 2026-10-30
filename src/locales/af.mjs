@@ -1,4 +1,6 @@
 export default Object.freeze({
+  "code.aiPanel.omittedScope": "Buite die gekose omvang of deur jou instellings uitgesluit.",
+  "code.aiPanel.omittedFile": "Hierdie lêer kon nie ingesluit word nie. Kies 'n ondersteunde tekslêer by sy oorspronklike werkruimtepad.",
   "code.aiPanel.connections": "Gestoorde pasgemaakte verbindings",
   "code.aiPanel.connectionName": "Verbindingsnaam",
   "code.aiPanel.newConnection": "Nuwe pasgemaakte verbinding",

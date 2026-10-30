@@ -361,7 +361,8 @@ test('selected folders resolve recursively, enforce exclusions and never grant s
   const tools = createAiWorkspaceTools({ workspace, review, scope: { mode: 'selected' } });
   const context = await tools.context({ scope: { mode: 'selected', paths: ['/templates'], excluded: ['/templates/site.css'] } });
   assert.deepEqual(context.files.map(file => file.path), ['/templates/nested/view.php']);
-  assert.ok(context.excluded.some(file => file.path === '/templates/.env'));
+  assert.equal(context.excluded.find(file => file.path === '/templates/.env').reasonCode, 'sensitive');
+  assert.equal(context.excluded.find(file => file.path === '/templates/site.css').reasonCode, 'scope');
   await assert.rejects(tools.execute('read_file', { path: '/templates/.env' }), /Explicitly select/);
   await assert.rejects(tools.execute('read_file', { path: '/templates/site.css' }), /outside the selected/);
   assert.equal((await tools.browse({ path: '/templates' })).entries.find(file => file.path === '/templates/.env').sensitive, true);
@@ -447,4 +448,15 @@ test('cancellation stops recursive context and proposal preparation before a rev
   await assert.rejects(cancellable.prepare({ summary: 'Cancelled proposal', changes: [{ operation: 'write', path: '/index.php', content: 'cancel me' }] }, { signal: proposalController.signal }), { name: 'AbortError' });
   const next = await cancellable.prepare({ summary: 'Fresh proposal', changes: [{ operation: 'write', path: '/index.php', content: 'fresh' }] });
   assert.match(next.id, /-1$/, 'cancelled preparation never publishes a review');
+});
+
+
+test('context omission feedback carries stable localized categories for unsupported files and size limits', async () => {
+  const { workspace, review, directory } = fixture();
+  fs.writeFileSync(path.join(directory, 'templates/binary.txt'), Buffer.from([0, 1, 2]));
+  fs.writeFileSync(path.join(directory, 'templates/large.txt'), 'a'.repeat(65));
+  const tools = createAiWorkspaceTools({ workspace, review, maxFileBytes: 64, scope: { mode: 'selected' } });
+  const context = await tools.context({ scope: { mode: 'selected', paths: ['/templates'] } });
+  assert.equal(context.excluded.find(file => file.path === '/templates/binary.txt').reasonCode, 'file');
+  assert.equal(context.excluded.find(file => file.path === '/templates/large.txt').reasonCode, 'size');
 });

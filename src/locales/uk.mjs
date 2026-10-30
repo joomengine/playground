@@ -1,4 +1,6 @@
 export default Object.freeze({
+  "code.aiPanel.omittedScope": "За межами вибраної області доступу або виключено вашими налаштуваннями.",
+  "code.aiPanel.omittedFile": "Не вдалося включити цей файл. Виберіть підтримуваний текстовий файл за його початковим шляхом у робочому просторі.",
   "code.aiPanel.connections": "Збережені власні підключення",
   "code.aiPanel.connectionName": "Назва підключення",
   "code.aiPanel.newConnection": "Нове власне підключення",

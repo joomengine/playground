@@ -478,5 +478,7 @@ export default Object.freeze({
   "code.aiPanel.contextTruncated": "コンテキスト一覧が上限に達しました。より小さいフォルダーを選択するか、検索条件を絞り込んでください。",
   "code.aiProvider.group.providers": "モデルプロバイダー",
   "code.aiProvider.group.services": "推論サービス",
-  "code.aiProvider.group.custom": "カスタム API とローカル API"
+  "code.aiProvider.group.custom": "カスタム API とローカル API",
+  "code.aiPanel.omittedScope": "選択した範囲外にあるか、設定によって除外されています。",
+  "code.aiPanel.omittedFile": "このファイルを含めることができませんでした。ワークスペース内の元のパスにある、対応形式のテキストファイルを選択してください。"
 });

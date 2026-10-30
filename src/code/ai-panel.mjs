@@ -101,6 +101,8 @@ export const AI_PANEL_MESSAGES = Object.freeze({
   "code.aiPanel.templateCustom": "Custom URL",
   "code.aiPanel.newConversation": "New conversation",
   "code.aiPanel.busy": "An AI request is running in another workspace window. You can cancel it here.",
+  "code.aiPanel.omittedScope": "Outside the selected scope or excluded by your settings.",
+  "code.aiPanel.omittedFile": "This file could not be included. Choose a supported text file at its original workspace path.",
   "code.aiPanel.contextTruncated": "The context list reached its limit. Select a smaller folder or refine your search."
 
 
@@ -286,7 +288,7 @@ function runIsolatedAiPanel({ nonce, hostOrigin, senderPath, definitions, candid
         undo.disabled = false;
       } catch (error) {
         progress.textContent = error.message;
-        } finally { resolving = false; sync(); }
+      } finally { resolving = false; sync(); }
     }
     accept.addEventListener('click', () => resolve('accept'));
     reject.addEventListener('click', () => resolve('reject'));
@@ -519,7 +521,11 @@ function runIsolatedAiPanel({ nonce, hostOrigin, senderPath, definitions, candid
     $('context-feedback').replaceChildren();
     if (!result.files?.length && contextScope === 'current') $('context-feedback').textContent = text('code.aiPanel.noCurrent');
     for (const file of result.files || []) { const item = document.createElement('li'); item.textContent = `${file.path}${file.unsaved ? ` — ${text('code.aiPanel.unsaved')}` : ''}`; $('context-feedback').append(item); }
-    for (const item of result.excluded || []) { const entry = document.createElement('li'); entry.textContent = `${item.path}: ${item.reason}`; $('context-feedback').append(entry); }
+    for (const item of result.excluded || []) {
+      const entry = document.createElement('li');
+      const reason = { scope: 'code.aiPanel.omittedScope', file: 'code.aiPanel.omittedFile', size: 'code.aiPanel.resultLimit', sensitive: 'code.aiPanel.sensitive' }[item.reasonCode] || 'code.aiPanel.omittedFile';
+      entry.textContent = `${item.path}: ${text(reason)}`; $('context-feedback').append(entry);
+    }
     if (result.excluded?.length || result.truncated) $('context-budget').textContent += ' · ' + text('code.aiPanel.contextOmitted', { count: result.excluded?.length || 0 });
     return result;
   }

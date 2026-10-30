@@ -478,5 +478,7 @@ export default Object.freeze({
   "code.aiPanel.contextTruncated": "The context list reached its limit. Select a smaller folder or refine your search.",
   "code.aiProvider.group.providers": "Model providers",
   "code.aiProvider.group.services": "Inference services",
-  "code.aiProvider.group.custom": "Custom and local APIs"
+  "code.aiProvider.group.custom": "Custom and local APIs",
+  "code.aiPanel.omittedScope": "Outside the selected scope or excluded by your settings.",
+  "code.aiPanel.omittedFile": "This file could not be included. Choose a supported text file at its original workspace path."
 });

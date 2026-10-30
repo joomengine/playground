@@ -462,7 +462,7 @@ export function createAiWorkspaceTools({ workspace, review, selectedPaths = () =
         visited.add(directory);
         for (const entry of await workspace.request('list', { path: directory })) {
           signal?.throwIfAborted();
-          if (!allowedEntry(entry)) { excluded.push({ path: entry.path, reason: 'Excluded from this context scope or requires explicit selection.' }); continue; }
+          if (!allowedEntry(entry)) { excluded.push({ path: entry.path, reasonCode: isSensitiveAiPath(entry.path) || isSensitiveAiPath(canonicalPath(entry)) ? 'sensitive' : 'scope', reason: 'Excluded from this context scope or requires explicit selection.' }); continue; }
           if (entry.type === 'directory') pending.push(entry.path);
           else if (entry.type === 'file' && !descriptors.has(entry.path)) descriptors.set(entry.path, buffers.get(entry.path) || { path: entry.path });
           if (descriptors.size >= maxEntries) break;
@@ -486,7 +486,7 @@ export function createAiWorkspaceTools({ workspace, review, selectedPaths = () =
         if (!allowedText(value.canonicalPath, value.content)) throw new Error('Possible credentials require explicit selection of the canonical workspace path.');
         account(value.canonicalPath, size);
         bytes += size; files.push(value);
-      } catch (error) { if (signal?.aborted) throw error; excluded.push({ path, reason: error.message }); }
+      } catch (error) { if (signal?.aborted) throw error; excluded.push({ path, reasonCode: /credentials|sensitive/i.test(error.message) ? 'sensitive' : /scope|excluded/i.test(error.message) ? 'scope' : /limit|too large|budget/i.test(error.message) ? 'size' : 'file', reason: error.message }); }
     }
     let includedSelection = null;
     if (selection !== null && (!scope || permitted(selection.path, selection.canonicalPath || selection.path))) {
