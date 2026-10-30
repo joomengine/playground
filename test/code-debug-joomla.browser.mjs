@@ -214,7 +214,11 @@ for (const name of browsers) for (const phpVersion of versions) test(
             file_put_contents($jecPath, (string) ((int) @file_get_contents($jecPath) + 1));
             $jecProbe = (object) ['username' => $this->getIdentity()->username, 'method' => $_SERVER['REQUEST_METHOD'], 'title' => $this->input->post->getString('title')];
             $jecTicks = 0;
-            if ($jecAction === 'stop') { while (true) { $jecTicks++; } }
+            if ($jecAction === 'stop') {
+                while (true) {
+                    $jecTicks++;
+                }
+            }
             header('X-Jec-Authenticated: ' . $jecProbe->username);
         }
 `;
@@ -222,6 +226,7 @@ for (const name of browsers) for (const phpVersion of versions) test(
         await window.playground.workspace.request('write', { path: '/libraries/src/Application/AdministratorApplication.php',
           bytes: new TextEncoder().encode(source), overwrite: true });
         window.debugPostLine = source.split('\n').findIndex(line => line.trim() === '$jecTicks = 0;') + 1;
+        window.debugLoopLine = source.split('\n').findIndex(line => line.trim() === '$jecTicks++;') + 1;
         await window.playground.debugger.setBreakpoints(window.debugApplicationPath, [{ line: window.debugPostLine }]);
         window.debugEvents = [];
         await window.playground.debugger.start({ method: 'POST', url: new URL('administrator/index.php', window.playground.baseUrl).href });
@@ -263,17 +268,37 @@ echo json_encode(['rows' => (int) $db->query('SELECT COUNT(*) FROM ' . $config->
       assert.deepEqual(once, { rows: 1, files: 1, queued: 'saved after paused request' });
       await page.evaluate(async () => {
         window.debugEvents = [];
+        await window.playground.debugger.setBreakpoints(window.debugApplicationPath, [{ line: window.debugLoopLine }]);
         await window.playground.debugger.start({ method: 'POST', url: new URL('administrator/index.php', window.playground.baseUrl).href });
         window.debugResponse = fetch(new URL('administrator/index.php', window.playground.baseUrl), {
           method: 'POST', body: new URLSearchParams({ jec_debug_action: 'stop', title: 'Stopped Joomla POST' }),
         }).then(async response => ({ status: response.status, text: await response.text() }));
       });
+      // A running PHP process can still be bootstrapping Joomla. Synchronize
+      // on the actual loop after both side effects, not elapsed wall time.
+      await page.waitForFunction(() => window.playground.debugger.state === 'paused');
+      const beforeStop = await page.evaluate(async () => {
+        const debug = window.playground.debugger;
+        const frames = await debug.stackTrace();
+        const action = await debug.evaluate('$jecAction');
+        const rows = await debug.evaluate("(int) $jecDb->setQuery('SELECT COUNT(*) FROM #__jec_debug_once')->loadResult()");
+        const files = await debug.evaluate("(int) file_get_contents('/persist/www/jec-debug-once.txt')");
+        window.debugStopProof = { path: frames[0]?.source.path, line: frames[0]?.line, expectedLine: window.debugLoopLine,
+          action: action.result, rows: Number(rows.result), files: Number(files.result) };
+        await debug.setBreakpoints(window.debugApplicationPath, []);
+        return window.debugStopProof;
+      });
+      assert.equal(beforeStop.path, '/persist/www/libraries/src/Application/AdministratorApplication.php');
+      assert.equal(beforeStop.line, beforeStop.expectedLine, 'The stopped request reaches its busy loop before pause/stop is tested.');
+      assert.equal(beforeStop.action, '"stop"');
+      assert.deepEqual({ rows: beforeStop.rows, files: beforeStop.files }, { rows: 2, files: 2 }, 'Both POST side effects exist before stopping PHP.');
+      await page.evaluate(() => window.playground.debugger.continue());
       await page.waitForFunction(() => window.playground.debugger.state === 'running');
-      // Let native Joomla reach the loop, then pause through the independent
-      // control channel while its original HTTP request remains pending.
-      await page.waitForTimeout(500);
+      // Still exercise the independent pause channel on running native PHP,
+      // with its original HTTP response pending and no breakpoint installed.
       await page.evaluate(() => window.playground.debugger.pause());
       await page.waitForFunction(() => window.playground.debugger.state === 'paused');
+      assert.equal(await page.evaluate(() => window.debugEvents.filter(event => event.event === 'stopped').at(-1)?.body.reason), 'pause');
       await page.evaluate(() => window.playground.debugger.stop());
       const stopped = await page.evaluate(() => window.debugResponse);
       assert.equal(stopped.status, 503);
@@ -300,12 +325,13 @@ echo json_encode(['rows' => (int) $db->query('SELECT COUNT(*) FROM ' . $config->
         ok: true, browser: name, phpVersion, joomlaVersion: manifest.defaults.joomlaVersion,
         authenticatedGet: true, appObjectAndCaller: true, stepped: true, postOnce: once.rows === 1,
         pausedWriteQueued: true, stopAndRecovery: true, databaseEffects: recovered.effects.rows, filesystemEffects: recovered.effects.files,
+        stoppedPostBeforeStop: beforeStop,
         nativeWorkbenchDebugUI: phpVersion === manifest.defaults.phpVersion,
         nativeSourceProof,
       }, null, 2));
     } catch (error) {
       await mkdir(path.join(root, 'test-results'), { recursive: true });
-      const state = await page.evaluate(() => ({ state: window.playground?.debugger.state, events: window.debugEvents?.slice(-50), failure: window.debugFailure })).catch(() => ({}));
+      const state = await page.evaluate(() => ({ state: window.playground?.debugger.state, events: window.debugEvents?.slice(-50), failure: window.debugFailure, stopProof: window.debugStopProof })).catch(() => ({}));
       await writeFile(path.join(root, 'test-results', `debug-joomla-${name}-${phpVersion}.json`), JSON.stringify({ error: error.stack, errors, logs: logs.slice(-100), state }, null, 2));
       await page.screenshot({ path: path.join(root, 'test-results', `debug-joomla-failure-${name}-${phpVersion}.png`) }).catch(() => {});
       throw error;

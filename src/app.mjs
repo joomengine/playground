@@ -26,6 +26,7 @@ let catalog, deployCatalog, runtime, currentConfig, currentInput;
 let busy = false;
 let launching = false;
 let selectedSiteId = null;
+let savedSiteNameDraft = null;
 let runningSiteId = null;
 let runningAdministrator = null;
 let previewDirty = false;
@@ -487,7 +488,10 @@ function renderSavedSites(selectedKey = selectedSiteId) {
     return option;
   }));
   select.value = selectedKey || '';
-  $('saved-site-name').value = savedState.sites[selectedKey]?.displayName || '';
+  // Autosave and locale changes can refresh the catalog while a different
+  // site's name is being edited. Keep that draft, including an empty value.
+  if (savedSiteNameDraft?.key !== selectedKey || !Object.hasOwn(savedState.sites, selectedKey)) savedSiteNameDraft = null;
+  $('saved-site-name').value = savedSiteNameDraft?.value ?? savedState.sites[selectedKey]?.displayName ?? '';
 }
 function rememberCurrentSite() {
   if (currentConfig?.persistence) {
@@ -712,6 +716,7 @@ function renameSelectedSite() {
     savedState = renameSavedSite(savedState, selectedSiteId, $('saved-site-name').value);
     const metadataSaved = writePreferences();
     if (!metadataSaved) { savedState = previous; renderSavedSites(); }
+    else { savedSiteNameDraft = null; renderSavedSites(); }
     setBusy(false);
     feedback(t(metadataSaved ? 'status.siteRenamed' : 'error.storage'),
       { error: !metadataSaved, persistent: !metadataSaved });
@@ -763,6 +768,9 @@ $('code-refresh-button').addEventListener('click', () => { void codeHost?.refres
 $('close-button').addEventListener('click', () => { if (runtime && !currentConfig.persistence && !confirm(t('confirm.temporary'))) return; void closeSite(); });
 $('new-site-button').addEventListener('click', () => void newSite());
 $('saved-site').addEventListener('change', (event) => void openSavedSite(event.target.value));
+$('saved-site-name').addEventListener('input', (event) => {
+  savedSiteNameDraft = { key: selectedSiteId, value: event.target.value };
+});
 $('rename-site-button').addEventListener('click', renameSelectedSite);
 $('delete-site-button').addEventListener('click', () => void deleteSelectedSite());
 $('stop-countdown').addEventListener('click', pauseAutomaticLaunch);
