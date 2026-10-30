@@ -4,7 +4,7 @@ Prepared 30 October 2026 for implementation in [joomengine/playground](https://g
 
 This is the complete handoff for the requested interface, navigation, saved-site, editor, AI, theme and About changes. It incorporates the latest clarification on custom AI APIs, provider ordering, Site/Admin placement, responsive buttons and the supplied SVG bundle. It describes requirements; implementation and verification are recorded in [completion status](completion-status.md).
 
-**Post-merge clarification, 30 October 2026:** the pearl SVG replaces interface rocket icons and the favicon only; the original launch-stage poster/video stays. Header/footer hiding fully removes their layout space and leaves compact overlays at the document corners. Site actions move to the dashboard’s top-right above saved-site details. One actual-state Light/Dark icon sits beside Downloads and realigns on the next system theme change. Light-mode branding has dark lettering, original gold highlights and no dark plate. The corresponding requirements below supersede the earlier interpretation in PR #8.
+**Post-merge clarification, 30 October 2026:** the pearl SVG replaces interface rocket icons and the favicon only; the original launch-stage poster/video stays. Header/footer hiding fully removes their layout space and leaves compact overlays at the document corners. Site actions move to the dashboard’s top-right above saved-site details. One actual-state Light/Dark icon sits beside Downloads and realigns on the next system theme change. Light-mode branding has a clean black wordmark with no glare or background plate (updated 31 October 2026). The corresponding requirements below supersede the earlier interpretation in PR #8.
 
 ## 1. Direction and deliverables
 
@@ -236,7 +236,7 @@ A manual toggle takes effect immediately, but the next operating-system color-sc
 
 The setting applies to this open Playground session, with a tab-scoped non-secret preference that can survive reloads. Synchronize the owner and its detached editor. Independent Playground sessions should not be forced to change by a global localStorage setting or cross-tab broadcast. A newly created independent session defaults to the current system theme.
 
-Apply a shared palette to header, footer, dashboard, restore tabs, dialogs, tooltips, controls, focus/disabled/destructive states, Code shell, file tree, AI surface and detached tools. Apply an actual corresponding editor/workbench theme for code backgrounds, tokens, diff views and native widgets. Do not merely invert the shell around a dark editor. Handle logos/wordmarks and all icons with adequate contrast. In Light mode the main JoomEngine logo has dark lettering and preserves its original gold highlights and transparency, without a dark background plate. Dark mode retains its light lettering and original gold highlights.
+Apply a shared palette to header, footer, dashboard, restore tabs, dialogs, tooltips, controls, focus/disabled/destructive states, Code shell, file tree, AI surface and detached tools. Apply an actual corresponding editor/workbench theme for code backgrounds, tokens, diff views and native widgets. Do not merely invert the shell around a dark editor. Handle logos/wordmarks and all icons with adequate contrast. In Light mode the main JoomEngine logo uses clean solid-black vector lettering on a transparent background, with both glare effects removed. Dark mode retains its light lettering and original gold highlights.
 
 Set the CSS `color-scheme` and appropriate document theme metadata so supported native controls/scrollbars fit. The website can style its own surfaces; it cannot change the user's browser or operating-system preference. The embedded Joomla site's template retains its own styling unless it already supports a compatible theme integration; do not globally invert arbitrary Joomla content.
 
@@ -302,7 +302,7 @@ Build theme primitives early, then verify every later surface against them. AI c
 - [ ] Context browser is inside the assistant and supports file/folder/project scope, unsaved buffers, limits and tool-scope enforcement.
 - [ ] AI streaming, cancel, tool calls, diff review, accept/reject and undo retain their intended behavior for each supported adapter.
 - [ ] One icon beside Downloads shows the active Light/Dark state and toggles it. The next system color-scheme event clears the manual override and realigns immediately; no System selector exists and unrelated sessions remain independent.
-- [ ] Header/footer, all dialogs, Code, AI and detached windows use the chosen theme with readable icons, native controls and syntax colors. Light-mode JoomEngine lettering is dark, with original gold highlights and no dark plate.
+- [ ] Header/footer, all dialogs, Code, AI and detached windows use the chosen theme with readable icons, native controls and syntax colors. Light-mode JoomEngine lettering is solid black, without glare effects or a background plate.
 - [ ] About order, concise explanation and technology repository links match section 11; distributed notices remain intact.
 - [ ] Keyboard, focus, tooltip, screen-reader, zoom, narrow-screen, long-translation and reduced-motion behavior remain usable.
 
