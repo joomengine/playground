@@ -3,7 +3,7 @@
  * Protocol and catalog routes are verified separately; see docs/roadmap/ai-validation.md.
  */
 const preset = (id, label, baseURL, options = {}) => Object.freeze({
-  id, label, baseURL, protocol: 'openai', auth: 'bearer', catalog: 'openai',
+  id, label, baseURL, group: 'providers', protocol: 'openai', auth: 'bearer', catalog: 'openai',
   fields: [], preferences: ['coder', 'code', 'instruct', 'chat'], ...options,
 });
 const regions = [
@@ -54,34 +54,36 @@ export const AI_PROVIDERS = Object.freeze([
     protocol: 'agent', catalog: 'agent', preferences: ['anthropic/claude-sonnet', 'openai/gpt-6-sol', 'google/gemini'],
     documentation: 'https://docs.perplexity.ai/api-reference/agent-post',
   }),
-  preset('groq', 'Groq', 'https://api.groq.com/openai/v1'),
-  preset('cerebras', 'Cerebras', 'https://api.cerebras.ai/v1'),
-  preset('together', 'Together AI', 'https://api.together.ai/v1'),
+  preset('groq', 'Groq', 'https://api.groq.com/openai/v1', { group: 'services' }),
+  preset('cerebras', 'Cerebras', 'https://api.cerebras.ai/v1', { group: 'services' }),
+  preset('together', 'Together AI', 'https://api.together.ai/v1', { group: 'services' }),
   preset('fireworks', 'Fireworks AI', 'https://api.fireworks.ai/inference/v1', {
-    catalog: 'fireworks', fields: [{ id: 'accountId', label: 'Account ID', required: true }],
+    group: 'services', catalog: 'fireworks', fields: [{ id: 'accountId', label: 'Account ID', required: true }],
     description: 'Lists serverless models from your account catalog. Dedicated deployments require their model ID.',
     documentation: 'https://docs.fireworks.ai/api-reference/list-models',
   }),
   preset('openrouter', 'OpenRouter', 'https://openrouter.ai/api/v1', {
+    group: 'services',
     description: 'Optional gateway that routes requests to multiple AI providers.',
     preferences: ['anthropic/claude-sonnet', 'openai/gpt-6-sol', 'qwen/qwen3-coder'],
     documentation: 'https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties',
   }),
   preset('huggingface', 'Hugging Face Inference Providers', 'https://router.huggingface.co/v1', {
+    group: 'services',
     description: 'Hosted routing through Hugging Face Inference Providers.',
   }),
   preset('nvidia', 'NVIDIA hosted AI APIs / NIM', 'https://integrate.api.nvidia.com/v1', {
-    catalog: 'static', models: ['nvidia/nemotron-3-super-120b-a12b', 'deepseek-ai/deepseek-v4-pro', 'moonshotai/kimi-k3'],
+    group: 'services', catalog: 'static', models: ['nvidia/nemotron-3-super-120b-a12b', 'deepseek-ai/deepseek-v4-pro', 'moonshotai/kimi-k3'],
     description: 'Published hosted model catalog. Self-hosted NIM servers use Other / Local AI API.',
     documentation: 'https://docs.api.nvidia.com/nim/reference/llm-apis',
   }),
   preset('azure', 'Microsoft Azure / Foundry', '', {
-    auth: 'azure', fields: [{ id: 'resource', label: 'Azure resource name', required: true }],
+    group: 'services', auth: 'azure', fields: [{ id: 'resource', label: 'Azure resource name', required: true }],
     description: 'Use your deployment name as the model ID when it differs from the catalog model name.',
     documentation: 'https://learn.microsoft.com/en-us/rest/api/aifoundry/azureopenai/models',
   }),
   preset('bedrock', 'Amazon Bedrock', '', {
-    catalog: 'bedrock', fields: [
+    group: 'services', catalog: 'bedrock', fields: [
       { id: 'region', label: 'Region', default: 'us-east-1', required: true },
       { id: 'route', label: 'Bedrock endpoint', default: 'mantle', options: [
         { value: 'mantle', label: 'Mantle — model catalog and /v1 inference' },
@@ -95,7 +97,7 @@ export const AI_PROVIDERS = Object.freeze([
     documentation: 'https://docs.aws.amazon.com/bedrock/latest/userguide/inference-chat-completions.html',
   }),
   preset('other', 'Other / Local AI API', '', {
-    auth: 'optional', description: 'Connect your own API server. Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1',
+    group: 'custom', auth: 'optional', description: 'Connect your own API server. Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1',
   }),
 ]);
 
@@ -103,11 +105,16 @@ export const AI_PROVIDERS = Object.freeze([
 export const AI_PROVIDER_CANDIDATES = AI_PROVIDERS;
 
 /** The settings UI translates these keys before serializing public configuration. */
-export const AI_PROVIDER_MESSAGES = Object.freeze(Object.fromEntries(AI_PROVIDERS.flatMap(provider => [
+export const AI_PROVIDER_MESSAGES = Object.freeze(Object.fromEntries([
+  ['code.aiProvider.group.providers', 'Model providers'],
+  ['code.aiProvider.group.services', 'Inference services'],
+  ['code.aiProvider.group.custom', 'Custom and local APIs'],
+  ...AI_PROVIDERS.flatMap(provider => [
   ...(provider.id === 'other' ? [['code.aiProvider.other', provider.label]] : []),
   ...(provider.description ? [[`code.aiProvider.${provider.id}.description`, provider.description]] : []),
   ...provider.fields.flatMap(field => [
     [`code.aiProvider.field.${field.id}`, field.label],
     ...(field.options || []).map(option => [`code.aiProvider.option.${option.value}`, option.label]),
   ]),
-])));
+  ]),
+]));

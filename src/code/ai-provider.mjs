@@ -39,6 +39,10 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
   base.pathname = base.pathname.replace(/\/+$/, '');
   // A common paste error must not silently produce /chat/completions/chat/completions.
   if (/\/(?:chat\/completions|responses|messages|models)$/.test(base.pathname)) throw new TypeError('Enter the API base URL, without the chat, messages, responses or models operation.');
+  // Native operations use their own versions (Cohere lists v1 but chats v2).
+  // Accept the conventional native API base as well as the service root.
+  if (id === 'other' && protocol === 'anthropic') base.pathname = base.pathname.replace(/\/v1$/, '');
+  if (id === 'other' && protocol === 'cohere') base.pathname = base.pathname.replace(/\/v[12]$/, '');
   if (typeof model !== 'string' || model.length > 256 || /[\r\n]/.test(model)) throw new TypeError('Choose a provider model.');
   if (typeof apiKey !== 'string' || apiKey.length > 4096 || /[\r\n]/.test(apiKey)) throw new TypeError('Enter a valid AI API key.');
   for (const value of [accessKeyId, secretAccessKey, sessionToken]) {
@@ -184,17 +188,20 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
     return items;
   }
   function usable(item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw failure('The API returned an invalid model entry.', 'INVALID_CATALOG');
     const id = item.id || item.name || item.model;
     if (typeof id !== 'string' || !id.trim() || id.length > 256) return null;
-    if (item.active === false || item.archived === true || item.deprecated === true || item.is_deprecated === true || /retired|deprecated/i.test(item.status || item.lifecycle || '')) return null;
+    const lifecycle = [item.status, item.lifecycle?.status, typeof item.lifecycle === 'string' ? item.lifecycle : '', item.modelLifecycle?.status].join(' ');
+    if (item.active === false || item.archived === true || item.deprecated === true || item.is_deprecated === true || /retired|deprecated|inactive|archived|unavailable/i.test(lifecycle)) return null;
     if (/embed|rerank|whisper|tts|dall-e|moderation|imagen|veo|(^|[/-])audio|transcri|realtime|safety|guard/i.test(id)) return null;
     const methods = item.supportedGenerationMethods;
     if (Array.isArray(methods) && !methods.includes('generateContent')) return null;
     if (item.capabilities?.completion_chat === false || item.capabilities?.function_calling === false
       || item.capabilities?.tools === false || item.capabilities?.tools?.supported === false
-      || item.capabilities?.streaming === false || item.capabilities?.streaming?.supported === false) return null;
+      || item.capabilities?.streaming === false || item.capabilities?.streaming?.supported === false
+      || item.supports_streaming === false || item.supportsStreaming === false) return null;
     if (Array.isArray(item.supported_parameters) && !item.supported_parameters.includes('tools')) return null;
-    if (Array.isArray(item.capabilities) && !item.capabilities.some(value => ['TG', 'Reasoning', 'text-generation'].includes(value))) return null;
+    if (provider.catalog === 'qwen' && Array.isArray(item.capabilities) && !item.capabilities.some(value => ['TG', 'Reasoning', 'text-generation'].includes(value))) return null;
     if (provider.catalog === 'qwen' && Array.isArray(item.features) && !item.features.includes('function-calling')) return null;
     if (Array.isArray(item.endpoints) && !item.endpoints.includes('chat')) return null;
     if (item.type && !['chat', 'model', 'language', 'text', 'text-generation'].includes(item.type) && !methods) return null;
@@ -209,7 +216,8 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
         || (Array.isArray(item.supported_parameters) && item.supported_parameters.includes('tools')) ? true : null };
   }
   async function listModels({ signal, currentModel = model } = {}) {
-    const catalog = provider.catalog || (protocol === 'anthropic' ? 'anthropic' : protocol === 'gemini' ? 'gemini' : protocol === 'cohere' ? 'cohere' : 'openai');
+    const nativeCatalog = protocol === 'anthropic' ? 'anthropic' : protocol === 'gemini' ? 'gemini' : protocol === 'cohere' ? 'cohere' : 'openai';
+    const catalog = id === 'other' ? nativeCatalog : provider.catalog || nativeCatalog;
     return bounded(signal, async active => {
       let source = 'live', items = [];
       if (id === 'bedrock' && route === 'runtime' && (accessKeyId || secretAccessKey || sessionToken)) {

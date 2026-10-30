@@ -168,6 +168,17 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
         document.dispatchEvent(new CustomEvent('joomengine:themechange', { detail: { resolved: 'light' } }));
       });
       await captureHostVisual(page, name, 'wide-light');
+      const saveControl = page.locator('.jec-toolbar button[data-i18n-title="code.saveAll"]');
+      await saveControl.focus();
+      await saveControl.locator('.je-action-label').evaluate(label => {
+        label.dataset.originalLabel = label.textContent;
+        label.textContent = 'A translated action with a substantially longer descriptive label '.repeat(8);
+      });
+      await page.waitForFunction(() => document.querySelector('.jec-panel').dataset.actions === 'icons');
+      assert.equal(await saveControl.evaluate(button => button === document.activeElement), true,
+        'Collapsing a long translated label preserves the focused action.');
+      await assertWideHeader();
+      await saveControl.locator('.je-action-label').evaluate(label => { label.textContent = label.dataset.originalLabel; });
       await page.locator('[data-i18n-aria-label="code.restore"]').click();
       assert.equal(await mode.inputValue(), 'floating');
       after = await panel.boundingBox();

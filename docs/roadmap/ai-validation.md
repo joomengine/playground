@@ -4,7 +4,7 @@ Implementation review: 30 October 2026. This document records engineering covera
 
 ## Implemented contracts
 
-`src/code/ai-provider-registry.mjs` is the ordered, non-secret catalog. `createChatProvider` is self-contained so the credential sandbox can install its exact implementation without importing an owner-realm credential object. It offers `stream`, `listModels`, and `dispose`. Provider settings and their keys stay inside that sandbox.
+`src/code/ai-provider-registry.mjs` is the ordered, non-secret catalog, grouped into model providers, inference services, and custom/local APIs without changing the required provider order. `createChatProvider` is self-contained so the credential sandbox can install its exact implementation without importing an owner-realm credential object. It offers `stream`, `listModels`, and `dispose`. Provider settings and their keys stay inside that sandbox.
 
 | Preset | Generation adapter | Model selection |
 | --- | --- | --- |
@@ -26,6 +26,8 @@ Implementation review: 30 October 2026. This document records engineering covera
 | Other / Local AI API | User-selected Chat Completions, Responses, Messages, Gemini, or Cohere format | Native format catalog; optional credentials and editable model ID |
 
 Standard presets derive endpoints internally. Changing a named preset's visible settings cannot substitute an arbitrary base URL. Other accepts HTTPS and explicit local/private HTTP addresses; its HTTP support does not bypass browser mixed-content, local-network permission, or CORS rules. No local ports are probed automatically, no proxy is added, and redirects are rejected before credentials can be forwarded.
+
+Other chooses its catalog adapter from the selected API format. Native Anthropic and Cohere connections accept the service root or their conventional versioned base without doubling `/v1` or `/v2`; Cohere still lists models through v1 while streaming chat through v2.
 
 Model listing performs only GET requests. It has bounded bytes, pages and entries, rejects repeated or missing cursors, preserves a still-available selection, and uses preference rules after capability filtering. Where discovery is unavailable, a catalog/manual result is distinguished from a successful live connection.
 

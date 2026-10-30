@@ -154,11 +154,11 @@ export function mountFileActions({ toolbar, workspace, getActivePath = () => '/'
 .jec-file-dialog h2{font-size:22px;line-height:1.3;margin:0;overflow-wrap:anywhere}
 .jec-file-dialog p{font-size:13px;line-height:1.7;color:var(--muted,#acb4d0);overflow-wrap:anywhere}
 .jec-file-dialog button,.jec-file-dialog input{box-sizing:border-box;font:inherit;color:var(--ink,#edf0ff);background:var(--control,#151c32);border:1px solid var(--control-border,#465073);border-radius:5px;padding:8px 12px;min-height:36px}
-.jec-file-dialog button{cursor:pointer}.jec-file-dialog button:disabled,.jec-file-dialog input:disabled{opacity:.5;cursor:default}
+.jec-file-dialog button{cursor:pointer}.jec-file-dialog .je-action{display:inline-flex;align-items:center;justify-content:center;gap:7px}.jec-file-dialog .je-icon{width:20px;height:20px;flex:none;fill:currentColor;stroke:none}.jec-file-dialog button:disabled,.jec-file-dialog input:disabled{opacity:.5;cursor:default}
 .jec-file-dialog button:focus-visible,.jec-file-dialog input:focus-visible{outline:2px solid var(--focus,#ffc55b);outline-offset:2px}
 .jec-file-dialog .dialog-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:20px;padding-top:16px;border-top:1px solid var(--line,#ffffff1b)}
 .jec-file-dialog .dialog-error{color:var(--danger,#ffd0c3);background:var(--error-bg,#ff836012);border:1px solid var(--danger,#ff83603b);padding:10px 13px;border-radius:5px}
-@media(max-width:480px){.jec-file-dialog{padding:16px}.jec-file-dialog .dialog-heading{gap:8px}.jec-file-dialog h2{font-size:19px}}
+@media(max-width:480px){.jec-file-dialog{padding:16px}.jec-file-dialog .dialog-heading{gap:8px}.jec-file-dialog h2{font-size:19px}.jec-file-dialog .je-action>.je-action-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.jec-file-dialog .je-action{min-width:36px;min-height:36px}}
 @media(forced-colors:active){.jec-file-dialog,.jec-file-dialog button,.jec-file-dialog input{border-color:ButtonText}.jec-file-dialog button:focus-visible,.jec-file-dialog input:focus-visible{outline-color:Highlight}}
 `;
   document.head.append(style);

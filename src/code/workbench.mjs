@@ -440,7 +440,7 @@ export async function mountWorkbench({ container, workspace, siteId, onSave = ()
       window.document.documentElement.dataset.theme = theme;
       window.document.documentElement.style.colorScheme = theme;
       if (favicon) {
-        const icon = window.document.createElement('link'); icon.rel = 'icon'; icon.type = 'image/svg+xml'; icon.href = favicon;
+        const icon = window.document.createElement('link'); icon.rel = 'icon'; icon.type = 'image/svg+xml'; icon.sizes = 'any'; icon.href = favicon;
         window.document.head.append(icon);
       }
       let companion;
