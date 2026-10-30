@@ -441,11 +441,30 @@ async function dismissAutomaticTour(page) {
   assert.ok(prefix);
   const probeURL = new URL(`${prefix}modules/mod_playground_contract/contract.php`, frame.url());
   probeURL.search = new URLSearchParams({ action: 'tour-state', tour: String(tourId), username }).toString();
-  // Shepherd centers within Joomla's auto-sized iframe. Activate its real
-  // button by keyboard instead of relying on nested pointer auto-scrolling.
-  await hideTour.focus();
-  assert.equal(await hideTour.evaluate(button => button.ownerDocument.activeElement === button), true);
+  // Shepherd centers within Joomla's auto-sized iframe and applies delayed
+  // focus after positioning. Wait for its initial focus, then let press focus
+  // and activate the native button in one action. Verify the trusted click at
+  // dispatch time, before Joomla removes the tour, rather than sampling focus
+  // in a separate protocol round trip that later repositioning can race.
+  await frame.waitForFunction(() => document.activeElement
+    === document.querySelector('[data-shepherd-step-id="tourinfo"]'));
+  await hideTour.evaluate(button => {
+    const win = button.ownerDocument.defaultView;
+    win.__playgroundTourDismissal = null;
+    button.addEventListener('click', event => {
+      win.__playgroundTourDismissal = {
+        trusted: event.isTrusted, intended: event.currentTarget === button,
+      };
+    }, { capture: true, once: true });
+  });
   await hideTour.press('Enter');
+  const activation = await frame.evaluate(() => {
+    const receipt = window.__playgroundTourDismissal;
+    delete window.__playgroundTourDismissal;
+    return receipt;
+  });
+  assert.deepEqual(activation, { trusted: true, intended: true },
+    'Hide forever receives the trusted keyboard activation before its persisted state is checked.');
   await hideTour.waitFor({ state: 'hidden' });
   assert.equal(await frame.evaluate(() => sessionStorage.getItem('tourId')), null);
   await page.waitForFunction(async url => {
