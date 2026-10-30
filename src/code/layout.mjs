@@ -263,6 +263,8 @@ export function createCodeLayout({
     // Size against the editor container, including a narrow dock inside a wide
     // browser. Only the action area may move down; window controls stay put.
     const actions = [...toolbar.children].filter(node => !node.hidden && node.getAttribute('role') !== 'status');
+    // The title aligns to the start of its grid area so strip mode measures its
+    // intrinsic width, not free space that would prevent returning to one row.
     const reserved = windowControls.getBoundingClientRect().width + title.getBoundingClientRect().width + 32;
     const iconWidth = actions.length * 36;
     panel.dataset.actions = panel.clientWidth < reserved + iconWidth ? 'strip'

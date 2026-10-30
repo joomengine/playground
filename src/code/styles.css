@@ -7,7 +7,7 @@
 .jec-panel{grid-area:editor;display:flex;flex-direction:column;position:sticky;top:8px;height:calc(100dvh - 16px);min-height:240px;min-width:0;border:1px solid var(--jec-border,#3b4464);border-radius:8px;overflow:hidden;color:var(--jec-text,#e6e9f3);background:var(--jec-bg,#10152b);box-shadow:0 12px 40px #0004;color-scheme:inherit;z-index:5}
 .jec-panel[hidden],.jec-divider[hidden],.jec-panel [hidden]{display:none!important}
 .jec-titlebar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:'identity actions windows';align-items:center;gap:6px;min-height:43px;padding:5px 8px;background:var(--jec-surface,#141a36);border-bottom:1px solid var(--jec-border,#39415e);flex:none}
-.jec-panel-title{grid-area:identity;font-size:13px!important;font-weight:700;color:var(--jec-text,#e6e9f3)!important;letter-spacing:.1px;white-space:nowrap;touch-action:none;min-width:40px}
+.jec-panel-title{grid-area:identity;justify-self:start;font-size:13px!important;font-weight:700;color:var(--jec-text,#e6e9f3)!important;letter-spacing:.1px;white-space:nowrap;touch-action:none;min-width:40px}
 .jec-panel-title:disabled{opacity:1;cursor:default}
 .jec-window-controls{grid-area:windows;display:flex;align-items:center;justify-content:flex-end;gap:3px;flex:none;min-width:0}
 .jec-control{display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;background:transparent;color:var(--jec-text,#c9d2e9);border-radius:4px;min-width:30px;min-height:30px;padding:4px 5px;font-size:17px;line-height:1.2;cursor:pointer}
