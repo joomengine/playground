@@ -189,6 +189,7 @@ for (const name of names) test(`AI local optional-key transport, model selection
       function check() { if (input.value === 'connection-A-key') resolve(); else if (performance.now() - start > 3000) reject(new Error('Original connection key was not restored')); else setTimeout(check, 20); }
       check();
     }));
+    await panel.locator('#advanced-settings > summary').click();
     await panel.locator('#protocol').selectOption('anthropic');
     assert.equal(await panel.locator('#api-key').inputValue(), '', 'another protocol is a distinct connection');
     await page.evaluate(async () => {
@@ -212,6 +213,118 @@ for (const name of names) test(`AI local optional-key transport, model selection
     await browser?.close(); await server.close(); api.closeAllConnections();
     await new Promise(resolve => api.close(resolve));
   }
+});
+
+for (const name of names) test(`AI named custom profiles, templates and session model cache in ${name}`, { timeout: 45_000 }, async () => {
+  const server = await createStaticServer({ directory: root });
+  let browser;
+  const requests = [];
+  const inputIs = (locator, expected) => locator.evaluate((input, value) => new Promise((resolve, reject) => {
+    const start = performance.now();
+    const check = () => input.value === value ? resolve() : performance.now() - start > 5000
+      ? reject(new Error(`Expected ${input.id} to restore its selected value`)) : setTimeout(check, 20);
+    check();
+  }), expected);
+  try {
+    browser = await { chromium, firefox }[name].launch({ headless: true, ...(process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`] ? { executablePath: process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`] } : {}) });
+    const page = await browser.newPage();
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    await page.route('https://profiles.test/**', route => {
+      const request = route.request(), pathname = new URL(request.url()).pathname;
+      const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS', 'Access-Control-Allow-Headers': 'Authorization,Content-Type' };
+      if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      requests.push({ method: request.method(), pathname, authorization: request.headers().authorization });
+      if (!['/a/v1/models', '/b/v1/models'].includes(pathname)) return route.fulfill({ status: 404, headers });
+      return route.fulfill({ status: 200, headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: [{ id: pathname.startsWith('/a/') ? 'coder-a' : 'coder-b' }] }) });
+    });
+    // Templates are user-selected examples. Intercept their optional catalog
+    // requests so this fixture never depends on a developer's local AI server.
+    await page.route(/^http:\/\/localhost:(11434|1234)\/v1\/models$/, route => {
+      assert.equal(route.request().headers().authorization, undefined, 'Templates must not inherit a saved connection key.');
+      return route.fulfill({ status: route.request().method() === 'OPTIONS' ? 204 : 200,
+        headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type,Authorization', 'Content-Type': 'application/json' },
+        body: route.request().method() === 'OPTIONS' ? '' : JSON.stringify({ data: [] }) });
+    });
+    await page.goto(`${server.url}__test__.html`);
+    await page.evaluate(async () => {
+      const { createIsolatedAiPanel } = await import('./src/code/ai-panel.mjs');
+      window.mountProfiles = () => {
+        window.profilePanel = createIsolatedAiPanel({ container: document.querySelector('main'), sessionKey: 'profiles-test',
+          tools: { definitions: [], execute() {}, getScope: () => ({ mode: 'current', paths: [] }) },
+          review: { accept() {} }, getContext: ({ scope }) => ({ scope, files: [], bytes: 0 }) });
+        window.profilePanel.showSettings();
+      };
+      window.mountProfiles();
+    });
+    const panel = page.frameLocator('.jec-ai-frame');
+    await panel.locator('#settings[open]').waitFor();
+    assert.equal(await panel.locator('#provider optgroup').count(), 3);
+    const providerIds = await panel.locator('#provider option').evaluateAll(options => options.map(option => option.value));
+    assert.deepEqual(providerIds.slice(0, 3), ['openai', 'anthropic', 'google']);
+    assert.equal(providerIds.at(-1), 'other');
+    await panel.locator('#provider').selectOption('other');
+    assert.equal(await panel.locator('#advanced-settings').evaluate(details => details.open), false);
+    assert.equal(await panel.locator('#protocol').inputValue(), 'openai');
+
+    async function saveProfile(id, label, key) {
+      const url = `https://profiles.test/${id}/v1`;
+      await panel.locator('#base-url').fill(url);
+      await panel.locator('#model').click();
+      await panel.locator('#saved-connections option').filter({ hasText: url }).waitFor({ state: 'attached' });
+      await panel.locator('#connection-name').fill(label);
+      await panel.locator('#api-key').fill(key);
+      await panel.locator('#fetch-models').click();
+      await panel.locator(`#models option[value="coder-${id}"]`).waitFor({ state: 'attached' });
+      await panel.locator('#status').filter({ hasText: 'Available models refreshed.' }).waitFor();
+      await panel.locator('#saved-connections option').filter({ hasText: label }).waitFor({ state: 'attached' });
+      return panel.locator('#saved-connections').inputValue();
+    }
+    const profileA = await saveProfile('a', 'Coding A', 'profile-A-key');
+    assert.ok(profileA);
+    await panel.locator('#saved-connections').selectOption('');
+    await inputIs(panel.locator('#base-url'), '');
+    const profileB = await saveProfile('b', 'Coding B', 'profile-B-key');
+    assert.notEqual(profileA, profileB);
+    const countBeforeRestore = requests.length;
+    await panel.locator('#saved-connections').selectOption(profileA);
+    await inputIs(panel.locator('#api-key'), 'profile-A-key');
+    await panel.locator('#models option[value="coder-a"]').waitFor({ state: 'attached' });
+    assert.equal(requests.length, countBeforeRestore, 'Switching to an unchanged connection reuses its isolated session catalog.');
+
+    await page.evaluate(() => { window.profilePanel.dispose(); window.mountProfiles(); });
+    await panel.locator('#settings[open]').waitFor();
+    await inputIs(panel.locator('#connection-name'), 'Coding A');
+    await inputIs(panel.locator('#api-key'), 'profile-A-key');
+    await panel.locator('#models option[value="coder-a"]').waitFor({ state: 'attached' });
+    assert.equal(requests.length, countBeforeRestore, 'Reopening settings preserves the session catalog without another request.');
+    assert.equal(await panel.locator('#api-key').getAttribute('type'), 'password');
+    assert.equal(await page.evaluate(() => document.documentElement.textContent.includes('profile-A-key')), false);
+    await panel.locator('#forget-connection').click();
+    await panel.locator('#status').filter({ hasText: 'This connection was forgotten.' }).waitFor();
+    assert.equal(await panel.locator('#api-key').inputValue(), '');
+    const savedProfiles = await panel.locator('#saved-connections option').evaluateAll(options => options.map(option => option.value));
+    assert.equal(savedProfiles.includes(profileA), false);
+    assert.equal(savedProfiles.includes(profileB), true, 'Forgetting one connection must retain other profiles.');
+    await panel.locator('#saved-connections').selectOption(profileB);
+    await inputIs(panel.locator('#api-key'), 'profile-B-key');
+    await panel.locator('#models option[value="coder-b"]').waitFor({ state: 'attached' });
+    assert.equal(requests.length, countBeforeRestore);
+
+    for (const [template, port] of [['ollama', 11434], ['lmstudio', 1234]]) {
+      await panel.locator('#local-template').selectOption(template);
+      await inputIs(panel.locator('#base-url'), `http://localhost:${port}/v1`);
+      await inputIs(panel.locator('#local-template'), template);
+      assert.equal(await panel.locator('#protocol').inputValue(), 'openai');
+      assert.equal(await panel.locator('#api-key').inputValue(), '');
+    }
+    assert.ok(requests.length >= 2);
+    for (const request of requests) {
+      assert.equal(request.method, 'GET', 'Profile/catalog setup must never generate a paid completion.');
+      if (request.authorization) assert.equal(request.authorization, request.pathname.startsWith('/a/') ? 'Bearer profile-A-key' : 'Bearer profile-B-key');
+    }
+    assert.deepEqual(errors, []);
+  } finally { await browser?.close(); await server.close(); }
 });
 
 for (const name of names) test(`AI Bedrock discovery credentials remain masked and isolated in ${name}`, { timeout: 45_000 }, async () => {
