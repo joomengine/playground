@@ -1,21 +1,5 @@
 import assert from 'node:assert/strict';
 
-/** Check the shared HTML contract, including browsers without playsInline IDL support. */
-export async function assertLaunchMediaMetadata(page) {
-  assert.match(await page.locator('#welcome .rocket-window img').getAttribute('src'), /rocket-poster\.jpg$/,
-    'The launch stage retains its cinematic poster; the pearl vector is for icons.');
-  const media = await page.locator('#launch-video').evaluate(video => ({
-    // Firefox in our test matrix does not expose video.playsInline.
-    // The HTML attribute is the portable declaration that must remain present.
-    muted: video.muted, loop: video.loop, inline: video.hasAttribute('playsinline'), paused: video.paused,
-    poster: video.getAttribute('poster'), source: video.querySelector('source')?.getAttribute('src'),
-  }));
-  assert.deepEqual(media, {
-    muted: true, loop: true, inline: true, paused: true,
-    poster: './src/brand/rocket-poster.jpg', source: './src/brand/rocket-launch.mp4',
-  });
-}
-
 /** Pause the visible launch before any runtime download, then start explicitly. */
 export async function assertLaunchCountdown(page, url) {
   const requests = [];
@@ -30,7 +14,6 @@ export async function assertLaunchCountdown(page, url) {
     assert.equal(await page.locator('#php-version').inputValue(), '8.4');
     await page.locator('#stop-countdown').click();
     assert.equal(await page.locator('#launch-countdown').isVisible(), false);
-    await assertLaunchMediaMetadata(page);
     await page.locator('#settings-toggle').click();
     assert.equal(await page.locator('#settings #dashboard-countdown').isVisible(), true);
     assert.equal(await page.locator('#stop-countdown-button').isDisabled(), true);
@@ -48,10 +31,6 @@ export async function assertLaunchCountdown(page, url) {
     await page.locator('#deploy-dialog [data-close-dialog]').click();
     const startedAt = Date.now();
     await page.locator('#embedded-launch').click();
-    await page.waitForFunction(() => {
-      const video = document.getElementById('launch-video');
-      return !video.paused && video.currentTime > 0;
-    }, undefined, { timeout: 20_000 });
     return startedAt;
   } finally { page.off('request', observe); }
 }

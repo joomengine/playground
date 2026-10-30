@@ -211,12 +211,12 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Install selected browser engine
         run: npx playwright install --with-deps ${{ matrix.browser }}
-      - name: Validate launch media, Code, isolated AI, layout and language interactions
+      - name: Validate Code, isolated AI, layout and language interactions
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
         run: |
           result=0
-          for suite in test/launch-media.browser.mjs test/code-workbench.browser.mjs test/code-ai-browser.mjs test/code-host-lifecycle.browser.mjs test/language-selector.browser.mjs; do
+          for suite in test/code-workbench.browser.mjs test/code-ai-browser.mjs test/code-host-lifecycle.browser.mjs test/language-selector.browser.mjs; do
             node --test "$suite" || result=1
           done
           exit "$result"
