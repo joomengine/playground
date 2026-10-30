@@ -1009,14 +1009,22 @@ for (const name of browserNames) {
         assert.match(navigationFrame.url(), /task=article.save&token=secret/, 'Only saved resume state is sanitized; Joomla retains its current URL.');
         await navigationFrame.locator('#route-hash').click();
         await page.waitForFunction(() => new URL(location.href).searchParams.get('path')?.endsWith('#second-tab'));
+        const previousHistoryEntry = await navigationFrame.evaluate(() => {
+          // A native fragment navigation creates its own history entry; do not
+          // assume it retains the earlier pushState entry's serialized state.
+          window.__routePopstates.length = 0;
+          return { url: location.href, state: history.state };
+        });
         await navigationFrame.locator('#route-site').click();
         await page.waitForFunction(() => document.getElementById('nav-site').getAttribute('aria-pressed') === 'true');
         await navigationFrame.locator('#route-back').click();
         await page.waitForFunction(() => document.getElementById('nav-admin').getAttribute('aria-pressed') === 'true'
           && new URL(location.href).searchParams.get('path')?.endsWith('#second-tab'));
         assert.equal(await navigationFrame.evaluate(() => document === window.__navigationDocument), true);
-        assert.ok(await navigationFrame.evaluate(() => window.__routePopstates.some(event => event.trusted
-          && event.state?.routeProof === 'administrator' && event.url.endsWith('#second-tab'))), 'A real browser popstate must restore the previous same-document route.');
+        const popstates = await navigationFrame.evaluate(() => window.__routePopstates);
+        const restoredEntry = popstates.find(event => event.trusted && event.url === previousHistoryEntry.url);
+        assert.ok(restoredEntry, `A real browser popstate must restore the previous same-document route: ${JSON.stringify(popstates)}`);
+        assert.deepEqual(restoredEntry.state, previousHistoryEntry.state, 'Back preserves the actual fragment history entry state.');
         await navigationFrame.goto(originalNavigation, { waitUntil: 'load' });
         assert.equal(await page.evaluate(() => document.getElementById('site-frame') === window.__navigationFrame), true);
         assert.deepEqual(navigationWorkers, [], 'Site/Admin never creates replacement runtime workers.');
