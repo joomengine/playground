@@ -36,7 +36,6 @@ const keyMapping = Object.freeze({
   'code.files.history': 'file-recovery', 'code.files.close': 'cancel', 'code.files.choose': 'upload-files',
   'code.files.open': 'open-file', 'code.files.restore': 'restore-snapshot',
 });
-const themedFields = new WeakSet();
 const alwaysIconOnly = new Set(['fork', 'star', 'ai-assistant', 'dashboard-toggle', 'hide-chrome', 'restore-top', 'restore-bottom']);
 
 /** Trusted, bundled artwork only. Credentials/user content never enter this markup. */
@@ -99,19 +98,6 @@ export function decorateIcons(root = globalThis.document) {
     const changingIcon = ['action.show', 'action.hide', 'code.maximize', 'code.restore'].includes(key) ? keyMapping[key] : null;
     const action = changingIcon || button.dataset.icon || idMapping[button.id] || keyMapping[key] || (button.hasAttribute('data-close-dialog') ? 'cancel' : null);
     if (action) decorateAction(button, action, button.hasAttribute('data-close-dialog') ? { iconOnly: true } : undefined);
-  }
-  const theme = root.querySelector('#theme-preference');
-  if (theme && !themedFields.has(theme)) {
-    themedFields.add(theme);
-    const refresh = () => {
-      const parent = theme.parentElement;
-      parent.querySelector('.je-theme-icon')?.remove();
-      const icon = createIcon(`theme-${['system', 'light', 'dark'].includes(theme.value) ? theme.value : 'system'}`, theme.ownerDocument);
-      icon.classList.add('je-theme-icon'); parent.insertBefore(icon, theme);
-    };
-    theme.addEventListener('change', refresh);
-    theme.ownerDocument.addEventListener('joomengine:themechange', refresh);
-    refresh();
   }
 }
 /** One observer per mounted surface; useful for dynamic dialogs and translations. */

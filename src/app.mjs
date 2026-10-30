@@ -4,7 +4,7 @@ import { createPlayground, prepareEnvironment, resetPlayground } from './playgro
 import { customSetupDetails, defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, rememberSiteRoute, renameSavedSite, safeSavedRoute, resolveResumePath, runtimeLocation, savedStateKey } from './ui-state.mjs';
 
 import { initializeTheme, setTheme, getThemeState } from './theme.mjs';
-import { observeIcons } from './icons.mjs';
+import { observeIcons, decorateAction } from './icons.mjs';
 import { createLanguageSelector } from './language-selector.mjs';
 
 import { connectFrame } from './frame-view.mjs';
@@ -93,6 +93,9 @@ function activity(message) {
 function show(view) {
   for (const name of ['welcome', 'loading-view', 'error-view', 'site-mount']) $(name).hidden = name !== view;
   document.querySelector('.preview-panel').classList.toggle('launching', view === 'loading-view');
+  const video = $('launch-video');
+  if (view === 'loading-view' && !matchMedia('(prefers-reduced-motion: reduce)').matches) video.play().catch(() => {});
+  else video.pause();
 }
 function feedback(message, { error = false, persistent = false } = {}) {
   clearTimeout(feedbackTimer);
@@ -1039,11 +1042,21 @@ function populatePhpSettings(settings = phpSettings) {
   $('php-effective').textContent = effective ? `${t('label.effectiveSettings')}: ${Object.entries(effective).map(([key, value]) => `${key}=${value}`).join(' · ')}` : '';
   $('php-error').hidden = true;
 }
+function syncThemeToggle() {
+  const button = $('theme-toggle');
+  const mode = getThemeState().resolved;
+  const next = mode === 'dark' ? 'light' : 'dark';
+  decorateAction(button, `theme-${mode}`, { iconOnly: true });
+  button.setAttribute('aria-pressed', String(mode === 'dark'));
+  button.setAttribute('aria-label', `${t('label.appearance')}: ${t(`theme.${mode}`)}`);
+  button.title = `${t('label.appearance')}: ${t(`theme.${mode}`)} → ${t(`theme.${next}`)}`;
+}
 function setupInterface() {
   initializeTheme();
-  $('theme-preference').value = getThemeState().preference;
   observeIcons();
-  $('theme-preference').addEventListener('change', event => setTheme(event.target.value));
+  syncThemeToggle();
+  document.addEventListener('joomengine:themechange', syncThemeToggle);
+  $('theme-toggle').addEventListener('click', () => setTheme(getThemeState().resolved === 'dark' ? 'light' : 'dark'));
   languageSelector = createLanguageSelector(fields.language, { t, getLocale });
   deploymentLanguageSelector = createLanguageSelector($('deploy-languages'), { multiple: true, t, getLocale });
   $('interface-language').replaceChildren(...UI_LANGUAGES.map(({ code, label }) => { const option = document.createElement('option'); option.value = code; option.textContent = label; return option; }));
@@ -1051,6 +1064,7 @@ function setupInterface() {
   $('interface-language').addEventListener('change', async event => { try { await setLocale(event.target.value); } catch (error) { feedback(error, { error: true }); } });
   document.addEventListener('rocket:languagechange', () => {
     $('interface-language').value = getLocale();
+    syncThemeToggle();
     if (catalog) setBusy(busy);
     if (runtime && currentConfig) $('preview-label').textContent = currentConfig.siteName;
     $('credentials-button').textContent = `${t('title.credentials')}${$('credentials-button').dataset.signedOut === 'true' ? ` · ${t('status.signedOut')}` : ''}`;

@@ -17,6 +17,8 @@ The dark version uses the existing silver/white `#edf0ff`, navy and warm gold `#
 
 The repository's original `src/brand/joomengine-logo.webp` is a 400 × 80 raster. No original outline or font source accompanies it. These new SVG paths are a documented geometric reconstruction of that existing identity, extended with CODE, rather than a claim to be the original designer's font outlines. They require no additional font licence. The original logo is retained.
 
+The Playground header uses that original WebP in dark mode. Its light-mode companion, `src/brand/joomengine-logo-light.svg`, embeds the same artwork and applies an SVG composite: neutral lettering becomes dark ink while colored highlights and the original transparency are retained. It does not redraw the wordmark, invert the gold accents, or add a background plate. Regenerate it with `node scripts/build-wordmark.mjs` after changing the original WebP.
+
 ## Accessible integration
 
 For a launcher use a button with `aria-label="Open JoomEngine Code"` and `title="Open JoomEngine Code"`. Set the image inside it to `alt=""` to avoid repeating the button name. A standalone image uses `alt="JoomEngine Code"`. Each SVG also contains a title and description for direct embedding. The detached document title and workbench name remain `JoomEngine Code`.

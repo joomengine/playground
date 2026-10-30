@@ -1,3 +1,4 @@
+import { fitToolbarActions } from './toolbar-layout.mjs';
 import { createIcon, decorateAction, decorateIcons } from '../icons.mjs';
 
 export const DETACHED_MESSAGES = Object.freeze({
@@ -57,7 +58,7 @@ export function mountDetachedTools({ part, provider, openFile, saveAll, redock, 
 .jec-detached-identity{grid-area:identity;justify-self:start;padding:0 4px}.jec-detached-window-controls{grid-area:windows;flex:none}
 .jec-detached-toolbar{grid-area:actions;display:flex;align-items:center;gap:4px;min-width:0}
 .jec-detached-toolbar>*{flex:none}.jec-detached-toolbar>[role=status]{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
-.jec-detached-root[data-actions=icons] .je-action-label,.jec-detached-root[data-actions=strip] .jec-detached-toolbar .je-action-label{display:none}
+.jec-detached-toolbar .jec-action-icon .je-action-label,.jec-detached-root[data-actions=icons] .jec-detached-toolbar .je-action-label,.jec-detached-root[data-actions=strip] .jec-detached-toolbar .je-action-label{display:none}
 @media(max-width:600px){.jec-detached-window-controls .je-action-label{display:none}}
 .jec-detached-root[data-actions=strip] .jec-detached-header{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:'identity windows' 'actions actions'}
 .jec-detached-root[data-actions=strip] .jec-detached-toolbar{overflow:auto;overscroll-behavior-inline:contain;scrollbar-width:thin;padding-bottom:2px}
@@ -104,11 +105,7 @@ export function mountDetachedTools({ part, provider, openFile, saveAll, redock, 
   let lastLayout = [window.innerWidth, window.innerHeight - 22, 0, 0];
   part.layout = (width, height, top, left) => {
     lastLayout = [width, height, top, left];
-    root.dataset.actions = 'labels';
-    if (toolbar.scrollWidth > toolbar.clientWidth + 1) {
-      root.dataset.actions = 'icons';
-      if (toolbar.scrollWidth > toolbar.clientWidth + 1) root.dataset.actions = 'strip';
-    }
+    fitToolbarActions(root, toolbar);
     const toolbarHeight = Math.ceil(header.getBoundingClientRect().height);
     const offset = hidden ? 0 : Math.min(260, Math.max(width < 500 ? 140 : 180, Math.floor(width * .32)));
     sidebar.style.width = `${offset}px`; sidebar.style.top = `${toolbarHeight}px`;

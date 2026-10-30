@@ -2,25 +2,27 @@
 
 Prepared 30 October 2026 for implementation in [joomengine/playground](https://github.com/joomengine/playground).
 
-This is the complete handoff for the requested interface, navigation, saved-site, editor, AI, theme and About changes. It incorporates the latest clarification on custom AI APIs, provider ordering, Site/Admin placement, responsive buttons and the supplied SVG bundle. It describes work to implement; it is not a claim that the application has already been changed.
+This is the complete handoff for the requested interface, navigation, saved-site, editor, AI, theme and About changes. It incorporates the latest clarification on custom AI APIs, provider ordering, Site/Admin placement, responsive buttons and the supplied SVG bundle. It describes requirements; implementation and verification are recorded in [completion status](completion-status.md).
+
+**Post-merge clarification, 30 October 2026:** the pearl SVG replaces interface rocket icons and the favicon only; the original launch-stage poster/video stays. Header/footer hiding fully removes their layout space and leaves compact overlays at the document corners. Site actions move to the dashboard’s top-right above saved-site details. One actual-state Light/Dark icon sits beside Downloads and realigns on the next system theme change. Light-mode branding has dark lettering, original gold highlights and no dark plate. The corresponding requirements below supersede the earlier interpretation in PR #8.
 
 ## 1. Direction and deliverables
 
 Improve the existing Playground, retaining its browser-based Joomla/PHP/MariaDB runtime and editor. The result should feel modern, compact and polished, with useful controls, consistent spacing, clear states and a coherent icon system. Preserve running sessions, saved sites, unsaved editor work and the existing deployment/share/export features.
 
-Use the accompanying curated icon package. Monochrome action icons come from the user's `black-svg-icons.zip`; branded rocket uses come from the newly supplied `JoomEngine_Pearl_Logo.svg`, which supersedes the old rocket and the generic bundle rocket. Review its numbered preview and `ICON-MAPPING.md` before integration. The selected icons are proposals for this review round, not a claim of final user approval. Do not reuse the earlier rejected, custom-drawn icon proposals, generate replacement artwork or silently substitute another library. Source geometry is retained. Black, white and `currentColor` variants are supplied for 101 monochrome action mappings; the pearl rocket stays full color and serves Deployment and Launch as well as the favicon and other project rocket uses.
+Use the accompanying curated icon package. Monochrome action icons come from the user's `black-svg-icons.zip`; branded rocket icons come from the newly supplied `JoomEngine_Pearl_Logo.svg`, which supersedes the old rocket icon and the generic bundle rocket. Review its numbered preview and `ICON-MAPPING.md` before integration. The selected icons are proposals for this review round, not a claim of final user approval. Do not reuse the earlier rejected, custom-drawn icon proposals, generate replacement artwork or silently substitute another library. Source geometry is retained. Black, white and `currentColor` variants are supplied for 101 monochrome action mappings; the pearl rocket stays full color and serves Deployment and Launch icons, the favicon and other interface rocket icons. Preserve the original launch-stage poster and video.
 
 The final application work must include:
 
-- The new pearl rocket used consistently for the favicon and project rocket imagery, sized and positioned for each use.
+- The new pearl rocket used consistently for the favicon and interface rocket icons, sized and positioned for each use; the original launch-stage video/poster is preserved.
 - Site/Admin navigation beside Deployment.
-- One expanded dashboard containing configuration, saved-site management, site actions and theme settings.
+- One expanded dashboard containing configuration and saved-site management, with its site actions in a top-right row above saved-site details.
 - Predictable launch/countdown behavior and saved-site rename/delete/resume.
-- Small document-scrolling header/footer restore tabs that reveal and scroll to the restored area.
+- Full header/footer collapse with no reserved strip; small document-corner overlays scroll with the page and reveal/scroll to the restored area.
 - Editable language selectors backed by the existing language catalog.
 - Compact, responsive editor controls; a working Code toggle; reliable detach/redock.
 - Named AI API presets, custom/self-hosted APIs, session credentials, provider model discovery and browsable context selection.
-- System/Light/Dark appearance across the Playground shell and Code, including detached windows.
+- One Light/Dark icon toggle beside Downloads, synchronized across the shell and Code; operating-system theme changes realign the session automatically.
 - Reordered, clearer About content and repository links.
 
 ## 2. Reviewed baseline and implementation entry points
@@ -57,13 +59,15 @@ Where the bundle lacks an exact specialist glyph, the mapping explains the close
 
 ### 3.2 Authoritative pearl rocket and size-specific framing
 
-The user-supplied `JoomEngine_Pearl_Logo.svg` is the rocket identity across the project from now on. Use it for the browser favicon, Deployment/Launch rocket icons and every other branded rocket reference. Search source, HTML, CSS, asset generation and any existing manifest/touch-icon declarations for older rocket artwork. Update references consistently, including the detached window's favicon where supported. Do not replace the separate JoomEngine wordmark with a rocket unless that surface already calls for the rocket.
+The user-supplied `JoomEngine_Pearl_Logo.svg` is the rocket identity for interface icons and the favicon. Use it for the browser favicon, Deployment/Launch rocket icons and other branded rocket icons. Search source, HTML, CSS, asset generation and any existing manifest/touch-icon declarations for older rocket icon artwork. Update those references consistently, including the detached window's favicon where supported. Keep the separate JoomEngine wordmark.
+
+The launch-stage media is explicitly excluded from this replacement: preserve `rocket-poster.jpg` on the welcome/recovery stages and `rocket-launch.mp4` on the loading stage, with muted looping playback, pause when hidden and a reduced-motion poster fallback.
 
 Preserve the exact master SVG under a brand-source path. The supplied file is 218,076 bytes with a `0 0 1280 1280` viewBox, gradients, vector lettering and a transparent background; it contains no embedded raster image, script or external resource reference. Its drawing bounds were measured for this handoff as approximately x=226.852, y=57.917, width=921.295, height=1185.34. These values explain the current empty margins; they are not a requirement to clip to a tight rectangle.
 
 The handoff includes `brand/rocket.svg` and `brand/favicon.svg`, which retain all artwork and use centered square framing with modest padding. Width/height are convenient intrinsic sizes, not fixed rendering requirements. Tune `viewBox`, `preserveAspectRatio`, CSS dimensions and optical alignment per surface. Keep the complete flame/body in the selected frame; avoid distortion, clipping or making a 1280-pixel image box enlarge the toolbar. Reposition within its icon box without moving neighboring controls.
 
-Use roughly 20–24px visible controls as a starting point, test 16/32/48px favicon rendering, and scale larger decorative uses independently. Preserve the recognizable silhouette at small sizes; lettering and reflection detail cannot be expected to read at 16px. If a small-size framing adjustment is needed, derive it from this same vector and review it; do not invent a new simplified rocket or silently remove branded details.
+Use roughly 20–24px visible controls as a starting point, test 16/32/48px favicon rendering, and frame other interface icon sizes independently. Preserve the recognizable silhouette at small sizes; lettering and reflection detail cannot be expected to read at 16px. If a small-size framing adjustment is needed, derive it from this same vector and review it; do not invent a new simplified rocket or silently remove branded details.
 
 Keep this asset full color in both Light and Dark modes. Exempt it from monochrome `currentColor`/fill rules. Check its edges, highlights and transparency on both backgrounds. For repeated UI use prefer a cached external SVG image instead of duplicating the full gradient-heavy markup into every button. If inlining, namespace all gradient/clip/title IDs per instance or use a validated shared symbol so duplicate IDs do not corrupt the rendering.
 
@@ -97,7 +101,8 @@ Keep the existing chevron as the disclosure for the main advanced dashboard. Mov
 | Runtime configuration | Deployment, Joomla version, PHP version, Joomla language, Keep this site |
 | Launch | Launch button, startup countdown, Stop countdown, running/progress status |
 | Site actions | New Site, Restart, Close Site, Login Details, PHP Settings, Reset Site |
-| Appearance | System, Light, Dark |
+
+Place New Site, Restart, Close Site, Login Details, PHP Settings and Reset Site in a right-aligned row at the very top of the expanded dashboard, above the saved-site selector, saved name and details. Keep a divider beneath the row. The actions should remain close to the dashboard disclosure control. The appearance toggle belongs beside Downloads in the main header, outside this dashboard.
 
 Give dashboard actions icons and clear labels. Visually distinguish destructive actions without allowing them to dominate. Preserve the existing Deployment dialog for its detailed deployment fields; the dashboard consolidates the duplicated quick/More areas, not every dialog into one crowded screen.
 
@@ -135,9 +140,11 @@ Migrate existing launch preferences without losing saved entries. Introduce disp
 
 ## 6. Header/footer restore tabs and scrolling
 
-Replace viewport-fixed restore flags with small controls anchored to the top-left and bottom-left document boundaries. They scroll with the document. At a middle scroll position neither tab should follow the user; the top tab returns near the top and the bottom tab appears only near the bottom.
+Hiding the chrome must completely collapse the header, dashboard, activity area and footer: no residual padding, margin, border, spacer or reserved restore strip may remain in document flow. The Joomla preview reclaims that space.
 
-Use the supplied inward-facing arrow choices: down-right at the top-left boundary and up-right at the bottom-left boundary. Keep the visible tab smaller and discreet, with adequate contrast in both themes. Its hit region must remain outside Joomla's interactive content. Align the relevant hide/restore affordances closely enough that hiding chrome makes the new small tab discoverable near the pointer, rather than placing it far away at the opposite edge.
+Place compact restore controls as absolute overlays exactly at the top-left and bottom-left document boundaries. They occupy no layout space and scroll with the document; they are not viewport-fixed. At a middle scroll position neither tab follows the user; the top tab returns near the top and the bottom tab appears only near the bottom.
+
+Use the supplied inward-facing arrow choices: down-right at the top-left boundary and up-right at the bottom-left boundary. Keep each visible tab and its hit region compact, entirely in its corner, with adequate contrast in both themes. It may hover over the Joomla surface but must not cover Joomla buttons or other interactive controls; do not create a blank strip to accommodate it. Align the relevant hide/restore affordances closely enough that hiding chrome makes the new small tab discoverable near the pointer, rather than placing it far away at the opposite edge.
 
 Clicking the top tab must reveal the existing chrome and scroll to the header; clicking the bottom tab must reveal it and scroll to the footer. Wait until layout has expanded before calculating the scroll target. Respect reduced-motion settings and focus the restored control area appropriately without a second accidental scroll.
 
@@ -221,13 +228,15 @@ The current source can include all open files plus selected text and extra paths
 
 Show selected paths, counts and size/budget feedback. Include current unsaved buffers where appropriate and identify them as such. Preserve canonical path checks, boundaries and sensitive-file exclusions. Explain omission/truncation in plain language and ask for explicit inclusion where the existing sensitive-file policy requires it. Make context state follow the assistant into detached mode. Suggested edits remain reviewable before application.
 
-## 10. System, Light and Dark appearance
+## 10. Light/Dark toggle and system alignment
 
-Default to **System** and follow `prefers-color-scheme`, including changes while the application is open. Put an explicit **System / Light / Dark** selector in the expanded dashboard, using the supplied computer/sun/moon icons and readable labels. A manual Light/Dark choice wins over subsequent operating-system changes until System is selected again.
+Default to the actual `prefers-color-scheme` value. Place a single icon-only toggle immediately beside Downloads in the main header, separated by a small vertical divider. Show the supplied sun icon when Light is active and the moon icon when Dark is active; the icon represents the current appearance. Clicking it switches to the other mode. Provide a translated accessible name and tooltip. There is no System button, dropdown or appearance control in the dashboard.
 
-The setting applies to this open Playground session, with a tab-scoped non-secret preference that can survive reloads. Synchronize the owner and its detached editor. Independent Playground sessions should not be forced to change by a global localStorage setting or cross-tab broadcast. A newly created independent session defaults to System.
+A manual toggle takes effect immediately, but the next operating-system color-scheme change clears that override and realigns the session to the new system value. Subsequent system transitions continue to apply until another manual toggle. An actual system event must clear the override even if its resulting theme already matches the current display.
 
-Apply a shared palette to header, footer, dashboard, restore tabs, dialogs, tooltips, controls, focus/disabled/destructive states, Code shell, file tree, AI surface and detached tools. Apply an actual corresponding editor/workbench theme for code backgrounds, tokens, diff views and native widgets. Do not merely invert the shell around a dark editor. Handle logos/wordmarks and all icons with adequate contrast.
+The setting applies to this open Playground session, with a tab-scoped non-secret preference that can survive reloads. Synchronize the owner and its detached editor. Independent Playground sessions should not be forced to change by a global localStorage setting or cross-tab broadcast. A newly created independent session defaults to the current system theme.
+
+Apply a shared palette to header, footer, dashboard, restore tabs, dialogs, tooltips, controls, focus/disabled/destructive states, Code shell, file tree, AI surface and detached tools. Apply an actual corresponding editor/workbench theme for code backgrounds, tokens, diff views and native widgets. Do not merely invert the shell around a dark editor. Handle logos/wordmarks and all icons with adequate contrast. In Light mode the main JoomEngine logo has dark lettering and preserves its original gold highlights and transparency, without a dark background plate. Dark mode retains its light lettering and original gold highlights.
 
 Set the CSS `color-scheme` and appropriate document theme metadata so supported native controls/scrollbars fit. The website can style its own surfaces; it cannot change the user's browser or operating-system preference. The embedded Joomla site's template retains its own styling unless it already supports a compatible theme integration; do not globally invert arbitrary Joomla content.
 
@@ -263,18 +272,18 @@ Suggested replacement explanation: “These projects work together to run Joomla
 | 4 — Editor layout and windows | Compact Code identity/header; responsive icon/label behavior; toggle; detach/reclaim/redock/scroll | Embedded and detached editors retain work and use correct measured layouts |
 | 5 — AI connections | Provider registry/adapters/model discovery; Other/local APIs; Accounts and isolated session sharing | Every shipped preset has a real validated configuration/adapter; representative protocols and a local endpoint pass browser checks; unexercised credential/account limits are recorded; keys stay isolated |
 | 6 — AI context | In-panel browsable scopes, recursive folders, budget/exclusion feedback, enforcement in tools | Conversations use exactly the selected scope; edit review remains intact |
-| 7 — Theme completion and About | Live System/Light/Dark across all windows; About order/links/prose; full localization and visual pass | No mixed-theme surfaces or oversized duplicate branding; credits follow requested priority |
+| 7 — Theme completion and About | Light/Dark toggle with live system realignment across all windows; About order/links/prose; full localization and visual pass | No mixed-theme surfaces or oversized duplicate branding; credits follow requested priority |
 | 8 — Regression and handoff | Complete required checks, targeted browser scenarios and review evidence | All acceptance items below accounted for, with any real limitation explicitly recorded |
 
 Build theme primitives early, then verify every later surface against them. AI connection protocol work and shell/saved-site work can proceed independently after shared state contracts are defined. Use small reviewable changes; do not perform a broad unrelated dependency/runtime upgrade as part of the UI work.
 
 ## 13. Acceptance and regression checklist
 
-- [ ] The new supplied pearl rocket replaces old rocket references, including the favicon and Deployment/Launch; small sizes, positioning, both themes and existing manifest/fallback declarations are verified.
+- [ ] The supplied pearl rocket replaces old interface rocket icons, including the favicon and Deployment/Launch; small sizes, positioning, both themes and existing manifest/fallback declarations are verified. The original launch-stage video/poster and reduced-motion fallback are preserved.
 - [ ] Site/Admin sit beside Deployment, track actual route and switch without recreating the running site.
 - [ ] Fork, Star and AI Assistant are icon-only with accessible names; other labelled buttons have icons and lose labels cleanly when constrained.
-- [ ] The expanded dashboard contains all former More actions, saved-site controls and theme override; no duplicate main More menu remains.
-- [ ] Header/footer restore tabs scroll away; neither is visible in the middle solely because it is viewport-fixed.
+- [ ] The expanded dashboard contains all former More actions in a top-right row above saved-site details, with a divider; no duplicate main More menu remains. The appearance toggle sits beside Downloads.
+- [ ] Hidden header/footer chrome collapses completely without a reserved strip. Compact absolute restore overlays sit exactly in the document corners and scroll away; neither follows the viewport in the middle.
 - [ ] Top restore reveals and scrolls to header; bottom restore reveals and scrolls to footer; no Joomla control is covered.
 - [ ] Both language fields visibly offer catalog values on focus/open and accept typed tags; multi-select and custom-package validation work.
 - [ ] Startup countdown visibly runs 10 → 0, Stop cancels it, and manual selection never stops or launches a site by itself.
@@ -292,8 +301,8 @@ Build theme primitives early, then verify every later surface against them. AI c
 - [ ] Development-status labels are gone; actual connection/model errors remain useful.
 - [ ] Context browser is inside the assistant and supports file/folder/project scope, unsaved buffers, limits and tool-scope enforcement.
 - [ ] AI streaming, cancel, tool calls, diff review, accept/reject and undo retain their intended behavior for each supported adapter.
-- [ ] System theme changes live; manual override wins; returning to System works; unrelated sessions are unaffected.
-- [ ] Header/footer, all dialogs, Code, AI and detached windows use the chosen theme with readable icons, native controls and syntax colors.
+- [ ] One icon beside Downloads shows the active Light/Dark state and toggles it. The next system color-scheme event clears the manual override and realigns immediately; no System selector exists and unrelated sessions remain independent.
+- [ ] Header/footer, all dialogs, Code, AI and detached windows use the chosen theme with readable icons, native controls and syntax colors. Light-mode JoomEngine lettering is dark, with original gold highlights and no dark plate.
 - [ ] About order, concise explanation and technology repository links match section 11; distributed notices remain intact.
 - [ ] Keyboard, focus, tooltip, screen-reader, zoom, narrow-screen, long-translation and reduced-motion behavior remain usable.
 
@@ -307,7 +316,7 @@ This delivery prepares the plan and icon assets. It does not modify, merge or de
 
 The new pearl rocket is an explicit user choice; monochrome action mappings in the accompanying icon preview are the current selection round. Make any user-requested substitutions within the supplied bundle and regenerate all variants/mappings consistently. The archive contains no original README or license file, so record its source provenance and verify the applicable upstream release/notice before distributing the application; do not invent a license from the filenames. This does not require redrawing or replacing the user's selected icons.
 
-Implementation defaults chosen where the discussion left options: startup-only automatic countdown; manual selection waits for Launch; Current File as the initial AI scope; Accounts opens shared AI API settings; tab-session theme override; an action-only collapsed strip at the narrowest editor widths. Keep these explicit in review so refinements do not accidentally alter the core requirements.
+Implementation defaults chosen where the discussion left options: startup-only automatic countdown; manual selection waits for Launch; Current File as the initial AI scope; Accounts opens shared AI API settings; tab-session theme override cleared by the next system change; an action-only collapsed strip at the narrowest editor widths. Keep these explicit in review so refinements do not accidentally alter the core requirements.
 
 ## Appendix A. Expanded AI API preset catalog
 

@@ -7,12 +7,35 @@ async function assertHiddenControls(page) {
   assert.equal(await page.locator('body').evaluate(body => body.classList.contains('embedded')), true);
   for (const id of [...bars, 'settings', 'activity-dock']) {
     assert.equal(await page.locator(`#${id}`).isVisible(), false, `${id} must hide with the playground controls.`);
+    assert.equal(await page.locator(`#${id}`).evaluate(node => node.getBoundingClientRect().height), 0,
+      `${id} must collapse completely, without a remaining strip.`);
   }
   for (const id of restoreControls) {
     const control = page.locator(`#${id}`);
     assert.equal(await control.isVisible(), true);
-    assert.equal(await control.evaluate(button => ['fixed', 'sticky'].includes(getComputedStyle(button).position)), false, `${id} must scroll with the document.`);
+    const geometry = await control.evaluate(button => {
+      const rect = button.getBoundingClientRect();
+      return { position: getComputedStyle(button).position, left: rect.left, top: rect.top + scrollY,
+        bottom: rect.bottom + scrollY, width: rect.width, height: rect.height,
+        documentHeight: document.body.getBoundingClientRect().height };
+    });
+    assert.equal(geometry.position, 'absolute', `${id} must overlay its document corner without reserving a row.`);
+    assert.equal(geometry.left, 0, `${id} must sit entirely in the physical left corner, including RTL.`);
+    assert.equal(geometry.width, 20); assert.equal(geometry.height, 20,
+      `${id} must have a compact corner hit area rather than cover Joomla controls.`);
+    assert.equal(id.endsWith('top') ? geometry.top : geometry.bottom,
+      id.endsWith('top') ? 0 : geometry.documentHeight, `${id} must touch its document edge.`);
   }
+  const layout = await page.evaluate(() => {
+    const content = document.getElementById('site-mount').hidden
+      ? document.getElementById('welcome') : document.getElementById('site-mount');
+    const main = document.querySelector('main').getBoundingClientRect();
+    return { contentTop: content.getBoundingClientRect().top + scrollY, mainTop: main.top + scrollY,
+      mainBottom: main.bottom + scrollY, bodyHeight: document.body.getBoundingClientRect().height };
+  });
+  assert.equal(layout.mainTop, 0, 'Collapsed chrome must reserve no space above the site.');
+  assert.equal(layout.contentTop, 0, 'The site starts at the document edge.');
+  assert.equal(layout.mainBottom, layout.bodyHeight, 'Collapsed footer and restore controls must reserve no space below the site.');
 }
 
 async function assertVisibleControls(page) {
@@ -25,20 +48,26 @@ async function assertVisibleControls(page) {
  * Viewport resizing is responsive-layout evidence, not native browser zoom.
  */
 async function assertShellAppearance(page, capture) {
-  const theme = page.locator('#theme-preference');
-  const previous = await theme.inputValue();
+  const theme = page.locator('#theme-toggle');
+  const previous = await page.locator('html').getAttribute('data-theme');
+  const previousPreference = await page.locator('html').getAttribute('data-theme-preference');
   const settingsVisible = await page.locator('#settings').isVisible();
   const viewport = page.viewportSize();
   const stablePaint = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const choose = async value => {
-    await theme.selectOption(value);
+    if (await page.locator('html').getAttribute('data-theme') !== value) await theme.click();
     await page.waitForFunction(expected => document.documentElement.dataset.theme === expected, value);
-    assert.equal(await theme.evaluate(select => getComputedStyle(select).colorScheme), value,
+    assert.equal(await theme.evaluate(button => getComputedStyle(button).colorScheme), value,
       'Native settings controls must use the selected appearance.');
+    assert.equal(await theme.getAttribute('data-icon'), `theme-${value}`, 'The toggle icon shows the active appearance.');
+    assert.equal(await theme.getAttribute('aria-pressed'), String(value === 'dark'));
     await stablePaint();
   };
   try {
     if (!settingsVisible) await page.locator('#settings-toggle').click();
+    assert.equal(await theme.evaluate(button => button.previousElementSibling?.id), 'download-dialog-button',
+      'The single appearance icon stays immediately beside Downloads.');
+    assert.equal(await page.locator('#theme-preference').count(), 0, 'There is no separate System selector.');
     const brand = await page.evaluate(async () => {
       const link = document.querySelector('link[rel=icon]');
       const favicon = new Image(); favicon.src = link.href; await favicon.decode();
@@ -62,14 +91,22 @@ async function assertShellAppearance(page, capture) {
       assert.equal(icon.naturalWidth, 24); assert.equal(icon.width, 24); assert.equal(icon.height, 24);
       assert.equal(icon.objectFit, 'contain'); assert.equal(icon.filter, 'none', 'Pearl artwork stays full color.');
     }
-    // Exercise the actual selector and live OS preference listener.
-    await theme.selectOption('system');
-    for (const colorScheme of ['dark', 'light']) {
-      await page.emulateMedia({ colorScheme });
-      await page.waitForFunction(expected => document.documentElement.dataset.theme === expected, colorScheme);
-    }
-    await choose('dark'); await page.emulateMedia({ colorScheme: 'light' });
-    assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark', 'Explicit appearance overrides System.');
+    assert.equal(await page.locator('#theme-preference').count(), 0, 'Appearance has one toggle and no System selector.');
+    assert.equal(await theme.evaluate(button => button.previousElementSibling?.id), 'download-dialog-button',
+      'The appearance icon immediately follows Downloads.');
+    assert.equal(await page.locator('#configuration-fields').evaluate(fieldset => fieldset.querySelector('legend').nextElementSibling?.id), 'site-actions',
+      'Site actions are the first dashboard row, above saved-site details.');
+    // Start from a known OS value, then prove a manual toggle only lasts until
+    // the OS changes again, even when the first change matches the override.
+    await page.emulateMedia({ colorScheme: 'light' });
+    await choose('light'); await choose('dark');
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.waitForFunction(() => document.documentElement.dataset.themePreference === 'system');
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
+    assert.equal(await theme.getAttribute('data-icon'), 'theme-light', 'System changes also update the current-mode icon.');
+    // A second manual click still works after returning to system alignment.
+    await choose('dark'); await choose('light');
     const backgrounds = {};
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
@@ -79,19 +116,32 @@ async function assertShellAppearance(page, capture) {
         await capture?.(`shell-dashboard-${mode}-${width}`);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
           'The expanded dashboard must fit the viewport.');
+        const layout = await page.evaluate(() => {
+          const actions = document.getElementById('site-actions');
+          return { actionsBottom: actions.getBoundingClientRect().bottom,
+            savedTop: document.querySelector('.site-switcher').getBoundingClientRect().top,
+            rightGap: actions.getBoundingClientRect().right - actions.lastElementChild.getBoundingClientRect().right,
+            logoContent: getComputedStyle(document.querySelector('.brand img')).content,
+            logoBackground: getComputedStyle(document.querySelector('.brand img')).backgroundColor };
+        });
+        assert.ok(layout.actionsBottom <= layout.savedTop, 'Site actions appear above saved-site details.');
+        assert.ok(Math.abs(layout.rightGap) <= 1, 'Site actions align to the far right of the dashboard.');
+        if (mode === 'light') {
+          assert.match(layout.logoContent, /joomengine-logo-light\.svg/);
+          assert.equal(layout.logoBackground, 'rgba(0, 0, 0, 0)', 'Light wordmark has no dark plate.');
+        }
         backgrounds[mode] = await page.locator('#settings').evaluate(node => getComputedStyle(node).backgroundColor);
-        // Theme is the final dashboard control. Going forward first enters
-        // Joomla's iframe, where Firefox retains an independent tab sequence.
-        // Enter the selector from its preceding shell control instead.
+        // Enter the icon from its preceding header control to verify the
+        // visible keyboard focus indicator independently of iframe tab order.
         await theme.focus(); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab');
         const focus = await theme.evaluate(node => {
           const style = getComputedStyle(node);
           return { active: document.activeElement?.id, visible: node.matches(':focus-visible'),
             outline: style.outlineStyle, width: parseFloat(style.outlineWidth) };
         });
-        assert.equal(focus.active, 'theme-preference', `Keyboard focus returns to the selector: ${JSON.stringify(focus)}`);
+        assert.equal(focus.active, 'theme-toggle', `Keyboard focus returns to the appearance button: ${JSON.stringify(focus)}`);
         assert.ok(focus.visible && focus.outline !== 'none' && focus.width >= 2,
-          `The theme selector keeps a visible keyboard focus indicator: ${JSON.stringify(focus)}`);
+          `The appearance button keeps a visible keyboard focus indicator: ${JSON.stringify(focus)}`);
         await capture?.(`shell-theme-control-${mode}-${width}`);
         await page.locator('#site-footer').scrollIntoViewIfNeeded();
         await capture?.(`shell-footer-${mode}-${width}`);
@@ -116,8 +166,12 @@ async function assertShellAppearance(page, capture) {
     for (const selector of ['#information-dialog[open]', '#deploy-dialog[open]']) {
       if (await page.locator(selector).count()) await page.keyboard.press('Escape');
     }
-    await theme.selectOption(previous);
+    if (previousPreference === 'system') {
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await page.emulateMedia({ colorScheme: 'light' });
+    }
     await page.emulateMedia({ colorScheme: null });
+    if (previousPreference !== 'system') await choose(previous);
     if (await page.locator('#settings').isVisible() !== settingsVisible) await page.locator('#settings-toggle').click();
     await page.setViewportSize(viewport);
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -156,14 +210,15 @@ export async function assertLiveFocusMode(page, frame, { capture } = {}) {
         const hideControl = page.locator(`#${hide}`);
         await hideControl.scrollIntoViewIfNeeded();
         const hideLeft = await hideControl.evaluate(button => button.getBoundingClientRect().left);
-        assert.ok(hideLeft <= 12, 'Hide controls stay beside the left-boundary restore tabs, including RTL.');
+        assert.ok(hideLeft <= 12, 'Hide controls stay beside the left-corner restore tabs, including RTL.');
         if (keyboard) { await hideControl.focus(); await page.keyboard.press('Enter'); }
         else await hideControl.click();
         await assertHiddenControls(page);
         const sameEdge = page.locator(`#focus-restore-${hide === 'focus-header-button' ? 'top' : 'bottom'}`);
-        assert.ok(Math.abs(await sameEdge.evaluate(button => button.getBoundingClientRect().left) - hideLeft) <= 2,
+        assert.ok(Math.abs(await sameEdge.evaluate(button => button.getBoundingClientRect().left) - hideLeft) <= 12,
           'Hiding chrome must not move its restore affordance to the opposite edge.');
         await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight / 2 - innerHeight / 2));
+        await assertHiddenControls(page);
         for (const id of restoreControls) assert.equal(await page.locator(`#${id}`).evaluate(button => {
           const box = button.getBoundingClientRect(); return box.bottom > 0 && box.top < innerHeight;
         }), false, 'Restore tabs must leave the viewport in the middle of a long Joomla page.');
@@ -173,8 +228,17 @@ export async function assertLiveFocusMode(page, frame, { capture } = {}) {
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
         const restoreControl = page.locator(`#${restore}`);
         await restoreControl.scrollIntoViewIfNeeded();
+        const hitArea = await restoreControl.evaluate(button => {
+          const rect = button.getBoundingClientRect(), top = button.id.endsWith('top');
+          const inside = document.elementFromPoint(rect.left + 3, rect.top + (top ? 3 : 17));
+          const outside = document.elementFromPoint(rect.left + 17, rect.top + (top ? 17 : 3));
+          return { inside: inside === button || button.contains(inside),
+            outside: outside === button || button.contains(outside) };
+        });
+        assert.equal(hitArea.inside, true, 'The small corner triangle accepts activation.');
+        assert.equal(hitArea.outside, false, 'The clipped area passes through to Joomla instead of covering its controls.');
         if (keyboard) { await restoreControl.focus(); await page.keyboard.press('Enter'); }
-        else await restoreControl.click();
+        else await restoreControl.click({ position: { x: 3, y: restore.endsWith('top') ? 3 : 17 } });
         await assertVisibleControls(page);
         await page.waitForFunction(edge => { const area = document.getElementById(edge === 'focus-restore-bottom' ? 'site-footer' : 'site-header').getBoundingClientRect(); return edge === 'focus-restore-bottom' ? area.bottom <= innerHeight + 2 : Math.abs(area.top) <= 2; }, restore);
         assert.equal(await page.evaluate(() => document.activeElement?.id), restore === 'focus-restore-bottom' ? 'focus-footer-button' : 'focus-header-button',

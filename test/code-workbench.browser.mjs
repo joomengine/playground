@@ -199,6 +199,14 @@ test('bundled JoomEngine Code preserves native document models through edits and
         await page.evaluate(() => window.code.setTheme('light'));
         await popup.waitForFunction(() => document.documentElement.dataset.theme === 'light' && document.querySelector('.monaco-workbench')?.classList.contains('vs'));
         await captureVisual(popup, name, 'detached-narrow-light');
+        await popup.setViewportSize({ width: 2800, height: 900 });
+        await popup.waitForFunction(() => document.querySelector('.jec-detached-root')?.dataset.actions === 'labels');
+        assert.equal(await popup.locator('.jec-detached-toolbar').evaluate(toolbar => {
+          const labels = [...toolbar.querySelectorAll(':scope > :not(.je-icon-only) > .je-action-label')];
+          return labels.length > 0 && labels.every(label => getComputedStyle(label).display !== 'none')
+            && toolbar.scrollWidth <= toolbar.clientWidth + 1;
+        }), true, 'Detached actions regain their words when the actual window width permits them.');
+        await popup.setViewportSize({ width: 500, height: 560 });
         await page.evaluate(() => window.code.setTheme('dark'));
         await popup.waitForFunction(() => document.documentElement.dataset.theme === 'dark' && document.querySelector('.monaco-workbench')?.classList.contains('vs-dark'));
         const fileArea = popup.locator('.jec-detached-nav');
