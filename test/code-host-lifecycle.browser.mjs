@@ -94,6 +94,22 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
           detachAttempts: window.layoutCounts.detachAttempts })));
         assert.equal(await page.frameLocator('#layout-preview').locator('body').evaluate(() => window.siteIdentity), previewIdentity);
       };
+      const assertWideHeader = async () => {
+        await page.waitForFunction(() => document.querySelector('.jec-panel')?.dataset.actions !== 'strip');
+        const boxes = await page.locator('.jec-titlebar').evaluate(header => {
+          const rect = selector => {
+            const box = header.querySelector(selector).getBoundingClientRect();
+            return { x: box.x, right: box.right, y: box.y, bottom: box.bottom, width: box.width };
+          };
+          return { title: rect('.jec-panel-title'), actions: rect('.jec-toolbar'), windows: rect('.jec-window-controls') };
+        });
+        assert.ok(Math.abs(boxes.actions.y - boxes.windows.y) < 2
+          && Math.abs(boxes.actions.bottom - boxes.windows.bottom) < 2,
+        'Expanding the editor restores actions and window controls to one row.');
+        assert.ok(boxes.title.right <= boxes.actions.x && boxes.actions.right <= boxes.windows.x,
+          'The wide header keeps identity, actions and window controls separate.');
+        assert.ok(boxes.title.width < 100, 'The Code identity keeps its compact width after expansion.');
+      };
 
       await mode.selectOption('left');
       let before = await panel.boundingBox(), siteBox = await preview.boundingBox();
@@ -141,6 +157,7 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await page.locator('[data-i18n-aria-label="code.maximize"]').click();
       assert.equal(await preview.isVisible(), false);
       assert.equal(await mode.inputValue(), 'full');
+      await assertWideHeader();
       await page.evaluate(() => {
         document.documentElement.dataset.theme = 'dark';
         document.dispatchEvent(new CustomEvent('joomengine:themechange', { detail: { resolved: 'dark' } }));
@@ -198,6 +215,9 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
         'A narrow viewport collapses the chosen side dock below the site.');
       assert.equal(await mode.inputValue(), 'right', 'Responsive collapse preserves the preferred dock mode.');
       await page.setViewportSize({ width: 1400, height: 900 });
+      await mode.selectOption('full');
+      await assertWideHeader();
+      await assertDocuments();
       await mode.selectOption('right');
       await page.locator('[data-i18n-aria-label="code.detach"]').click();
       await page.getByRole('alert').filter({ hasText: /popup|pop-up/i }).waitFor();
