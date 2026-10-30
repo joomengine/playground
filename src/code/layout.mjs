@@ -1,4 +1,5 @@
 import english from '../locales/en.mjs';
+import { createIcon } from '../icons.mjs';
 
 const MODES = new Set(['left', 'right', 'bottom', 'full', 'floating']);
 const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
@@ -47,7 +48,7 @@ export function createCodeLayout({
   try { saved = JSON.parse(storage?.getItem(storageKey) || 'null'); } catch { /* Storage is optional for temporary use. */ }
   let preferences = normalizeCodeLayout(saved, viewport());
   let visible = false, restoreMode = preferences.mode === 'full' ? 'right' : preferences.mode;
-  let disposed = false, detached = null, detaching = false, resizing = null, frame = 0;
+  let disposed = false, detached = null, detaching = false, detachOperation, hiding = false, hidingOperation, resizing = null, frame = 0;
   const listeners = new Set([onState]);
   const cleanups = [];
   const create = (tag, className, text) => {
@@ -73,13 +74,8 @@ export function createCodeLayout({
   const titlebar = create('div', 'jec-titlebar');
   const title = button('code.move', t('code.title'));
   title.classList.add('jec-panel-title');
-  const logo = create('img', 'jec-wordmark');
-  logo.src = new URL('../brand/joomengine-code-dark.svg', import.meta.url).href;
-  logo.alt = t('code.title'); logo.setAttribute('data-i18n-alt', 'code.title');
-  const identity = create('picture', 'jec-identity');
-  const compact = create('source', ''); compact.media = '(max-width:800px)';
-  compact.srcset = new URL('../brand/joomengine-code-compact-dark.svg', import.meta.url).href;
-  identity.append(compact, logo); title.replaceChildren(identity);
+  title.textContent = 'Code';
+  const windowControls = create('div', 'jec-window-controls');
   const modeLabel = create('label', 'jec-mode-label');
   const label = create('span', 'jec-visually-hidden', t('code.layout'));
   label.setAttribute('data-i18n', 'code.layout');
@@ -91,16 +87,19 @@ export function createCodeLayout({
   const detachButton = button('code.detach', '↗');
   detachButton.hidden = typeof detachView !== 'function';
   const maximize = button('code.maximize', '□');
-  const hideButton = button('code.hide', '×');
-  titlebar.append(title, modeLabel, detachButton, maximize, hideButton);
+  const hideButton = button('code.hide');
+  hideButton.append(createIcon('hide-editor', doc));
+  windowControls.append(modeLabel, detachButton, maximize, hideButton);
   const toolbar = create('div', 'jec-toolbar');
   toolbar.setAttribute('role', 'toolbar'); toolbar.setAttribute('aria-label', t('code.actions')); toolbar.setAttribute('data-i18n-aria-label', 'code.actions');
   const notice = create('p', 'jec-detached-notice', t('code.detachedNotice'));
   notice.hidden = true; notice.setAttribute('role', 'status'); notice.setAttribute('data-i18n', 'code.detachedNotice');
   editor.classList.add('jec-editor-mount');
-  const resize = button('code.resize', '◢');
+  const resize = button('code.resize');
+  resize.append(createIcon('resize-editor', doc));
   resize.classList.add('jec-resize-corner');
-  panel.append(titlebar, toolbar, notice, editor, resize);
+  titlebar.append(title, toolbar, windowControls);
+  panel.append(titlebar, notice, editor, resize);
   const divider = create('div', 'jec-divider');
   divider.tabIndex = 0;
   divider.setAttribute('role', 'separator');
@@ -125,23 +124,27 @@ export function createCodeLayout({
     const mode = preferences.mode;
     // Collapse side-by-side on narrow screens without overwriting the chosen mode.
     const effectiveMode = win.innerWidth < 720 && ['left', 'right'].includes(mode) ? 'bottom' : mode;
-    host.dataset.jecMode = visible ? effectiveMode : 'hidden';
-    panel.hidden = !visible;
-    divider.hidden = !visible || !['left', 'right', 'bottom'].includes(effectiveMode);
+    // The owner realm remains mounted, but a confirmed auxiliary window owns
+    // the visible editor. Release all embedded grid space until it returns.
+    const embedded = visible && !detached;
+    host.dataset.jecMode = embedded ? effectiveMode : 'hidden';
+    host.dataset.jecDetached = String(Boolean(detached));
+    panel.hidden = !embedded;
+    divider.hidden = !embedded || !['left', 'right', 'bottom'].includes(effectiveMode);
     resize.hidden = mode !== 'floating';
     title.disabled = mode !== 'floating';
     host.style.setProperty('--jec-dock', `${preferences.dock}%`);
     host.style.setProperty('--jec-bottom', `${preferences.bottom}px`);
     for (const key of ['x', 'y', 'width', 'height']) panel.style.setProperty(`--jec-${key}`, `${preferences[key]}px`);
     modeSelect.value = mode;
-    maximize.textContent = mode === 'full' ? '▣' : '□';
+    maximize.replaceChildren(createIcon(mode === 'full' ? 'restore-workspace' : 'full-workspace', doc));
     const maximizeKey = mode === 'full' ? 'code.restore' : 'code.maximize';
     maximize.title = t(maximizeKey);
     maximize.setAttribute('data-i18n-title', maximizeKey); maximize.setAttribute('data-i18n-aria-label', maximizeKey);
     maximize.setAttribute('aria-label', maximize.title);
     notice.hidden = !detached;
     detachButton.disabled = detaching;
-    detachButton.textContent = detached ? '↙' : '↗';
+    detachButton.replaceChildren(createIcon(detached ? 'redock' : 'detach', doc));
     const detachKey = detached ? 'code.redock' : 'code.detach';
     detachButton.title = t(detachKey);
     detachButton.setAttribute('data-i18n-title', detachKey); detachButton.setAttribute('data-i18n-aria-label', detachKey);
@@ -169,23 +172,43 @@ export function createCodeLayout({
     if (detached === current) detached = null;
     render();
   }
-  async function detach() {
+  function detach() {
     assertActive();
-    if (detached) { detached.focus?.(); return detached; }
-    if (detaching) return;
-    if (typeof detachView !== 'function') throw new Error(t('code.detachUnavailable'));
+    if (detached) { detached.focus?.(); return Promise.resolve(detached); }
+    if (detachOperation) return detachOperation;
+    if (typeof detachView !== 'function') return Promise.reject(new Error(t('code.detachUnavailable')));
     detaching = true; render({ persist: false });
-    try {
-      // Call immediately in the click's activation context, before yielding.
-      const result = await detachView({ onClose() { detached = null; if (!disposed) render(); } });
+    // Invoke in the actual click's activation context; awaiting first can cause
+    // a browser to reject the popup and must never hide the embedded workspace.
+    let pending;
+    try { pending = detachView({ onClose() { detached = null; if (!disposed) { if (!hiding) visible = true; render(); } } }); }
+    catch (error) { detaching = false; render({ persist: false }); return Promise.reject(error); }
+    detachOperation = Promise.resolve(pending).then(async result => {
       if (!result || typeof result.redock !== 'function') throw new Error(t('code.popupBlocked'));
       if (disposed) { await result.redock(); return; }
       detached = result;
-      result.closed?.then(() => { if (detached === result) detached = null; if (!disposed) render(); }, report);
+      result.closed?.then(() => {
+        if (detached === result) detached = null;
+        if (!disposed) { if (!hiding) visible = true; render(); }
+      }, report);
       return result;
-    } finally { detaching = false; if (!disposed) render(); }
+    }).finally(() => { detachOperation = undefined; detaching = false; if (!disposed) render(); });
+    return detachOperation;
   }
-  async function hide() { assertActive(); await redock(); visible = false; render(); }
+  function hide() {
+    assertActive();
+    if (hidingOperation) return hidingOperation;
+    const wasVisible = visible;
+    hiding = true; visible = false; render();
+    hidingOperation = (async () => {
+      // A toggle during popup creation takes ownership after that creation
+      // settles, preventing a late detached window from surviving a hide.
+      try { await detachOperation; } catch { /* Detach failure already leaves the owner available. */ }
+      try { await redock(); }
+      catch (error) { visible = wasVisible; throw error; }
+    })().finally(() => { hiding = false; hidingOperation = undefined; if (!disposed) render(); });
+    return hidingOperation;
+  }
   function pointerStart(event, kind) {
     if (event.button !== 0 || disposed) return;
     if (kind !== 'divider' && preferences.mode !== 'floating') return;
@@ -235,27 +258,41 @@ export function createCodeLayout({
   }
   listen(win, 'resize', () => render({ persist: false }));
   listen(doc, 'rocket:languagechange', () => render({ persist: false }));
-  const observer = new win.ResizeObserver(scheduleLayout);
+  const fitActions = () => {
+    if (!panel.clientWidth) return;
+    // Size against the editor container, including a narrow dock inside a wide
+    // browser. Only the action area may move down; window controls stay put.
+    const actions = [...toolbar.children].filter(node => !node.hidden && node.getAttribute('role') !== 'status');
+    const reserved = windowControls.getBoundingClientRect().width + title.getBoundingClientRect().width + 32;
+    const iconWidth = actions.length * 36;
+    panel.dataset.actions = panel.clientWidth < reserved + iconWidth ? 'strip'
+      : panel.clientWidth < reserved + actions.length * 112 ? 'icons' : 'labels';
+    scheduleLayout();
+  };
+  const observer = new win.ResizeObserver(fitActions);
+  observer.observe(panel);
   observer.observe(editor);
+  const toolbarObserver = new win.MutationObserver(fitActions);
+  toolbarObserver.observe(toolbar, { childList: true });
   render({ persist: false });
   return {
     panel, toolbar, editor,
     get state() { return state(); },
-    show() { assertActive(); visible = true; render(); },
+    show() { assertActive(); visible = true; render(); if (detached) detached.focus?.(); },
     hide, setMode, maximize() { setMode('full'); }, restore, detach, redock,
     subscribe(listener) { assertActive(); listeners.add(listener); listener(state()); return () => listeners.delete(listener); },
     dispose() {
       if (disposed) return;
       disposed = true;
       if (frame) win.cancelAnimationFrame(frame);
-      observer.disconnect();
+      observer.disconnect(); toolbarObserver.disconnect();
       for (const cleanup of cleanups) cleanup();
       listeners.clear();
       if (detached) void detached.redock().catch(report);
       panel.remove(); divider.remove();
       host.classList.remove('jec-layout-host', 'jec-interacting');
       preview.classList.remove('jec-preview');
-      delete host.dataset.jecMode;
+      delete host.dataset.jecMode; delete host.dataset.jecDetached;
       host.style.removeProperty('--jec-dock'); host.style.removeProperty('--jec-bottom');
     },
   };

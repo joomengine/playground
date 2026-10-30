@@ -1,0 +1,20 @@
+{
+  "source": "JoomEngine_Pearl_Logo.svg",
+  "sha256": "55305a0c163c69a1ca851adfcb0139449cd5658dfbb126e090da3e024abb98ca",
+  "source_bytes": 218076,
+  "source_viewBox": "0 0 1280 1280",
+  "drawing_bounds": {
+    "x": 226.852,
+    "y": 57.917,
+    "width": 921.295,
+    "height": 1185.34
+  },
+  "normalized_viewBox": "65.1960 28.2835 1244.6070 1244.6070",
+  "padding": "2.5% of longest drawing dimension per edge",
+  "source_geometry_and_colors_preserved": true,
+  "files": {
+    "original": "brand/JoomEngine_Pearl_Logo.original.svg",
+    "ui": "brand/rocket.svg",
+    "favicon": "brand/favicon.svg"
+  }
+}

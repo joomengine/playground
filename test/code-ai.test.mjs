@@ -94,7 +94,8 @@ test('provider validates endpoints and context bounds before sending credentials
   const provider = createChatProvider({ ...settings, maxRequestBytes: 1024, fetcher: () => { fetched = true; } });
   await assert.rejects(provider.stream({ messages: [{ role: 'user', content: 'x'.repeat(2048) }] }), { code: 'REQUEST_LIMIT' });
   assert.equal(fetched, false);
-  assert.equal(AI_PROVIDER_CANDIDATES.every(candidate => candidate.verified === false), true);
+  assert.deepEqual(AI_PROVIDER_CANDIDATES.slice(0, 3).map(provider => provider.id), ['openai', 'anthropic', 'google']);
+  assert.equal(AI_PROVIDER_CANDIDATES.at(-1).id, 'other');
 });
 
 test('prepare/reject is read-only; accept uses one recoverable batch and cannot be replayed', async () => {
@@ -332,4 +333,47 @@ test('AI accept and recovery recheck dirty buffers after obtaining the owner wri
 
 test('AI review cannot mutate through a workspace without the authoritative write reservation', () => {
   assert.throws(() => createAiReview({ workspace: { request() {} } }), /write reservation/);
+});
+
+test('current-file scope fences reads, search, aliases and mutation proposals while preserving unsaved text', async () => {
+  const { directory, workspace, review } = fixture();
+  fs.symlinkSync('templates/site.css', path.join(directory, 'alias.css'));
+  const tools = createAiWorkspaceTools({ workspace, review, scope: { mode: 'current' } });
+  const context = await tools.context({ scope: { mode: 'current' }, activePath: '/index.php', openFiles: [
+    { path: '/index.php', canonicalPath: '/index.php', content: 'unsaved permitted context', unsaved: true },
+    { path: '/templates/site.css', canonicalPath: '/templates/site.css', content: 'unrelated buffer', unsaved: true },
+  ] });
+  assert.deepEqual(context.files.map(file => file.path), ['/index.php']);
+  assert.equal(context.files[0].unsaved, true);
+  assert.equal((await tools.execute('read_file', { path: '/index.php' })).content, 'unsaved permitted context');
+  await assert.rejects(tools.execute('read_file', { path: '/templates/site.css' }), /outside the selected/);
+  await assert.rejects(tools.execute('read_file', { path: '/alias.css' }), /outside the selected/);
+  await assert.rejects(tools.execute('propose_changes', { summary: 'escape scope', changes: [{ operation: 'write', path: '/outside.php', content: 'no' }] }), /outside the selected/);
+  assert.deepEqual((await tools.execute('search_files', { path: '/', query: 'unrelated' })).matches, []);
+  assert.deepEqual((await tools.execute('list_files', { path: '/' })).entries.map(file => file.path), ['/index.php']);
+});
+
+test('selected folders resolve recursively, enforce exclusions and never grant sensitive children implicitly', async () => {
+  const { directory, workspace, review } = fixture();
+  fs.mkdirSync(path.join(directory, 'templates/nested'));
+  fs.writeFileSync(path.join(directory, 'templates/nested/view.php'), 'template body');
+  fs.writeFileSync(path.join(directory, 'templates/.env'), 'API_KEY="unsafe-secret-token"');
+  const tools = createAiWorkspaceTools({ workspace, review, scope: { mode: 'selected' } });
+  const context = await tools.context({ scope: { mode: 'selected', paths: ['/templates'], excluded: ['/templates/site.css'] } });
+  assert.deepEqual(context.files.map(file => file.path), ['/templates/nested/view.php']);
+  assert.ok(context.excluded.some(file => file.path === '/templates/.env'));
+  await assert.rejects(tools.execute('read_file', { path: '/templates/.env' }), /Explicitly select/);
+  await assert.rejects(tools.execute('read_file', { path: '/templates/site.css' }), /outside the selected/);
+  assert.equal((await tools.browse({ path: '/templates' })).entries.find(file => file.path === '/templates/.env').sensitive, true);
+  const explicit = await tools.context({ scope: { mode: 'selected', paths: ['/templates/.env'] } });
+  assert.equal(explicit.files[0].path, '/templates/.env');
+});
+
+test('project scope retrieves bounded context without recursively uploading the installation', async () => {
+  const { workspace, review } = fixture();
+  const tools = createAiWorkspaceTools({ workspace, review, scope: { mode: 'project' } });
+  const context = await tools.context({ scope: { mode: 'project', paths: ['/templates'] }, openFiles: ['/index.php'] });
+  assert.deepEqual(context.files.map(file => file.path), ['/index.php']);
+  assert.equal((await tools.execute('read_file', { path: '/templates/site.css' })).path, '/templates/site.css');
+  await assert.rejects(tools.execute('read_file', { path: '/configuration.php' }), /Explicitly select/);
 });

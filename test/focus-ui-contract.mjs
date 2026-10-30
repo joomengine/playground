@@ -11,10 +11,7 @@ async function assertHiddenControls(page) {
   for (const id of restoreControls) {
     const control = page.locator(`#${id}`);
     assert.equal(await control.isVisible(), true);
-    assert.equal(await control.evaluate(button => {
-      const bounds = button.getBoundingClientRect();
-      return bounds.top >= 0 && bounds.bottom <= innerHeight + 1 && bounds.left >= 0 && bounds.right <= innerWidth + 1;
-    }), true, `${id} must remain available inside the viewport.`);
+    assert.equal(await control.evaluate(button => ['fixed', 'sticky'].includes(getComputedStyle(button).position)), false, `${id} must scroll with the document.`);
   }
 }
 
@@ -51,13 +48,19 @@ export async function assertLiveFocusMode(page, frame) {
         if (keyboard) { await hideControl.focus(); await page.keyboard.press('Enter'); }
         else await hideControl.click();
         await assertHiddenControls(page);
+        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight / 2 - innerHeight / 2));
+        for (const id of restoreControls) assert.equal(await page.locator(`#${id}`).evaluate(button => {
+          const box = button.getBoundingClientRect(); return box.bottom > 0 && box.top < innerHeight;
+        }), false, 'Restore tabs must leave the viewport in the middle of a long Joomla page.');
         await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
         await assertHiddenControls(page);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
         const restoreControl = page.locator(`#${restore}`);
+        await restoreControl.scrollIntoViewIfNeeded();
         if (keyboard) { await restoreControl.focus(); await page.keyboard.press('Enter'); }
         else await restoreControl.click();
         await assertVisibleControls(page);
+        await page.waitForFunction(edge => { const area = document.getElementById(edge === 'focus-restore-bottom' ? 'site-footer' : 'site-header').getBoundingClientRect(); return edge === 'focus-restore-bottom' ? area.bottom <= innerHeight + 2 : Math.abs(area.top) <= 2; }, restore);
         assert.equal(await page.evaluate(() => document.getElementById('site-frame') === window.__focusFrameProof), true,
           'Showing or hiding controls must keep the same iframe element.');
         assert.equal(await frame.evaluate(() => document === window.__focusDocumentProof), true,

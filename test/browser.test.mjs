@@ -277,7 +277,8 @@ async function reviewFixtureLink(page, source) {
 }
 
 async function showSiteActions(page) {
-  if (await page.locator('#site-actions').getAttribute('open') === null) await page.locator('#site-actions > summary').click();
+  await showQuickSettings(page);
+  assert.equal(await page.locator('#site-actions > summary').count(), 0, 'Site actions belong to the one dashboard.');
 }
 
 async function openHarness(context, url, { isolation = true } = {}) {
@@ -964,10 +965,12 @@ for (const name of browserNames) {
         assert.equal(activeFrame.url(), originalFrameURL);
         await showQuickSettings(page);
         await page.locator('#php-version').selectOption(changedPHP);
-        await page.locator('#status-message').filter({ hasText: 'PHP settings applied.' }).waitFor({ timeout: requestTimeout });
+        assert.deepEqual(await previewContract(page), marker, 'Staging PHP must keep the active runtime unchanged.');
+        await page.locator('#launch-button').click();
+        await page.waitForFunction(() => !document.getElementById('launch-button').disabled, null, { timeout: requestTimeout });
         const switchedFrame = await renderedSiteFrame(page);
-        assert.equal(switchedFrame.url(), originalFrameURL,
-          'Restarting PHP must retain the active Joomla route.');
+        assert.equal(new URL(switchedFrame.url()).pathname.split('/administrator/')[1], new URL(originalFrameURL).pathname.split('/administrator/')[1]);
+        assert.equal(new URL(switchedFrame.url()).search, new URL(originalFrameURL).search, 'Launching a staged PHP change restores the safe Joomla route.');
         const afterSwitch = await previewContract(page);
         assert.deepEqual(afterSwitch, { ...marker, php: manifest.php.find((entry) => entry.version === changedPHP).patchVersion });
         page.testStep = 'reopen saved site from origin';
@@ -1044,12 +1047,26 @@ for (const name of browserNames) {
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         assert.notEqual(await page.locator('#storage-key').inputValue(), savedKey);
-        assert.equal(await page.locator('#site-frame').count(), 0);
+        assert.equal(await page.locator('#site-frame').count(), 1);
+        assert.deepEqual(await previewContract(page), afterSwitch, 'Staging a new site leaves the running site intact.');
         await page.locator('#launch-button').click();
         await renderedSiteFrame(page);
         assert.equal((await previewContract(page)).database, null, 'New site must install an independent database.');
         await showQuickSettings(page);
         await page.locator('#saved-site').selectOption(savedKey);
+        assert.equal((await previewContract(page)).database, null, 'Selecting a saved site does not launch it.');
+        await page.locator('#saved-site-name').fill('Renamed original site');
+        await page.locator('#rename-site-button').click();
+        assert.equal(await page.locator('#saved-site').inputValue(), savedKey);
+        assert.match(await page.locator(`#saved-site option[value="${savedKey}"]`).textContent(), /Renamed original site/);
+        assert.equal((await previewContract(page)).database, null, 'Renaming an inactive entry does not change the running database.');
+        await page.locator('#saved-site').selectOption(freshKey);
+        page.once('dialog', dialog => dialog.accept());
+        await page.locator('#delete-site-button').click();
+        await page.waitForFunction(key => !document.querySelector(`#saved-site option[value="${key}"]`), freshKey);
+        assert.equal((await previewContract(page)).database, null, 'Deleting an inactive entry never launches it or deletes the running database.');
+        await page.locator('#saved-site').selectOption(savedKey);
+        await page.locator('#launch-button').click();
         await renderedSiteFrame(page);
         assert.deepEqual(await previewContract(page), afterSwitch, 'The saved-site selector must reopen the original files and database.');
         page.testStep = 'reset site';
@@ -1138,6 +1155,8 @@ for (const name of browserNames) {
         assert.equal(await page.locator('#persistence').isChecked(), false);
         page.testStep = 'checkpoint temporary site into browser storage';
         await setPersistence(page, true);
+        assert.deepEqual(await previewContract(page), marker, 'Keep setting is staged without replacing the temporary runtime.');
+        await page.locator('#save-button').click();
         await page.locator('#save-button:enabled').waitFor({ timeout: requestTimeout });
         await renderedSiteFrame(page);
         assert.equal(await page.locator('#persistence').isChecked(), true);
@@ -1163,6 +1182,10 @@ for (const name of browserNames) {
         });
         await showSiteActions(page);
         await page.locator('#new-site-button').click();
+        await closeDeployEditor(page);
+        await showQuickSettings(page);
+        assert.deepEqual(await previewContract(page), marker, 'Staging a new site must not flush or close the running one.');
+        await page.locator('#launch-button').click();
         await page.locator('#header-feedback').filter({ hasText: 'Simulated storage quota failure' }).waitFor();
         assert.equal(await page.evaluate(() => window.__flushFailureInjected), true);
         await renderedSiteFrame(page);

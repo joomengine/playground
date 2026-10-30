@@ -1,7 +1,11 @@
 import { resolveSiteURL, createShareURL, createDeploymentDocument, parseDeploymentDocument, loadDeploymentDocument, normalizeConfiguration, parseCatalog, readURLConfiguration } from './config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from './deploys.mjs';
 import { createPlayground, prepareEnvironment, resetPlayground } from './playground.mjs';
-import { customSetupDetails, defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from './ui-state.mjs';
+import { customSetupDetails, defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, rememberSiteRoute, renameSavedSite, safeSavedRoute, resolveResumePath, runtimeLocation, savedStateKey } from './ui-state.mjs';
+
+import { initializeTheme, setTheme, getThemeState } from './theme.mjs';
+import { observeIcons } from './icons.mjs';
+import { createLanguageSelector } from './language-selector.mjs';
 
 import { connectFrame } from './frame-view.mjs';
 import { DEFAULT_PHP_SETTINGS, normalizePhpSettings } from './php-settings.mjs';
@@ -20,6 +24,12 @@ const controls = ['save-button', 'restart-button', 'close-button', 'reset-button
 const drafts = new Map();
 let catalog, deployCatalog, runtime, currentConfig, currentInput;
 let busy = false;
+let launching = false;
+let selectedSiteId = null;
+let runningSiteId = null;
+let runningAdministrator = null;
+let previewDirty = false;
+let languageSelector, deploymentLanguageSelector;
 let initialized = false;
 let disconnectFrame = () => {};
 let phpSettings = { ...DEFAULT_PHP_SETTINGS };
@@ -42,6 +52,7 @@ let openingCode;
 const launchCountdown = createLaunchCountdown({
   onTick(seconds) {
     $('launch-countdown').hidden = false;
+    $('stop-countdown').disabled = false;
     $('countdown-value').textContent = String(seconds);
     $('countdown-message').textContent = t('status.countdown', { seconds });
   },
@@ -56,8 +67,9 @@ function password() {
 }
 function messageOf(value) {
   let text = value instanceof Error ? value.message : String(value);
-  const secret = $('admin-password').value;
-  if (secret) text = text.split(secret).join('[password]');
+  for (const secret of [$('admin-password').value, runningAdministrator?.password]) {
+    if (secret) text = text.split(secret).join('[password]');
+  }
   return text;
 }
 function activity(message) {
@@ -78,8 +90,8 @@ function show(view) {
   for (const name of ['welcome', 'loading-view', 'error-view', 'site-mount']) $(name).hidden = name !== view;
   document.querySelector('.preview-panel').classList.toggle('launching', view === 'loading-view');
   const video = $('launch-video');
-  if (view === 'loading-view' && !matchMedia('(prefers-reduced-motion: reduce)').matches) video.play().catch(() => {});
-  else video.pause();
+  if (video && view === 'loading-view' && !matchMedia('(prefers-reduced-motion: reduce)').matches) video.play().catch(() => {});
+  else video?.pause();
 }
 function feedback(message, { error = false, persistent = false } = {}) {
   clearTimeout(feedbackTimer);
@@ -110,7 +122,6 @@ function approveCustomSetup(input) {
 }
 function openDialog(id) {
   pauseAutomaticLaunch();
-  $('site-actions').open = false;
   const dialog = $(id);
   if (!dialog.open) dialog.showModal();
 }
@@ -131,7 +142,6 @@ function setFocusMode(hidden, { focus = false, edge = 'top' } = {}) {
   const previousScroll = window.scrollY;
   hideToolbar = Boolean(hidden);
   document.body.classList.toggle('embedded', hideToolbar);
-  $('site-actions').open = false;
   for (const id of ['focus-header-button', 'focus-footer-button']) $(id).setAttribute('aria-expanded', String(!hideToolbar));
   for (const id of ['focus-restore-top', 'focus-restore-bottom']) {
     $(id).hidden = !hideToolbar;
@@ -140,13 +150,18 @@ function setFocusMode(hidden, { focus = false, edge = 'top' } = {}) {
   // Only the surrounding controls change: keep the live frame and its document.
   // Notify its layout observer and keep the same site content in view.
   window.dispatchEvent(new Event('resize'));
-  if (frame) {
+  if (frame && hidden) {
     const nextTop = frame.getBoundingClientRect().top + window.scrollY;
     window.scrollTo({ top: Math.max(0, previousScroll + nextTop - previousTop), behavior: 'instant' });
   }
   if (focus) {
     const target = hidden ? `focus-restore-${edge}` : `focus-${edge === 'top' ? 'header' : 'footer'}-button`;
     $(target).focus({ preventScroll: true });
+    if (!hidden) requestAnimationFrame(() => requestAnimationFrame(() => {
+      const area = $(edge === 'bottom' ? 'site-footer' : 'site-header');
+      area.scrollIntoView({ block: edge === 'bottom' ? 'end' : 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+      $(target).focus({ preventScroll: true });
+    }));
   }
 }
 function updateSaveState() {
@@ -161,6 +176,21 @@ function destroyPreview() {
   $('site-mount').replaceChildren();
   $('site-mount').hidden = true;
 }
+function updateNavigation() {
+  const available = Boolean(runtime?.healthy && !runtime?.recovery && !busy && !launching);
+  const admin = /^\/administrator(?:\/|[?#]|$)/.test(currentSitePath);
+  for (const [id, active] of [['nav-site', !admin], ['nav-admin', admin]]) {
+    $(id).disabled = !available;
+    $(id).setAttribute('aria-pressed', String(available && active));
+  }
+}
+function navigatePreview(path) {
+  if (busy || !runtime?.healthy || runtime?.recovery) return;
+  const frame = $('site-frame');
+  if (!frame) return;
+  // Native navigation preserves Joomla's beforeunload checks and the runtime.
+  frame.contentWindow.location.assign(resolveSiteURL(path, runtime.baseUrl));
+}
 function mountPreview(url) {
   const frame = document.createElement('iframe');
   frame.id = 'site-frame';
@@ -168,9 +198,25 @@ function mountPreview(url) {
   frame.referrerPolicy = 'same-origin';
   // Set the destination before attachment so a newly inserted blank document is never reused.
   frame.src = url;
+  previewDirty = false;
+  frame.addEventListener('load', () => {
+    previewDirty = false;
+    try {
+      const markDirty = event => { if (event.isTrusted && event.target.closest('form')) previewDirty = true; };
+      frame.contentDocument.addEventListener('input', markDirty, { capture: true });
+      frame.contentDocument.addEventListener('change', markDirty, { capture: true });
+    } catch { /* The browser owns cross-origin form navigation checks. */ }
+  });
   disconnectFrame();
   disconnectFrame = connectFrame(frame, { onNavigate: ({ url, signedOut }) => {
-    if (runtime && url.startsWith(runtime.baseUrl)) currentSitePath = `/${url.slice(runtime.baseUrl.length)}`;
+    if (runtime && url.startsWith(runtime.baseUrl)) {
+      currentSitePath = `/${url.slice(runtime.baseUrl.length)}`;
+      if (runningSiteId && currentConfig.persistence) {
+        const next = rememberSiteRoute(savedState, runningSiteId, currentSitePath);
+        if (next !== savedState) { savedState = next; writePreferences({ render: false }); }
+      }
+      updateNavigation();
+    }
     $('credentials-button').dataset.signedOut = String(signedOut);
     $('credentials-button').textContent = `${t('title.credentials')}${signedOut ? ` · ${t('status.signedOut')}` : ''}`;
   } });
@@ -198,12 +244,17 @@ async function openCode() {
         onState(state) {
           $('code-refresh-button').hidden = Boolean(state.closed);
           $('code-button').setAttribute('aria-expanded', String(Boolean(state.visible)));
+          const toggleLabel = state.visible ? 'code.hide' : 'code.open';
+          for (const attribute of ['title', 'aria-label']) {
+            $('code-button').setAttribute(`data-i18n-${attribute}`, toggleLabel);
+            $('code-button').setAttribute(attribute, t(toggleLabel));
+          }
           $('code-refresh-button').dataset.changed = String(Boolean(state.savedChanges));
           $('code-refresh-button').title = t(state.savedChanges ? 'code.savedChanges' : 'code.refresh');
         },
       });
     }
-    await codeHost.open();
+    await codeHost.toggle();
   })();
   $('code-button').disabled = true;
   try { await openingCode; }
@@ -216,27 +267,31 @@ function updateMcpPreview() {
 }
 function setBusy(value) {
   busy = value;
+  const locked = busy || launching;
   const unavailable = !initialized || !catalog || !deployCatalog;
   const filesOnly = Boolean(runtime?.recovery?.filesOnly);
-  $('configuration-fields').disabled = busy || unavailable;
-  $('installation-fields').disabled = busy || unavailable;
-  fields.persistence.disabled = busy || unavailable || filesOnly;
-  fields.phpVersion.disabled = busy || unavailable || filesOnly;
-  $('launch-button').disabled = busy || Boolean(runtime) || unavailable;
-  $('embedded-launch').disabled = busy || Boolean(runtime) || unavailable;
-  $('retry-button').disabled = busy || unavailable;
-  $('recover-button').disabled = busy || unavailable || !fields.persistence.checked;
+  $('configuration-fields').disabled = locked || unavailable;
+  $('installation-fields').disabled = locked || unavailable;
+  fields.persistence.disabled = locked || unavailable;
+  fields.phpVersion.disabled = locked || unavailable;
+  const targetRunning = Boolean(runtime && fields.storageKey.value === currentConfig?.storageKey && fields.persistence.checked === currentConfig?.persistence);
+  $('launch-button').disabled = locked || unavailable;
+  $('embedded-launch').disabled = locked || unavailable;
+  $('retry-button').disabled = locked || unavailable;
+  $('recover-button').disabled = locked || unavailable || !fields.persistence.checked;
   $('repair-button').hidden = filesOnly || !runtime?.recovery?.configured;
-  $('repair-button').disabled = busy || filesOnly;
-  $('error-reset-button').disabled = busy || unavailable || !fields.persistence.checked;
-  $('new-site-button').disabled = busy || unavailable;
-  $('saved-site').disabled = busy || unavailable || Object.keys(savedState.sites).length === 0;
-  for (const id of controls) $(id).disabled = busy || !runtime;
-  $('share-button').disabled = busy || unavailable;
-  $('reset-button').disabled = busy || (!runtime && (unavailable || !fields.persistence.checked));
-  $('save-button').disabled = busy || !runtime || filesOnly;
-  $('restart-button').disabled = busy || !runtime || filesOnly;
-  $('download-dialog-button').disabled = busy || !runtime;
+  $('repair-button').disabled = locked || filesOnly;
+  $('error-reset-button').disabled = locked || unavailable || !fields.persistence.checked;
+  $('new-site-button').disabled = locked || unavailable;
+  $('saved-site').disabled = locked || unavailable || Object.keys(savedState.sites).length === 0;
+  for (const id of ['saved-site-name', 'rename-site-button', 'delete-site-button']) $(id).disabled = locked || !selectedSiteId || !Object.hasOwn(savedState.sites, selectedSiteId);
+  updateNavigation();
+  for (const id of controls) $(id).disabled = locked || !runtime;
+  $('share-button').disabled = locked || unavailable;
+  $('reset-button').disabled = locked || (!runtime && (unavailable || !fields.persistence.checked));
+  $('save-button').disabled = locked || !runtime || filesOnly;
+  $('restart-button').disabled = locked || !runtime || filesOnly;
+  $('download-dialog-button').disabled = locked || !runtime;
   const recoveryFormat = $('export-format').querySelector('[value="recovery"]');
   recoveryFormat.hidden = !runtime?.recovery;
   recoveryFormat.disabled = !runtime?.recovery;
@@ -248,16 +303,17 @@ function setBusy(value) {
   $('recovery-files-notice').hidden = !filesOnly;
   $('download-files-notice').hidden = !filesOnly;
   $('download-help').hidden = filesOnly;
-  $('credentials-button').disabled = busy || !runtime || Boolean(runtime.recovery);
-  $('php-settings-button').disabled = busy || unavailable || filesOnly;
-  $('use-deploy').disabled = busy || unavailable;
-  $('apply-deploy').disabled = busy || !runtime || Boolean(runtime.recovery);
-  $('preview-dot').className = `status-dot${busy ? ' busy' : runtime ? '' : ' muted'}`;
-  $('launch-button').querySelector('span').textContent = t(busy ? 'status.working' : runtime ? 'status.running' : 'action.launch');
+  $('credentials-button').disabled = locked || !runtime || Boolean(runtime.recovery);
+  $('php-settings-button').disabled = locked || unavailable || filesOnly;
+  $('use-deploy').disabled = locked || unavailable;
+  $('apply-deploy').disabled = locked || !runtime || Boolean(runtime.recovery);
+  $('preview-dot').className = `status-dot${locked ? ' busy' : runtime ? '' : ' muted'}`;
+  $('launch-button').querySelector('span').textContent = t(locked ? 'status.working' : targetRunning ? 'action.openRunning' : 'action.launch');
   $('launch-hint').textContent = t('help.firstLaunch');
   $('storage-note').textContent = t(fields.persistence.checked ? 'help.storage' : 'help.temporary');
   document.body.classList.toggle('running', Boolean(runtime));
-  $('preview-label').textContent = runtime && currentConfig ? currentConfig.siteName : t('title.site');
+  $('preview-label').textContent = runtime && currentConfig ? savedState.sites[runningSiteId]?.displayName || currentConfig.siteName : t('title.site');
+  $('running-site-note').textContent = runtime ? t('status.runningSite', { name: savedState.sites[runningSiteId]?.displayName || currentConfig.siteName }) : t('status.noRunningSite');
   updateSaveState();
   updateMcpPreview();
 }
@@ -290,19 +346,18 @@ function displayError(error, title = t('title.error')) {
 async function recoverSite() {
   if (busy || !catalog || !deployCatalog || !fields.persistence.checked) return;
   pauseAutomaticLaunch();
-  if (runtime) {
-    try { await runtime.close(); } catch (error) { activity(error); }
-    runtime = undefined;
-  }
+  if (runtime && !await closeSite({ save: currentConfig.persistence && !runtime.recovery })) return;
   setBusy(true);
   destroyPreview();
   show('loading-view');
   try {
-    const input = currentInput || formInput();
+    const input = formInput();
     const resolved = await resolve(input);
     currentInput = input;
     currentConfig = resolved.configuration;
     runtime = await createPlayground(currentConfig, { recovery: true, onProgress: progress });
+    runningSiteId = currentConfig.storageKey;
+    runningAdministrator = runtime.installation?.administrator || currentInput.admin;
     clearFeedback();
     $('error-title').textContent = t('title.recovery');
     $('error-message').textContent = runtime.recovery.filesOnly ? messageOf(runtime.recovery.databaseError) : t('help.recovery');
@@ -360,11 +415,8 @@ function updateCompatibility({ preserve = false } = {}) {
   const major = joomla.version.split('.')[0];
   for (const option of fields.deployId.options) { const descriptor = deployCatalog.deploys.find(item => item.id === option.value); option.disabled = Boolean(descriptor?.joomla && !descriptor.joomla.includes(major)); }
   const tags = [...new Set(['en-GB', ...(deployCatalog.languages?.[major] || []).map((item) => item.tag)])];
-  $('language-options').replaceChildren(...tags.map((tag) => {
-    const option = document.createElement('option');
-    option.value = tag;
-    return option;
-  }));
+  languageSelector?.setCatalog(tags);
+  deploymentLanguageSelector?.setCatalog(tags);
 }
 function applyConfiguration(config, input = config, deploy) {
   extraDeploymentFields = Object.fromEntries(['content', 'languages'].filter(key => input[key] !== undefined).map(key => [key, structuredClone(input[key])]));
@@ -392,9 +444,11 @@ function applyConfiguration(config, input = config, deploy) {
   const description = deploy?.description ?? deployCatalog.deploys.find((item) => item.id === config.deployId)?.description;
   $('deploy-description').textContent = description || 'A verified Joomla installation with the selected setup steps.';
   updateCompatibility({ preserve: true });
+  languageSelector?.refresh(); deploymentLanguageSelector?.refresh();
 }
-function writePreferences() {
-  renderSavedSites();
+
+function writePreferences({ render = true } = {}) {
+  if (render) renderSavedSites();
   try {
     if (!preferences) throw new Error('Browser preference storage is unavailable.');
     preferences.setItem(preferenceKey, JSON.stringify(savedState));
@@ -404,7 +458,7 @@ function writePreferences() {
     return false;
   }
 }
-function renderSavedSites(selectedKey = runtime && currentConfig?.persistence ? currentConfig.storageKey : savedState.active) {
+function renderSavedSites(selectedKey = selectedSiteId) {
   const select = $('saved-site');
   const entries = Object.values(savedState.sites).reverse();
   const empty = document.createElement('option');
@@ -413,16 +467,17 @@ function renderSavedSites(selectedKey = runtime && currentConfig?.persistence ? 
   select.replaceChildren(empty, ...entries.map((entry) => {
     const option = document.createElement('option');
     option.value = entry.storageKey;
-    option.textContent = `${entry.siteName} · Joomla ${entry.joomlaVersion} · ${entry.storageKey}`;
+    option.textContent = `${entry.displayName || entry.siteName} · Joomla ${entry.joomlaVersion}${entry.storageKey === runningSiteId ? ` · ${t('status.running')}` : ''}`;
     return option;
   }));
   select.value = selectedKey || '';
+  $('saved-site-name').value = savedState.sites[selectedKey]?.displayName || '';
 }
 function rememberCurrentSite() {
   if (currentConfig?.persistence) {
-    savedState = rememberSite(savedState, { ...currentInput, ...Object.fromEntries(['deployId', 'joomlaVersion', 'phpVersion', 'siteName', 'storageKey', 'persistence', 'language'].map((name) => [name, currentConfig[name]])) });
+    savedState = rememberSite(savedState, { ...currentInput, lastPath: safeSavedRoute(currentSitePath, currentConfig.initialPath), ...Object.fromEntries(['deployId', 'joomlaVersion', 'phpVersion', 'siteName', 'storageKey', 'persistence', 'language'].map((name) => [name, currentConfig[name]])) });
   } else {
-    savedState = { ...savedState, active: null };
+    // Temporary installations must not replace the last resumable saved site.
     if (!preferences) return true;
   }
   return writePreferences();
@@ -436,7 +491,9 @@ function findProfile(deployId, joomlaVersion) {
     || Object.values(savedState.sites).reverse().find((item) => item.deployId === deployId && item.joomlaVersion === joomlaVersion);
 }
 async function launch() {
-  if (busy || runtime || !initialized || !catalog || !deployCatalog) return;
+  if (busy || launching || !initialized || !catalog || !deployCatalog) return;
+  launching = true;
+  let switchingStarted = false;
   launchCountdown.stop();
   $('launch-countdown').hidden = true;
   try {
@@ -445,7 +502,6 @@ async function launch() {
     if (!approveCustomSetup(input)) return;
     clearFeedback();
     setBusy(true);
-    show('loading-view');
     $('loading-title').textContent = t('title.loading');
     $('loading-progress').removeAttribute('value');
     if (freshKeyPending) {
@@ -459,14 +515,29 @@ async function launch() {
       activity(`Changed setup steps use a separate site key, “${input.storageKey}”. Your previous site is preserved.`);
     }
     const resolved = await resolve(input);
+    if (runtime && currentConfig.storageKey === resolved.configuration.storageKey && currentConfig.persistence === resolved.configuration.persistence && JSON.stringify(publicConfiguration(currentInput)) === JSON.stringify(publicConfiguration(input))) {
+      setDrawer(false); $('site-frame')?.focus(); feedback(t('status.alreadyRunning')); return;
+    }
+    if (runtime) {
+      if (!currentConfig.persistence && !confirm(t('confirm.temporary'))) return;
+      setBusy(false);
+      if (!await closeSite({ save: currentConfig.persistence })) return;
+    }
+    switchingStarted = true;
+    setBusy(true); show('loading-view');
     currentInput = input;
     currentConfig = resolved.configuration;
     $('preview-label').textContent = currentConfig.siteName;
     activity(`Starting ${resolved.deploy?.title || currentConfig.deployId} with Joomla ${currentConfig.joomlaVersion} and PHP ${currentConfig.phpVersion}.`);
-    runtime = await createPlayground(currentConfig, { onProgress: progress });
-    const siteURL = new URL(runtime.url, location.href);
+    const resumePath = !input.fresh && currentConfig.persistence && savedState.sites[currentConfig.storageKey]?.lastPath;
+    runtime = await createPlayground({ ...currentConfig, ...(resumePath ? { initialPath: safeSavedRoute(resumePath, currentConfig.initialPath) } : {}) }, { onProgress: progress });
+    runningSiteId = currentConfig.storageKey;
+    selectedSiteId = currentConfig.persistence ? currentConfig.storageKey : null;
+    const restoredPath = resumePath ? await resolveResumePath((path, init) => runtime.request(path, init), resumePath, currentConfig.initialPath) : null;
+    const siteURL = new URL(restoredPath ? resolveSiteURL(restoredPath, runtime.baseUrl) : runtime.url, location.href);
     if (siteURL.origin !== location.origin) throw new Error('The playground returned an unexpected site origin.');
-    applyAdministrator(runtime.installation?.administrator);
+    runningAdministrator = runtime.installation?.administrator || currentInput.admin;
+    applyAdministrator(runningAdministrator);
     currentConfig.siteName = runtime.installation?.siteName || currentConfig.siteName;
     currentInput.siteName = currentConfig.siteName;
     fields.siteName.value = currentConfig.siteName;
@@ -481,6 +552,7 @@ async function launch() {
       fields.deployId.value = currentConfig.deployId;
     }
     $('preview-label').textContent = currentConfig.siteName;
+    currentSitePath = `/${siteURL.href.slice(runtime.baseUrl.length)}`;
     mountPreview(siteURL.href);
     lastSavedAt = currentConfig.persistence ? new Date() : undefined;
     setDrawer(false);
@@ -496,35 +568,39 @@ async function launch() {
       ? resumeSaved ? 'Site ready. Reopening this playground will resume your saved site.' : `Site ready. Keep saved site key “${currentConfig.storageKey}” to reopen it.`
       : 'Temporary site ready. Download your work before closing.');
   } catch (error) {
+    if (!switchingStarted) { feedback(error, { error: true, persistent: true }); return; }
     destroyPreview();
     if (runtime) {
       try { await runtime.close(); } catch (closeError) { activity(closeError); }
       runtime = undefined;
+      runningSiteId = null;
     }
     displayError(error);
   } finally {
+    launching = false;
     setBusy(false);
     if (!$('error-view').hidden) $('preview-dot').className = 'status-dot failed';
   }
 }
 async function closeSite({ reset = false, save = false } = {}) {
-  if (busy || !runtime) return false;
+  if (busy || closing || !runtime) return false;
   if (openingCode) { feedback(t('code.loading')); return false; }
-  if (runtime.debugger.state !== 'idle') {
-    try { await runtime.debugger.stop(); } catch (error) { feedback(error, { error: true }); return false; }
-  }
-  try { if (codeHost && !codeHost.closed && !await codeHost.beforeClose()) return false; }
-  catch (error) { feedback(error, { error: true, persistent: true }); return false; }
-  setBusy(true);
-  closing = true;
   const handle = runtime;
-  destroyPreview();
+  let previewRemoved = false;
+  closing = true;
+  setBusy(true);
   try {
+    if (previewDirty && !confirm(t('confirm.unsavedSiteForm'))) return false;
+    if (handle.debugger.state !== 'idle') await handle.debugger.stop();
+    if (codeHost && !codeHost.closed && !await codeHost.beforeClose()) return false;
+    // A failed checkpoint must leave the current iframe and unsaved forms intact.
     if (save && !handle.recovery?.filesOnly) { activity('Saving the current site before closing…'); await handle.flush(); }
+    destroyPreview(); previewRemoved = true;
     if (reset) await handle.reset();
     else await handle.close();
     await codeHost?.dispose(); codeHost = undefined;
     runtime = undefined;
+    runningSiteId = null; runningAdministrator = null; previewDirty = false;
     if (reset) {
       savedState = forgetSite(savedState, currentConfig.storageKey);
       writePreferences();
@@ -532,31 +608,32 @@ async function closeSite({ reset = false, save = false } = {}) {
       freshKeyPending = false;
     }
     $('preview-label').textContent = t('title.site');
-    clearFeedback();
-    show('welcome');
+    clearFeedback(); show('welcome');
     activity(reset ? 'Site files and database deleted. Launch to build a fresh site from its deploy.' : 'Site closed. Its saved data remains available.');
     return true;
   } catch (error) {
     runtime = handle.healthy ? handle : undefined;
-    if (runtime) { mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl)); feedback(error, { error: true, persistent: true }); }
-    else displayError(error);
+    if (runtime) {
+      if (previewRemoved) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
+      feedback(error, { error: true, persistent: true });
+    } else { runningSiteId = null; runningAdministrator = null; displayError(error); }
     return false;
   } finally { closing = false; setBusy(false); }
 }
 
 async function newSite() {
-  if (busy || !catalog || !deployCatalog) return;
-  if (runtime && !currentConfig.persistence && !confirm(t('confirm.temporary'))) return;
+  if (busy || launching || !catalog || !deployCatalog) return;
+  pauseAutomaticLaunch();
   rememberDraft();
-  if (runtime && !await closeSite({ save: currentConfig.persistence })) return;
   const label = deployCatalog.deploys.find((entry) => entry.id === fields.deployId.value)?.title || 'Joomla site';
   fields.storageKey.value = `${defaultSiteKey(fields.deployId.value, fields.joomlaVersion.value).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`;
   fields.siteName.value = `${label.slice(0, 88)} ${Object.keys(savedState.sites).length + 1}`;
   $('admin-password').value = password();
   pendingFresh = false;
   freshKeyPending = false;
+  selectedSiteId = null;
   renderSavedSites('');
-  show('welcome');
+  if (!runtime) show('welcome');
   setBusy(false);
   activity(`Choose settings for new site “${fields.storageKey.value}”, then Launch. Your saved sites are preserved.`);
   openDialog('deploy-dialog');
@@ -564,40 +641,60 @@ async function newSite() {
 }
 
 async function openSavedSite(key) {
-  if (busy || !Object.hasOwn(savedState.sites, key)) return;
-  if (runtime && currentConfig.storageKey === key && currentConfig.persistence) return;
-  if (runtime && !currentConfig.persistence && !confirm(t('confirm.temporary'))) {
-    renderSavedSites(''); return;
-  }
-  if (runtime && !await closeSite({ save: currentConfig.persistence })) return;
+  if (busy || launching || !Object.hasOwn(savedState.sites, key)) return;
+  pauseAutomaticLaunch();
+  rememberDraft();
   setBusy(true);
   try {
     const input = { ...savedState.sites[key], hideToolbar, admin: administrator() };
     const resolved = await resolve(input);
     applyConfiguration(resolved.configuration, input, resolved.deploy);
+    selectedSiteId = key;
     freshKeyPending = false;
-    show('welcome');
+    if (!runtime) show('welcome');
     $('retry-button').hidden = false;
     renderSavedSites(key);
-  } catch (error) { displayError(error, t('title.error')); }
+    activity(t('status.siteStaged', { name: savedState.sites[key].displayName || input.siteName }));
+  } catch (error) { feedback(error, { error: true, persistent: true }); }
   finally { setBusy(false); }
-  if ($('error-view').hidden) await launch();
+}
+async function deleteSelectedSite() {
+  if (busy || launching || !selectedSiteId || !Object.hasOwn(savedState.sites, selectedSiteId)) return;
+  pauseAutomaticLaunch();
+  const key = selectedSiteId;
+  const name = savedState.sites[key].displayName || savedState.sites[key].siteName;
+  if (!confirm(t('confirm.deleteSavedSite', { name }))) return;
+  if (runtime && runningSiteId === key && !await closeSite()) return;
+  setBusy(true);
+  try {
+    // Locks, files, database and Code drafts all use the selected identity.
+    // Retain catalog metadata on any failure so deletion can safely be retried.
+    await resetPlayground({ storageKey: key });
+    savedState = forgetSite(savedState, key);
+    selectedSiteId = null;
+    writePreferences();
+    feedback(t('status.siteDeleted', { name }));
+  } catch (error) { feedback(error, { error: true, persistent: true }); }
+  finally { setBusy(false); }
+}
+function renameSelectedSite() {
+  if (busy || launching || !selectedSiteId) return;
+  pauseAutomaticLaunch();
+  try {
+    savedState = renameSavedSite(savedState, selectedSiteId, $('saved-site-name').value);
+    writePreferences(); setBusy(false);
+    feedback(t('status.siteRenamed'));
+  } catch (error) { feedback(error, { error: true, persistent: true }); }
 }
 async function changeProfile() {
-  if (busy || !catalog) return;
+  if (busy || launching || !catalog) return;
   const major = fields.joomlaVersion.value.split('.')[0];
   const descriptor = deployCatalog.deploys.find(item => item.id === fields.deployId.value);
   if (descriptor?.joomla && !descriptor.joomla.includes(major)) fields.deployId.value = deployCatalog.defaultsByJoomla?.[major] || deployCatalog.default;
   const target = { deployId: fields.deployId.value, joomlaVersion: fields.joomlaVersion.value };
   const previous = selectedProfile;
-  const wasRunning = Boolean(runtime);
-  if (wasRunning && !currentConfig.persistence && !confirm(t('confirm.temporary'))) {
-    fields.deployId.value = previous.deployId;
-    fields.joomlaVersion.value = previous.joomlaVersion;
-    return;
-  }
+  pauseAutomaticLaunch();
   rememberDraft(previous);
-  if (wasRunning && !await closeSite()) return;
   setBusy(true);
   try {
     const stored = findProfile(target.deployId, target.joomlaVersion);
@@ -617,12 +714,13 @@ async function changeProfile() {
     const resolved = await resolve(input);
     freshKeyPending = false;
     applyConfiguration(resolved.configuration, input, resolved.deploy);
-    show('welcome');
+    selectedSiteId = savedState.sites[input.storageKey] ? input.storageKey : null;
+    renderSavedSites();
+    if (!runtime) show('welcome');
     $('retry-button').hidden = false;
     activity(`Selected ${resolved.deploy?.title || target.deployId}. Saved site key: ${resolved.configuration.storageKey}.`);
-  } catch (error) { displayError(error, t('title.error')); }
+  } catch (error) { feedback(error, { error: true, persistent: true }); }
   finally { setBusy(false); }
-  if (wasRunning && $('error-view').hidden) await launch();
 }
 
 $('launch-form').addEventListener('submit', (event) => { event.preventDefault(); void launch(); });
@@ -633,10 +731,15 @@ $('code-refresh-button').addEventListener('click', () => { void codeHost?.refres
 $('close-button').addEventListener('click', () => { if (runtime && !currentConfig.persistence && !confirm(t('confirm.temporary'))) return; void closeSite(); });
 $('new-site-button').addEventListener('click', () => void newSite());
 $('saved-site').addEventListener('change', (event) => void openSavedSite(event.target.value));
+$('rename-site-button').addEventListener('click', renameSelectedSite);
+$('delete-site-button').addEventListener('click', () => void deleteSelectedSite());
+$('stop-countdown').addEventListener('click', pauseAutomaticLaunch);
+$('nav-site').addEventListener('click', () => navigatePreview('/'));
+$('nav-admin').addEventListener('click', () => navigatePreview('/administrator/'));
 $('restart-button').addEventListener('click', async () => {
   if (busy || !runtime || runtime.recovery?.filesOnly) return;
   setBusy(true); destroyPreview(); show('loading-view');
-  try { await runtime.updatePhpSettings(phpSettings); mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl)); feedback(t('status.ready')); }
+  try { await runtime.updatePhpSettings(currentConfig.phpSettings || DEFAULT_PHP_SETTINGS); mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl)); feedback(t('status.ready')); }
   catch (error) { if (runtime?.healthy) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl)); else displayError(error); feedback(error, { error: true }); }
   finally { setBusy(false); }
 });
@@ -720,41 +823,13 @@ $('log-toggle').addEventListener('click', () => {
 });
 fields.deployId.addEventListener('change', () => void changeProfile());
 fields.joomlaVersion.addEventListener('change', () => void changeProfile());
-fields.phpVersion.addEventListener('change', async () => {
-  if (busy || !runtime || runtime.recovery?.filesOnly) return;
-  const previous = currentConfig.phpVersion;
-  setBusy(true); destroyPreview(); show('loading-view');
-  try {
-    await runtime.switchPhpVersion(fields.phpVersion.value);
-    currentConfig = runtime.configuration;
-    currentInput = { ...currentInput, phpVersion: currentConfig.phpVersion };
-    rememberCurrentSite();
-    mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
-    history.replaceState(null, '', runtimeLocation(location.href, currentInput));
-    feedback(t('status.ready'));
-  } catch (error) { fields.phpVersion.value = previous; if (runtime?.healthy) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl)); else displayError(error); feedback(error, { error: true }); }
-  finally { setBusy(false); }
-});
-fields.persistence.addEventListener('change', async () => {
-  if (!runtime) { setBusy(busy); return; }
-  if (fields.persistence.checked && !currentConfig.persistence) await saveSite();
-  else if (!fields.persistence.checked && currentConfig.persistence) {
-    fields.persistence.checked = true;
-    feedback(t('help.savedSites'));
-  }
-});
-fields.storageKey.addEventListener('change', async () => {
-  if (runtime || busy) return;
-  const saved = Object.hasOwn(savedState.sites, fields.storageKey.value) ? savedState.sites[fields.storageKey.value] : undefined;
-  if (!saved) return;
-  setBusy(true);
-  try {
-    const resolved = await resolve({ ...saved, admin: administrator() });
-    applyConfiguration(resolved.configuration, saved, resolved.deploy);
-    show('welcome');
-    activity(`Selected saved site “${saved.siteName}”. Launch to resume it.`);
-  } catch (error) { displayError(error, t('title.error')); }
-  finally { setBusy(false); }
+fields.phpVersion.addEventListener('change', () => { pauseAutomaticLaunch(); setBusy(busy); });
+fields.persistence.addEventListener('change', () => { pauseAutomaticLaunch(); setBusy(busy); });
+fields.storageKey.addEventListener('change', () => {
+  pauseAutomaticLaunch();
+  if (busy) return;
+  if (Object.hasOwn(savedState.sites, fields.storageKey.value)) void openSavedSite(fields.storageKey.value);
+  else { selectedSiteId = null; renderSavedSites(); setBusy(false); }
 });
 
 function parseEditorJSON(id, fallback) {
@@ -806,6 +881,7 @@ function editorError(error) { $('deploy-error').textContent = messageOf(error); 
 async function saveSite({ quiet = false } = {}) {
   if (!runtime || busy || runtime.recovery?.filesOnly) return false;
   const wasTemporary = !currentConfig.persistence;
+  const savingSelected = fields.storageKey.value === currentConfig.storageKey;
   setBusy(true); $('save-state').textContent = t('status.saving');
   if (wasTemporary) { destroyPreview(); show('loading-view'); }
   try {
@@ -813,7 +889,8 @@ async function saveSite({ quiet = false } = {}) {
       runtime = await runtime.keep();
       currentConfig = runtime.configuration;
       currentInput = { ...currentInput, persistence: true, storageKey: currentConfig.storageKey };
-      fields.storageKey.value = currentConfig.storageKey; fields.persistence.checked = true;
+      runningSiteId = currentConfig.storageKey;
+      if (savingSelected) { fields.storageKey.value = currentConfig.storageKey; fields.persistence.checked = true; selectedSiteId = currentConfig.storageKey; }
       mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
     } else await runtime.flush();
     lastSavedAt = new Date(); rememberCurrentSite();
@@ -853,30 +930,28 @@ function downloadConfiguration(input = formInput()) {
   document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 async function useDeployment() {
-  if (busy || !catalog) return;
+  if (busy || launching || !catalog) return;
   $('deploy-error').hidden = true;
   try {
     let input = formInput();
     if (!approveCustomSetup(input)) return;
-    const wasRunning = Boolean(runtime);
-    if (wasRunning) {
-      // Files-only recovery is read-only. Leave that saved site untouched while
-      // closing its recovery session before creating the independent deployment.
-      if (!runtime.recovery?.filesOnly && !await saveSite()) return;
-      if (!await closeSite()) return;
-      input = { ...input, storageKey: `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`, admin: { ...input.admin, password: password() } };
-    }
+    const previousRuntime = runtime;
+    if (runtime) input = { ...input, storageKey: `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`, admin: { ...input.admin, password: password() } };
     const resolved = await resolve(input);
     applyConfiguration(resolved.configuration, input, resolved.deploy); applyAdministrator(input.admin);
+    selectedSiteId = null; renderSavedSites();
     $('deploy-dialog').close();
     await launch();
-    if (runtime) showShare(currentInput);
+    if (runtime && runtime !== previousRuntime) showShare(currentInput);
   } catch (error) { editorError(error); }
 }
 async function applyDeployment() {
-  if (busy || !runtime) return;
+  if (busy || launching || closing || !runtime) return;
   $('deploy-error').hidden = true;
+  setBusy(true);
   try {
+    if (previewDirty && !confirm(t('confirm.unsavedSiteForm'))) return;
+    if (codeHost && !codeHost.closed && !await codeHost.beforeClose()) return;
     const input = formInput({ storageKey: currentConfig.storageKey, persistence: currentConfig.persistence, fresh: false });
     if (!approveCustomSetup(input)) return;
     const resolved = await resolve(input);
@@ -884,7 +959,8 @@ async function applyDeployment() {
     await runtime.applyConfiguration(resolved.configuration);
     currentConfig = runtime.configuration; currentInput = input;
     applyConfiguration(currentConfig, currentInput, resolved.deploy);
-    applyAdministrator(runtime.installation?.administrator);
+    runningAdministrator = runtime.installation?.administrator || currentInput.admin;
+    applyAdministrator(runningAdministrator);
     lastSavedAt = currentConfig.persistence ? new Date() : undefined;
     rememberCurrentSite();
     mountPreview(resolveSiteURL(currentConfig.initialPath, runtime.baseUrl));
@@ -895,7 +971,11 @@ async function applyDeployment() {
       try {
         const oldRuntime = runtime;
         runtime = await error.recover();
+        await codeHost?.dispose(); codeHost = undefined;
         currentConfig = runtime.configuration;
+        runningSiteId = currentConfig.storageKey;
+        selectedSiteId = currentConfig.persistence ? currentConfig.storageKey : null;
+        runningAdministrator = runtime.installation?.administrator || currentInput.admin;
         currentInput = { ...currentInput, storageKey: currentConfig.storageKey, persistence: currentConfig.persistence };
         applyConfiguration(currentConfig, currentInput); rememberCurrentSite();
         history.replaceState(null, '', runtimeLocation(location.href, currentInput));
@@ -915,6 +995,11 @@ function populatePhpSettings(settings = phpSettings) {
   $('php-error').hidden = true;
 }
 function setupInterface() {
+  initializeTheme(); observeIcons();
+  $('theme-preference').value = getThemeState().preference;
+  $('theme-preference').addEventListener('change', event => setTheme(event.target.value));
+  languageSelector = createLanguageSelector(fields.language, { t, getLocale });
+  deploymentLanguageSelector = createLanguageSelector($('deploy-languages'), { multiple: true, t, getLocale });
   $('interface-language').replaceChildren(...UI_LANGUAGES.map(({ code, label }) => { const option = document.createElement('option'); option.value = code; option.textContent = label; return option; }));
   $('interface-language').value = getLocale();
   $('interface-language').addEventListener('change', async event => { try { await setLocale(event.target.value); } catch (error) { feedback(error, { error: true }); } });
@@ -926,6 +1011,7 @@ function setupInterface() {
     $('site-frame')?.setAttribute('title', t('a11y.site'));
     $('settings-toggle').setAttribute('aria-label', t($('settings').hidden ? 'action.expand' : 'action.collapse'));
     renderSavedSites(); renderEditorLists();
+    languageSelector?.refresh(); deploymentLanguageSelector?.refresh();
   });
   $('settings-toggle').addEventListener('click', () => setDrawer($('settings').hidden));
   for (const [id, hidden, edge] of [
@@ -938,17 +1024,16 @@ function setupInterface() {
     dialog.querySelector('[data-close-dialog]').addEventListener('click', () => dialog.close());
     dialog.addEventListener('click', event => { if (event.target === dialog) { const bounds = dialog.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dialog.close(); } });
   }
-  document.addEventListener('click', event => { if (!$('site-actions').contains(event.target)) $('site-actions').open = false; });
   $('information-button').addEventListener('click', () => openDialog('information-dialog'));
   $('download-dialog-button').addEventListener('click', () => openDialog('download-dialog'));
   $('credentials-button').addEventListener('click', () => {
     updateMcpPreview();
-    $('credential-username').value = $('admin-username').value; $('credential-password').value = $('admin-password').value;
+    $('credential-username').value = runningAdministrator?.username || ''; $('credential-password').value = runningAdministrator?.password || '';
     $('credential-password').type = 'password'; $('reveal-credentials').textContent = t('action.show'); openDialog('credentials-dialog');
   });
   $('reveal-credentials').addEventListener('click', () => { const show = $('credential-password').type === 'password'; $('credential-password').type = show ? 'text' : 'password'; $('reveal-credentials').textContent = t(show ? 'action.hide' : 'action.show'); });
   $('copy-credentials').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('credential-password').value); feedback(t('status.passwordCopied')); } catch { $('credential-password').type = 'text'; $('credential-password').select(); feedback(t('error.clipboard'), { error: true }); } });
-  $('go-administrator').addEventListener('click', () => { if (runtime) mountPreview(resolveSiteURL('/administrator/', runtime.baseUrl)); $('credentials-dialog').close(); });
+  $('go-administrator').addEventListener('click', () => { if (runtime) navigatePreview('/administrator/'); $('credentials-dialog').close(); });
   $('copy-share').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('share-url').value); $('share-feedback').textContent = t('status.copied'); } catch { $('share-url').focus(); $('share-url').select(); $('share-feedback').textContent = t('help.clipboard'); } });
   $('share-export-config').addEventListener('click', () => { try { downloadConfiguration(sharedConfiguration); } catch (error) { $('share-feedback').textContent = messageOf(error); } });
   $('native-share').addEventListener('click', async () => { try { await navigator.share({ title: sharedConfiguration?.siteName || 'JoomEngine Rocket', url: $('share-url').value }); } catch (error) { if (error.name !== 'AbortError') $('share-feedback').textContent = messageOf(error); } });
@@ -975,7 +1060,7 @@ function setupInterface() {
     const input = { ...parseDeploymentDocument(await file.text()), admin: administrator() };
     const resolved = await resolve(input); applyConfiguration(resolved.configuration, input, resolved.deploy); openEditor();
   } catch (error) { editorError(error); } finally { event.target.value = ''; } });
-  $('php-settings-button').addEventListener('click', () => { populatePhpSettings(); openDialog('php-dialog'); });
+  $('php-settings-button').addEventListener('click', () => { populatePhpSettings(runtime ? currentConfig.phpSettings : phpSettings); openDialog('php-dialog'); });
   $('reset-php').addEventListener('click', () => populatePhpSettings(DEFAULT_PHP_SETTINGS));
   $('php-settings-form').addEventListener('submit', async event => {
     event.preventDefault(); if (busy || runtime?.recovery?.filesOnly) return;
@@ -995,6 +1080,7 @@ function setupInterface() {
   });
   for (const event of ['input', 'change']) $('launch-form').addEventListener(event, pauseAutomaticLaunch);
   document.addEventListener('visibilitychange', () => { if (document.hidden) pauseAutomaticLaunch(); });
+  window.addEventListener('pagehide', () => launchCountdown.stop());
   setInterval(() => { if (runtime && !runtime.recovery && !runtime.changing && currentConfig?.persistence && !busy && document.visibilityState === 'visible') void saveSite({ quiet: true }); }, 60000);
 }
 
@@ -1045,6 +1131,8 @@ async function initialize() {
     }
     resolved = await resolve(input);
     applyConfiguration(resolved.configuration, input, resolved.deploy);
+    selectedSiteId = resolved.configuration.persistence && savedState.sites[resolved.configuration.storageKey] ? resolved.configuration.storageKey : null;
+    renderSavedSites();
     freshKeyPending = Boolean(parsed.config.fresh);
     initialized = true;
     setBusy(false);
