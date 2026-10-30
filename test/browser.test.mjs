@@ -371,6 +371,22 @@ async function renderedSiteFrame(page) {
   return frame;
 }
 
+/** Launch deliberately leaves the old preview alive while validation/saving runs. */
+async function launchStagedSite(page) {
+  const previous = await page.locator('#site-frame').elementHandle();
+  const key = await page.locator('#storage-key').inputValue();
+  try {
+    await page.locator('#launch-button').click();
+    await page.waitForFunction(({ previous, key }) => {
+      if (!document.getElementById('error-view').hidden) return true;
+      const frame = document.getElementById('site-frame');
+      return !document.getElementById('launch-button').disabled && frame && frame !== previous
+        && new URL(location.href).searchParams.get('key') === key;
+    }, { previous, key }, { timeout: requestTimeout });
+    return await renderedSiteFrame(page);
+  } finally { await previous?.dispose(); }
+}
+
 async function previewContract(page, action = 'read', frameId = 'site-frame') {
   const response = await bounded(page.evaluate(async ({ action, frameId }) => {
     const frame = document.getElementById(frameId);
@@ -966,24 +982,43 @@ for (const name of browserNames) {
         assert.deepEqual(await previewContract(page), marker);
         page.testStep = 'same-document navigation updates safe resume routes without changing Joomla URLs';
         const navigationFrame = await renderedSiteFrame(page);
-        const originalNavigation = await navigationFrame.evaluate(() => ({ url: location.href, state: history.state }));
-        await navigationFrame.evaluate(() => {
+        const originalNavigation = navigationFrame.url();
+        const siteBase = new URL(originalNavigation);
+        siteBase.pathname = siteBase.pathname.match(/^.*\/__site\/[^/]+\/[^/]+\//)[0];
+        siteBase.search = ''; siteBase.hash = '';
+        // Joomla's automatic guided tour can asynchronously redirect the admin
+        // document after load. Exercise native history in the installed inert
+        // extension page, still served by this exact runtime and preview iframe.
+        await navigationFrame.goto(new URL('modules/mod_playground_contract/asset-proof.html', siteBase).href, { waitUntil: 'load' });
+        await navigationFrame.evaluate(base => {
           window.__navigationDocument = document;
-          history.pushState({ routeProof: true }, '', `${location.pathname}?option=com_content&view=articles&task=article.save&token=secret#preview-tab`);
-        });
+          window.__routePopstates = [];
+          addEventListener('popstate', event => window.__routePopstates.push({ url: location.href, state: event.state, trusted: event.isTrusted }));
+          for (const [id, action] of [
+            ['route-admin', () => history.pushState({ routeProof: 'administrator' }, '', `${base}administrator/?option=com_content&view=articles&task=article.save&token=secret#preview-tab`)],
+            ['route-hash', () => { location.hash = '#second-tab'; }],
+            ['route-site', () => history.pushState({ routeProof: 'frontend' }, '', base)],
+            ['route-back', () => history.back()],
+          ]) {
+            const button = document.createElement('button'); button.id = id; button.type = 'button'; button.textContent = id;
+            button.addEventListener('click', action); document.body.append(button);
+          }
+        }, siteBase.href);
+        await navigationFrame.locator('#route-admin').click();
         await page.waitForFunction(() => new URL(location.href).searchParams.get('path')?.endsWith('?option=com_content&view=articles#preview-tab'));
         assert.match(navigationFrame.url(), /task=article.save&token=secret/, 'Only saved resume state is sanitized; Joomla retains its current URL.');
-        await navigationFrame.evaluate(() => { location.hash = '#second-tab'; });
+        await navigationFrame.locator('#route-hash').click();
         await page.waitForFunction(() => new URL(location.href).searchParams.get('path')?.endsWith('#second-tab'));
-        await navigationFrame.evaluate(() => {
-          history.pushState({ routeProof: 'frontend' }, '', location.pathname.slice(0, location.pathname.indexOf('/administrator/') + 1));
-        });
+        await navigationFrame.locator('#route-site').click();
         await page.waitForFunction(() => document.getElementById('nav-site').getAttribute('aria-pressed') === 'true');
-        await navigationFrame.evaluate(() => history.back());
+        await navigationFrame.locator('#route-back').click();
         await page.waitForFunction(() => document.getElementById('nav-admin').getAttribute('aria-pressed') === 'true'
           && new URL(location.href).searchParams.get('path')?.endsWith('#second-tab'));
-        await navigationFrame.evaluate(original => { history.replaceState(original.state, '', original.url); }, originalNavigation);
         assert.equal(await navigationFrame.evaluate(() => document === window.__navigationDocument), true);
+        assert.ok(await navigationFrame.evaluate(() => window.__routePopstates.some(event => event.trusted
+          && event.state?.routeProof === 'administrator' && event.url.endsWith('#second-tab'))), 'A real browser popstate must restore the previous same-document route.');
+        await navigationFrame.goto(originalNavigation, { waitUntil: 'load' });
+        assert.equal(await page.evaluate(() => document.getElementById('site-frame') === window.__navigationFrame), true);
         assert.deepEqual(navigationWorkers, [], 'Site/Admin never creates replacement runtime workers.');
         page.off('worker', observeNavigationWorker);
         page.testStep = 'save site';
@@ -1082,8 +1117,7 @@ for (const name of browserNames) {
         assert.notEqual(await page.locator('#storage-key').inputValue(), savedKey);
         assert.equal(await page.locator('#site-frame').count(), 1);
         assert.deepEqual(await previewContract(page), afterSwitch, 'Staging a new site leaves the running site intact.');
-        await page.locator('#launch-button').click();
-        await renderedSiteFrame(page);
+        await launchStagedSite(page);
         assert.equal((await previewContract(page)).database, null, 'New site must install an independent database.');
         await showQuickSettings(page);
         await page.locator('#saved-site').selectOption(savedKey);
@@ -1099,8 +1133,7 @@ for (const name of browserNames) {
         await page.waitForFunction(key => !document.querySelector(`#saved-site option[value="${key}"]`), freshKey);
         assert.equal((await previewContract(page)).database, null, 'Deleting an inactive entry never launches it or deletes the running database.');
         await page.locator('#saved-site').selectOption(savedKey);
-        await page.locator('#launch-button').click();
-        await renderedSiteFrame(page);
+        await launchStagedSite(page);
         assert.deepEqual(await previewContract(page), afterSwitch, 'The saved-site selector must reopen the original files and database.');
         page.testStep = 'reset site';
         page.once('dialog', (dialog) => dialog.accept());
