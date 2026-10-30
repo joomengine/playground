@@ -408,3 +408,43 @@ test('review identifiers never resolve a stale transcript to a new service propo
   assert.match(fs.readFileSync(path.join(directory, 'index.php'), 'utf8'), /before/);
   assert.equal(replacement.get(current.id).status, 'pending');
 });
+
+test('context and subsequent tools share a bounded byte budget without charging repeated reads twice', async () => {
+  const { workspace, review, directory } = fixture();
+  fs.writeFileSync(path.join(directory, 'index.php'), '1234567890');
+  fs.writeFileSync(path.join(directory, 'templates/site.css'), 'abcdefghij');
+  const tools = createAiWorkspaceTools({ workspace, review, maxContextBytes: 16, scope: { mode: 'project' } });
+  const context = await tools.context({ scope: { mode: 'project' }, openFiles: ['/index.php'] });
+  assert.equal(context.bytes, 10);
+  assert.equal((await tools.execute('read_file', { path: '/index.php' })).budget.bytes, 10);
+  await assert.rejects(tools.execute('read_file', { path: '/templates/site.css' }), /budget/);
+  const result = await tools.execute('search_files', { path: '/', query: 'abcd' });
+  assert.deepEqual(result.matches, []);
+  assert.equal(result.budget.bytes, 10);
+  assert.ok(result.skipped > 0);
+  await tools.context({ scope: { mode: 'project' } });
+  assert.equal((await tools.execute('read_file', { path: '/templates/site.css' })).budget.bytes, 10, 'the next request starts with a fresh budget');
+});
+
+test('cancellation stops recursive context and proposal preparation before a review becomes available', async () => {
+  const { workspace, review } = fixture();
+  const contextController = new AbortController();
+  let lists = 0;
+  const bounded = { ...workspace, async request(operation, args) {
+    const result = await workspace.request(operation, args);
+    if (operation === 'list' && ++lists === 1) contextController.abort();
+    return result;
+  } };
+  const tools = createAiWorkspaceTools({ workspace: bounded, review, scope: { mode: 'selected' } });
+  await assert.rejects(tools.context({ scope: { mode: 'selected', paths: ['/templates'] }, signal: contextController.signal }), { name: 'AbortError' });
+  assert.equal(lists, 1);
+  const proposalController = new AbortController();
+  const cancellable = createAiReview({ workspace: { ...workspace, async request(operation, args) {
+    const result = await workspace.request(operation, args);
+    if (operation === 'read') proposalController.abort();
+    return result;
+  } } });
+  await assert.rejects(cancellable.prepare({ summary: 'Cancelled proposal', changes: [{ operation: 'write', path: '/index.php', content: 'cancel me' }] }, { signal: proposalController.signal }), { name: 'AbortError' });
+  const next = await cancellable.prepare({ summary: 'Fresh proposal', changes: [{ operation: 'write', path: '/index.php', content: 'fresh' }] });
+  assert.match(next.id, /-1$/, 'cancelled preparation never publishes a review');
+});
