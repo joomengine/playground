@@ -430,8 +430,7 @@ async function dismissAutomaticTour(page) {
   const frame = await renderedSiteFrame(page);
   // A new administrator's tour fetch can redirect after document load. Use
   // Joomla's actual Hide forever action, then verify TourModel's persisted
-  // user profile before navigating or saving this installation. The native
-  // page response event alone did not establish that the skip was persisted.
+  // user profile before navigating or saving this installation.
   const hideTour = frame.locator('[data-shepherd-step-id="tourinfo"] .shepherd-button-secondary');
   await hideTour.waitFor({ timeout: requestTimeout });
   const tourId = await frame.evaluate(() => Number(sessionStorage.getItem('tourId')));
@@ -442,7 +441,11 @@ async function dismissAutomaticTour(page) {
   assert.ok(prefix);
   const probeURL = new URL(`${prefix}modules/mod_playground_contract/contract.php`, frame.url());
   probeURL.search = new URLSearchParams({ action: 'tour-state', tour: String(tourId), username }).toString();
-  await hideTour.click();
+  // Shepherd centers within Joomla's auto-sized iframe. Activate its real
+  // button by keyboard instead of relying on nested pointer auto-scrolling.
+  await hideTour.focus();
+  assert.equal(await hideTour.evaluate(button => button.ownerDocument.activeElement === button), true);
+  await hideTour.press('Enter');
   await hideTour.waitFor({ state: 'hidden' });
   assert.equal(await frame.evaluate(() => sessionStorage.getItem('tourId')), null);
   await page.waitForFunction(async url => {
