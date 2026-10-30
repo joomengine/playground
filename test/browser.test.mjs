@@ -457,12 +457,15 @@ async function dismissAutomaticTour(page) {
       };
     }, { capture: true, once: true });
   });
-  await hideTour.press('Enter');
-  const activation = await frame.evaluate(() => {
-    const receipt = window.__playgroundTourDismissal;
-    delete window.__playgroundTourDismissal;
-    return receipt;
-  });
+  let activation = null;
+  const activationDeadline = Date.now() + 10_000;
+  // A later FloatingUI update can refocus the container. Retry only when no
+  // click reached the button; stop as soon as the once-listener records it.
+  while (!activation && Date.now() < activationDeadline) {
+    await hideTour.press('Enter');
+    activation = await frame.evaluate(() => window.__playgroundTourDismissal);
+  }
+  await frame.evaluate(() => { delete window.__playgroundTourDismissal; });
   assert.deepEqual(activation, { trusted: true, intended: true },
     'Hide forever receives the trusted keyboard activation before its persisted state is checked.');
   await hideTour.waitFor({ state: 'hidden' });
