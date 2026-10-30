@@ -68,6 +68,16 @@ const extensionArchive = zipSync({
 header('Content-Type: application/json');
 $db = new PDO('mysql:dbname=joomla;charset=utf8mb4', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
 $path = __DIR__ . '/saved-marker.txt';
+if (($_GET['action'] ?? '') === 'tour-state') {
+    require_once dirname(__DIR__, 2) . '/configuration.php';
+    $prefix = str_replace('\`', '\`\`', (new JConfig())->dbprefix);
+    $query = $db->prepare('SELECT p.profile_value FROM \`' . $prefix . 'user_profiles\` p '
+        . 'JOIN \`' . $prefix . 'users\` u ON u.id = p.user_id WHERE p.profile_key = ? AND u.username = ?');
+    $query->execute(['guidedtour.id.' . (int) ($_GET['tour'] ?? 0), (string) ($_GET['username'] ?? '')]);
+    $value = $query->fetchColumn();
+    echo json_encode($value === false ? null : json_decode($value, true, 512, JSON_THROW_ON_ERROR), JSON_THROW_ON_ERROR);
+    return;
+}
 if (($_GET['action'] ?? '') === 'settings') {
     echo json_encode(array_combine(['upload_max_filesize', 'post_max_size', 'max_execution_time', 'max_input_vars', 'max_input_time', 'memory_limit'], array_map('ini_get', ['upload_max_filesize', 'post_max_size', 'max_execution_time', 'max_input_vars', 'max_input_time', 'memory_limit'])), JSON_THROW_ON_ERROR);
     return;
@@ -419,24 +429,27 @@ async function saveRunningSite(page) {
 async function dismissAutomaticTour(page) {
   const frame = await renderedSiteFrame(page);
   // A new administrator's tour fetch can redirect after document load. Use
-  // Joomla's actual Hide forever action and await its persisted acknowledgement
-  // before the fixture starts navigating or saving this installation.
+  // Joomla's actual Hide forever action, then verify TourModel's persisted
+  // user profile before navigating or saving this installation. The native
+  // page response event alone did not establish that the skip was persisted.
   const hideTour = frame.locator('[data-shepherd-step-id="tourinfo"] .shepherd-button-secondary');
   await hideTour.waitFor({ timeout: requestTimeout });
-  const [acknowledged] = await Promise.all([
-    page.waitForResponse(response => {
-      const url = new URL(response.url());
-      return response.request().frame() === frame && url.searchParams.get('option') === 'com_guidedtours'
-        && url.searchParams.get('task') === 'ajax.fetchUserState' && url.searchParams.get('context') === 'tour.skip';
-    }),
-    hideTour.click(),
-  ]);
-  assert.equal(acknowledged.status(), 200);
-  const payload = await acknowledged.json();
-  assert.equal(payload.success, true, JSON.stringify(payload));
-  assert.equal(payload.data.state, 'skipped');
+  const tourId = await frame.evaluate(() => Number(sessionStorage.getItem('tourId')));
+  assert.ok(Number.isSafeInteger(tourId) && tourId > 0, 'The visible tour has a concrete Joomla tour ID.');
+  const username = await page.locator('#admin-username').inputValue();
+  assert.ok(username, 'The persistence probe targets the running administrator.');
+  const prefix = new URL(frame.url()).pathname.match(/^.*\/__site\/[^/]+\/[^/]+\//)?.[0];
+  assert.ok(prefix);
+  const probeURL = new URL(`${prefix}modules/mod_playground_contract/contract.php`, frame.url());
+  probeURL.search = new URLSearchParams({ action: 'tour-state', tour: String(tourId), username }).toString();
+  await hideTour.click();
   await hideTour.waitFor({ state: 'hidden' });
   assert.equal(await frame.evaluate(() => sessionStorage.getItem('tourId')), null);
+  await page.waitForFunction(async url => {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`Tour-state probe failed: HTTP ${response.status}`);
+    return (await response.json())?.state === 'skipped';
+  }, probeURL.href, { timeout: requestTimeout, polling: 500 });
 }
 
 async function previewContract(page, action = 'read', frameId = 'site-frame') {
