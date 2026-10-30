@@ -12,6 +12,14 @@ default on Joomla 5; **JCB + MCP** remains an optional Joomla 6 deployment. Sele
 **Joomla only** to start without additional extensions. Rocket is the compact,
 multilingual interface around the running Joomla site.
 
+**JoomEngine Code** adds a lazy-loaded browser IDE for that same site: native
+editor groups, project files and language services, docked/floating/detached
+layouts, reviewed AI changes and PHP debugging of actual Joomla requests.
+See the [user guide](docs/joomengine-code-user-guide.md) and
+[implementation checkpoints](docs/joomengine-code-checkpoints.md). The AI
+provider verification requirement remains open on this implementation branch;
+local editing and debugging do not require AI credentials.
+
 ## Upstream foundations and credits
 
 This project builds directly on the work of these maintainers and contributors:
@@ -35,6 +43,14 @@ This project builds directly on the work of these maintainers and contributors:
   engine used by the bridge.
 - **[Joomla](https://github.com/joomla/joomla-cms)** provides the CMS and its
   installation, extension management, and console interfaces.
+- **Microsoft [VS Code](https://github.com/microsoft/vscode) and
+  [Monaco](https://github.com/microsoft/monaco-editor)** provide the editor and
+  workbench foundations. **[CodinGame](https://github.com/CodinGame/monaco-vscode-api)**
+  provides their browser integration. JoomEngine Code retains the exact shipped
+  licenses, source notices and dependency inventory.
+- **[PHP/phpdbg](https://github.com/php/php-src)** supplies the PHP debugger;
+  JoomEngine Code uses Sean Morris's pinned `php-dbg-wasm` package with a small,
+  reproducibly compiled HTTP/debugging bridge.
 
 Thank you to these communities for the engineering and maintenance this project
 relies on. Their licenses and notices remain with the distributed assets; see
@@ -50,8 +66,8 @@ passes database operations to the MariaDB bridge. The playground service worker
 routes site requests to a dedicated PHP worker and adds the isolation headers
 needed by the threaded MariaDB engine.
 
-The native build compiles the PDO, fileinfo, cURL, and Sodium extensions against
-matching PHP headers. Fileinfo supplies MIME detection with its embedded magic
+The native build compiles the PDO, fileinfo, cURL, Sodium and phpdbg HTTP/debugging
+bridges against matching PHP headers. Fileinfo supplies MIME detection with its embedded magic
 database.
 cURL uses Sean Morris’s [php-wasm-curl](https://github.com/seanmorris/php-wasm-curl)
 to connect PHP’s `ext/curl` to the host’s Fetch API. The implementation
@@ -127,6 +143,7 @@ while IFS= read -r minor; do
   BRIDGE_SOURCE_DIR=external/bridge node scripts/build-fileinfo.mjs "$minor"
   BRIDGE_SOURCE_DIR=external/bridge node scripts/build-curl.mjs "$minor"
   BRIDGE_SOURCE_DIR=external/bridge node scripts/build-sodium.mjs "$minor"
+  BRIDGE_SOURCE_DIR=external/bridge node scripts/phpdbg-build.mjs "$minor"
 done < <(node --input-type=module -e "import p from './versions.json' with {type:'json'}; for (const v of p.php) console.log(v.version)")
 
 MARIADB_DRIVER_DIR=.cache/native npm run build

@@ -89,6 +89,9 @@ export async function assertInitialFocusMode(page, url) {
   await page.locator('#focus-restore-top').focus();
   await page.keyboard.press('Enter');
   await assertVisibleControls(page);
+  // Finishing asynchronous catalog loading must not undo the explicit restore.
+  await page.locator('#embedded-launch:enabled').waitFor({ state: 'visible' });
+  await assertVisibleControls(page);
   assert.equal(await page.locator('#site-frame').count(), 0, 'Restoring controls must not launch or restart Joomla.');
   return { initialToolbarHidden: true, keyboardRestore: true };
 }
