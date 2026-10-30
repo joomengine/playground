@@ -73,6 +73,7 @@ test('Anthropic native streaming preserves tool inputs, thinking signatures and 
   assert.equal(requests[0].url, 'https://api.anthropic.com/v1/messages');
   assert.equal(requests[0].headers['x-api-key'], key);
   assert.equal(requests[0].headers['anthropic-dangerous-direct-browser-access'], 'true');
+  assert.equal(requests[0].headers['anthropic-version'], '2026-10-21');
   assert.equal(requests[0].parsed.tools[0].input_schema.type, 'object');
   assert.equal(result.content, 'Reading ✓');
   assert.equal(result._anthropic[0].signature, 'signed');
@@ -221,4 +222,47 @@ test('catalog errors, cursor cycles, entry bounds and abort do not expose creden
   }
   const provider = createChatProvider({ provider: preset('deepseek'), apiKey: key, fetcher: async () => json({ data: [{ id: 'chat' }] }) });
   provider.dispose(); await assert.rejects(provider.listModels(), { code: 'CLOSED' });
+});
+
+
+test('unknown tool capability stays unknown and does not outrank a known capable model', async () => {
+  const provider = createChatProvider({ provider: preset('other'), baseURL: 'http://localhost:11434/v1', fetcher: async () => json({ data: [
+    { id: 'excellent-coder' }, { id: 'known-text', capabilities: { tools: { supported: false } } },
+    { id: 'plain-model', capabilities: { tools: { supported: true } } },
+    { id: 'no-stream', capabilities: { streaming: false } },
+  ] }) });
+  const result = await provider.listModels();
+  assert.deepEqual(result.models.map(item => [item.id, item.tools]), [['plain-model', true], ['excellent-coder', null]]);
+  assert.equal(result.selectedModel, 'plain-model');
+});
+
+test('compatible adapter does not forward a previous native Cohere tool_plan field', async () => {
+  const { requests, create } = fixture('deepseek');
+  const provider = create(() => sse(openaiEvents, true));
+  await provider.stream({ messages: [...messages, { role: 'assistant', content: 'Earlier native output', tool_plan: 'Cohere metadata' }, { role: 'user', content: 'Continue' }] });
+  assert.equal(requests[0].parsed.messages[2].tool_plan, undefined);
+});
+
+test('OpenRouter preserves the exact signed reasoning chunk sequence through a tool continuation', async () => {
+  const details = [
+    { type: 'reasoning.text', index: 0, id: 'reason-1', format: 'anthropic-claude-v1', text: 'Inspect ', signature: null },
+    { type: 'reasoning.text', index: 0, id: 'reason-1', format: 'anthropic-claude-v1', text: 'the file.', signature: 'opaque-signature' },
+    { type: 'reasoning.encrypted', index: 1, id: 'reason-2', data: 'opaque-encrypted-data', format: 'google-gemini-v1' },
+  ];
+  const { requests, create } = fixture('openrouter');
+  let visible = '';
+  const provider = create(() => sse([
+    { choices: [{ index: 0, delta: { reasoning: 'Inspect ', reasoning_details: details.slice(0, 1) } }] },
+    { choices: [{ index: 0, delta: { reasoning: 'the file.', reasoning_details: details.slice(1) } }] },
+    ...openaiEvents,
+  ], true));
+  const result = await provider.stream({ messages, tools: [tool], onDelta: value => { visible += value; } });
+  assert.equal(visible, 'Ready ✓');
+  assert.equal(result.reasoning, 'Inspect the file.');
+  assert.deepEqual(result.reasoning_details, details);
+  await provider.stream({ messages: [...messages, result, { role: 'tool', tool_call_id: 'call_1', content: 'file result' }], tools: [tool] });
+  assert.deepEqual(requests[1].parsed.messages.at(-2).reasoning_details, details);
+  assert.equal(requests[1].parsed.messages.at(-2).reasoning, 'Inspect the file.');
+  const invalid = create(() => sse([{ choices: [{ index: 0, delta: { reasoning_details: { invalid: true } }, finish_reason: 'stop' }] }], true));
+  await assert.rejects(invalid.stream({ messages }), { code: 'INVALID_STREAM' });
 });

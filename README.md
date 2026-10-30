@@ -15,10 +15,13 @@ multilingual interface around the running Joomla site.
 **JoomEngine Code** adds a lazy-loaded browser IDE for that same site: native
 editor groups, project files and language services, docked/floating/detached
 layouts, reviewed AI changes and PHP debugging of actual Joomla requests.
-See the [user guide](docs/joomengine-code-user-guide.md) and
-[implementation checkpoints](docs/joomengine-code-checkpoints.md). The AI
-provider verification requirement remains open on this implementation branch;
-local editing and debugging do not require AI credentials.
+See the [user guide](docs/joomengine-code-user-guide.md), current
+[experience roadmap](docs/roadmap/implementation-roadmap.md), and historical
+[implementation checkpoints](docs/joomengine-code-checkpoints.md). Named AI API
+presets, custom/local endpoints and scoped context are implemented; the
+[AI validation record](docs/roadmap/ai-validation.md) distinguishes protocol tests
+from outstanding real-service browser checks. Local editing and debugging do not
+require AI credentials.
 
 ## Upstream foundations and credits
 
@@ -221,13 +224,32 @@ provide a public CORS proxy.
 
 ## Using Rocket
 
-The default page shows a ten-second rocket countdown before launching JCB.
-Choose **Configure** during the countdown to pause and edit the deployment, or
-launch immediately. Use `?start=0` to load setup without a countdown. The slim
-header scrolls away with the page; its expandable controls and dialogs leave the Joomla site the full available width. The launch
-view shows the rocket animation and deployment progress. Activity remains
-available below the site, and the footer information button lists dependency
-credits and licenses.
+On normal entry, Playground selects the last successfully used saved site, or
+JCB when none exists, and shows a ten-second startup countdown. **Stop countdown**
+cancels automatic launch; **Launch** opens the staged target immediately. Opening
+configuration or manually selecting a saved site also cancels the countdown.
+Manual selections wait for Launch and leave the current site running. Use
+`?start=0` to load setup without a countdown; explicit deployment/share links keep
+their own configuration and review requirements.
+
+The chevron opens one dashboard containing saved-site management, runtime
+configuration, site actions and appearance. **Site** and **Admin**, beside
+Deployment, navigate the existing preview without reinstalling Joomla or starting
+another runtime. Admin uses the normal Joomla authentication flow. The slim
+header scrolls with the page. The supplied pearl rocket identifies the favicon,
+Deployment, Launch and progress views. Activity remains below the site; About in
+the footer lists the technology repositories and distributed notices.
+
+Appearance defaults to **System**, follows operating-system changes live, and
+can be overridden with **Light** or **Dark**. The choice is scoped to this tab
+session and survives reload; it synchronizes Code, dialogs, the assistant and
+detached editor windows. It does not restyle the embedded Joomla template.
+
+The main **JoomEngine Code** action toggles the editor without discarding its
+buffers. Its compact header keeps layout/window controls available when action
+labels collapse at narrower editor widths. **Accounts** opens AI API settings;
+the robot-shaped **AI Assistant** uses the same isolated session connection. See
+the [Code guide](docs/joomengine-code-user-guide.md#optional-ai-editing).
 
 The deployment editor selects Joomla, PHP, packages, languages, the site name,
 login behavior, menus and a template. It can install a component from a public
@@ -242,32 +264,53 @@ for the complete document format and advanced parameters.
   packages or applying configuration. If an operation fails, the recovery action
   restores that checkpoint as a separate site. Removing a package from the editor
   does not uninstall an already installed extension.
-- **Keep my site / Save** saves both files and database. Keeping a temporary site
-  copies its current state into persistent storage, including its credentials.
+- **Keep this site** stages the persistence choice for the next launch. **Save**
+  saves the running site's files and database. Saving a temporary site copies its
+  current state into persistent storage, including credentials, and transfers the
+  open Code session and recoverable drafts to that saved identity.
 - **Restart** restarts PHP with the current settings while preserving the site,
   including a temporary site's files and database.
 - **Close** shuts down the workers and releases the site lock. Closing a temporary
   site discards its state after confirmation.
-- **Reset** deletes the selected site's saved data after confirmation.
+- **Reset** deletes the running site's files and database after confirmation,
+  or the staged saved key when no site is running. It is separate from saved-entry
+  management.
 - **Recover saved site** opens storage without booting Joomla. Download a backup,
   then restore safe error settings if needed; the original configuration is kept
   privately. If MariaDB cannot start, recovery opens the saved PHP files read-only
   so they can be downloaded without changing either saved store. That recovery
   ZIP contains files and private settings, but no SQL database; it does not repair
   a failed database. **Reset and launch** provides an explicit fresh start from the failure screen.
-- **New site** starts an independent installation; saved sites remain selectable.
+- **New site** stages an independent configuration; the current runtime stays
+  open until Launch completes its dirty-work checks.
+- **Rename** changes the selected saved entry's display label, preserving its
+  storage key, Joomla title, files and database.
+- **Delete saved site** names and removes the selected saved entry, files,
+  database and editor drafts after confirmation. An inactive entry is deleted
+  without launching it. Locked or failed deletion retains its management entry
+  so it can be retried.
 - **Download** exports the complete site, its files, or its SQL database.
 - **Hide controls** in either the header or footer hides both bars, settings and
   activity together. Joomla keeps the same running iframe, current page and
-  unsaved work. Small restore tabs remain at the top and bottom edges; either
-  restores the controls without restarting or transferring the site.
+  unsaved work. Small restore tabs occupy the top-left and bottom-left document
+  boundaries and scroll away in the middle of a long page. Each reveals the
+  controls and scrolls to its corresponding header or footer without restarting
+  or transferring the site.
 
 Persistence is enabled by default. Joomla files, session data, cookies and the
 MariaDB database are kept in IndexedDB. A site key identifies saved data on this
-origin. Returning to the domain reopens the last saved site; the saved-site
-selector opens others. Only one tab may own a saved site at a time. Changing PHP
-preserves its content. Changing the Joomla release or selecting another deploy
-starts a separate profile instead of upgrading an existing Joomla installation.
+origin. Returning normally to the domain stages the last saved site and restores
+its last safe in-site route when the startup countdown or Launch opens it. Route
+metadata excludes action/security parameters and credentials; a missing resumed
+page falls back to the initial route. Explicit URL or edited initial-page choices
+remain authoritative. Temporary sites do not replace the last saved-site preference.
+
+The saved-site selector, PHP/Joomla controls and deploy choices stage changes;
+Launch validates them before closing the current runtime. Only one tab may own a
+saved site at a time. Applying a staged PHP choice preserves saved content.
+Changing the Joomla release or deploy selects a separate profile, rather than
+upgrading an existing installation. Saved metadata migrates without the previous
+40-entry pruning, and display names remain separate from setup identity.
 MariaDB bridge 0.1.8 checkpoints InnoDB before flushing its filesystem to browser
 storage. Playground reserves the PHP request queue until both the site files and
 database finish saving, including during configuration changes and PHP restarts.
@@ -327,6 +370,14 @@ Translated interface catalogs load on selection. The preference is saved locally
 dialogs and footer, without changing Joomla or downloading a Joomla language pack.
 Technical details from PHP, Joomla and installed extensions retain their original
 messages in the activity log.
+
+The dashboard's Joomla Language and the Deployment dialog's Site Languages use
+the same selected-version catalog. Focus or open either selector to browse tags
+and language names, or type to filter and enter a custom tag. Site Languages
+supports multiple removable selections. Script subtags such as `sr-Latn-RS` are
+accepted; a custom tag still needs a usable pinned or explicitly configured
+language package before launch. Entering a tag alone does not install an
+unavailable package.
 
 Ordinary Joomla deployments use Joomla's English default. The multilingual
 heritage deploy installs **Afrikaans, German, French, Italian, Spanish, Simplified

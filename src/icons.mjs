@@ -14,7 +14,7 @@ const idMapping = Object.freeze({
   'rename-site': 'rename-site', 'rename-site-button': 'rename-site', 'delete-site': 'delete-site', 'delete-site-button': 'delete-site',
   'focus-header-button': 'hide-chrome', 'focus-footer-button': 'hide-chrome',
   'focus-restore-top': 'restore-top', 'focus-restore-bottom': 'restore-bottom',
-  'activity-toggle': 'activity', 'information-button': 'about', 'welcome-configure': 'deployment',
+  'activity-toggle': 'activity', 'log-toggle': 'activity', 'information-button': 'about', 'welcome-configure': 'deployment',
   'editor-runtime-button': 'workspace-layout', 'show-password': 'show-password', 'reset-php': 'recommended-settings', 'php-apply-button': 'apply',
   'apply-deploy': 'apply', 'copy-share': 'copy', 'copy-credentials': 'copy', 'go-administrator': 'open-administrator',
   'reveal-credentials': 'show-password', 'native-share': 'share-site', 'share-export-config': 'export-configuration',
@@ -97,7 +97,7 @@ export function decorateIcons(root = globalThis.document) {
     const key = button.getAttribute('data-i18n') || button.getAttribute('data-i18n-title') || button.getAttribute('data-i18n-aria-label');
     const changingIcon = ['action.show', 'action.hide', 'code.maximize', 'code.restore'].includes(key) ? keyMapping[key] : null;
     const action = changingIcon || button.dataset.icon || idMapping[button.id] || keyMapping[key] || (button.hasAttribute('data-close-dialog') ? 'cancel' : null);
-    if (action) decorateAction(button, action);
+    if (action) decorateAction(button, action, button.hasAttribute('data-close-dialog') ? { iconOnly: true } : undefined);
   }
   const theme = root.querySelector('#theme-preference');
   if (theme && !themedFields.has(theme)) {

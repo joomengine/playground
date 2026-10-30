@@ -48,3 +48,16 @@ test('isolated views share connection updates and site-scoped conversations thro
   assert.ok(embedded.replies.some(message => message.type === 'clear'));
   assert.equal(call(embedded, 'session-read', { key: 'site-a' }), null);
 });
+
+test('credentials are loaded only by exact connection identity and changing a key invalidates native conversation replay', () => {
+  const { attach, call } = brokerFixture();
+  const view = attach();
+  const original = call(view, 'save', { id: 'local-openai-A', settings: { provider: 'other', apiKey: 'first-key', model: 'first' } });
+  assert.equal(call(view, 'read', { id: 'local-openai-B' }), null);
+  assert.equal(call(view, 'read', { id: 'local-anthropic-A' }), null);
+  assert.equal(call(view, 'read', { id: 'local-openai-A' }).apiKey, 'first-key');
+  const same = call(view, 'save', { id: 'local-openai-A', settings: { provider: 'other', apiKey: 'first-key', model: 'second' } });
+  assert.equal(original.revision, same.revision);
+  const changed = call(view, 'save', { id: 'local-openai-A', settings: { provider: 'other', apiKey: 'second-key' } });
+  assert.notEqual(original.revision, changed.revision);
+});
