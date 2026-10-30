@@ -1,6 +1,8 @@
 # JoomEngine pearl rocket — authoritative brand asset
 
-The user supplied `JoomEngine_Pearl_Logo.svg` as the replacement rocket across the project. This supersedes both the existing branded rocket and the generic rocket from the monochrome icon bundle. It applies to the favicon, Deployment, Launch and other branded rocket uses. Keep the separate JoomEngine wordmark where appropriate.
+The user supplied `JoomEngine_Pearl_Logo.svg` as the replacement rocket for interface icons and the favicon. This supersedes both the existing branded rocket icon and the generic rocket from the monochrome icon bundle. It applies to Deployment, Launch and other branded action icons. Keep the separate JoomEngine wordmark where appropriate.
+
+The launch-stage media is separate: preserve `rocket-launch.mp4` and `rocket-poster.jpg`. The welcome and recovery stages show the original poster; the loading stage plays the original muted, looping video. Reduced-motion preferences retain the poster. Do not replace the launch-stage media with the vector icon.
 
 ## Included files
 

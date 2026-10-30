@@ -39,7 +39,13 @@ export function initializeTheme({ document: doc = globalThis.document, window: w
       }
     }
   }
-  const systemChanged = () => { if (preference === 'system') apply(); };
+  // A manual toggle lasts until the next operating-system appearance change.
+  // Persist the return to automatic alignment so reloading cannot revive it.
+  const systemChanged = () => {
+    preference = 'system';
+    try { storage?.setItem(THEME_STORAGE_KEY, preference); } catch { /* Storage is optional. */ }
+    apply();
+  };
   if (media?.addEventListener) media.addEventListener('change', systemChanged);
   else media?.addListener?.(systemChanged);
   const controller = {

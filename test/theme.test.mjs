@@ -21,20 +21,37 @@ function realm(initial, dark = false) {
   return { document: doc, window: win, values, change, listeners, metas };
 }
 
-test('System follows live system changes; an explicit override wins until System returns', () => {
+test('A manual appearance toggle yields to the next system change and stays aligned on reload', () => {
   const one = realm(); const events = [];
   one.document.addEventListener('joomengine:themechange', event => events.push(event.detail));
-  const controller = initializeTheme(one);
+  let controller = initializeTheme(one);
   assert.equal(controller.state.preference, 'system');
   assert.equal(one.document.documentElement.dataset.theme, 'light');
-  one.change(true); assert.equal(controller.state.resolved, 'dark');
-  controller.set('light'); one.change(false); one.change(true);
+  controller.set('dark');
+  assert.equal(controller.state.resolved, 'dark');
+  assert.equal(one.values.get(THEME_STORAGE_KEY), 'dark');
+  one.change(true);
+  assert.equal(controller.state.preference, 'system');
+  assert.equal(controller.state.resolved, 'dark');
+  assert.equal(one.values.get(THEME_STORAGE_KEY), 'system');
+  one.change(false);
   assert.equal(controller.state.resolved, 'light');
-  assert.equal(one.values.get(THEME_STORAGE_KEY), 'light');
-  controller.set('system'); assert.equal(controller.state.resolved, 'dark');
-  assert.equal(one.metas.get('color-scheme').content, 'dark');
+  assert.equal(one.metas.get('color-scheme').content, 'light');
   assert.equal(events.length, 4);
   controller.dispose(); assert.equal(one.listeners.size, 0);
+  controller = initializeTheme(one);
+  assert.equal(controller.state.preference, 'system');
+  assert.equal(controller.state.resolved, 'light');
+  controller.dispose();
+});
+
+test('A manual light override also yields when the system switches back to light, then dark', () => {
+  const one = realm(undefined, true);
+  const controller = initializeTheme(one);
+  controller.set('light'); assert.equal(controller.state.resolved, 'light');
+  one.change(false); assert.equal(controller.state.preference, 'system');
+  one.change(true); assert.equal(controller.state.resolved, 'dark');
+  controller.dispose();
 });
 
 test('Separate tabs retain independent non-secret preferences and reload reads only its own session', () => {
@@ -43,7 +60,7 @@ test('Separate tabs retain independent non-secret preferences and reload reads o
   a.set('light'); two.change(true);
   assert.equal(b.state.preference, 'system'); assert.equal(b.state.resolved, 'dark');
   assert.equal(a.state.resolved, 'light');
-  assert.equal(two.values.size, 0);
+  assert.equal(two.values.get(THEME_STORAGE_KEY), 'system');
   a.dispose(); b.dispose();
   const reloaded = initializeTheme(one); assert.equal(reloaded.state.preference, 'light'); reloaded.dispose();
 });
@@ -55,6 +72,9 @@ test('Unavailable session storage is optional; detached documents receive the re
   assert.equal(detached.document.documentElement.dataset.theme, 'dark');
   assert.equal(detached.document.documentElement.style.colorScheme, 'dark');
   assert.equal(detached.metas.get('theme-color').content, '#080a27');
+  source.change(true); source.change(false);
+  assert.equal(controller.state.preference, 'system');
+  assert.equal(controller.state.resolved, 'light');
   assert.throws(() => controller.set('sepia'), /Unknown/);
   controller.dispose();
 });
