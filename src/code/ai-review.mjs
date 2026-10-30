@@ -78,7 +78,8 @@ export function createAiReview({ workspace, isDirty = () => false, onApplied = (
   async function clean(paths) {
     for (const path of paths) if (await isDirty(path, true)) throw new Error(`Unsaved editor changes affect ${path}. Save or discard them before accepting AI changes.`);
   }
-  async function prepare(proposal) {
+  async function prepare(proposal, { signal } = {}) {
+    signal?.throwIfAborted();
     if (!proposal || typeof proposal.summary !== 'string' || !proposal.summary.trim() || proposal.summary.length > 2048
       || !Array.isArray(proposal.changes) || !proposal.changes.length || proposal.changes.length > maxChanges) {
       throw new TypeError(`Propose a summary and between 1 and ${maxChanges} file operations.`);
@@ -86,6 +87,7 @@ export function createAiReview({ workspace, isDirty = () => false, onApplied = (
     const changes = [], operations = [], preconditions = new Map(), paths = new Set();
     let totalBytes = 0;
     for (const input of proposal.changes) {
+      signal?.throwIfAborted();
       if (!input || !['write', 'mkdir', 'rename', 'delete'].includes(input.operation)) throw new TypeError('Unsupported AI file operation.');
       const path = pathName(input.path);
       const target = input.operation === 'rename' ? pathName(input.target) : null;
@@ -114,6 +116,7 @@ export function createAiReview({ workspace, isDirty = () => false, onApplied = (
         operation.entries = [];
         const pending = [path];
         while (pending.length) {
+          signal?.throwIfAborted();
           for (const entry of await workspace.request('list', { path: pending.shift() })) {
             if (operation.entries.length >= 1000) throw new Error('The folder affects too many files for one AI review. Propose smaller operations.');
             operation.entries.push({ path: entry.path, type: entry.type, size: entry.size });
@@ -168,6 +171,7 @@ export function createAiReview({ workspace, isDirty = () => false, onApplied = (
       if (totalBytes > maxBytes) throw new Error('This AI change set is too large to review safely. Propose a smaller change.');
       operations.push(operation);
     }
+    signal?.throwIfAborted();
     const id = `ai-review-${reviewSession}-${++sequence}`;
     const record = { id, summary: proposal.summary.trim(), status: 'pending', operations,
       changes, preconditions: [...preconditions].map(([path, condition]) => ({ path, ...condition })), paths: [...paths] };
@@ -256,7 +260,14 @@ export function createAiWorkspaceTools({ workspace, review, selectedPaths = () =
   if (typeof workspace?.request !== 'function' || typeof review?.prepare !== 'function') throw new TypeError('Workspace and review services are required.');
   const literal = literalPath, canonicalPath = canonicalWorkspacePath;
   let scope = initialScope ? { mode: 'current', paths: [], excluded: [], ...initialScope } : null;
-  let roots = [], buffers = new Map();
+  let roots = [], buffers = new Map(), exposed = new Map(), exposedBytes = 0;
+  const budget = () => ({ bytes: exposedBytes, maxContextBytes, count: exposed.size });
+  function account(path, size) {
+    const next = exposedBytes - (exposed.get(path) || 0) + size;
+    if (next > maxContextBytes) throw new Error('The AI context budget is full. Select less context or start a new request.');
+    exposed.set(path, size); exposedBytes = next;
+  }
+
   const explicit = () => scope?.mode === 'selected' ? scope.paths : selectedPaths();
   const excluded = path => scope?.excluded?.some(root => path === root || path.startsWith(`${root}/`));
   function permitted(path, canonical, { ancestor = false } = {}) {
@@ -297,8 +308,10 @@ export function createAiWorkspaceTools({ workspace, review, selectedPaths = () =
     if (buffered && typeof buffered.content === 'string') {
       if (canonicalPath(buffered) !== canonical) throw new Error('The editor buffer belongs to a different file target.');
       if (encoder.encode(buffered.content).byteLength > maxFileBytes || !allowedText(canonical, buffered.content)) throw new Error('The editor buffer exceeds context limits or contains credentials requiring explicit selection.');
-      return { path, canonicalPath: canonical, content: buffered.content, unsaved: Boolean(buffered.unsaved) };
+      account(canonical, encoder.encode(buffered.content).byteLength);
+      return { path, canonicalPath: canonical, content: buffered.content, unsaved: Boolean(buffered.unsaved), budget: budget() };
     }
+    if (exposedBytes - (exposed.get(canonical) || 0) + stat.size > maxContextBytes) throw new Error('The AI context budget is full. Select less context or start a new request.');
     const value = await workspace.request('read', { path });
     const actual = authorize(path, canonicalPath(value));
     if (actual !== canonical) throw new Error('The file target changed while AI context was being read. Select it again.');
@@ -306,7 +319,8 @@ export function createAiWorkspaceTools({ workspace, review, selectedPaths = () =
     signal?.throwIfAborted();
     const content = textOf(value.bytes, path);
     if (!allowedText(actual, content)) throw new Error('This file appears to contain credentials. Explicitly select its canonical workspace path before including it in AI context.');
-    return { path, canonicalPath: actual, content, revision: value.revision };
+    account(actual, value.bytes.byteLength);
+    return { path, canonicalPath: actual, content, revision: value.revision, budget: budget() };
   }
   async function execute(name, args, { signal } = {}) {
     signal?.throwIfAborted();
@@ -336,7 +350,7 @@ export function createAiWorkspaceTools({ workspace, review, selectedPaths = () =
           }
         }
       }
-      return review.prepare(args);
+      return review.prepare(args, { signal });
     }
     const path = name === 'read_file' ? pathName(args.path) : literal(args.path);
     if (name === 'read_file') return read(path, signal);
@@ -375,15 +389,17 @@ export function createAiWorkspaceTools({ workspace, review, selectedPaths = () =
       }
       if (truncated) break;
     }
-    return { matches, truncated: truncated || pending.length > 0 || matches.length >= maxMatches, visited, skipped };
+    return { matches, truncated: truncated || pending.length > 0 || matches.length >= maxMatches || exposedBytes >= maxContextBytes, visited, skipped, budget: budget() };
   }
-  async function setScope(value, snapshot = {}) {
+  async function setScope(value, snapshot = {}, signal) {
+    signal?.throwIfAborted();
     if (!value || !['current', 'selected', 'project'].includes(value.mode)) throw new TypeError('Choose a valid AI context scope.');
     const paths = value.mode === 'current' ? [snapshot.activePath || snapshot.selection?.path].filter(Boolean) : value.mode === 'selected' ? value.paths || [] : [];
     if (!Array.isArray(paths) || paths.length > 64 || !Array.isArray(value.excluded || []) || (value.excluded || []).length > 64) throw new Error('Select at most 64 context paths.');
     const next = { mode: value.mode, paths: [...new Set(paths.map(pathName))], excluded: [...new Set((value.excluded || []).map(pathName))] };
     const nextRoots = [];
     for (const path of next.paths) {
+      signal?.throwIfAborted();
       const stat = await workspace.request('stat', { path });
       const canonical = await canonicalWorkspaceTarget(workspace, path, stat);
       if (canonical !== path) throw new Error('Select the canonical file or folder rather than an alias for AI context.');
@@ -419,8 +435,10 @@ export function createAiWorkspaceTools({ workspace, review, selectedPaths = () =
     return { path, entries, truncated: entries.length >= maxEntries || pending.length > 0, scope: getScope() };
   }
   async function context({ selection = null, openFiles = [], activePath, scope: requestedScope, signal } = {}) {
-    if (requestedScope) await setScope(requestedScope, { selection, openFiles, activePath });
-    else if (scope && scope.mode === 'current' && !roots.length) await setScope(scope, { selection, openFiles, activePath });
+    signal?.throwIfAborted();
+    exposed = new Map(); exposedBytes = 0;
+    if (requestedScope) await setScope(requestedScope, { selection, openFiles, activePath }, signal);
+    else if (scope && scope.mode === 'current' && !roots.length) await setScope(scope, { selection, openFiles, activePath }, signal);
     if (scope) buffers = new Map(openFiles.filter(file => file && typeof file === 'object').map(file => [file.path, file]));
     const files = [], excluded = [], selected = scope ? scope.paths : selectedPaths();
     if (!Array.isArray(openFiles) || openFiles.length > 64 || !Array.isArray(selected) || selected.length > 64) {
@@ -438,10 +456,12 @@ export function createAiWorkspaceTools({ workspace, review, selectedPaths = () =
       if (!root?.directory) { if (!descriptors.has(path)) descriptors.set(path, { path }); continue; }
       const pending = [path], visited = new Set();
       while (pending.length && descriptors.size < maxEntries && visited.size < maxEntries) {
+        signal?.throwIfAborted();
         const directory = pending.shift();
         if (visited.has(directory)) continue;
         visited.add(directory);
         for (const entry of await workspace.request('list', { path: directory })) {
+          signal?.throwIfAborted();
           if (!allowedEntry(entry)) { excluded.push({ path: entry.path, reason: 'Excluded from this context scope or requires explicit selection.' }); continue; }
           if (entry.type === 'directory') pending.push(entry.path);
           else if (entry.type === 'file' && !descriptors.has(entry.path)) descriptors.set(entry.path, buffers.get(entry.path) || { path: entry.path });
@@ -464,6 +484,7 @@ export function createAiWorkspaceTools({ workspace, review, selectedPaths = () =
         const size = encoder.encode(value.content).byteLength;
         if (size > maxFileBytes || bytes + size > maxContextBytes) throw new Error('Context size limit reached.');
         if (!allowedText(value.canonicalPath, value.content)) throw new Error('Possible credentials require explicit selection of the canonical workspace path.');
+        account(value.canonicalPath, size);
         bytes += size; files.push(value);
       } catch (error) { if (signal?.aborted) throw error; excluded.push({ path, reason: error.message }); }
     }
@@ -476,6 +497,7 @@ export function createAiWorkspaceTools({ workspace, review, selectedPaths = () =
       if (typeof selection.text !== 'string' || !allowedText(original, selection.text)) throw new Error('The selected text may contain credentials. Explicitly select its canonical file before sending.');
       const size = encoder.encode(selection.text).byteLength;
       if (size > maxFileBytes || bytes + size > maxContextBytes) throw new Error('The selected text exceeds the AI context limit.');
+      account(`selection:${original}`, size);
       bytes += size;
       includedSelection = { path: selection.path, canonicalPath: original, text: selection.text };
     }
