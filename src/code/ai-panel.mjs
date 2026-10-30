@@ -148,7 +148,7 @@ function runIsolatedAiPanel({ nonce, hostOrigin, senderPath, definitions, candid
     });
   }
   function disconnect() {
-    disposed = true; stopCatalog(); controller?.abort(); provider?.dispose(); $('api-key').value = '';
+    disposed = true; stopCatalog(); controller?.abort(); provider?.dispose(); clearCredentials();
     for (const task of pending.values()) { clearTimeout(task.timer); task.cleanup(); task.reject(new Error(text('code.aiPanel.disconnected'))); }
     pending.clear(); port?.close(); connectionPort?.postMessage({ id: ++connectionSequence, operation: 'detach', args: {} }); connectionPort?.close(); clearTimeout(modelTimer);
     for (const task of connectionTasks.values()) { clearTimeout(task.timer); task.reject(new Error(text('code.aiPanel.disconnected'))); }
@@ -163,7 +163,7 @@ function runIsolatedAiPanel({ nonce, hostOrigin, senderPath, definitions, candid
       || event.data.nonce !== nonce || event.ports.length !== 2 || port) return;
     port = event.ports[0]; connectionPort = event.ports[1];
     connectionPort.onmessage = event => {
-      if (event.data?.type === 'clear') { stopCatalog(); settingsEpoch++; pendingSettings = undefined; controller?.abort(); provider?.dispose(); $('api-key').value = ''; messages.length = transcript.length = 0; $('conversation').replaceChildren(); return; }
+      if (event.data?.type === 'clear') { stopCatalog(); settingsEpoch++; pendingSettings = undefined; controller?.abort(); provider?.dispose(); clearCredentials(); messages.length = transcript.length = 0; $('conversation').replaceChildren(); return; }
       if (event.data?.type === 'settings') { const saved = event.data.settings; if (saved?.provider) { if (controller) pendingSettings = saved; else { stopCatalog(); settingsEpoch++; $('provider').value = saved.provider; renderCandidate(saved); } } return; }
       if (event.data?.type === 'session') { if (!controller && event.data.key === sessionKey) restoreConversation(event.data.state); return; }
       const task = connectionTasks.get(event.data?.id);
@@ -262,7 +262,9 @@ function runIsolatedAiPanel({ nonce, hostOrigin, senderPath, definitions, candid
   async function saveSettings() {
     const settings = values();
     const saved = await broker('save', { id: settingsKey(settings), settings: { ...settings, provider: settings.provider.id } });
-    if (saved && settingsKey(settings) === settingsKey() && settings.apiKey === $('api-key').value) connectionRevision = saved.revision || '';
+    const current = values();
+    if (saved && settingsKey(settings) === settingsKey(current)
+      && ['apiKey', ...(current.provider.fields || []).filter(field => field.credential).map(field => field.id)].every(key => settings[key] === current[key])) connectionRevision = saved.revision || '';
   }
   function renderFields(candidate, saved = {}) {
     $('connection-fields').replaceChildren();
@@ -270,10 +272,17 @@ function runIsolatedAiPanel({ nonce, hostOrigin, senderPath, definitions, candid
       const label = document.createElement('label'); label.textContent = field.label;
       const input = document.createElement(field.options ? 'select' : 'input'); input.dataset.connectionField = field.id;
       input.autocomplete = 'off'; input.spellcheck = false;
+      if (!field.options) input.type = field.secret ? 'password' : 'text';
       for (const option of field.options || []) { const element = document.createElement('option'); element.value = option.value; element.textContent = option.label; input.append(element); }
       input.value = saved[field.id] ?? field.default ?? ''; input.required = Boolean(field.required);
-      input.addEventListener('input', invalidateConnection);
-      input.addEventListener('change', () => { void restoreConnection().catch(error => status(error.message)); }); label.append(input); $('connection-fields').append(label);
+      if (field.credential) {
+        input.addEventListener('input', credentialEdited);
+        input.addEventListener('change', () => { void saveSettings().catch(error => status(error.message)); scheduleModels(); });
+      } else {
+        input.addEventListener('input', invalidateConnection);
+        input.addEventListener('change', () => { void restoreConnection().catch(error => status(error.message)); });
+      }
+      label.append(input); $('connection-fields').append(label);
     }
   }
   function renderCandidate(saved = {}) {
@@ -298,12 +307,20 @@ function runIsolatedAiPanel({ nonce, hostOrigin, senderPath, definitions, candid
     renderCandidate(saved || {});
     const history = await broker('session-read', { key: sessionKey });
     restoreConversation(history);
-    if (saved?.apiKey || saved?.provider === 'other') scheduleModels();
+    if (saved?.apiKey || saved?.accessKeyId || saved?.provider === 'other') scheduleModels();
+  }
+  function credentialFields(saved = {}) { return Object.fromEntries((currentCandidate().fields || []).filter(field => field.credential).map(field => [field.id, saved[field.id] || ''])); }
+  function clearCredentials() {
+    $('api-key').value = '';
+    for (const input of document.querySelectorAll('[data-connection-field]')) if (Object.hasOwn(credentialFields(), input.dataset.connectionField)) input.value = '';
+  }
+  function credentialEdited() {
+    settingsEpoch++; stopCatalog(); activeConnectionKey = settingsKey(); messages.length = 0; conversationConnection = null;
   }
   function invalidateConnection() {
     if (activeConnectionKey === settingsKey()) return;
     settingsEpoch++; stopCatalog(); activeConnectionKey = null;
-    $('api-key').value = ''; $('model').value = ''; $('models').replaceChildren();
+    clearCredentials(); $('model').value = ''; $('models').replaceChildren();
   }
   async function restoreConnection() {
     const selected = values(), key = settingsKey(selected);
@@ -311,10 +328,10 @@ function runIsolatedAiPanel({ nonce, hostOrigin, senderPath, definitions, candid
     const epoch = ++settingsEpoch; stopCatalog();
     // Remove the previous key before yielding: even a pending click or model
     // timer may never send it to a newly typed endpoint or API format.
-    $('api-key').value = ''; $('model').value = ''; $('models').replaceChildren(); activeConnectionKey = null;
+    clearCredentials(); $('model').value = ''; $('models').replaceChildren(); activeConnectionKey = null;
     const saved = await broker('read', { id: key });
     if (disposed || epoch !== settingsEpoch || key !== settingsKey()) return;
-    renderCandidate({ ...selected, apiKey: saved?.apiKey || '', model: saved?.model || '', revision: saved?.revision || '' });
+    renderCandidate({ ...selected, ...credentialFields(saved || {}), apiKey: saved?.apiKey || '', model: saved?.model || '', revision: saved?.revision || '' });
     await saveSettings(); scheduleModels();
   }
   async function fetchModels() {
@@ -335,7 +352,10 @@ function runIsolatedAiPanel({ nonce, hostOrigin, senderPath, definitions, candid
     clearTimeout(modelTimer);
     modelTimer = setTimeout(() => {
       const settings = values();
-      if (!settings.apiKey && settings.provider.id !== 'other') return;
+      const nativeBedrock = settings.provider.id === 'bedrock' && settings.route === 'runtime';
+      const awsCredentials = Boolean(settings.accessKeyId && settings.secretAccessKey);
+      if (nativeBedrock && (settings.accessKeyId || settings.secretAccessKey || settings.sessionToken) && !awsCredentials) return;
+      if (!settings.apiKey && settings.provider.id !== 'other' && !(nativeBedrock && awsCredentials)) return;
       if ((settings.provider.fields || []).some(field => field.required && !settings[field.id])) return;
       // Constructor validation makes no network request. Incomplete editing is
       // quiet; the explicit Refresh/Send actions still report useful errors.
@@ -356,7 +376,7 @@ function runIsolatedAiPanel({ nonce, hostOrigin, senderPath, definitions, candid
     $(id).addEventListener('change', () => { void restoreConnection().catch(error => status(error.message)); });
   }
   for (const id of ['api-key', 'model']) {
-    $(id).addEventListener('input', () => { settingsEpoch++; stopCatalog(); activeConnectionKey = settingsKey(); if (id === 'api-key') { messages.length = 0; conversationConnection = null; } });
+    $(id).addEventListener('input', () => { if (id === 'api-key') credentialEdited(); else { settingsEpoch++; stopCatalog(); activeConnectionKey = settingsKey(); } });
     $(id).addEventListener('change', () => { void saveSettings().catch(error => status(error.message)); if (id !== 'model') scheduleModels(); });
   }
   $('fetch-models').addEventListener('click', () => { void fetchModels().catch(error => status(error.message)); });
@@ -423,7 +443,7 @@ function runIsolatedAiPanel({ nonce, hostOrigin, senderPath, definitions, candid
   $('clear').addEventListener('click', () => {
     conversationEpoch++;
     stopCatalog(); settingsEpoch++; controller?.abort(); provider?.dispose(); provider = undefined;
-    $('api-key').value = ''; messages.length = 0; transcript.length = 0; $('conversation').replaceChildren();
+    clearCredentials(); messages.length = 0; transcript.length = 0; $('conversation').replaceChildren();
     void broker('clear', {});
     status(text('code.aiPanel.cleared'));
   });

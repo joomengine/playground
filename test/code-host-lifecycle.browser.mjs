@@ -1,10 +1,20 @@
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
 import { test } from 'node:test';
 import { chromium, firefox } from 'playwright';
 import { createStaticServer } from './server.mjs';
 
 const directory = fileURLToPath(new URL('../', import.meta.url));
+const receipts = path.join(directory, 'test-results');
+// These captures demonstrate the actual host controls with a mock editor frame;
+// code-workbench.browser.mjs separately captures the real bundled native editor.
+async function captureHostVisual(page, browser, state) {
+  await mkdir(receipts, { recursive: true });
+  await page.screenshot({ path: path.join(receipts, `code-host-fixture-${browser}-${state}.png`),
+    animations: 'disabled', caret: 'hide', timeout: 5000 });
+}
 for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split(',')) {
   test(`Code layout controls preserve the live documents and modeless site (${name})`, { timeout: 45_000 }, async () => {
     const server = await createStaticServer({ directory, fixtures: {
@@ -131,6 +141,16 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await page.locator('[data-i18n-aria-label="code.maximize"]').click();
       assert.equal(await preview.isVisible(), false);
       assert.equal(await mode.inputValue(), 'full');
+      await page.evaluate(() => {
+        document.documentElement.dataset.theme = 'dark';
+        document.dispatchEvent(new CustomEvent('joomengine:themechange', { detail: { resolved: 'dark' } }));
+      });
+      await captureHostVisual(page, name, 'wide-dark');
+      await page.evaluate(() => {
+        document.documentElement.dataset.theme = 'light';
+        document.dispatchEvent(new CustomEvent('joomengine:themechange', { detail: { resolved: 'light' } }));
+      });
+      await captureHostVisual(page, name, 'wide-light');
       await page.locator('[data-i18n-aria-label="code.restore"]').click();
       assert.equal(await mode.inputValue(), 'floating');
       after = await panel.boundingBox();
@@ -167,6 +187,12 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       });
       assert.ok(headerBoxes.windows.right <= 391 && headerBoxes.windows.x >= 0);
       assert.ok(headerBoxes.actions.y >= headerBoxes.windows.bottom, 'Only the action strip moves below window controls at narrow widths.');
+      await captureHostVisual(page, name, 'narrow-light');
+      await page.evaluate(() => {
+        document.documentElement.dataset.theme = 'dark';
+        document.dispatchEvent(new CustomEvent('joomengine:themechange', { detail: { resolved: 'dark' } }));
+      });
+      await captureHostVisual(page, name, 'narrow-dark');
       await mode.selectOption('right');
       assert.equal(await page.locator('.jec-layout-host').getAttribute('data-jec-mode'), 'bottom',
         'A narrow viewport collapses the chosen side dock below the site.');

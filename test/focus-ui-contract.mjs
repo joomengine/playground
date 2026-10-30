@@ -22,7 +22,7 @@ async function assertVisibleControls(page) {
 }
 
 /** Hide either bar and restore either edge without navigating or replacing Joomla. */
-export async function assertLiveFocusMode(page, frame) {
+export async function assertLiveFocusMode(page, frame, { capture } = {}) {
   const viewport = page.viewportSize();
   const originalURL = frame.url();
   const originalSource = await page.locator('#site-frame').getAttribute('src');
@@ -52,6 +52,7 @@ export async function assertLiveFocusMode(page, frame) {
         for (const id of restoreControls) assert.equal(await page.locator(`#${id}`).evaluate(button => {
           const box = button.getBoundingClientRect(); return box.bottom > 0 && box.top < innerHeight;
         }), false, 'Restore tabs must leave the viewport in the middle of a long Joomla page.');
+        if (hide === 'focus-header-button') await capture?.(`hidden-middle-${width}`);
         await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
         await assertHiddenControls(page);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
@@ -68,6 +69,7 @@ export async function assertLiveFocusMode(page, frame) {
         assert.equal(frame.url(), originalURL, 'The current Joomla page must not change.');
         assert.equal(await page.locator('#site-frame').getAttribute('src'), originalSource);
         assert.equal(await frame.locator('#rocket-unsaved-focus-proof').inputValue(), 'Unsaved Joomla form value');
+        await capture?.(`${restore === 'focus-restore-bottom' ? 'bottom' : 'top'}-restored-${width}`);
       }
     }
     assert.deepEqual(workers, [], 'Hiding controls must not start replacement PHP or database workers.');

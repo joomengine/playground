@@ -1,4 +1,8 @@
-// Automatic launch is deliberately cancellable before any runtime work starts.
+/**
+ * Automatic launch remains cancellable before runtime work starts. After the
+ * zero tick, a 100 ms final stage gives the UI time to paint; `active` stays true
+ * during that stage so Stop, disposal and restarted countdowns can cancel it.
+ */
 export function createLaunchCountdown({ seconds = 10, onTick, onLaunch, schedule = setTimeout, cancel = clearTimeout }) {
   let remaining = seconds;
   let timer;
@@ -13,9 +17,14 @@ export function createLaunchCountdown({ seconds = 10, onTick, onLaunch, schedule
   function tick(epoch) {
     if (!active || epoch !== generation) return;
     onTick(remaining);
+    // A tick observer may itself stop or restart the countdown.
+    if (!active || epoch !== generation) return;
     if (remaining === 0) {
-      stop();
-      void onLaunch();
+      timer = schedule(() => {
+        if (!active || epoch !== generation) return;
+        stop();
+        void onLaunch();
+      }, 100);
     } else {
       remaining -= 1;
       timer = schedule(() => tick(epoch), 1000);

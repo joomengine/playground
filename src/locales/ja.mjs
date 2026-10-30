@@ -420,11 +420,11 @@ export default Object.freeze({
   "code.aiProvider.nvidia.description": "公開されたホスト型モデルカタログです。セルフホスト NIM サーバーには「その他 / ローカル AI API」を使用してください。",
   "code.aiProvider.azure.description": "デプロイ名がカタログのモデル名と異なる場合は、デプロイ名をモデル ID として使用してください。",
   "code.aiProvider.field.resource": "Azure リソース名",
-  "code.aiProvider.bedrock.description": "Bedrock API キーを使用してください。モデルカードで指定されたエンドポイントを選択します。Runtime には API キーで利用できるモデルカタログがありません。",
+  "code.aiProvider.bedrock.description": "チャットには Bedrock API キーを使用します。任意の AWS 認証情報を設定すると、Runtime のモデルと推論プロファイルを取得できます。Runtime モデルを選択する前に、モデルカードで Chat Completions への対応を確認してください。",
   "code.aiProvider.field.route": "Bedrock エンドポイント",
   "code.aiProvider.option.mantle": "Mantle — モデルカタログと /v1 推論",
   "code.aiProvider.option.mantle-openai": "Mantle — /openai/v1 推論",
-  "code.aiProvider.option.runtime": "Runtime — モデルまたは推論プロファイル ID を手動入力",
+  "code.aiProvider.option.runtime": "Runtime — ネイティブモデルと推論プロファイル",
   "code.aiProvider.other": "その他 / ローカル AI API",
   "code.aiProvider.other.description": "独自の API サーバーに接続します。Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1",
   "label.siteNavigation": "サイトナビゲーション",
@@ -461,5 +461,8 @@ export default Object.freeze({
   "code.accounts": "アカウント",
   "help.technologyIntro": "これらのプロジェクトが連携し、ブラウザー内で Joomla、PHP、MariaDB とコードワークスペースを実行します。Playground サイトのファイルとデータベースは、このブラウザーにローカル保存されます。",
   "confirm.unsavedSiteForm": "この Joomla ページには未保存のフォーム変更があります。離れて続行しますか？",
-  "code.aiPanel.scopeChanged": "コンテキストを変更しました。新しい会話ではこの範囲のみを使用します。"
+  "code.aiPanel.scopeChanged": "コンテキストを変更しました。新しい会話ではこの範囲のみを使用します。",
+  "code.aiProvider.field.accessKeyId": "AWS アクセスキー ID（モデル取得用・任意）",
+  "code.aiProvider.field.secretAccessKey": "AWS シークレットアクセスキー（モデル取得用・任意）",
+  "code.aiProvider.field.sessionToken": "AWS セッショントークン（一時認証情報）"
 });

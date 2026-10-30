@@ -420,11 +420,11 @@ export default Object.freeze({
   "code.aiProvider.nvidia.description": "হোস্ট করা মডেলের প্রকাশিত ক্যাটালগ। নিজস্ব হোস্ট করা NIM সার্ভারের জন্য অন্যান্য / স্থানীয় AI API ব্যবহার করুন।",
   "code.aiProvider.azure.description": "আপনার ডিপ্লয়মেন্টের নাম ক্যাটালগের মডেলের নাম থেকে আলাদা হলে, মডেল ID হিসেবে ডিপ্লয়মেন্টের নাম ব্যবহার করুন।",
   "code.aiProvider.field.resource": "Azure রিসোর্সের নাম",
-  "code.aiProvider.bedrock.description": "একটি Bedrock API কী ব্যবহার করুন। আপনার মডেল কার্ডে প্রয়োজনীয় এন্ডপয়েন্ট বেছে নিন; Runtime-এ API কী দিয়ে ব্যবহারযোগ্য মডেল ক্যাটালগ নেই।",
+  "code.aiProvider.bedrock.description": "চ্যাটের জন্য Bedrock API কী ব্যবহার করুন। ঐচ্ছিক AWS প্রমাণীকরণ তথ্য দিয়ে Runtime মডেল ও ইনফারেন্স প্রোফাইল খোঁজা যায়। Runtime মডেল বেছে নেওয়ার আগে মডেল কার্ডে Chat Completions সমর্থন নিশ্চিত করুন।",
   "code.aiProvider.field.route": "Bedrock এন্ডপয়েন্ট",
   "code.aiProvider.option.mantle": "Mantle — মডেল ক্যাটালগ ও /v1 ইনফারেন্স",
   "code.aiProvider.option.mantle-openai": "Mantle — /openai/v1 ইনফারেন্স",
-  "code.aiProvider.option.runtime": "Runtime — মডেল বা ইনফারেন্স প্রোফাইল ID নিজে লিখুন",
+  "code.aiProvider.option.runtime": "Runtime — নেটিভ মডেল ও ইনফারেন্স প্রোফাইল",
   "code.aiProvider.other": "অন্যান্য / স্থানীয় AI API",
   "code.aiProvider.other.description": "আপনার নিজস্ব API সার্ভার সংযুক্ত করুন। Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1",
   "label.siteNavigation": "সাইট নেভিগেশন",
@@ -461,5 +461,8 @@ export default Object.freeze({
   "code.accounts": "অ্যাকাউন্ট",
   "help.technologyIntro": "এই প্রকল্পগুলি একসঙ্গে আপনার ব্রাউজারে Joomla, PHP, MariaDB এবং কোড কর্মক্ষেত্র চালায়। আপনার Playground সাইটের ফাইল ও ডেটাবেস এই ব্রাউজারেই স্থানীয়ভাবে সংরক্ষিত থাকে।",
   "confirm.unsavedSiteForm": "এই Joomla পৃষ্ঠার ফর্মে অসংরক্ষিত পরিবর্তন রয়েছে। পৃষ্ঠা ছেড়ে চালিয়ে যাবেন?",
-  "code.aiPanel.scopeChanged": "প্রসঙ্গ পরিবর্তিত হয়েছে। নতুন কথোপকথন শুধুমাত্র এই পরিসর ব্যবহার করবে।"
+  "code.aiPanel.scopeChanged": "প্রসঙ্গ পরিবর্তিত হয়েছে। নতুন কথোপকথন শুধুমাত্র এই পরিসর ব্যবহার করবে।",
+  "code.aiProvider.field.accessKeyId": "AWS অ্যাক্সেস কী ID (মডেল অনুসন্ধানের জন্য ঐচ্ছিক)",
+  "code.aiProvider.field.secretAccessKey": "AWS সিক্রেট অ্যাক্সেস কী (মডেল অনুসন্ধানের জন্য ঐচ্ছিক)",
+  "code.aiProvider.field.sessionToken": "AWS সেশন টোকেন (অস্থায়ী প্রমাণীকরণ তথ্য)"
 });

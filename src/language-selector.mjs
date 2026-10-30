@@ -184,6 +184,12 @@ export function createLanguageSelector(input, { multiple = false, t, getLocale =
     if (open) renderChoices({ all: true });
   }
   on(entry, 'focus', () => show({ all: true }));
+  on(entry, 'blur', () => {
+    // Tab first reaches the dropdown button inside this widget. Commit when
+    // leaving the text field as well as when leaving the whole selector, so
+    // pasted comma-separated tags become chips without an extra Tab or click.
+    if (multiple && commit() && open) renderChoices({ all: true });
+  });
   on(entry, 'input', () => {
     if (internal) return;
     syncPending();

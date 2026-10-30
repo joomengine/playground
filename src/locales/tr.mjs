@@ -420,11 +420,11 @@ export default Object.freeze({
   "code.aiProvider.nvidia.description": "Yayımlanan barındırılmış model kataloğu. Kendi sunucunuzdaki NIM için Diğer / Yerel YZ API'si seçeneğini kullanın.",
   "code.aiProvider.azure.description": "Dağıtım adınız katalogdaki model adından farklıysa model kimliği olarak dağıtım adını kullanın.",
   "code.aiProvider.field.resource": "Azure kaynak adı",
-  "code.aiProvider.bedrock.description": "Bir Bedrock API anahtarı kullanın. Model kartınızın gerektirdiği uç noktayı seçin; Runtime, API anahtarıyla erişilen bir model kataloğu sunmaz.",
+  "code.aiProvider.bedrock.description": "Sohbet için bir Bedrock API anahtarı kullanın. İsteğe bağlı AWS kimlik bilgileriyle Runtime modelleri ve profilleri keşfedilir. Bir Runtime modeli seçmeden önce model kartında Chat Completions desteğini doğrulayın.",
   "code.aiProvider.field.route": "Bedrock uç noktası",
   "code.aiProvider.option.mantle": "Mantle — model kataloğu ve /v1 çıkarımı",
   "code.aiProvider.option.mantle-openai": "Mantle — /openai/v1 çıkarımı",
-  "code.aiProvider.option.runtime": "Runtime — elle girilen model veya çıkarım profili kimliği",
+  "code.aiProvider.option.runtime": "Runtime — yerel API modelleri ve çıkarım profilleri",
   "code.aiProvider.other": "Diğer / Yerel YZ API'si",
   "code.aiProvider.other.description": "Kendi API sunucunuzu bağlayın. Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1",
   "label.siteNavigation": "Site gezintisi",
@@ -461,5 +461,8 @@ export default Object.freeze({
   "code.accounts": "Hesaplar",
   "help.technologyIntro": "Bu projeler Joomla, PHP, MariaDB ve kod çalışma alanını tarayıcınızda çalıştırmak için birlikte çalışır. Playground sitenizin dosyaları ve veritabanı bu tarayıcıda yerel olarak saklanır.",
   "confirm.unsavedSiteForm": "Bu Joomla sayfasında kaydedilmemiş form değişiklikleri var. Sayfadan ayrılıp devam edilsin mi?",
-  "code.aiPanel.scopeChanged": "Bağlam değişti. Yeni konuşma yalnızca bu kapsamı kullanacak."
+  "code.aiPanel.scopeChanged": "Bağlam değişti. Yeni konuşma yalnızca bu kapsamı kullanacak.",
+  "code.aiProvider.field.accessKeyId": "AWS erişim anahtarı kimliği (isteğe bağlı model keşfi)",
+  "code.aiProvider.field.secretAccessKey": "AWS gizli erişim anahtarı (isteğe bağlı model keşfi)",
+  "code.aiProvider.field.sessionToken": "AWS oturum belirteci (geçici kimlik bilgileri)"
 });

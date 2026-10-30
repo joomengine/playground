@@ -52,10 +52,12 @@ let codeHost;
 let openingCode;
 const launchCountdown = createLaunchCountdown({
   onTick(seconds) {
-    $('launch-countdown').hidden = false;
-    $('stop-countdown').disabled = false;
-    $('countdown-value').textContent = String(seconds);
-    $('countdown-message').textContent = t('status.countdown', { seconds });
+    $('launch-countdown').hidden = $('dashboard-countdown').hidden = false;
+    for (const prefix of ['', 'dashboard-']) {
+      $(`${prefix}countdown-value`).textContent = String(seconds);
+      $(`${prefix}countdown-message`).textContent = t('status.countdown', { seconds });
+    }
+    $('stop-countdown').disabled = $('stop-countdown-button').disabled = false;
   },
   onLaunch: () => launch(),
 });
@@ -107,6 +109,8 @@ function pauseAutomaticLaunch() {
   if (!launchCountdown.active) return;
   launchCountdown.stop();
   $('launch-countdown').hidden = true;
+  $('dashboard-countdown-message').textContent = t('status.countdownPaused');
+  $('stop-countdown-button').disabled = true;
   activity(t('status.countdownPaused'));
 }
 function approveCustomSetup(input) {
@@ -499,6 +503,7 @@ async function launch() {
   let switchingStarted = false;
   launchCountdown.stop();
   $('launch-countdown').hidden = true;
+  $('dashboard-countdown').hidden = true;
   try {
     if (!$('launch-form').checkValidity()) { setDrawer(true); openDialog('deploy-dialog'); $('advanced-settings').open = true; $('launch-form').reportValidity(); return; }
     let input = formInput();
@@ -745,6 +750,7 @@ $('saved-site').addEventListener('change', (event) => void openSavedSite(event.t
 $('rename-site-button').addEventListener('click', renameSelectedSite);
 $('delete-site-button').addEventListener('click', () => void deleteSelectedSite());
 $('stop-countdown').addEventListener('click', pauseAutomaticLaunch);
+$('stop-countdown-button').addEventListener('click', pauseAutomaticLaunch);
 $('nav-site').addEventListener('click', () => navigatePreview('/'));
 $('nav-admin').addEventListener('click', () => navigatePreview('/administrator/'));
 $('restart-button').addEventListener('click', async () => {

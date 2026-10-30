@@ -66,8 +66,18 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await page.getByRole('button', { name: 'Remove de-DE', exact: true }).click();
       assert.equal(await page.locator('#languages').inputValue(), 'en-GB, sr-Latn-RS');
       await multi.fill('af-za, fr-fr'); await multi.press('Tab');
+      assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('language-toggle')), true,
+        'Tab moves to the dropdown button within the same widget.');
       assert.equal(await page.locator('#languages').inputValue(), 'en-GB, sr-Latn-RS, af-ZA, fr-FR');
+      assert.equal(await multi.inputValue(), '', 'Leaving the entry commits valid pasted tags.');
       assert.equal(await page.locator('.language-tag').count(), 4);
+      await multi.fill('invalid'); await multi.press('Tab');
+      assert.equal(await multi.inputValue(), 'invalid', 'Invalid pending text stays editable after blur.');
+      assert.equal(await multi.evaluate(input => input.checkValidity()), false);
+      assert.equal(await page.locator('.language-tag').count(), 4, 'Invalid text is never promoted to a selected tag.');
+      await multi.fill('fr-FR'); await multi.press('Tab');
+      assert.equal(await page.locator('#languages').inputValue(), 'en-GB, sr-Latn-RS, af-ZA, fr-FR');
+      assert.equal(await page.locator('.language-tag').count(), 4, 'Committing a repeated tag does not duplicate it.');
       await page.evaluate(() => { document.getElementById('languages').value = 'de-DE'; window.multiLanguage.refresh(); });
       assert.equal(await page.locator('.language-tag').count(), 1);
       assert.equal(await page.locator('.language-tag').innerText(), 'de-DE×');

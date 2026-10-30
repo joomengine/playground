@@ -32,12 +32,12 @@ export function runConnectionBroker({ nonce, hostOrigin }) {
           result = record || null;
         } else if (operation === 'save' && typeof args.id === 'string' && args.id.length <= 8192 && args.settings && typeof args.settings === 'object') {
           const record = {};
-          for (const key of ['provider', 'baseURL', 'protocol', 'model', 'apiKey', 'region', 'workspaceId', 'resource', 'accountId', 'route']) {
+          for (const key of ['provider', 'baseURL', 'protocol', 'model', 'apiKey', 'region', 'workspaceId', 'resource', 'accountId', 'route', 'accessKeyId', 'secretAccessKey', 'sessionToken']) {
             const value = args.settings[key];
             if (typeof value === 'string' && value.length <= 4096 && !/[\r\n]/.test(value)) record[key] = value;
           }
           const previous = connections.get(args.id);
-          record.revision = previous && previous.apiKey === record.apiKey ? previous.revision : String(++credentialGeneration);
+          record.revision = previous && ['apiKey', 'accessKeyId', 'secretAccessKey', 'sessionToken'].every(key => previous[key] === record[key]) ? previous.revision : String(++credentialGeneration);
           connections.set(args.id, record); latest = args.id; result = record; broadcast({ type: 'settings', settings: record });
           while (connections.size > 64) connections.delete(connections.keys().next().value);
         }
