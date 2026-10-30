@@ -33,15 +33,15 @@ export function publicConfiguration(config) {
 }
 
 export function readSavedState(storage, key) {
-  const empty = () => ({ schemaVersion: 1, active: null, sites: Object.create(null) });
+  const empty = () => ({ schemaVersion: 2, active: null, sites: Object.create(null) });
   try {
     const value = JSON.parse(storage.getItem(key));
-    if (value?.schemaVersion !== 1 || !value.sites || typeof value.sites !== 'object' || Array.isArray(value.sites)) return empty();
+    if (![1, 2].includes(value?.schemaVersion) || !value.sites || typeof value.sites !== 'object' || Array.isArray(value.sites)) return empty();
     const result = empty();
-    for (const [name, site] of Object.entries(value.sites).slice(-40)) {
+    for (const [name, site] of Object.entries(value.sites)) {
       if (!SITE_KEY.test(name) || !site || typeof site !== 'object' || site.storageKey !== name || site.persistence !== true
           || !Array.isArray(site.extensions) || !Array.isArray(site.startupCommands)) continue;
-      result.sites[name] = publicConfiguration(site);
+      result.sites[name] = { ...publicConfiguration(site), displayName: savedSiteName(site.displayName || site.siteName), lastPath: safeSavedRoute(site.lastPath, site.initialPath) };
     }
     if (typeof value.active === 'string' && Object.hasOwn(result.sites, value.active)) result.active = value.active;
     return result;
@@ -52,15 +52,67 @@ export function rememberSite(state, config) {
   if (!config.persistence || !SITE_KEY.test(config.storageKey)) return state;
   const sites = { ...state.sites };
   delete sites[config.storageKey];
-  sites[config.storageKey] = publicConfiguration(config);
-  const retained = Object.fromEntries(Object.entries(sites).slice(-40));
-  return { schemaVersion: 1, active: config.storageKey, sites: retained };
+  const previous = state.sites[config.storageKey];
+  sites[config.storageKey] = { ...publicConfiguration(config),
+    displayName: savedSiteName(config.displayName || previous?.displayName || config.siteName),
+    lastPath: safeSavedRoute(config.lastPath || previous?.lastPath, config.initialPath) };
+  return { schemaVersion: 2, active: config.storageKey, sites };
 }
 
 export function forgetSite(state, storageKey) {
   const sites = { ...state.sites };
   delete sites[storageKey];
-  return { schemaVersion: 1, active: state.active === storageKey ? null : state.active, sites };
+  return { schemaVersion: 2, active: state.active === storageKey ? null : state.active, sites };
+}
+
+
+/** Display names are metadata, never part of a recipe or the storage identity. */
+export function savedSiteName(value) {
+  return typeof value === 'string' ? value.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 100) || 'Joomla site' : 'Joomla site';
+}
+export function renameSavedSite(state, storageKey, displayName) {
+  if (!Object.hasOwn(state.sites, storageKey)) return state;
+  if (typeof displayName !== 'string' || !displayName.trim() || displayName.length > 100 || /[\x00-\x1f\x7f]/.test(displayName)) throw new TypeError('Enter a site name of 1–100 characters.');
+  return { ...state, sites: { ...state.sites, [storageKey]: { ...state.sites[storageKey], displayName: displayName.trim() } } };
+}
+
+/** Resume navigation, never commands, credentials, CSRF tokens or external URLs. */
+export function safeSavedRoute(value, fallback = '/') {
+  function normalize(input) {
+    if (typeof input !== 'string' || input.length > 2048 || !input.startsWith('/') || input.startsWith('//') || /[\\\x00-\x20\x7f]/.test(input)) return null;
+    let decoded;
+    try { decoded = decodeURIComponent(input.split(/[?#]/)[0]); } catch { return null; }
+    if (/[\\\x00-\x20\x7f]/.test(decoded) || decoded.startsWith('//') || decoded.split('/').some(part => part === '.' || part === '..')) return null;
+    const url = new URL(input, 'https://saved-site.invalid');
+    if (url.origin !== 'https://saved-site.invalid') return null;
+    const safe = new URLSearchParams();
+    const allowed = new Set(['option', 'view', 'layout', 'id', 'Itemid', 'lang', 'limit', 'limitstart', 'start', 'tmpl']);
+    for (const [key, item] of url.searchParams) {
+      if (allowed.has(key) && /^[a-zA-Z0-9_.:, -]{1,128}$/.test(item)) safe.append(key, item);
+    }
+    const query = safe.toString();
+    const hash = /^#[a-zA-Z0-9_-]{1,128}$/.test(url.hash) ? url.hash : '';
+    return `${url.pathname}${query ? `?${query}` : ''}${hash}`;
+  }
+  return normalize(value) || normalize(fallback) || '/';
+}
+/** Check only a resumed route; HEAD never submits a saved form or action. */
+export async function resolveResumePath(request, path, fallback = '/') {
+  const initial = safeSavedRoute(fallback);
+  const route = safeSavedRoute(path, initial);
+  if (route === initial) return route;
+  try {
+    const response = await request(route, { method: 'HEAD' });
+    await response.body?.cancel();
+    return response.status === 404 || response.status === 410 ? initial : route;
+  } catch { return initial; }
+}
+
+export function rememberSiteRoute(state, storageKey, path) {
+  if (!Object.hasOwn(state.sites, storageKey)) return state;
+  const lastPath = safeSavedRoute(path, state.sites[storageKey].initialPath);
+  if (state.sites[storageKey].lastPath === lastPath) return state;
+  return { ...state, sites: { ...state.sites, [storageKey]: { ...state.sites[storageKey], lastPath } } };
 }
 
 /** Reflect selected controls without newly exposing manually entered setup steps. */

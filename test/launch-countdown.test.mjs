@@ -38,3 +38,19 @@ test('shared custom code and commands require review while catalog presets do no
     { template: { params: { customHtml: '<script>console.log("template")</script>' } } },
   ]) assert.equal(deploymentNeedsReview(input), true);
 });
+
+test('a stale timer from a previous countdown cannot launch or change a restarted countdown', () => {
+  const callbacks = [], ticks = [];
+  let launches = 0;
+  const countdown = createLaunchCountdown({ seconds: 1, onTick: value => ticks.push(value), onLaunch: () => launches++,
+    schedule: callback => { callbacks.push(callback); return callbacks.length; }, cancel() {} });
+  countdown.start();
+  const stale = callbacks[0];
+  countdown.stop();
+  countdown.start();
+  stale();
+  assert.deepEqual(ticks, [1, 1]);
+  assert.equal(launches, 0);
+  callbacks[1]();
+  assert.equal(launches, 1);
+});

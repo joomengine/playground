@@ -1,6 +1,8 @@
 import { createCodeLayout } from './layout.mjs';
 import { createRefreshController } from './refresh.mjs';
 import { mountFileActions } from './file-actions.mjs';
+import { decorateAction, decorateIcons, createIcon } from '../icons.mjs';
+import { syncThemeDocument } from '../theme.mjs';
 
 const mutations = new Set(['write', 'batch', 'mkdir', 'copy', 'rename', 'delete', 'recover']);
 let stylesheet;
@@ -21,9 +23,19 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
   await loadStyles();
   if (!runtime.healthy) throw new Error('Open a healthy Joomla site before opening JoomEngine Code.');
   let workbench, opening, disposed = false, aiPanel, aiLoading, disposal, fileActions, cancelFrameLoad;
-  let selectedAiPaths = [];
   let aiServices;
   const auxiliaryTools = new Set();
+  const auxiliaryDocuments = new Set();
+  let currentTheme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+  const shellStylesheet = new URL('./styles.css', import.meta.url).href;
+  const applyTheme = event => {
+    currentTheme = event?.detail?.resolved || event?.detail?.theme || document.documentElement.dataset.theme || 'dark';
+    for (const doc of auxiliaryDocuments) syncThemeDocument(doc, { resolved: currentTheme, theme: currentTheme });
+    for (const panel of aiPanels) panel.setTheme?.(currentTheme);
+    if (frame.contentDocument) syncThemeDocument(frame.contentDocument, { resolved: currentTheme, theme: currentTheme });
+    void workbench?.setTheme?.(currentTheme)?.catch(report);
+  };
+  document.addEventListener('joomengine:themechange', applyTheme);
   const aiPanels = new Set();
   const editor = document.createElement('div');
   const frame = document.createElement('iframe');
@@ -64,7 +76,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     host, preview, editor, storage, t,
     onError: report,
     onLayout: () => workbench?.layout?.(),
-    onState: state => onState({ ...refresh.state, visible: state.visible }),
+    onState: state => onState({ ...refresh.state, visible: state.visible, detached: state.detached }),
     detachView: options => {
       if (!workbench) throw new Error('Wait for JoomEngine Code to finish opening before detaching.');
       return workbench.detach(options);
@@ -72,8 +84,14 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
   });
   const button = (key, action, doc = document, onFailure = report) => {
     const element = doc.createElement('button'); element.type = 'button';
-    element.textContent = t(key); element.title = t(key);
-    element.setAttribute('data-i18n', key); element.setAttribute('data-i18n-title', key);
+    element.textContent = t(key); element.title = t(key); element.setAttribute('aria-label', t(key));
+    element.setAttribute('data-i18n', key); element.setAttribute('data-i18n-title', key); element.setAttribute('data-i18n-aria-label', key);
+    const icons = { 'code.saveAll': 'save-all', 'code.refresh': 'refresh-site', 'code.cacheClear': 'clear-cache',
+      'code.debugRefresh': 'debug-refresh', 'code.debugArm': 'arm-php', 'code.ai': 'ai-assistant',
+      'code.accounts': 'accounts', 'code.debugContinue': 'debug-continue', 'code.debugPause': 'debug-pause',
+      'code.debugStepOver': 'debug-step-over', 'code.debugStepInto': 'debug-step-into',
+      'code.debugStepOut': 'debug-step-out', 'code.debugStop': 'debug-stop', 'code.retry': 'retry' };
+    if (icons[key]) decorateAction(element, icons[key], { iconOnly: key === 'code.ai' });
     element.addEventListener('click', () => { void Promise.resolve().then(action).catch(onFailure); });
     return element;
   };
@@ -99,15 +117,15 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     if (!aiServices) {
       const review = createAiReview({ workspace, isDirty: (path, recursive) => workbench.isDirty(path, recursive),
         onApplied: result => workbench.reconcileApplied(result) });
-      aiServices = { review, tools: createAiWorkspaceTools({ workspace, review, selectedPaths: () => selectedAiPaths }) };
+      aiServices = { review, tools: createAiWorkspaceTools({ workspace, review, scope: { mode: 'current', paths: [], excluded: [] } }) };
     }
     const { review, tools } = aiServices;
-    const isolated = createIsolatedAiPanel({ container, tools, review, t,
+    const isolated = createIsolatedAiPanel({ container, tools, review, t, sessionKey: runtime.workspace.id,
       locale: document.documentElement.lang, direction: document.documentElement.dir,
-      getContext: ({ signal }) => tools.context({ ...workbench.getContext(), signal }) });
+      getContext: ({ signal, scope }) => tools.context({ ...workbench.getContext(), scope, signal }) });
     // Register before returning through an async boundary: disposal can run
     // before the requesting main or auxiliary view receives this value.
-    const panel = Object.freeze({ element: isolated.element, dispose() {
+    const panel = Object.freeze({ element: isolated.element, showSettings: isolated.showSettings, setTheme: isolated.setTheme, dispose() {
       aiPanels.delete(panel); isolated.dispose();
     } });
     aiPanels.add(panel);
@@ -126,7 +144,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
   const arm = button('code.debugArm', () => armRequest());
   const aiContainer = document.createElement('section');
   aiContainer.className = 'jec-ai-panel'; aiContainer.hidden = true;
-  const ai = button('code.ai', async () => {
+  async function toggleAi() {
     if (!workbench) throw new Error('Wait for JoomEngine Code to finish opening.');
     if (aiPanel) { aiContainer.hidden = !aiContainer.hidden; ai.setAttribute('aria-expanded', String(!aiContainer.hidden)); return; }
     if (aiLoading) return aiLoading;
@@ -139,30 +157,29 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
       ai.setAttribute('aria-expanded', 'true');
     })().finally(() => { aiLoading = undefined; });
     return aiLoading;
-  });
+  }
+  const ai = button('code.ai', toggleAi);
   ai.setAttribute('aria-expanded', 'false');
-  const aiContext = button('code.aiContext', async () => {
-    const input = window.prompt(t('code.aiContextPrompt'), selectedAiPaths.join('\n'));
-    if (input === null) return;
-    const { normalizeWorkspacePath } = await import('./workspace-files.mjs');
-    const paths = [...new Set(input.split(/[\n,]/).map(path => path.trim()).filter(Boolean).map(normalizeWorkspacePath))];
-    if (paths.length > 16) throw new Error(t('code.aiContextLimit'));
-    for (const path of paths) {
-      const file = await workspace.request('stat', { path });
-      if (!file || file.type !== 'file' || file.size > 128 * 1024) throw new Error(`${path}: ${t('code.aiContextInvalid')}`);
-    }
-    selectedAiPaths = paths;
-    aiContext.title = paths.length ? `${t('code.aiContext')}: ${paths.join(', ')}` : t('code.aiContext');
+  const accounts = button('code.accounts', async () => {
+    if (!aiPanel) await toggleAi();
+    if (!aiPanel) return;
+    aiContainer.hidden = false; ai.setAttribute('aria-expanded', 'true'); aiPanel.showSettings();
   });
   const autoLabel = document.createElement('label');
   const auto = document.createElement('input'); auto.type = 'checkbox';
   auto.addEventListener('change', () => refresh.setAutomatic(auto.checked));
-  autoLabel.append(auto, document.createTextNode(t('code.autoRefresh')));
-  layout.toolbar.append(save, reload, clearCache, debug, arm, ai, aiContext, autoLabel, status);
+  autoLabel.title = t('code.autoRefresh');
+  auto.setAttribute('aria-label', t('code.autoRefresh')); auto.setAttribute('data-i18n-aria-label', 'code.autoRefresh');
+  const autoText = document.createElement('span'); autoText.className = 'je-action-label';
+  autoText.textContent = t('code.autoRefresh'); autoText.setAttribute('data-i18n', 'code.autoRefresh');
+  autoLabel.append(auto, createIcon('auto-refresh', document), autoText);
+  layout.toolbar.append(save, reload, clearCache, debug, arm, ai, accounts, autoLabel, status);
   layout.show();
 
   function mountDetachedTools({ window: win, toolbar, container, getActivePath, openFile }) {
     const doc = win.document;
+    auxiliaryDocuments.add(doc);
+    syncThemeDocument(doc, { resolved: currentTheme, theme: currentTheme });
     const output = doc.createElement('span'); output.setAttribute('role', 'status');
     const notify = error => { output.textContent = error.message; report(error); };
     const add = (key, action) => { const control = button(key, action, doc, notify); toolbar.append(control); return control; };
@@ -182,7 +199,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     aiMount.style.cssText = 'height:600px;max-height:75vh;width:100%;overflow:auto';
     container.append(aiMount);
     let panel, loadingPanel, closed = false;
-    const aiButton = add('code.ai', async () => {
+    async function toggleDetachedAi() {
       if (panel) { aiMount.hidden = !aiMount.hidden; aiButton.setAttribute('aria-expanded', String(!aiMount.hidden)); return; }
       if (loadingPanel) return loadingPanel;
       loadingPanel = createAiPanel(aiMount).then(value => {
@@ -190,16 +207,21 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
         panel = value; aiMount.hidden = false; aiButton.setAttribute('aria-expanded', 'true');
       }).finally(() => { loadingPanel = undefined; });
       return loadingPanel;
-    });
+    }
+    const aiButton = add('code.ai', toggleDetachedAi);
+
     aiButton.setAttribute('aria-expanded', 'false');
+    add('code.accounts', async () => { if (!panel) await toggleDetachedAi(); if (panel) { aiMount.hidden = false; aiButton.setAttribute('aria-expanded', 'true'); panel.showSettings(); } });
     const files = mountFileActions({ toolbar, workspace, getActivePath, openFile,
       isDirty: (path, recursive) => workbench.isDirty(path, recursive), onError: notify, t });
     toolbar.append(output);
+    decorateIcons(toolbar);
     const stopStatus = refresh.subscribe(state => {
       output.textContent = state.saving ? t(state.paused ? 'code.savesQueued' : 'code.saving') : state.savedChanges ? t('code.savedChanges') : '';
     });
     const tools = { dispose() {
       if (closed) return; closed = true;
+      auxiliaryDocuments.delete(doc);
       stopStatus(); debugStatus?.dispose(); panel?.dispose(); files.dispose(); aiMount.remove(); auxiliaryTools.delete(tools);
     } };
     auxiliaryTools.add(tools);
@@ -225,7 +247,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
       workbench = await frame.contentWindow.JoomEngineCode.mount({
         workspace, siteId: runtime.workspace.id, storageId: runtime.workspace.storageId,
         phpVersion: runtime.configuration.phpVersion,
-        onError: report, t,
+        onError: report, t, theme: currentTheme, shellStylesheet, favicon: new URL('../brand/favicon.svg', import.meta.url).href,
         onDetachedTools: mountDetachedTools,
         debuggerBackend: { ...runtime.debugger, async start(config) {
           await runtime.debugger.start(config);
@@ -237,6 +259,8 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
       fileActions = mountFileActions({ toolbar: layout.toolbar, workspace,
         getActivePath: () => workbench.getActivePath(), openFile: path => workbench.openFile(path),
         isDirty: (path, recursive) => workbench.isDirty(path, recursive), onError: report, t });
+      decorateIcons(layout.toolbar);
+      applyTheme();
       workbench.layout?.();
     })().catch(error => {
       opening = undefined;
@@ -262,9 +286,10 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     cancelFrameLoad?.();
     unsubscribe();
     window.removeEventListener('beforeunload', beforeUnload);
+    document.removeEventListener('joomengine:themechange', applyTheme);
     refresh.dispose();
     for (const panel of aiPanels) panel.dispose();
-    aiPanel = undefined; aiServices = undefined; selectedAiPaths = [];
+    aiPanel = undefined; aiServices = undefined;
     fileActions?.dispose();
     for (const tools of auxiliaryTools) tools.dispose();
     // Return auxiliary editor parts before disposing their owner realm.
@@ -281,7 +306,15 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     return disposal;
   }
   return {
-    open, refresh: () => refresh.refresh(),
+    open,
+    async toggle() {
+      if (disposed) throw new Error('This JoomEngine Code workspace is closed.');
+      if (layout.state.visible) await layout.hide();
+      else await open();
+    },
+    hide: () => layout.hide(),
+    get visible() { return layout.state.visible; },
+    refresh: () => refresh.refresh(),
     get closed() { return disposed; },
     async beforeClose() {
       await refresh.waitForSaves();

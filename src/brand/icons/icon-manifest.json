@@ -1,0 +1,1506 @@
+{
+  "source_archive": "black-svg-icons.zip",
+  "source_svg_count": 2785,
+  "style": "Coherent line control icons plus the user-supplied full-color pearl rocket brand asset",
+  "status": "Selected proposals for user review; not yet implemented in the app",
+  "policy": "Preserve supplied SVG geometry. Monochrome controls receive only a root fill in black, white or currentColor; the separately supplied pearl rocket stays full color with root sizing/framing changes only. No replacement drawings.",
+  "source_licensing": "No README, LICENSE or other non-SVG file was present in the archive. Preserve provenance and confirm the applicable original icon license before publishing the integrated application.",
+  "coverage": "Application-owned controls from the reviewed header/dashboard/footer, deployment dialogs, editor tools and AI panel. Preserve native VS Code file-type/language/product icons unless separately requested.",
+  "notes": [
+    "Selections are deliberately coherent line icons rather than a mix of line and fill variants.",
+    "Some icons serve several actions with the same meaning. The aliases are explicit in the manifest; tooltips and accessible names still identify the individual actions.",
+    "The old standalone main-menu More button is removed by the requested dashboard consolidation. The ellipsis here is only for responsive editor action overflow.",
+    "No dedicated PHP logo, git-fork or debugger step glyphs were found; closest supplied icons are marked."
+  ],
+  "icons": [
+    {
+      "id": "deployment",
+      "label": "Deployment",
+      "area": "Main header",
+      "source_path": "JoomEngine_Pearl_Logo.svg",
+      "rationale": "New user-supplied pearl rocket is the authoritative project rocket, shared with the favicon.",
+      "asset_kind": "brand-rocket",
+      "selection_note": "Preserve full-color pearl artwork in both themes. The generic bundle rocket is superseded.",
+      "number": "001",
+      "source_sha256": "55305a0c163c69a1ca851adfcb0139449cd5658dfbb126e090da3e024abb98ca",
+      "files": {
+        "light": "brand/rocket.svg",
+        "dark": "brand/rocket.svg",
+        "favicon": "brand/favicon.svg"
+      }
+    },
+    {
+      "id": "site",
+      "label": "Site",
+      "area": "Main header",
+      "source_path": "Business/global-line.svg",
+      "rationale": "Globe identifies the public website, beside Deployment.",
+      "number": "002",
+      "source_sha256": "64044eed82b6bbed1507e5c04c4f696c1073e6eeee58c410d411f9f4ae7e87f2",
+      "files": {
+        "black": "black/site.svg",
+        "white": "white/site.svg",
+        "currentColor": "currentColor/site.svg"
+      }
+    },
+    {
+      "id": "admin",
+      "label": "Admin",
+      "area": "Main header",
+      "source_path": "System/dashboard-line.svg",
+      "rationale": "Dashboard identifies the administrative area, beside Site.",
+      "number": "003",
+      "source_sha256": "43ae41eb1e0a16b249d0315696be5563064ae0af8d5b36804060482fa7e6a70a",
+      "files": {
+        "black": "black/admin.svg",
+        "white": "white/admin.svg",
+        "currentColor": "currentColor/admin.svg"
+      }
+    },
+    {
+      "id": "save-site",
+      "label": "Save site",
+      "area": "Main header",
+      "source_path": "Device/save-3-line.svg",
+      "rationale": "Recognizable save symbol with a clean outline.",
+      "number": "004",
+      "source_sha256": "025bdc6ac25b34da2058c8d32cf798c9a76bd594cbe1c6e47e067a599c318f2c",
+      "files": {
+        "black": "black/save-site.svg",
+        "white": "white/save-site.svg",
+        "currentColor": "currentColor/save-site.svg"
+      }
+    },
+    {
+      "id": "share-site",
+      "label": "Share",
+      "area": "Main header",
+      "source_path": "System/share-line.svg",
+      "rationale": "Connected nodes convey sharing without a misleading navigation arrow.",
+      "number": "005",
+      "source_sha256": "1c4ad9b46790e4a09165e46e3ecdbe468df8b59c8192ec080b69907f13c64200",
+      "files": {
+        "black": "black/share-site.svg",
+        "white": "white/share-site.svg",
+        "currentColor": "currentColor/share-site.svg"
+      }
+    },
+    {
+      "id": "code",
+      "label": "JoomEngine Code",
+      "area": "Main header",
+      "source_path": "Development/code-box-line.svg",
+      "rationale": "Code brackets inside a window identify the editor.",
+      "number": "006",
+      "source_sha256": "e3715a80c89f0d53771f15cb7a2b17d8785dcec5430a21502c1c67ad4c3b512a",
+      "files": {
+        "black": "black/code.svg",
+        "white": "white/code.svg",
+        "currentColor": "currentColor/code.svg"
+      }
+    },
+    {
+      "id": "refresh-site",
+      "label": "Refresh site",
+      "area": "Main header",
+      "source_path": "System/refresh-line.svg",
+      "rationale": "Circular arrows convey reloading the preview.",
+      "number": "007",
+      "source_sha256": "174dde7692f9715dd07ab278e5c49a12abfa3d6e0455f208465286816e87320c",
+      "files": {
+        "black": "black/refresh-site.svg",
+        "white": "white/refresh-site.svg",
+        "currentColor": "currentColor/refresh-site.svg"
+      }
+    },
+    {
+      "id": "download-site",
+      "label": "Download site",
+      "area": "Main header",
+      "source_path": "System/download-2-line.svg",
+      "rationale": "Download arrow lands in a tray.",
+      "number": "008",
+      "source_sha256": "51c6d1a96463082cd739acc47aa9c765bcc95c1ec8aba3a4878be4de6c33ef1f",
+      "files": {
+        "black": "black/download-site.svg",
+        "white": "white/download-site.svg",
+        "currentColor": "currentColor/download-site.svg"
+      }
+    },
+    {
+      "id": "fork",
+      "label": "Fork",
+      "area": "Main header",
+      "source_path": "Development/git-branch-line.svg",
+      "rationale": "Branching source-control graphic is the closest supplied fork symbol.",
+      "selection_note": "The bundle has no git-fork icon. Keep the tooltip “Fork on GitHub”.",
+      "number": "009",
+      "source_sha256": "67aea9b75cce4298883a810149c3aac880ddc87fc313b84cd5264606c4200031",
+      "files": {
+        "black": "black/fork.svg",
+        "white": "white/fork.svg",
+        "currentColor": "currentColor/fork.svg"
+      }
+    },
+    {
+      "id": "star",
+      "label": "Star",
+      "area": "Main header",
+      "source_path": "System/star-line.svg",
+      "rationale": "Standard repository-star outline.",
+      "number": "010",
+      "source_sha256": "58366117332fe81f8b1837c6f04fe880bfb4a00d6270f8261538043d23ba8678",
+      "files": {
+        "black": "black/star.svg",
+        "white": "white/star.svg",
+        "currentColor": "currentColor/star.svg"
+      }
+    },
+    {
+      "id": "dashboard-toggle",
+      "label": "Advanced dashboard",
+      "area": "Main header",
+      "source_path": "System/arrow-down-s-line.svg",
+      "rationale": "Compact chevron expands the existing dashboard; rotate on expansion.",
+      "selection_note": "This replaces the need for a separate main-menu More control.",
+      "number": "011",
+      "source_sha256": "1dedf58fda5c376d00f52ee19bfafc0cc36fca46fa7b1c4244f9b34ad5a2c3d0",
+      "files": {
+        "black": "black/dashboard-toggle.svg",
+        "white": "white/dashboard-toggle.svg",
+        "currentColor": "currentColor/dashboard-toggle.svg"
+      }
+    },
+    {
+      "id": "new-site",
+      "label": "New site",
+      "area": "Advanced dashboard",
+      "source_path": "System/add-circle-line.svg",
+      "rationale": "Plus in a circle identifies creating another site.",
+      "number": "012",
+      "source_sha256": "dc5ea1822409cc677f798938b905d8541282b799f178b306516aff07d333bccf",
+      "files": {
+        "black": "black/new-site.svg",
+        "white": "white/new-site.svg",
+        "currentColor": "currentColor/new-site.svg"
+      }
+    },
+    {
+      "id": "restart-site",
+      "label": "Restart",
+      "area": "Advanced dashboard",
+      "source_path": "Device/restart-line.svg",
+      "rationale": "Power-cycle arrow distinguishes restarting the runtime from refreshing a page.",
+      "number": "013",
+      "source_sha256": "5732f7b1aee36f5c959ab9ce025b98824d959497e72a2cdfbd3a3147103a9858",
+      "files": {
+        "black": "black/restart-site.svg",
+        "white": "white/restart-site.svg",
+        "currentColor": "currentColor/restart-site.svg"
+      }
+    },
+    {
+      "id": "close-site",
+      "label": "Close site",
+      "area": "Advanced dashboard",
+      "source_path": "Device/shut-down-line.svg",
+      "rationale": "Power control indicates stopping the current running site.",
+      "number": "014",
+      "source_sha256": "3d2c8c011d217c453bb327240863a11a27fddfba63f39b072756c7095f5a5c76",
+      "files": {
+        "black": "black/close-site.svg",
+        "white": "white/close-site.svg",
+        "currentColor": "currentColor/close-site.svg"
+      }
+    },
+    {
+      "id": "login-details",
+      "label": "Login details",
+      "area": "Advanced dashboard",
+      "source_path": "Others/key-2-line.svg",
+      "rationale": "Key identifies access credentials.",
+      "number": "015",
+      "source_sha256": "5d58be181e073c1860456171242f83efb5953f66a62dc9082f31c400a9d8f3fa",
+      "files": {
+        "black": "black/login-details.svg",
+        "white": "white/login-details.svg",
+        "currentColor": "currentColor/login-details.svg"
+      }
+    },
+    {
+      "id": "php-settings",
+      "label": "PHP settings",
+      "area": "Advanced dashboard",
+      "source_path": "Device/cpu-line.svg",
+      "rationale": "Processor denotes runtime configuration; accompanying PHP label disambiguates.",
+      "selection_note": "No PHP-logo icon exists in this supplied bundle.",
+      "number": "016",
+      "source_sha256": "805bc8a99ac5b34f529730138893eba4537779331c5c9dd56e1e634ffe177bad",
+      "files": {
+        "black": "black/php-settings.svg",
+        "white": "white/php-settings.svg",
+        "currentColor": "currentColor/php-settings.svg"
+      }
+    },
+    {
+      "id": "reset-site",
+      "label": "Reset site",
+      "area": "Advanced dashboard",
+      "source_path": "System/arrow-go-back-line.svg",
+      "rationale": "Return arrow identifies resetting to an initial state.",
+      "selection_note": "Retain an explicit Reset site label and destructive confirmation; do not rely on this symbol alone.",
+      "number": "017",
+      "source_sha256": "2c1f8b69855633e3eda90a86f206ac0fd9ffd25a263e361618765af6cbb8ca49",
+      "files": {
+        "black": "black/reset-site.svg",
+        "white": "white/reset-site.svg",
+        "currentColor": "currentColor/reset-site.svg"
+      }
+    },
+    {
+      "id": "saved-sites",
+      "label": "Saved sites",
+      "area": "Advanced dashboard",
+      "source_path": "Business/archive-drawer-line.svg",
+      "rationale": "Archive drawers identify the saved-site collection.",
+      "number": "018",
+      "source_sha256": "7ac29e3f3271d6929ae1e3e7fa9f781f2647f57715bb052e8024a05347ac321c",
+      "files": {
+        "black": "black/saved-sites.svg",
+        "white": "white/saved-sites.svg",
+        "currentColor": "currentColor/saved-sites.svg"
+      }
+    },
+    {
+      "id": "launch",
+      "label": "Launch",
+      "area": "Advanced dashboard",
+      "source_path": "JoomEngine_Pearl_Logo.svg",
+      "rationale": "New user-supplied pearl rocket is the authoritative project rocket, shared with the favicon.",
+      "asset_kind": "brand-rocket",
+      "selection_note": "Preserve full-color pearl artwork in both themes. The generic bundle rocket is superseded.",
+      "number": "019",
+      "source_sha256": "55305a0c163c69a1ca851adfcb0139449cd5658dfbb126e090da3e024abb98ca",
+      "files": {
+        "light": "brand/rocket.svg",
+        "dark": "brand/rocket.svg",
+        "favicon": "brand/favicon.svg"
+      }
+    },
+    {
+      "id": "stop-countdown",
+      "label": "Stop countdown",
+      "area": "Advanced dashboard",
+      "source_path": "Media/stop-circle-line.svg",
+      "rationale": "A stop control clearly cancels automatic launch.",
+      "number": "020",
+      "source_sha256": "7b578f954151c973de03aeaacbf28624dab6a1c4d270a7a501fd039f97dfc078",
+      "files": {
+        "black": "black/stop-countdown.svg",
+        "white": "white/stop-countdown.svg",
+        "currentColor": "currentColor/stop-countdown.svg"
+      }
+    },
+    {
+      "id": "rename-site",
+      "label": "Rename",
+      "area": "Advanced dashboard",
+      "source_path": "Design/edit-2-line.svg",
+      "rationale": "Pencil represents editing the saved display name.",
+      "number": "021",
+      "source_sha256": "923db39086412600d1a2a6f0d684e4d241de2c04c219108a00b73b2fe50bf12c",
+      "files": {
+        "black": "black/rename-site.svg",
+        "white": "white/rename-site.svg",
+        "currentColor": "currentColor/rename-site.svg"
+      }
+    },
+    {
+      "id": "delete-site",
+      "label": "Delete saved site",
+      "area": "Advanced dashboard",
+      "source_path": "System/delete-bin-line.svg",
+      "rationale": "Trash bin is the explicit removal action.",
+      "number": "022",
+      "source_sha256": "168eb247e00dfa82eec8b60c8db8c33405746195edbd3a89b7ee1b4b1709e075",
+      "files": {
+        "black": "black/delete-site.svg",
+        "white": "white/delete-site.svg",
+        "currentColor": "currentColor/delete-site.svg"
+      }
+    },
+    {
+      "id": "keep-site",
+      "label": "Keep this site",
+      "area": "Advanced dashboard",
+      "source_path": "Business/bookmark-line.svg",
+      "rationale": "Bookmark conveys retaining the site for a future visit.",
+      "number": "023",
+      "source_sha256": "4ca5686dfbf13ec2c5883d6e6f43924d2b7475693ba60ca6f9bb14a6694512a4",
+      "files": {
+        "black": "black/keep-site.svg",
+        "white": "white/keep-site.svg",
+        "currentColor": "currentColor/keep-site.svg"
+      }
+    },
+    {
+      "id": "running-status",
+      "label": "Site is running",
+      "area": "Advanced dashboard",
+      "source_path": "System/checkbox-circle-line.svg",
+      "rationale": "Check inside a circle communicates successful running state.",
+      "number": "024",
+      "source_sha256": "8e129115337edbfeb967cc3d03ec69bb187588531a1589ded030de2a8ffd44a6",
+      "files": {
+        "black": "black/running-status.svg",
+        "white": "white/running-status.svg",
+        "currentColor": "currentColor/running-status.svg"
+      }
+    },
+    {
+      "id": "joomla-version",
+      "label": "Joomla version",
+      "area": "Advanced dashboard",
+      "source_path": "Document/file-code-line.svg",
+      "rationale": "Code file marks the installed application version without inventing a Joomla brand mark.",
+      "number": "025",
+      "source_sha256": "422322bb7beb1333700508f7972ca4153ff2179f52599a8389b2bca58133cbbf",
+      "files": {
+        "black": "black/joomla-version.svg",
+        "white": "white/joomla-version.svg",
+        "currentColor": "currentColor/joomla-version.svg"
+      }
+    },
+    {
+      "id": "php-version",
+      "label": "PHP version",
+      "area": "Advanced dashboard",
+      "source_path": "Device/cpu-line.svg",
+      "rationale": "Processor is shared with PHP settings for consistent runtime identity.",
+      "number": "026",
+      "source_sha256": "805bc8a99ac5b34f529730138893eba4537779331c5c9dd56e1e634ffe177bad",
+      "files": {
+        "black": "black/php-version.svg",
+        "white": "white/php-version.svg",
+        "currentColor": "currentColor/php-version.svg"
+      }
+    },
+    {
+      "id": "site-language",
+      "label": "Joomla language",
+      "area": "Advanced dashboard",
+      "source_path": "Business/global-line.svg",
+      "rationale": "Globe conveys installed site languages.",
+      "number": "027",
+      "source_sha256": "64044eed82b6bbed1507e5c04c4f696c1073e6eeee58c410d411f9f4ae7e87f2",
+      "files": {
+        "black": "black/site-language.svg",
+        "white": "white/site-language.svg",
+        "currentColor": "currentColor/site-language.svg"
+      }
+    },
+    {
+      "id": "theme-system",
+      "label": "System theme",
+      "area": "Advanced dashboard",
+      "source_path": "Device/computer-line.svg",
+      "rationale": "Monitor denotes following the computer’s current appearance.",
+      "number": "028",
+      "source_sha256": "dc46436cd7f4b32f272a4fac3d3fbf745816431feb7e4e73280ddd0016634bb1",
+      "files": {
+        "black": "black/theme-system.svg",
+        "white": "white/theme-system.svg",
+        "currentColor": "currentColor/theme-system.svg"
+      }
+    },
+    {
+      "id": "theme-light",
+      "label": "Light theme",
+      "area": "Advanced dashboard",
+      "source_path": "Weather/sun-line.svg",
+      "rationale": "Sun is the familiar light-appearance control.",
+      "number": "029",
+      "source_sha256": "29b2b4916dd8443eff0692f23cf0c609ff6ca9c647321a9516daf5c65336bb01",
+      "files": {
+        "black": "black/theme-light.svg",
+        "white": "white/theme-light.svg",
+        "currentColor": "currentColor/theme-light.svg"
+      }
+    },
+    {
+      "id": "theme-dark",
+      "label": "Dark theme",
+      "area": "Advanced dashboard",
+      "source_path": "Weather/moon-line.svg",
+      "rationale": "Crescent moon is the familiar dark-appearance control.",
+      "number": "030",
+      "source_sha256": "b237893c87ce68846780c448b60cb45998c6ab075edad4e0fda79323873ca90d",
+      "files": {
+        "black": "black/theme-dark.svg",
+        "white": "white/theme-dark.svg",
+        "currentColor": "currentColor/theme-dark.svg"
+      }
+    },
+    {
+      "id": "hide-chrome",
+      "label": "Hide header and footer",
+      "area": "Header and footer",
+      "source_path": "System/close-line.svg",
+      "rationale": "Compact close cross hides Playground chrome.",
+      "number": "031",
+      "source_sha256": "5686c5a5b595e5f70e99553e19f796761a6ad91b5bb254b9afc1612bf9e5d17c",
+      "files": {
+        "black": "black/hide-chrome.svg",
+        "white": "white/hide-chrome.svg",
+        "currentColor": "currentColor/hide-chrome.svg"
+      }
+    },
+    {
+      "id": "restore-top",
+      "label": "Show header",
+      "area": "Header and footer",
+      "source_path": "System/arrow-right-down-line.svg",
+      "rationale": "From the top-left corner, points inward toward the page center.",
+      "number": "032",
+      "source_sha256": "35b7b923d750e4d57f856107cbf1cda057cc1ba6d59f4b02a8045bb55e570a68",
+      "files": {
+        "black": "black/restore-top.svg",
+        "white": "white/restore-top.svg",
+        "currentColor": "currentColor/restore-top.svg"
+      }
+    },
+    {
+      "id": "restore-bottom",
+      "label": "Show footer",
+      "area": "Header and footer",
+      "source_path": "System/arrow-right-up-line.svg",
+      "rationale": "From the bottom-left corner, points inward toward the page center.",
+      "number": "033",
+      "source_sha256": "e0e1a2db43b84f609c3087169e655f47d1b6079c3071adbd46952654628cb559",
+      "files": {
+        "black": "black/restore-bottom.svg",
+        "white": "white/restore-bottom.svg",
+        "currentColor": "currentColor/restore-bottom.svg"
+      }
+    },
+    {
+      "id": "interface-language",
+      "label": "Interface language",
+      "area": "Header and footer",
+      "source_path": "Business/global-line.svg",
+      "rationale": "Globe represents interface-language selection.",
+      "number": "034",
+      "source_sha256": "64044eed82b6bbed1507e5c04c4f696c1073e6eeee58c410d411f9f4ae7e87f2",
+      "files": {
+        "black": "black/interface-language.svg",
+        "white": "white/interface-language.svg",
+        "currentColor": "currentColor/interface-language.svg"
+      }
+    },
+    {
+      "id": "deployment-guide",
+      "label": "Deployment guide",
+      "area": "Header and footer",
+      "source_path": "Document/book-open-line.svg",
+      "rationale": "Open book identifies guidance and documentation.",
+      "number": "035",
+      "source_sha256": "274c929062e639bb2b92f7757c63fcb0e8b2c6bf34f98b569100ca95bbe30042",
+      "files": {
+        "black": "black/deployment-guide.svg",
+        "white": "white/deployment-guide.svg",
+        "currentColor": "currentColor/deployment-guide.svg"
+      }
+    },
+    {
+      "id": "about",
+      "label": "About",
+      "area": "Header and footer",
+      "source_path": "System/information-line.svg",
+      "rationale": "Familiar information mark identifies project credits and explanation.",
+      "number": "036",
+      "source_sha256": "98a172d0fb12524950378807edd2e5016bba8306c2db85fad3459d129c88acc2",
+      "files": {
+        "black": "black/about.svg",
+        "white": "white/about.svg",
+        "currentColor": "currentColor/about.svg"
+      }
+    },
+    {
+      "id": "activity",
+      "label": "Activity log",
+      "area": "Header and footer",
+      "source_path": "Document/file-list-2-line.svg",
+      "rationale": "List on a page represents runtime activity messages.",
+      "number": "037",
+      "source_sha256": "53f922fea5a02a0d7fb6a907d72dcffc0e1038d4e2c276790ef40a7a7b84c0fb",
+      "files": {
+        "black": "black/activity.svg",
+        "white": "white/activity.svg",
+        "currentColor": "currentColor/activity.svg"
+      }
+    },
+    {
+      "id": "view-source",
+      "label": "View source",
+      "area": "Header and footer",
+      "source_path": "Development/git-repository-line.svg",
+      "rationale": "Repository book identifies source code links.",
+      "number": "038",
+      "source_sha256": "ffeafd81af36faf8cc90aeaf40246aa8e12cb7268a19343c3556b0ba003f8496",
+      "files": {
+        "black": "black/view-source.svg",
+        "white": "white/view-source.svg",
+        "currentColor": "currentColor/view-source.svg"
+      }
+    },
+    {
+      "id": "licenses",
+      "label": "Licenses and notices",
+      "area": "Header and footer",
+      "source_path": "Document/file-text-line.svg",
+      "rationale": "Text document identifies distributed legal notices.",
+      "number": "039",
+      "source_sha256": "4c5a022aed76d08955e06296aa08374b7c817cd382de6c70525e227e3316f04d",
+      "files": {
+        "black": "black/licenses.svg",
+        "white": "white/licenses.svg",
+        "currentColor": "currentColor/licenses.svg"
+      }
+    },
+    {
+      "id": "save-all",
+      "label": "Save all files",
+      "area": "Editor header and layout",
+      "source_path": "Device/save-3-line.svg",
+      "rationale": "Reuse the save symbol with a precise accessible label.",
+      "number": "040",
+      "source_sha256": "025bdc6ac25b34da2058c8d32cf798c9a76bd594cbe1c6e47e067a599c318f2c",
+      "files": {
+        "black": "black/save-all.svg",
+        "white": "white/save-all.svg",
+        "currentColor": "currentColor/save-all.svg"
+      }
+    },
+    {
+      "id": "clear-cache",
+      "label": "Clear Joomla cache",
+      "area": "Editor header and layout",
+      "source_path": "Design/brush-2-line.svg",
+      "rationale": "Cleaning brush conveys clearing cached content without resembling deletion of site files.",
+      "number": "041",
+      "source_sha256": "b280fd4ae34b73ca50df9efd804ce77b7f46db888b3c8560350690c39ee528d0",
+      "files": {
+        "black": "black/clear-cache.svg",
+        "white": "white/clear-cache.svg",
+        "currentColor": "currentColor/clear-cache.svg"
+      }
+    },
+    {
+      "id": "debug-refresh",
+      "label": "Debug and refresh",
+      "area": "Editor header and layout",
+      "source_path": "Development/bug-2-line.svg",
+      "rationale": "Bug is the established debugging symbol.",
+      "number": "042",
+      "source_sha256": "fa1e9afa56258df02b2788dcdb0b5541e19e0717c486fb865d5f1ac86885a444",
+      "files": {
+        "black": "black/debug-refresh.svg",
+        "white": "white/debug-refresh.svg",
+        "currentColor": "currentColor/debug-refresh.svg"
+      }
+    },
+    {
+      "id": "arm-php",
+      "label": "Arm PHP request",
+      "area": "Editor header and layout",
+      "source_path": "Design/focus-3-line.svg",
+      "rationale": "Target mark conveys preparing to intercept the next request.",
+      "selection_note": "Semantic approximation; keep the full tooltip and explain the armed state.",
+      "number": "043",
+      "source_sha256": "d73879c66cce0cb1eb82a3828bde0e16ae215b175e6949593f4c96c7848f86c1",
+      "files": {
+        "black": "black/arm-php.svg",
+        "white": "white/arm-php.svg",
+        "currentColor": "currentColor/arm-php.svg"
+      }
+    },
+    {
+      "id": "ai-assistant",
+      "label": "AI assistant",
+      "area": "Editor header and layout",
+      "source_path": "User/robot-line.svg",
+      "rationale": "Supplied robot provides the requested icon-only AI entry point.",
+      "number": "044",
+      "source_sha256": "e70fcd2c22553783ca2a6031560351d0d85f2fa140db71eadddf89df03d9d93a",
+      "files": {
+        "black": "black/ai-assistant.svg",
+        "white": "white/ai-assistant.svg",
+        "currentColor": "currentColor/ai-assistant.svg"
+      }
+    },
+    {
+      "id": "accounts",
+      "label": "Accounts / AI APIs",
+      "area": "Editor header and layout",
+      "source_path": "User/account-circle-line.svg",
+      "rationale": "Account silhouette identifies session provider credentials.",
+      "number": "045",
+      "source_sha256": "4a65df6c27b8bb55dc367c138b0e9329051041b20f0b16bf814008350f565c1b",
+      "files": {
+        "black": "black/accounts.svg",
+        "white": "white/accounts.svg",
+        "currentColor": "currentColor/accounts.svg"
+      }
+    },
+    {
+      "id": "auto-refresh",
+      "label": "Automatic refresh",
+      "area": "Editor header and layout",
+      "source_path": "Media/repeat-line.svg",
+      "rationale": "Repeating arrows distinguish ongoing automatic refresh from a one-time refresh.",
+      "number": "046",
+      "source_sha256": "7646ed7c43f6ff1f4f0129fdfae40f2403a87ec4581febe7f154e1100657703b",
+      "files": {
+        "black": "black/auto-refresh.svg",
+        "white": "white/auto-refresh.svg",
+        "currentColor": "currentColor/auto-refresh.svg"
+      }
+    },
+    {
+      "id": "workspace-layout",
+      "label": "Workspace layout",
+      "area": "Editor header and layout",
+      "source_path": "Design/layout-line.svg",
+      "rationale": "Pane arrangement identifies editor layout selection.",
+      "number": "047",
+      "source_sha256": "43c81b49e873a27010f794cbf35672b3d5c2e10596794617ce03c5e197dbae98",
+      "files": {
+        "black": "black/workspace-layout.svg",
+        "white": "white/workspace-layout.svg",
+        "currentColor": "currentColor/workspace-layout.svg"
+      }
+    },
+    {
+      "id": "dock-left",
+      "label": "Dock left",
+      "area": "Editor header and layout",
+      "source_path": "Design/layout-left-line.svg",
+      "rationale": "Highlights the left pane placement.",
+      "number": "048",
+      "source_sha256": "d0a2215cd711942531623c634442f8c8526555ebd1a3a32b502e4158b28595e6",
+      "files": {
+        "black": "black/dock-left.svg",
+        "white": "white/dock-left.svg",
+        "currentColor": "currentColor/dock-left.svg"
+      }
+    },
+    {
+      "id": "dock-right",
+      "label": "Dock right",
+      "area": "Editor header and layout",
+      "source_path": "Design/layout-right-line.svg",
+      "rationale": "Highlights the right pane placement.",
+      "number": "049",
+      "source_sha256": "b14ab5e3acf97be073ac0f1f80db226d2025c3e9fa13db089c3ff65e3b2fa94c",
+      "files": {
+        "black": "black/dock-right.svg",
+        "white": "white/dock-right.svg",
+        "currentColor": "currentColor/dock-right.svg"
+      }
+    },
+    {
+      "id": "dock-bottom",
+      "label": "Dock bottom",
+      "area": "Editor header and layout",
+      "source_path": "Design/layout-bottom-line.svg",
+      "rationale": "Highlights the bottom pane placement.",
+      "number": "050",
+      "source_sha256": "b0482398f7332ad593c70a7a32dd47364f4273eaedb406e03997091b6d8e725e",
+      "files": {
+        "black": "black/dock-bottom.svg",
+        "white": "white/dock-bottom.svg",
+        "currentColor": "currentColor/dock-bottom.svg"
+      }
+    },
+    {
+      "id": "floating",
+      "label": "Floating workspace",
+      "area": "Editor header and layout",
+      "source_path": "Business/window-2-line.svg",
+      "rationale": "Window outline identifies a movable editor panel.",
+      "number": "051",
+      "source_sha256": "b9de597c71e523ed6454c2cf323365af61eaee19c29a060119a2ed51834e5950",
+      "files": {
+        "black": "black/floating.svg",
+        "white": "white/floating.svg",
+        "currentColor": "currentColor/floating.svg"
+      }
+    },
+    {
+      "id": "full-workspace",
+      "label": "Full workspace",
+      "area": "Editor header and layout",
+      "source_path": "Media/fullscreen-line.svg",
+      "rationale": "Outward corners indicate maximum editor space.",
+      "number": "052",
+      "source_sha256": "1d4c7ec52f7bbe746647d2aaa09f2d3e0026ef087abea1ba94d3b0028dd14805",
+      "files": {
+        "black": "black/full-workspace.svg",
+        "white": "white/full-workspace.svg",
+        "currentColor": "currentColor/full-workspace.svg"
+      }
+    },
+    {
+      "id": "restore-workspace",
+      "label": "Restore workspace size",
+      "area": "Editor header and layout",
+      "source_path": "Media/fullscreen-exit-line.svg",
+      "rationale": "Inward corners return from a maximized layout.",
+      "number": "053",
+      "source_sha256": "400a4a27571725bef94fc407f39931373d691abf3795e6a61d8c3e215931a5c4",
+      "files": {
+        "black": "black/restore-workspace.svg",
+        "white": "white/restore-workspace.svg",
+        "currentColor": "currentColor/restore-workspace.svg"
+      }
+    },
+    {
+      "id": "detach",
+      "label": "Detach editor",
+      "area": "Editor header and layout",
+      "source_path": "System/external-link-line.svg",
+      "rationale": "Outward arrow from a square identifies opening in a separate window.",
+      "number": "054",
+      "source_sha256": "ce0560e058d18fa5a148ed7155be59b67257520afabb3f87b76fe32eb2ec9132",
+      "files": {
+        "black": "black/detach.svg",
+        "white": "white/detach.svg",
+        "currentColor": "currentColor/detach.svg"
+      }
+    },
+    {
+      "id": "redock",
+      "label": "Return to owner tab",
+      "area": "Editor header and layout",
+      "source_path": "Media/picture-in-picture-exit-line.svg",
+      "rationale": "Returning inset pane is the closest supplied redocking symbol.",
+      "selection_note": "Confirm the preview is intuitive; retain the tooltip “Return to owner tab”.",
+      "number": "055",
+      "source_sha256": "11dd8f27b488dbbce97cb6ece399f816341bfd72e5a5b72e90d2f484d5cb20d4",
+      "files": {
+        "black": "black/redock.svg",
+        "white": "white/redock.svg",
+        "currentColor": "currentColor/redock.svg"
+      }
+    },
+    {
+      "id": "hide-editor",
+      "label": "Hide editor",
+      "area": "Editor header and layout",
+      "source_path": "System/close-line.svg",
+      "rationale": "Close cross hides the editor without discarding its session.",
+      "number": "056",
+      "source_sha256": "5686c5a5b595e5f70e99553e19f796761a6ad91b5bb254b9afc1612bf9e5d17c",
+      "files": {
+        "black": "black/hide-editor.svg",
+        "white": "white/hide-editor.svg",
+        "currentColor": "currentColor/hide-editor.svg"
+      }
+    },
+    {
+      "id": "move-editor",
+      "label": "Move editor",
+      "area": "Editor header and layout",
+      "source_path": "Design/drag-move-2-line.svg",
+      "rationale": "Four-direction arrows indicate dragging the floating panel.",
+      "number": "057",
+      "source_sha256": "7197fef71b81db699aabe0a4c7cdfaec711ad541064f4250fd1cb744d4d6c3a8",
+      "files": {
+        "black": "black/move-editor.svg",
+        "white": "white/move-editor.svg",
+        "currentColor": "currentColor/move-editor.svg"
+      }
+    },
+    {
+      "id": "resize-editor",
+      "label": "Resize editor",
+      "area": "Editor header and layout",
+      "source_path": "Media/aspect-ratio-line.svg",
+      "rationale": "Outlined bounds communicate resizing.",
+      "selection_note": "Keep the actual corner drag affordance; this glyph must not consume extra header space.",
+      "number": "058",
+      "source_sha256": "9fe4386da5f3b164291178641a134c30d43762623c144254c83e9286e4057846",
+      "files": {
+        "black": "black/resize-editor.svg",
+        "white": "white/resize-editor.svg",
+        "currentColor": "currentColor/resize-editor.svg"
+      }
+    },
+    {
+      "id": "editor-overflow",
+      "label": "More editor actions",
+      "area": "Editor header and layout",
+      "source_path": "System/more-line.svg",
+      "rationale": "Horizontal ellipsis opens actions that no longer fit.",
+      "selection_note": "Only editor action overflow; do not recreate a second main-site More menu.",
+      "number": "059",
+      "source_sha256": "38f125ee878b747da1eb2298cda9e2b43354edf9cc9d8a3a5b6c2fc33a6be7be",
+      "files": {
+        "black": "black/editor-overflow.svg",
+        "white": "white/editor-overflow.svg",
+        "currentColor": "currentColor/editor-overflow.svg"
+      }
+    },
+    {
+      "id": "debug-continue",
+      "label": "Continue PHP",
+      "area": "Editor debugging",
+      "source_path": "Media/play-line.svg",
+      "rationale": "Play triangle resumes execution.",
+      "number": "060",
+      "source_sha256": "999d6086ca286161501b3dcc6da4eed920a65f36321259139ce6f91d1e1437db",
+      "files": {
+        "black": "black/debug-continue.svg",
+        "white": "white/debug-continue.svg",
+        "currentColor": "currentColor/debug-continue.svg"
+      }
+    },
+    {
+      "id": "debug-pause",
+      "label": "Pause PHP",
+      "area": "Editor debugging",
+      "source_path": "Media/pause-line.svg",
+      "rationale": "Pause bars interrupt execution.",
+      "number": "061",
+      "source_sha256": "dffb0acdc92b4edaf903b85f90d15cc019ade41c8e783087787acdb69a36fa02",
+      "files": {
+        "black": "black/debug-pause.svg",
+        "white": "white/debug-pause.svg",
+        "currentColor": "currentColor/debug-pause.svg"
+      }
+    },
+    {
+      "id": "debug-step-over",
+      "label": "Step over",
+      "area": "Editor debugging",
+      "source_path": "System/arrow-go-forward-line.svg",
+      "rationale": "Curving forward arrow suggests moving over the current statement.",
+      "selection_note": "No dedicated step-over glyph in this bundle; use the explicit tooltip and shortcut.",
+      "number": "062",
+      "source_sha256": "c783f59608cd10d686bdd979626fb095ff575b869ab324f9974ddb40f866b28d",
+      "files": {
+        "black": "black/debug-step-over.svg",
+        "white": "white/debug-step-over.svg",
+        "currentColor": "currentColor/debug-step-over.svg"
+      }
+    },
+    {
+      "id": "debug-step-into",
+      "label": "Step into",
+      "area": "Editor debugging",
+      "source_path": "System/arrow-down-line.svg",
+      "rationale": "Downward arrow indicates entering the current call.",
+      "selection_note": "No dedicated step-into glyph in this bundle; use the explicit tooltip and shortcut.",
+      "number": "063",
+      "source_sha256": "149a1bbc5843438772a31c301a387cad3aa67770a28cd5839f9f5a95dcc34d67",
+      "files": {
+        "black": "black/debug-step-into.svg",
+        "white": "white/debug-step-into.svg",
+        "currentColor": "currentColor/debug-step-into.svg"
+      }
+    },
+    {
+      "id": "debug-step-out",
+      "label": "Step out",
+      "area": "Editor debugging",
+      "source_path": "System/arrow-up-line.svg",
+      "rationale": "Upward arrow indicates leaving the current call.",
+      "selection_note": "No dedicated step-out glyph in this bundle; use the explicit tooltip and shortcut.",
+      "number": "064",
+      "source_sha256": "e093ad0bdb95a4eae82008af82111e77ed4a1797a7d4e0fce0f98ce3ed2cbd7b",
+      "files": {
+        "black": "black/debug-step-out.svg",
+        "white": "white/debug-step-out.svg",
+        "currentColor": "currentColor/debug-step-out.svg"
+      }
+    },
+    {
+      "id": "debug-stop",
+      "label": "Stop PHP debugging",
+      "area": "Editor debugging",
+      "source_path": "Media/stop-line.svg",
+      "rationale": "Stop square ends debugging.",
+      "number": "065",
+      "source_sha256": "5b6cd92304a72a75ece5d9f1803a05bad221982040319cd137a9e6a7f405e832",
+      "files": {
+        "black": "black/debug-stop.svg",
+        "white": "white/debug-stop.svg",
+        "currentColor": "currentColor/debug-stop.svg"
+      }
+    },
+    {
+      "id": "files",
+      "label": "Files",
+      "area": "Editor files",
+      "source_path": "Document/folders-line.svg",
+      "rationale": "Stacked folders identify the file explorer.",
+      "number": "066",
+      "source_sha256": "d9334fd2184940e590cff9191c0288fb095f7475a67aacf2c5800529ff0b43ac",
+      "files": {
+        "black": "black/files.svg",
+        "white": "white/files.svg",
+        "currentColor": "currentColor/files.svg"
+      }
+    },
+    {
+      "id": "refresh-files",
+      "label": "Refresh files",
+      "area": "Editor files",
+      "source_path": "System/refresh-line.svg",
+      "rationale": "Reuse the reload symbol for refreshing the file tree.",
+      "number": "067",
+      "source_sha256": "174dde7692f9715dd07ab278e5c49a12abfa3d6e0455f208465286816e87320c",
+      "files": {
+        "black": "black/refresh-files.svg",
+        "white": "white/refresh-files.svg",
+        "currentColor": "currentColor/refresh-files.svg"
+      }
+    },
+    {
+      "id": "search-project",
+      "label": "Search project",
+      "area": "Editor files",
+      "source_path": "System/search-line.svg",
+      "rationale": "Magnifying glass identifies searching file contents.",
+      "number": "068",
+      "source_sha256": "c7a4228032dd55907c7afd2579791c799bdaed978ab10fca8da49690e692cdb4",
+      "files": {
+        "black": "black/search-project.svg",
+        "white": "white/search-project.svg",
+        "currentColor": "currentColor/search-project.svg"
+      }
+    },
+    {
+      "id": "upload-files",
+      "label": "Upload files",
+      "area": "Editor files",
+      "source_path": "Document/file-upload-line.svg",
+      "rationale": "File and upward arrow indicate sending files into the site.",
+      "number": "069",
+      "source_sha256": "dc4a640e58e1fd472243debcbc116dbfb7d6b4a0c30ee35901ab8f36f7329006",
+      "files": {
+        "black": "black/upload-files.svg",
+        "white": "white/upload-files.svg",
+        "currentColor": "currentColor/upload-files.svg"
+      }
+    },
+    {
+      "id": "download-file",
+      "label": "Download file",
+      "area": "Editor files",
+      "source_path": "Document/file-download-line.svg",
+      "rationale": "File and downward arrow distinguish a single file from a whole-site export.",
+      "number": "070",
+      "source_sha256": "80c9ff64eb373c59efab7e742aa1b3151b94ddfde47c15372886463ef25f792b",
+      "files": {
+        "black": "black/download-file.svg",
+        "white": "white/download-file.svg",
+        "currentColor": "currentColor/download-file.svg"
+      }
+    },
+    {
+      "id": "preview-image",
+      "label": "Preview image",
+      "area": "Editor files",
+      "source_path": "Media/image-line.svg",
+      "rationale": "Framed picture identifies an image preview.",
+      "number": "071",
+      "source_sha256": "0675a10c12001f692413810aa9e4dc41ce97e784c6b508121eea9afc24f79c88",
+      "files": {
+        "black": "black/preview-image.svg",
+        "white": "white/preview-image.svg",
+        "currentColor": "currentColor/preview-image.svg"
+      }
+    },
+    {
+      "id": "file-recovery",
+      "label": "File recovery",
+      "area": "Editor files",
+      "source_path": "Document/file-history-line.svg",
+      "rationale": "File with clock identifies prior file snapshots.",
+      "number": "072",
+      "source_sha256": "b69427ca52036728418bd2eb9271878c6d60733f38fa3ea94cd78a7c7c44163f",
+      "files": {
+        "black": "black/file-recovery.svg",
+        "white": "white/file-recovery.svg",
+        "currentColor": "currentColor/file-recovery.svg"
+      }
+    },
+    {
+      "id": "restore-snapshot",
+      "label": "Restore snapshot",
+      "area": "Editor files",
+      "source_path": "System/history-line.svg",
+      "rationale": "Reverse clock denotes restoring an earlier saved state.",
+      "number": "073",
+      "source_sha256": "21acd26cf6e9c1f31f3da9e8bf4dce5f155ce0fece892d8eb49fc4fc387972af",
+      "files": {
+        "black": "black/restore-snapshot.svg",
+        "white": "white/restore-snapshot.svg",
+        "currentColor": "currentColor/restore-snapshot.svg"
+      }
+    },
+    {
+      "id": "open-file",
+      "label": "Open file",
+      "area": "Editor files",
+      "source_path": "Document/file-code-line.svg",
+      "rationale": "Code document represents an editable file.",
+      "number": "074",
+      "source_sha256": "422322bb7beb1333700508f7972ca4153ff2179f52599a8389b2bca58133cbbf",
+      "files": {
+        "black": "black/open-file.svg",
+        "white": "white/open-file.svg",
+        "currentColor": "currentColor/open-file.svg"
+      }
+    },
+    {
+      "id": "choose-folder",
+      "label": "Choose folder",
+      "area": "Editor files",
+      "source_path": "Document/folder-open-line.svg",
+      "rationale": "Open folder identifies browsing a directory.",
+      "number": "075",
+      "source_sha256": "4952c19ef66646d82b6572bac20952729f816c9eebb7da84e4400ba4e660f7f4",
+      "files": {
+        "black": "black/choose-folder.svg",
+        "white": "white/choose-folder.svg",
+        "currentColor": "currentColor/choose-folder.svg"
+      }
+    },
+    {
+      "id": "ai-api-settings",
+      "label": "AI API settings",
+      "area": "AI API and conversation",
+      "source_path": "System/settings-3-line.svg",
+      "rationale": "Gear identifies provider configuration, inside Accounts and the AI panel.",
+      "number": "076",
+      "source_sha256": "341e6eb7e3f8c1fe79a4a5910067ac645af09036e2cc406ad363b5c5a5a10b5d",
+      "files": {
+        "black": "black/ai-api-settings.svg",
+        "white": "white/ai-api-settings.svg",
+        "currentColor": "currentColor/ai-api-settings.svg"
+      }
+    },
+    {
+      "id": "ai-context",
+      "label": "Choose AI context",
+      "area": "AI API and conversation",
+      "source_path": "Document/folder-shared-line.svg",
+      "rationale": "Folder with sharing mark identifies files being supplied to the assistant.",
+      "number": "077",
+      "source_sha256": "df1ef088e1409731318e9e0cf53b758d0510e7e24e90683c4ac859c6b2fde03a",
+      "files": {
+        "black": "black/ai-context.svg",
+        "white": "white/ai-context.svg",
+        "currentColor": "currentColor/ai-context.svg"
+      }
+    },
+    {
+      "id": "context-current-file",
+      "label": "Current file",
+      "area": "AI API and conversation",
+      "source_path": "Document/file-code-line.svg",
+      "rationale": "Single code page clearly indicates one-file context.",
+      "number": "078",
+      "source_sha256": "422322bb7beb1333700508f7972ca4153ff2179f52599a8389b2bca58133cbbf",
+      "files": {
+        "black": "black/context-current-file.svg",
+        "white": "white/context-current-file.svg",
+        "currentColor": "currentColor/context-current-file.svg"
+      }
+    },
+    {
+      "id": "context-files",
+      "label": "Selected files",
+      "area": "AI API and conversation",
+      "source_path": "Document/file-copy-2-line.svg",
+      "rationale": "Multiple pages indicate an explicit selection of files.",
+      "number": "079",
+      "source_sha256": "91be3fb936200e01a60e8e912576a3d2f86f51f299bd0f2b6160c23f2bdbcf3e",
+      "files": {
+        "black": "black/context-files.svg",
+        "white": "white/context-files.svg",
+        "currentColor": "currentColor/context-files.svg"
+      }
+    },
+    {
+      "id": "context-folder",
+      "label": "Folder context",
+      "area": "AI API and conversation",
+      "source_path": "Document/folder-open-line.svg",
+      "rationale": "Open folder indicates a chosen subtree.",
+      "number": "080",
+      "source_sha256": "4952c19ef66646d82b6572bac20952729f816c9eebb7da84e4400ba4e660f7f4",
+      "files": {
+        "black": "black/context-folder.svg",
+        "white": "white/context-folder.svg",
+        "currentColor": "currentColor/context-folder.svg"
+      }
+    },
+    {
+      "id": "context-project",
+      "label": "Project context",
+      "area": "AI API and conversation",
+      "source_path": "Document/folders-line.svg",
+      "rationale": "Multiple folders identify the whole project scope.",
+      "number": "081",
+      "source_sha256": "d9334fd2184940e590cff9191c0288fb095f7475a67aacf2c5800529ff0b43ac",
+      "files": {
+        "black": "black/context-project.svg",
+        "white": "white/context-project.svg",
+        "currentColor": "currentColor/context-project.svg"
+      }
+    },
+    {
+      "id": "ai-send",
+      "label": "Send message",
+      "area": "AI API and conversation",
+      "source_path": "Business/send-plane-line.svg",
+      "rationale": "Paper-plane outline is a familiar send action.",
+      "number": "082",
+      "source_sha256": "248c44eccf55e8baa5f0019d2d9a96281ce0c47136c793b6389ef3a30b4d53fc",
+      "files": {
+        "black": "black/ai-send.svg",
+        "white": "white/ai-send.svg",
+        "currentColor": "currentColor/ai-send.svg"
+      }
+    },
+    {
+      "id": "ai-cancel",
+      "label": "Stop response",
+      "area": "AI API and conversation",
+      "source_path": "Media/stop-circle-line.svg",
+      "rationale": "Same stopping convention as countdown cancellation.",
+      "number": "083",
+      "source_sha256": "7b578f954151c973de03aeaacbf28624dab6a1c4d270a7a501fd039f97dfc078",
+      "files": {
+        "black": "black/ai-cancel.svg",
+        "white": "white/ai-cancel.svg",
+        "currentColor": "currentColor/ai-cancel.svg"
+      }
+    },
+    {
+      "id": "ai-clear-key",
+      "label": "Clear API key",
+      "area": "AI API and conversation",
+      "source_path": "Others/key-2-line.svg",
+      "rationale": "Key identifies the credential action; the visible text must state Clear API key.",
+      "selection_note": "Do not imply that this clears the conversation.",
+      "number": "084",
+      "source_sha256": "5d58be181e073c1860456171242f83efb5953f66a62dc9082f31c400a9d8f3fa",
+      "files": {
+        "black": "black/ai-clear-key.svg",
+        "white": "white/ai-clear-key.svg",
+        "currentColor": "currentColor/ai-clear-key.svg"
+      }
+    },
+    {
+      "id": "ai-refresh-models",
+      "label": "Refresh AI models",
+      "area": "AI API and conversation",
+      "source_path": "System/refresh-line.svg",
+      "rationale": "Reload symbol refreshes the selected provider’s model list.",
+      "number": "085",
+      "source_sha256": "174dde7692f9715dd07ab278e5c49a12abfa3d6e0455f208465286816e87320c",
+      "files": {
+        "black": "black/ai-refresh-models.svg",
+        "white": "white/ai-refresh-models.svg",
+        "currentColor": "currentColor/ai-refresh-models.svg"
+      }
+    },
+    {
+      "id": "ai-accept",
+      "label": "Accept proposed change",
+      "area": "AI API and conversation",
+      "source_path": "System/check-line.svg",
+      "rationale": "Check mark accepts the reviewed change.",
+      "number": "086",
+      "source_sha256": "b53c0dcdfc7dc4a1f77a5e26300d68b531e22df1142a3171b097965c8a72b1d2",
+      "files": {
+        "black": "black/ai-accept.svg",
+        "white": "white/ai-accept.svg",
+        "currentColor": "currentColor/ai-accept.svg"
+      }
+    },
+    {
+      "id": "ai-reject",
+      "label": "Reject proposed change",
+      "area": "AI API and conversation",
+      "source_path": "System/close-line.svg",
+      "rationale": "Cross rejects the proposed change.",
+      "number": "087",
+      "source_sha256": "5686c5a5b595e5f70e99553e19f796761a6ad91b5bb254b9afc1612bf9e5d17c",
+      "files": {
+        "black": "black/ai-reject.svg",
+        "white": "white/ai-reject.svg",
+        "currentColor": "currentColor/ai-reject.svg"
+      }
+    },
+    {
+      "id": "ai-undo",
+      "label": "Undo accepted change",
+      "area": "AI API and conversation",
+      "source_path": "System/arrow-go-back-line.svg",
+      "rationale": "Back arrow reverses the previously accepted action.",
+      "number": "088",
+      "source_sha256": "2c1f8b69855633e3eda90a86f206ac0fd9ffd25a263e361618765af6cbb8ca49",
+      "files": {
+        "black": "black/ai-undo.svg",
+        "white": "white/ai-undo.svg",
+        "currentColor": "currentColor/ai-undo.svg"
+      }
+    },
+    {
+      "id": "ai-api-custom",
+      "label": "Other / custom AI API",
+      "area": "AI API and conversation",
+      "source_path": "Device/server-line.svg",
+      "rationale": "Server stack identifies a user-supplied hosted or local endpoint.",
+      "number": "089",
+      "source_sha256": "97992b82491bcb5302a63dbea887bbcd0e4902c20cc361ed98e88ef84547168a",
+      "files": {
+        "black": "black/ai-api-custom.svg",
+        "white": "white/ai-api-custom.svg",
+        "currentColor": "currentColor/ai-api-custom.svg"
+      }
+    },
+    {
+      "id": "add-item",
+      "label": "Add item",
+      "area": "Shared dialogs and deployment",
+      "source_path": "System/add-line.svg",
+      "rationale": "Plain plus adds an extension package or menu item.",
+      "number": "090",
+      "source_sha256": "38e4c49e4a39475fcc34c66127d8545704bc25469fbd0fc9a3376c99921f6d6e",
+      "files": {
+        "black": "black/add-item.svg",
+        "white": "white/add-item.svg",
+        "currentColor": "currentColor/add-item.svg"
+      }
+    },
+    {
+      "id": "remove-item",
+      "label": "Remove item",
+      "area": "Shared dialogs and deployment",
+      "source_path": "System/subtract-line.svg",
+      "rationale": "Minus removes a staged list entry without implying saved-site deletion.",
+      "number": "091",
+      "source_sha256": "64a5af4bae7824e81312dfa73eb419f285dcdbcbb6269bd32b0a0876a0526717",
+      "files": {
+        "black": "black/remove-item.svg",
+        "white": "white/remove-item.svg",
+        "currentColor": "currentColor/remove-item.svg"
+      }
+    },
+    {
+      "id": "apply",
+      "label": "Apply changes",
+      "area": "Shared dialogs and deployment",
+      "source_path": "System/check-line.svg",
+      "rationale": "Check mark confirms the current configuration.",
+      "number": "092",
+      "source_sha256": "b53c0dcdfc7dc4a1f77a5e26300d68b531e22df1142a3171b097965c8a72b1d2",
+      "files": {
+        "black": "black/apply.svg",
+        "white": "white/apply.svg",
+        "currentColor": "currentColor/apply.svg"
+      }
+    },
+    {
+      "id": "cancel",
+      "label": "Cancel / close dialog",
+      "area": "Shared dialogs and deployment",
+      "source_path": "System/close-line.svg",
+      "rationale": "Cross closes a dialog without applying changes.",
+      "number": "093",
+      "source_sha256": "5686c5a5b595e5f70e99553e19f796761a6ad91b5bb254b9afc1612bf9e5d17c",
+      "files": {
+        "black": "black/cancel.svg",
+        "white": "white/cancel.svg",
+        "currentColor": "currentColor/cancel.svg"
+      }
+    },
+    {
+      "id": "copy",
+      "label": "Copy",
+      "area": "Shared dialogs and deployment",
+      "source_path": "Document/file-copy-line.svg",
+      "rationale": "Overlapping pages represent copying a link or credential.",
+      "number": "094",
+      "source_sha256": "d5a28dba58293e4a45ea5c2b87038d88ed8fef4041ae11c1ad496f552538d12b",
+      "files": {
+        "black": "black/copy.svg",
+        "white": "white/copy.svg",
+        "currentColor": "currentColor/copy.svg"
+      }
+    },
+    {
+      "id": "show-password",
+      "label": "Show password",
+      "area": "Shared dialogs and deployment",
+      "source_path": "System/eye-line.svg",
+      "rationale": "Eye reveals the masked credential.",
+      "number": "095",
+      "source_sha256": "74d59fc392dafa00b5293411251945d86e8030c630dd8aa6147a19e33d453eaf",
+      "files": {
+        "black": "black/show-password.svg",
+        "white": "white/show-password.svg",
+        "currentColor": "currentColor/show-password.svg"
+      }
+    },
+    {
+      "id": "hide-password",
+      "label": "Hide password",
+      "area": "Shared dialogs and deployment",
+      "source_path": "System/eye-off-line.svg",
+      "rationale": "Crossed eye masks the credential again.",
+      "number": "096",
+      "source_sha256": "a36391e08afca4f6d2eca21282b4bc83c1f1ff10469c0f43a8af7f42b29dbe2a",
+      "files": {
+        "black": "black/hide-password.svg",
+        "white": "white/hide-password.svg",
+        "currentColor": "currentColor/hide-password.svg"
+      }
+    },
+    {
+      "id": "export-configuration",
+      "label": "Export configuration",
+      "area": "Shared dialogs and deployment",
+      "source_path": "Document/file-download-line.svg",
+      "rationale": "Download file denotes exporting the configuration JSON.",
+      "number": "097",
+      "source_sha256": "80c9ff64eb373c59efab7e742aa1b3151b94ddfde47c15372886463ef25f792b",
+      "files": {
+        "black": "black/export-configuration.svg",
+        "white": "white/export-configuration.svg",
+        "currentColor": "currentColor/export-configuration.svg"
+      }
+    },
+    {
+      "id": "import-configuration",
+      "label": "Import configuration",
+      "area": "Shared dialogs and deployment",
+      "source_path": "Document/file-upload-line.svg",
+      "rationale": "Upload file denotes loading a configuration JSON.",
+      "number": "098",
+      "source_sha256": "dc4a640e58e1fd472243debcbc116dbfb7d6b4a0c30ee35901ab8f36f7329006",
+      "files": {
+        "black": "black/import-configuration.svg",
+        "white": "white/import-configuration.svg",
+        "currentColor": "currentColor/import-configuration.svg"
+      }
+    },
+    {
+      "id": "retry",
+      "label": "Try again",
+      "area": "Shared dialogs and deployment",
+      "source_path": "System/refresh-line.svg",
+      "rationale": "Reload symbol repeats a failed request.",
+      "number": "099",
+      "source_sha256": "174dde7692f9715dd07ab278e5c49a12abfa3d6e0455f208465286816e87320c",
+      "files": {
+        "black": "black/retry.svg",
+        "white": "white/retry.svg",
+        "currentColor": "currentColor/retry.svg"
+      }
+    },
+    {
+      "id": "recover-site",
+      "label": "Recover saved site",
+      "area": "Shared dialogs and deployment",
+      "source_path": "Device/device-recover-line.svg",
+      "rationale": "Recovery arrow on a device identifies recovery from saved browser data.",
+      "number": "100",
+      "source_sha256": "a1291315e55728ec3ece578d9e1a15adf063f02b78deec136eec03e968278fcc",
+      "files": {
+        "black": "black/recover-site.svg",
+        "white": "white/recover-site.svg",
+        "currentColor": "currentColor/recover-site.svg"
+      }
+    },
+    {
+      "id": "recommended-settings",
+      "label": "Recommended settings",
+      "area": "Shared dialogs and deployment",
+      "source_path": "System/settings-3-line.svg",
+      "rationale": "Gear identifies returning to recommended runtime settings.",
+      "number": "101",
+      "source_sha256": "341e6eb7e3f8c1fe79a4a5910067ac645af09036e2cc406ad363b5c5a5a10b5d",
+      "files": {
+        "black": "black/recommended-settings.svg",
+        "white": "white/recommended-settings.svg",
+        "currentColor": "currentColor/recommended-settings.svg"
+      }
+    },
+    {
+      "id": "open-administrator",
+      "label": "Open administrator",
+      "area": "Shared dialogs and deployment",
+      "source_path": "System/dashboard-line.svg",
+      "rationale": "Reuse Admin’s dashboard glyph in the Login details dialog.",
+      "number": "102",
+      "source_sha256": "43ae41eb1e0a16b249d0315696be5563064ae0af8d5b36804060482fa7e6a70a",
+      "files": {
+        "black": "black/open-administrator.svg",
+        "white": "white/open-administrator.svg",
+        "currentColor": "currentColor/open-administrator.svg"
+      }
+    },
+    {
+      "id": "link",
+      "label": "AI API URL / link",
+      "area": "Shared dialogs and deployment",
+      "source_path": "Business/links-line.svg",
+      "rationale": "Linked rings identify an endpoint or share URL when an input decoration is needed.",
+      "number": "103",
+      "source_sha256": "3b7e426a958bb4ab737d0a73a3a7d90bd450c1b9432d72af49b984d77ead0a7b",
+      "files": {
+        "black": "black/link.svg",
+        "white": "white/link.svg",
+        "currentColor": "currentColor/link.svg"
+      }
+    }
+  ],
+  "source_archive_sha256": "d43881529b5e9c618faeaeec097af18ec62588be99989f920963c29308df05f6",
+  "unique_source_count": 80,
+  "monochrome_unique_sources": 79,
+  "monochrome_action_count": 101,
+  "brand": {
+    "source": "JoomEngine_Pearl_Logo.svg",
+    "sha256": "55305a0c163c69a1ca851adfcb0139449cd5658dfbb126e090da3e024abb98ca",
+    "source_bytes": 218076,
+    "source_viewBox": "0 0 1280 1280",
+    "drawing_bounds": {
+      "x": 226.852,
+      "y": 57.917,
+      "width": 921.295,
+      "height": 1185.34
+    },
+    "normalized_viewBox": "65.1960 28.2835 1244.6070 1244.6070",
+    "padding": "2.5% of longest drawing dimension per edge",
+    "source_geometry_and_colors_preserved": true,
+    "files": {
+      "original": "brand/JoomEngine_Pearl_Logo.original.svg",
+      "ui": "brand/rocket.svg",
+      "favicon": "brand/favicon.svg"
+    }
+  },
+  "action_count": 103,
+  "color_variants": {
+    "black": "#000000",
+    "white": "#FFFFFF",
+    "currentColor": "currentColor"
+  },
+  "geometry_validation": "All 303 monochrome variants differ only by root fill. The two brand derivatives change only root sizing/framing; paths and colors are preserved."
+}

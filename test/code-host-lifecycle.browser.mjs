@@ -135,7 +135,11 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await panel.waitFor({ state: 'hidden' });
       await page.frameLocator('#layout-preview').getByRole('button', { name: 'Use running site' }).click();
       assert.equal(await page.frameLocator('#layout-preview').locator('#count').textContent(), '2');
-      await page.evaluate(() => window.layoutHost.open());
+      await page.evaluate(() => window.layoutHost.toggle());
+      await panel.waitFor({ state: 'visible' });
+      await page.evaluate(() => window.layoutHost.toggle());
+      await panel.waitFor({ state: 'hidden' });
+      await page.evaluate(() => window.layoutHost.toggle());
       await panel.waitFor({ state: 'visible' });
       await assertDocuments();
 
@@ -150,6 +154,13 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
           `${selector} stays reachable after the viewport becomes smaller.`);
       }
       await assertDocuments();
+      const headerBoxes = await page.locator('.jec-titlebar').evaluate(header => {
+        const windows = header.querySelector('.jec-window-controls').getBoundingClientRect();
+        const actions = header.querySelector('.jec-toolbar').getBoundingClientRect();
+        return { windows: { x: windows.x, right: windows.right, bottom: windows.bottom }, actions: { y: actions.y } };
+      });
+      assert.ok(headerBoxes.windows.right <= 391 && headerBoxes.windows.x >= 0);
+      assert.ok(headerBoxes.actions.y >= headerBoxes.windows.bottom, 'Only the action strip moves below window controls at narrow widths.');
       await mode.selectOption('right');
       assert.equal(await page.locator('.jec-layout-host').getAttribute('data-jec-mode'), 'bottom',
         'A narrow viewport collapses the chosen side dock below the site.');
@@ -249,7 +260,9 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       // running site. The failure is still reported after the host is closed.
       await page.evaluate(() => window.makeCodeHost({ brokenRedock: true }));
       await page.locator('[data-i18n-aria-label="code.detach"]').click();
-      await page.locator('[data-i18n-aria-label="code.redock"]').waitFor();
+      await page.locator('[data-i18n-aria-label="code.redock"]').waitFor({ state: 'attached' });
+      assert.equal(await page.locator('.jec-panel').isVisible(), false, 'Confirmed detachment releases the embedded shell.');
+      assert.equal(await page.locator('.jec-divider').isVisible(), false, 'Confirmed detachment releases the divider.');
       const result = await page.evaluate(async () => {
         let failed;
         try { await window.codeHost.dispose(); } catch (error) { failed = error.message; }
@@ -263,7 +276,7 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
 
       await page.evaluate(() => window.makeCodeHost({ brokenRedock: true, brokenDisposal: true }));
       await page.locator('[data-i18n-aria-label="code.detach"]').click();
-      await page.locator('[data-i18n-aria-label="code.redock"]').waitFor();
+      await page.locator('[data-i18n-aria-label="code.redock"]').waitFor({ state: 'attached' });
       const failures = await page.evaluate(async () => {
         try { await window.codeHost.dispose(); } catch (error) { return error.errors.map(item => item.message); }
       });

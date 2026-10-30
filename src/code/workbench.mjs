@@ -56,7 +56,7 @@ let initialized = false;
 
 /** One workbench per iframe realm. Hiding/layout changes must preserve that realm. */
 export async function mountWorkbench({ container, workspace, siteId, onSave = () => {},
-  onError = () => {}, onDirtyChange = () => {}, debuggerBackend, getDebugConfiguration, storageId, phpVersion, onLanguageStatus = () => {}, onDetachedTools, t }) {
+  onError = () => {}, onDirtyChange = () => {}, debuggerBackend, getDebugConfiguration, storageId, phpVersion, onLanguageStatus = () => {}, onDetachedTools, theme = 'dark', shellStylesheet, favicon, t }) {
   const message = (key, values = {}) => {
     let text = t?.(key, values);
     if (!text || text === key) text = WORKBENCH_MESSAGES[key] || key;
@@ -64,6 +64,9 @@ export async function mountWorkbench({ container, workspace, siteId, onSave = ()
   };
   if (initialized) throw new Error('JoomEngine Code is already initialized in this view. Reuse its session.');
   initialized = true;
+  theme = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
   const provider = new JoomlaFileSystemProvider(workspace, siteId, { onSave, onError });
   registerCustomProvider('jec', provider);
   const workerFiles = {
@@ -117,7 +120,7 @@ export async function mountWorkbench({ container, workspace, siteId, onSave = ()
       dataFolderName: '.joomengine-code', urlProtocol: 'joomengine-code', enableTelemetry: false },
     configurationDefaults: {
       'files.autoSave': 'off', 'files.hotExit': 'off', 'files.enableTrash': false,
-      'workbench.startupEditor': 'none', 'workbench.colorTheme': 'Default Dark Modern',
+      'workbench.startupEditor': 'none', 'workbench.colorTheme': theme === 'light' ? 'Light Modern' : 'Dark Modern',
       'workbench.iconTheme': 'vs-seti', 'window.title': '${dirty}${activeEditorShort}${separator}JoomEngine Code',
       'window.menuBarVisibility': 'compact', 'window.commandCenter': false,
       'workbench.activity.showAccounts': false, 'workbench.enableExperiments': false,
@@ -328,6 +331,14 @@ export async function mountWorkbench({ container, workspace, siteId, onSave = ()
       }
     },
     layout: () => layout.layout(),
+    async setTheme(value) {
+      theme = value === 'light' ? 'light' : 'dark';
+      for (const doc of [document, detachedPart?.getContainer().ownerDocument].filter(Boolean)) {
+        doc.documentElement.dataset.theme = theme;
+        doc.documentElement.style.colorScheme = theme;
+      }
+      await configuration.updateValue('workbench.colorTheme', theme === 'light' ? 'Light Modern' : 'Dark Modern');
+    },
     getEditorLayout: () => relativeLayout((detachedPart || groups.mainPart).getLayout()),
     getEditorGroups: () => (detachedPart || groups.mainPart).getGroups(2).map(group => ({
       paths: group.editors.filter(editor => editor.resource?.scheme === 'jec').map(editor => editor.resource.path),
@@ -345,6 +356,8 @@ export async function mountWorkbench({ container, workspace, siteId, onSave = ()
     getDirtyCount: () => copies.dirtyCount,
     isDirty: (path, recursive = false) => provider.isDirty(path, recursive),
     getActivePath() {
+      const auxiliary = detachedPart?.activeGroup?.activeEditor?.resource;
+      if (auxiliary?.scheme === 'jec' && auxiliary.authority === siteId) return auxiliary.path;
       const selected = explorer.getContext(false)[0]?.resource;
       if (!document.hasFocus() && lastActiveArea === 'explorer') return selected?.path || lastActivePath;
       if (!document.hasFocus() && lastActivePath) return lastActivePath;
@@ -372,7 +385,7 @@ export async function mountWorkbench({ container, workspace, siteId, onSave = ()
       .filter(marker => marker.resource.scheme === 'jec' && marker.resource.authority === siteId).slice(0, 200)
       .map(marker => ({ path: marker.resource.path, message: marker.message, severity: marker.severity,
         startLineNumber: marker.startLineNumber, startColumn: marker.startColumn, endLineNumber: marker.endLineNumber, endColumn: marker.endColumn })); },
-    getContext() { return { selection: api.getSelection(), openFiles: api.getOpenFiles().map(file => ({
+    getContext() { return { activePath: api.getActivePath(), selection: api.getSelection(), openFiles: api.getOpenFiles().map(file => ({
       path: file.path, canonicalPath: file.canonicalPath, content: file.text, unsaved: file.dirty,
     })) }; },
     discardAll: () => editors.revertAll(),
@@ -416,6 +429,12 @@ export async function mountWorkbench({ container, workspace, siteId, onSave = ()
         return closePart();
       };
       const window = part.getContainer().ownerDocument.defaultView;
+      window.document.documentElement.dataset.theme = theme;
+      window.document.documentElement.style.colorScheme = theme;
+      if (favicon) {
+        const icon = window.document.createElement('link'); icon.rel = 'icon'; icon.type = 'image/svg+xml'; icon.href = favicon;
+        window.document.head.append(icon);
+      }
       let companion;
       let resolveClosed;
       const closed = new Promise(resolve => { resolveClosed = resolve; });
@@ -426,7 +445,7 @@ export async function mountWorkbench({ container, workspace, siteId, onSave = ()
         part.close();
       };
       detached = { closed, focus: () => window.focus(), close: () => window.close(), redock };
-      companion = mountDetachedTools({ part, provider, openFile: api.openFile, saveAll, redock, onError, onDetachedTools, t });
+      companion = mountDetachedTools({ part, provider, openFile: api.openFile, saveAll, redock, onError, onDetachedTools, shellStylesheet, t });
       return detached;
     },
     async redock() { await detached?.redock(); },

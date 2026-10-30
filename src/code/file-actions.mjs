@@ -1,3 +1,4 @@
+import { decorateAction } from '../icons.mjs';
 import { normalizeWorkspacePath, WORKSPACE_LIMITS } from './workspace-files.mjs';
 
 export const FILE_ACTION_MESSAGES = Object.freeze({
@@ -147,16 +148,16 @@ export function mountFileActions({ toolbar, workspace, getActivePath = () => '/'
   // Scope these essentials to file dialogs so they stay usable in either realm.
   const style = document.createElement('style');
   style.textContent = `
-.jec-file-dialog{box-sizing:border-box;font:14px/1.5 system-ui,sans-serif;color:#edf0ff;color-scheme:dark;background:linear-gradient(135deg,#161c3b,#0c122d);border:1px solid #465073;border-radius:12px;padding:24px;width:min(600px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;box-shadow:0 24px 80px #0009}
+.jec-file-dialog{box-sizing:border-box;font:14px/1.5 system-ui,sans-serif;color:var(--ink,#edf0ff);color-scheme:inherit;background:var(--panel,#161c3b);border:1px solid var(--control-border,#465073);border-radius:12px;padding:24px;width:min(600px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;box-shadow:0 24px 80px #0009}
 .jec-file-dialog::backdrop{background:#020619b3}
 .jec-file-dialog .dialog-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}
 .jec-file-dialog h2{font-size:22px;line-height:1.3;margin:0;overflow-wrap:anywhere}
-.jec-file-dialog p{font-size:13px;line-height:1.7;color:#acb4d0;overflow-wrap:anywhere}
-.jec-file-dialog button,.jec-file-dialog input{box-sizing:border-box;font:inherit;color:#edf0ff;background:#151c32;border:1px solid #465073;border-radius:5px;padding:8px 12px;min-height:36px}
+.jec-file-dialog p{font-size:13px;line-height:1.7;color:var(--muted,#acb4d0);overflow-wrap:anywhere}
+.jec-file-dialog button,.jec-file-dialog input{box-sizing:border-box;font:inherit;color:var(--ink,#edf0ff);background:var(--control,#151c32);border:1px solid var(--control-border,#465073);border-radius:5px;padding:8px 12px;min-height:36px}
 .jec-file-dialog button{cursor:pointer}.jec-file-dialog button:disabled,.jec-file-dialog input:disabled{opacity:.5;cursor:default}
-.jec-file-dialog button:focus-visible,.jec-file-dialog input:focus-visible{outline:2px solid #ffc55b;outline-offset:2px}
-.jec-file-dialog .dialog-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:20px;padding-top:16px;border-top:1px solid #ffffff1b}
-.jec-file-dialog .dialog-error{color:#ffd0c3;background:#ff836012;border:1px solid #ff83603b;padding:10px 13px;border-radius:5px}
+.jec-file-dialog button:focus-visible,.jec-file-dialog input:focus-visible{outline:2px solid var(--focus,#ffc55b);outline-offset:2px}
+.jec-file-dialog .dialog-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:20px;padding-top:16px;border-top:1px solid var(--line,#ffffff1b)}
+.jec-file-dialog .dialog-error{color:var(--danger,#ffd0c3);background:var(--error-bg,#ff836012);border:1px solid var(--danger,#ff83603b);padding:10px 13px;border-radius:5px}
 @media(max-width:480px){.jec-file-dialog{padding:16px}.jec-file-dialog .dialog-heading{gap:8px}.jec-file-dialog h2{font-size:19px}}
 @media(forced-colors:active){.jec-file-dialog,.jec-file-dialog button,.jec-file-dialog input{border-color:ButtonText}.jec-file-dialog button:focus-visible,.jec-file-dialog input:focus-visible{outline-color:Highlight}}
 `;
@@ -175,10 +176,12 @@ export function mountFileActions({ toolbar, workspace, getActivePath = () => '/'
     if (className) node.className = className;
     return node;
   };
+  const fileIcons = { 'code.files.upload': 'upload-files', 'code.files.choose': 'upload-files', 'code.files.download': 'download-file', 'code.files.preview': 'preview-image', 'code.files.history': 'file-recovery', 'code.files.close': 'cancel', 'code.files.open': 'open-file', 'code.files.restore': 'restore-snapshot' };
   const button = (key, action) => {
     const node = element('button', label(key), 'button secondary'); node.type = 'button';
     node.setAttribute('data-i18n', key);
     node.addEventListener('click', () => { if (!disposed) void Promise.resolve().then(action).catch(error => { if (!disposed) onError(error); }); });
+    decorateAction(node, fileIcons[key] || 'apply');
     return node;
   };
   function revoke(url) {
@@ -245,6 +248,7 @@ export function mountFileActions({ toolbar, workspace, getActivePath = () => '/'
     const node = element('form');
     const action = element('button', label(key), 'button'); action.type = 'submit';
     action.setAttribute('data-i18n', key);
+    decorateAction(action, fileIcons[key] || 'apply');
     const actions = element('div', undefined, 'dialog-actions'); actions.append(action);
     node.addEventListener('submit', event => { event.preventDefault(); void submit(); });
     container.append(node); return { node, actions };

@@ -139,3 +139,51 @@ test('launch locations discard stale remote setup and refresh temporary public s
   assert.equal(privateChange.hash, '');
   assert.equal(privateChange.href.includes('private'), false);
 });
+
+test('legacy metadata migrates all sites and rename keeps immutable setup identity', async () => {
+  const { renameSavedSite } = await import('../src/ui-state.mjs');
+  const sites = Object.fromEntries(Array.from({ length: 65 }, (_, index) => {
+    const storageKey = `legacy-${index}`;
+    return [storageKey, { ...configuration, storageKey }];
+  }));
+  const state = readSavedState({ getItem: () => JSON.stringify({ schemaVersion: 1, active: 'legacy-0', sites }) });
+  assert.equal(state.schemaVersion, 2);
+  assert.equal(Object.keys(state.sites).length, 65);
+  assert.equal(state.active, 'legacy-0');
+  const renamed = renameSavedSite(state, 'legacy-0', 'My renamed workspace');
+  assert.equal(renamed.sites['legacy-0'].displayName, 'My renamed workspace');
+  assert.equal(renamed.sites['legacy-0'].siteName, configuration.siteName);
+  assert.equal(renamed.sites['legacy-0'].storageKey, 'legacy-0');
+  assert.equal((await isolateSetup(renamed, { ...configuration, storageKey: 'legacy-0' })).changed, false);
+  const savedAgain = rememberSite(renamed, { ...configuration, storageKey: 'legacy-0' });
+  assert.equal(savedAgain.sites['legacy-0'].displayName, 'My renamed workspace');
+  assert.equal(Object.keys(savedAgain.sites).length, 65);
+  assert.throws(() => renameSavedSite(state, 'legacy-0', '   '));
+  assert.throws(() => renameSavedSite(state, 'legacy-0', 'name\nwith control'));
+});
+
+test('resume routes exclude actions, tokens, external paths and credentials', async () => {
+  const { safeSavedRoute, rememberSiteRoute } = await import('../src/ui-state.mjs');
+  assert.equal(safeSavedRoute('/administrator/index.php?option=com_content&view=articles&task=delete&password=secret&abc123=1#items'), '/administrator/index.php?option=com_content&view=articles#items');
+  for (const value of ['https://outside.test/', '//outside.test/', '/%2foutside.test/', '/a/../secret', '/%2e%2e/a', '/a\\b', '/a%00b']) {
+    assert.equal(safeSavedRoute(value, '/administrator/'), '/administrator/');
+  }
+  const state = rememberSite(empty(), configuration);
+  const navigated = rememberSiteRoute(state, 'work', '/articles?view=article&id=12&token=secret');
+  assert.equal(navigated.sites.work.lastPath, '/articles?view=article&id=12');
+  assert.equal(navigated.sites.work.initialPath, '/administrator/');
+  assert.equal(rememberSite(navigated, configuration).sites.work.lastPath, '/articles?view=article&id=12');
+  assert.equal(rememberSiteRoute(navigated, 'missing', '/'), navigated);
+  assert.equal(rememberSiteRoute(navigated, 'work', '/articles?view=article&id=12'), navigated);
+});
+
+test('resume falls back for a removed page without replaying action query parameters', async () => {
+  const { resolveResumePath } = await import('../src/ui-state.mjs');
+  const seen = [];
+  const request = async (path, init) => { seen.push({ path, init }); return new Response(null, { status: 404 }); };
+  assert.equal(await resolveResumePath(request, '/missing?task=delete&view=article&id=9', '/administrator/'), '/administrator/');
+  assert.deepEqual(seen, [{ path: '/missing?view=article&id=9', init: { method: 'HEAD' } }]);
+  assert.equal(await resolveResumePath(async () => new Response(null, { status: 200 }), '/articles', '/'), '/articles');
+  assert.equal(await resolveResumePath(async () => new Response(null, { status: 405 }), '/articles', '/'), '/articles', 'A server without HEAD support still receives ordinary browser navigation.');
+  assert.equal(await resolveResumePath(async () => { throw new Error('unavailable'); }, '/removed', '/'), '/');
+});

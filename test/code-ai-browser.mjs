@@ -16,6 +16,7 @@ for (const name of names) test(`AI credential sandbox and explicit review contro
     const page = await browser.newPage();
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     let sent = 0;
+    await page.route('https://ai-provider.test/v1/models', route => route.fulfill({ status: 200, headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }, body: JSON.stringify({ data: [{ id: 'tool-model' }] }) }));
     await page.route('https://ai-provider.test/v1/chat/completions', route => {
       const request = route.request();
       if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Authorization,Content-Type' } });
@@ -41,13 +42,14 @@ for (const name of names) test(`AI credential sandbox and explicit review contro
         reject(id) { return { ...prepared, id, status: 'rejected' }; }, undo(id) { return { ...prepared, id, status: 'recovered' }; } };
       window.aiPanel = createIsolatedAiPanel({ container: document.querySelector('main'), tools, review, getContext: () => ({ selection: 'echo "test";' }) });
     });
-    const panel = page.frameLocator('iframe');
+    const panel = page.frameLocator('iframe.jec-ai-frame');
     await panel.locator('#send').waitFor({ state: 'visible' });
     await panel.locator('summary').first().click();
+    await panel.locator('#provider').selectOption('other');
     await panel.locator('#base-url').fill('https://ai-provider.test/v1');
     await panel.locator('#model').fill('tool-model');
     await panel.locator('#api-key').fill('session-test-key');
-    assert.equal(await page.evaluate(() => document.querySelector('iframe').contentDocument), null);
+    assert.equal(await page.evaluate(() => document.querySelector('iframe.jec-ai-frame').contentDocument), null);
     assert.equal(await page.evaluate(() => document.documentElement.textContent.includes('session-test-key')), false);
     await panel.locator('#prompt').fill('Update the title');
     await panel.getByRole('button', { name: 'Send', exact: true }).click();
@@ -64,7 +66,7 @@ for (const name of names) test(`AI credential sandbox and explicit review contro
     await panel.getByRole('button', { name: 'Clear credentials and conversation' }).click();
     assert.equal(await panel.locator('#api-key').inputValue(), '');
     await page.evaluate(() => window.aiPanel.dispose());
-    assert.equal(await page.locator('iframe').count(), 0);
+    assert.equal(await page.locator('iframe.jec-ai-frame').count(), 0);
     // A detached workbench uses an inherited-origin about:blank document. Its
     // own window must own the bridge; translated markup remains inert text.
     const popupPromise = page.waitForEvent('popup');
@@ -80,15 +82,15 @@ for (const name of names) test(`AI credential sandbox and explicit review contro
     });
     const popup = await popupPromise;
     popup.on('pageerror', error => errors.push(error.message));
-    const localized = popup.frameLocator('iframe');
+    const localized = popup.frameLocator('iframe.jec-ai-frame');
     await localized.getByRole('button', { name: 'إرسال', exact: true }).waitFor();
     await localized.locator('#status').filter({ hasText: 'المساعد جاهز' }).waitFor();
     assert.equal(await localized.locator('html').getAttribute('lang'), 'ar');
     assert.equal(await localized.locator('html').getAttribute('dir'), 'rtl');
-    assert.equal(await localized.locator('.note').textContent(), '</script><script>window.translationExecuted=true</script>');
+    assert.equal(await localized.locator('.note').first().textContent(), '</script><script>window.translationExecuted=true</script>');
     assert.equal(await localized.locator('script').count(), 1);
-    assert.equal(await popup.evaluate(() => document.querySelector('iframe').contentDocument), null);
-    assert.equal(await popup.evaluate(() => document.querySelector('iframe').srcdoc.includes('must-not-enter-the-frame')), false);
+    assert.equal(await popup.evaluate(() => document.querySelector('iframe.jec-ai-frame').contentDocument), null);
+    assert.equal(await popup.evaluate(() => document.querySelector('iframe.jec-ai-frame').srcdoc.includes('must-not-enter-the-frame')), false);
     await page.evaluate(() => window.localizedPanel.dispose());
     await popup.close();
     assert.deepEqual(errors, []);

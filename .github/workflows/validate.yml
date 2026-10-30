@@ -223,6 +223,7 @@ jobs:
           npm run test:code-browser
           node --test test/code-ai-browser.mjs
           node --test test/code-host-lifecycle.browser.mjs
+          node --test test/language-selector.browser.mjs
           node --test test/code-joomla.browser.mjs
           node --test test/code-debug-joomla.browser.mjs
       - name: Validate the exact candidate build
