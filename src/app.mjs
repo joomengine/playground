@@ -689,8 +689,11 @@ async function deleteSelectedSite() {
     await resetPlayground({ storageKey: key });
     savedState = forgetSite(savedState, key);
     selectedSiteId = null;
-    writePreferences();
-    feedback(t('status.siteDeleted', { name }));
+    const metadataSaved = writePreferences();
+    // Files are already deleted; report a catalog persistence failure instead
+    // of promising a successful saved-site management change after reload.
+    feedback(`${t('status.siteDeleted', { name })}${metadataSaved ? '' : ` ${t('error.storage')}`}`,
+      { error: !metadataSaved, persistent: !metadataSaved });
   } catch (error) { feedback(error, { error: true, persistent: true }); }
   finally { setBusy(false); }
 }
@@ -698,9 +701,13 @@ function renameSelectedSite() {
   if (busy || launching || !selectedSiteId) return;
   pauseAutomaticLaunch();
   try {
+    const previous = savedState;
     savedState = renameSavedSite(savedState, selectedSiteId, $('saved-site-name').value);
-    writePreferences(); setBusy(false);
-    feedback(t('status.siteRenamed'));
+    const metadataSaved = writePreferences();
+    if (!metadataSaved) { savedState = previous; renderSavedSites(); }
+    setBusy(false);
+    feedback(t(metadataSaved ? 'status.siteRenamed' : 'error.storage'),
+      { error: !metadataSaved, persistent: !metadataSaved });
   } catch (error) { feedback(error, { error: true, persistent: true }); }
 }
 async function changeProfile() {
@@ -778,7 +785,9 @@ $('repair-button').addEventListener('click', async () => {
 });
 async function resetSite({ start = false } = {}) {
   if (busy) return;
-  if (!confirm(t('confirm.reset'))) return;
+  const targetKey = runtime ? currentConfig.storageKey : fields.storageKey.value;
+  const targetName = savedState.sites[targetKey]?.displayName || (runtime ? currentConfig.siteName : fields.siteName.value);
+  if (!confirm(`${targetName}\n\n${t('confirm.reset')}`)) return;
   pauseAutomaticLaunch();
   if (runtime) {
     if (await closeSite({ reset: true }) && start) await launch();
