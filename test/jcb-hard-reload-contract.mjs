@@ -31,7 +31,7 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
     }, undefined, { timeout });
   };
   const credentials = async () => {
-    if (await page.locator('#site-actions').getAttribute('open') === null) await page.locator('#site-actions > summary').click();
+    if (!(await page.locator('#settings').isVisible())) await page.locator('#settings-toggle').click();
     await page.locator('#credentials-button').click();
     const result = { username: await page.locator('#credential-username').inputValue(), password: await page.locator('#credential-password').inputValue() };
     await page.locator('#credentials-dialog [data-close-dialog]').click();

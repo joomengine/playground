@@ -3,6 +3,7 @@ export function normalizeLanguageTag(value) {
   if (typeof value !== 'string') return null;
   const parts = value.trim().split('-');
   if (parts.length !== 2 && parts.length !== 3) return null;
+  if (parts.length === 3 && !/^[a-zA-Z]{4}$/.test(parts[1])) return null;
   const language = parts[0].toLowerCase();
   const region = parts.at(-1).toUpperCase();
   const script = parts.length === 3 ? `${parts[1].slice(0, 1).toUpperCase()}${parts[1].slice(1).toLowerCase()}` : '';

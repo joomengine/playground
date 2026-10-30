@@ -1,12 +1,19 @@
 JoomEngine Playground
 Copyright 2026 JoomEngine contributors
 
-The rocket emoji artwork in src/brand/rocket.svg is from Google Noto Emoji,
-copyright Google Inc., licensed under Apache License 2.0. The unmodified SVG
-is pinned to revision 9a5261d871451f9b5183c93483cbd68ed916b1e9 (v2.034):
-https://github.com/googlefonts/noto-emoji/blob/9a5261d871451f9b5183c93483cbd68ed916b1e9/svg/emoji_u1f680.svg
-Its license is preserved in src/brand/LICENSE.noto-emoji.txt. A bundled vector
-keeps the favicon and small rocket icons visible without an installed emoji font.
+The full-color JoomEngine pearl rocket is user-supplied project brand artwork.
+The exact original is preserved in src/brand/JoomEngine_Pearl_Logo.original.svg;
+its checksum and framing are recorded in src/brand/brand-manifest.json.
+The SVG favicon and control/decorative uses are generated without changing paths,
+gradients or colors by scripts/build-brand.mjs.
+
+The monochrome action icons are Remix Icon, copyright Remix Design.
+All 79 supplied source SVGs match the official v2.5.0 release byte-for-byte:
+https://github.com/Remix-Design/RemixIcon/tree/755818100db4687fd907ecaef9f57cc9ea77d0d8
+That release is licensed under Apache License 2.0, preserved verbatim at
+src/brand/icons/LICENSE.remixicon.txt. Exact originals, the action mapping and
+file checksums are preserved in src/brand/icons/. The themed derivatives only
+add root currentColor paint and accessibility metadata; geometry is unchanged.
 
 PHP execution is provided by Sean Morris and the contributors to
 https://github.com/seanmorris/php-wasm . This project consumes their published

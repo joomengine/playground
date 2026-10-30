@@ -416,6 +416,14 @@ export async function mountWorkbench({ container, workspace, siteId, onSave = ()
     },
     onBreakpointsChanged(listener) { return vscode?.debug.onDidChangeBreakpoints(listener); },
     async flushDrafts() { await recovery?.flush?.(); },
+    async rebindStorage(nextStorageId) {
+      // URI authority and every native model remain unchanged when Keep Site
+      // replaces the runtime. Only durable draft storage changes identity.
+      await recovery?.dispose();
+      storageId = nextStorageId;
+      recovery = await attachEditorRecovery({ storageId, workspace, provider, models, editors, api, onError });
+      await recovery.flush?.();
+    },
     async detach({ onClose = () => {} } = {}) {
       if (detached) { detached.focus(); return detached; }
       const part = await groups.createAuxiliaryEditorPart();

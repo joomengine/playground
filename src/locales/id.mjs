@@ -460,5 +460,6 @@ export default Object.freeze({
   "language.limit": "Pilih paling banyak 30 bahasa.",
   "code.accounts": "Akun",
   "help.technologyIntro": "Proyek-proyek ini bekerja bersama untuk menjalankan Joomla, PHP, MariaDB, dan ruang kerja kode di browser Anda. File dan basis data situs Playground Anda disimpan secara lokal di browser ini.",
-  "confirm.unsavedSiteForm": "Halaman Joomla ini memiliki perubahan formulir yang belum disimpan. Tinggalkan halaman dan lanjutkan?"
+  "confirm.unsavedSiteForm": "Halaman Joomla ini memiliki perubahan formulir yang belum disimpan. Tinggalkan halaman dan lanjutkan?",
+  "code.aiPanel.scopeChanged": "Konteks berubah. Percakapan baru hanya akan menggunakan cakupan ini."
 });

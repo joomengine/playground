@@ -23,7 +23,8 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
   await loadStyles();
   if (!runtime.healthy) throw new Error('Open a healthy Joomla site before opening JoomEngine Code.');
   let workbench, opening, disposed = false, aiPanel, aiLoading, disposal, fileActions, cancelFrameLoad;
-  let aiServices;
+  let aiServices, transferring = false;
+  const workspaceListeners = new Set();
   const auxiliaryTools = new Set();
   const auxiliaryDocuments = new Set();
   let currentTheme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
@@ -55,6 +56,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
   });
   function trackRequest(target, operation, args) {
       if (disposed) return Promise.reject(new Error('This JoomEngine Code workspace is closed.'));
+      if (transferring) return Promise.reject(new Error(t('status.saving')));
       const pending = target.request(operation, args);
       if (!mutations.has(operation)) return pending;
       return refresh.trackSave(pending, { changed: result => result?.ok === true && Boolean(result.changes?.length) }).then(result => {
@@ -65,8 +67,11 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
   }
   const workspace = {
     ...runtime.workspace,
+    get storageId() { return runtime.workspace.storageId; },
+    subscribe(listener) { workspaceListeners.add(listener); return () => workspaceListeners.delete(listener); },
     request(operation, args) { return trackRequest(runtime.workspace, operation, args); },
     withBatch(callback) {
+      if (transferring) return Promise.reject(new Error(t('status.saving')));
       return refresh.trackSave(runtime.workspace.withBatch(batch => callback({
         ...batch, request: (operation, args) => trackRequest(batch, operation, args),
       })), { changed: false });
@@ -117,12 +122,24 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     if (!aiServices) {
       const review = createAiReview({ workspace, isDirty: (path, recursive) => workbench.isDirty(path, recursive),
         onApplied: result => workbench.reconcileApplied(result) });
-      aiServices = { review, tools: createAiWorkspaceTools({ workspace, review, scope: { mode: 'current', paths: [], excluded: [] } }) };
+      aiServices = { review, scope: { mode: 'current', paths: [], excluded: [] } };
     }
-    const { review, tools } = aiServices;
+    const { review } = aiServices;
+    // Each isolated view owns its scope. A second window must never broaden an
+    // in-flight conversation's tool permissions by changing a shared mutable service.
+    const tools = createAiWorkspaceTools({ workspace, review, scope: aiServices.scope });
+    let contextQueue = Promise.resolve();
     const isolated = createIsolatedAiPanel({ container, tools, review, t, sessionKey: runtime.workspace.id,
       locale: document.documentElement.lang, direction: document.documentElement.dir,
-      getContext: ({ signal, scope }) => tools.context({ ...workbench.getContext(), scope, signal }) });
+      getContext: ({ signal, scope }) => {
+        const snapshot = workbench.getContext();
+        const task = contextQueue.catch(() => {}).then(async () => {
+          const context = await tools.context({ ...snapshot, scope, signal });
+          if (aiServices) aiServices.scope = tools.getScope();
+          return context;
+        });
+        contextQueue = task; return task;
+      } });
     // Register before returning through an async boundary: disposal can run
     // before the requesting main or auxiliary view receives this value.
     const panel = Object.freeze({ element: isolated.element, showSettings: isolated.showSettings, setTheme: isolated.setTheme, dispose() {
@@ -219,7 +236,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     const stopStatus = refresh.subscribe(state => {
       output.textContent = state.saving ? t(state.paused ? 'code.savesQueued' : 'code.saving') : state.savedChanges ? t('code.savedChanges') : '';
     });
-    const tools = { dispose() {
+    const tools = { resetAi() { panel?.dispose(); panel = undefined; aiMount.hidden = true; aiButton.setAttribute('aria-expanded', 'false'); }, dispose() {
       if (closed) return; closed = true;
       auxiliaryDocuments.delete(doc);
       stopStatus(); debugStatus?.dispose(); panel?.dispose(); files.dispose(); aiMount.remove(); auxiliaryTools.delete(tools);
@@ -249,10 +266,15 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
         phpVersion: runtime.configuration.phpVersion,
         onError: report, t, theme: currentTheme, shellStylesheet, favicon: new URL('../brand/favicon.svg', import.meta.url).href,
         onDetachedTools: mountDetachedTools,
-        debuggerBackend: { ...runtime.debugger, async start(config) {
-          await runtime.debugger.start(config);
-          if (config.refresh) await refresh.refresh();
-        } },
+        debuggerBackend: {
+          ...Object.fromEntries(['stop', 'setBreakpoints', 'continue', 'next', 'stepIn', 'stepOut', 'pause',
+            'stackTrace', 'scopes', 'variables', 'evaluate', 'subscribe'].map(name => [name, (...args) => runtime.debugger[name](...args)])),
+          async start(config) {
+            if (transferring) throw new Error(t('status.saving'));
+            await runtime.debugger.start(config);
+            if (config.refresh) await refresh.refresh();
+          },
+        },
         getDebugConfiguration: () => ({ url: getPreviewURL(), method: 'GET', refresh: false }),
       });
       if (disposed) { await workbench?.dispose?.(); return; }
@@ -272,10 +294,39 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     });
     return opening;
   }
-  const unsubscribe = runtime.workspace.subscribe(event => {
-    if (event.type === 'workspace-closed') dispose();
+  const receiveWorkspaceEvent = event => {
+    // Saving a temporary site creates a verified replacement runtime. That
+    // specific close must not destroy the native editor models we are moving.
+    if (transferring && event.type === 'workspace-closed') return;
+    for (const listener of workspaceListeners) { try { listener(event); } catch (error) { report(error); } }
+    if (event.type === 'workspace-closed') void dispose();
     if (event.type === 'debug-state' && !disposed) refresh.setPaused(event.state === 'paused');
-  });
+  };
+  let unsubscribe = runtime.workspace.subscribe(receiveWorkspaceEvent);
+  async function keepSite() {
+    if (disposed || transferring) throw new Error(t('code.loading'));
+    await opening;
+    await refresh.waitForSaves();
+    await workbench?.stopDebugging?.();
+    transferring = true;
+    try {
+      const replacement = await runtime.keep();
+      if (replacement === runtime) return runtime;
+      unsubscribe(); runtime = replacement;
+      unsubscribe = runtime.workspace.subscribe(receiveWorkspaceEvent);
+      transferring = false;
+      // Worker recovery snapshots belong to the old runtime. Preserve the
+      // connection vault, but never let an old review target the replacement.
+      for (const panel of aiPanels) panel.dispose();
+      aiPanel = undefined; aiServices = undefined; aiContainer.hidden = true;
+      ai.setAttribute('aria-expanded', 'false');
+      for (const tools of auxiliaryTools) tools.resetAi?.();
+      try { await workbench?.rebindStorage?.(runtime.workspace.storageId); }
+      catch (error) { report(error); }
+      receiveWorkspaceEvent({ type: 'workspace-invalidated' });
+      return runtime;
+    } finally { transferring = false; }
+  }
   const beforeUnload = event => {
     if (workbench?.hasDirty?.()) { event.preventDefault(); event.returnValue = ''; }
   };
@@ -287,7 +338,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     unsubscribe();
     window.removeEventListener('beforeunload', beforeUnload);
     document.removeEventListener('joomengine:themechange', applyTheme);
-    refresh.dispose();
+    refresh.dispose(); workspaceListeners.clear();
     for (const panel of aiPanels) panel.dispose();
     aiPanel = undefined; aiServices = undefined;
     fileActions?.dispose();
@@ -306,7 +357,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     return disposal;
   }
   return {
-    open,
+    open, keepSite,
     async toggle() {
       if (disposed) throw new Error('This JoomEngine Code workspace is closed.');
       if (layout.state.visible) await layout.hide();
