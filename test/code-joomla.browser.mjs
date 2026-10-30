@@ -143,15 +143,18 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await editor.locator('.tab.dirty').first().waitFor();
       const draftLine = editor.locator('.monaco-editor .view-line').filter({ hasText: 'Rocket entrypoint unsaved proof' });
       await draftLine.first().waitFor();
-      await page.locator('[data-i18n-aria-label="code.hide"]').click();
-      await page.locator('.jec-panel').waitFor({ state: 'hidden' });
-      assert.equal(await page.locator('#code-button').getAttribute('aria-expanded'), 'false');
-      await page.locator('#code-button').click();
-      await page.locator('.jec-panel').waitFor({ state: 'visible' });
-      assert.equal(await page.evaluate(() => document.querySelector('.jec-workbench-frame') === window.originalEditorFrame
-        && window.originalEditorFrame.contentDocument === window.originalEditorDocument), true, 'Reopening uses the same native editor realm.');
-      await editor.locator('.tab.dirty').first().waitFor();
-      await draftLine.first().waitFor();
+      for (const hide of ['#code-button', '#code-button', '.jec-window-controls [data-i18n-aria-label="code.hide"]']) {
+        await page.locator(hide).click();
+        await page.locator('.jec-panel').waitFor({ state: 'hidden' });
+        assert.equal(await page.locator('#code-button').getAttribute('aria-expanded'), 'false');
+        await page.locator('#code-button').click();
+        await page.locator('.jec-panel').waitFor({ state: 'visible' });
+        assert.equal(await page.locator('#code-button').getAttribute('aria-expanded'), 'true');
+        assert.equal(await page.evaluate(() => document.querySelector('.jec-workbench-frame') === window.originalEditorFrame
+          && window.originalEditorFrame.contentDocument === window.originalEditorDocument), true, 'Reopening uses the same native editor realm.');
+        await editor.locator('.tab.dirty').first().waitFor();
+        await draftLine.first().waitFor();
+      }
       assert.equal(await page.evaluate(() => document.getElementById('site-frame') === window.originalSiteFrame
         && window.originalSiteFrame.contentDocument === window.originalSiteDocument), true, 'Hiding and reopening Code never reloads the running site.');
       assert.equal(await page.locator('#code-refresh-button').isVisible(), true);

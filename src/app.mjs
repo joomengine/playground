@@ -260,8 +260,10 @@ async function openCode() {
           $('code-refresh-button').title = t(state.savedChanges ? 'code.savedChanges' : 'code.refresh');
         },
       });
-    }
-    await codeHost.toggle();
+      // A new host exposes its shell before the native workbench has mounted.
+      // Its first activation must mount/open; later clicks toggle that session.
+      await codeHost.open();
+    } else await codeHost.toggle();
   })();
   $('code-button').disabled = true;
   try { await openingCode; }
