@@ -251,6 +251,7 @@ jobs:
           name: playground-static
           path: dist
       - name: Install selected browser engine
+        id: browser_install
         run: npx playwright install --with-deps ${{ matrix.browser }}
       - name: Validate Code against the running Joomla runtime
         env:
@@ -263,6 +264,7 @@ jobs:
           done
           exit "$result"
       - name: Validate the exact candidate build
+        if: ${{ !cancelled() && steps.browser_install.outcome == 'success' }}
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
           PLAYGROUND_SCENARIOS: ${{ needs.checks.outputs.scenarios }}
