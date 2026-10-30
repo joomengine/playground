@@ -460,5 +460,6 @@ export default Object.freeze({
   "language.limit": "ניתן לבחור עד 30 שפות.",
   "code.accounts": "חשבונות",
   "help.technologyIntro": "הפרויקטים האלה פועלים יחד כדי להריץ את Joomla, PHP, MariaDB ואת סביבת עבודת הקוד בדפדפן שלכם. הקבצים ומסד הנתונים של אתר ה-Playground שלכם נשמרים מקומית בדפדפן זה.",
-  "confirm.unsavedSiteForm": "דף Joomla זה מכיל שינויי טופס שלא נשמרו. לעזוב ולהמשיך?"
+  "confirm.unsavedSiteForm": "דף Joomla זה מכיל שינויי טופס שלא נשמרו. לעזוב ולהמשיך?",
+  "code.aiPanel.scopeChanged": "ההקשר השתנה. שיחה חדשה תשתמש רק בטווח הגישה הזה."
 });

@@ -11,7 +11,7 @@ test('typed language tags normalize to the same supported script-aware configura
     assert.equal(normalizeLanguage(tag), expected);
     assert.deepEqual(parseLanguageTags([tag]), [expected]);
   }
-  for (const input of ['', 'en', 'en_US', 'en-US-extra', 'x-US', 'abcd-US', 'en-123', 'javascript:alert(1)', null, 4]) {
+  for (const input of ['', 'en', 'en_US', 'en-US-extra', 'en--US', 'en-A-US', 'x-US', 'abcd-US', 'en-123', 'javascript:alert(1)', null, 4]) {
     assert.equal(normalizeLanguageTag(input), null);
   }
 });

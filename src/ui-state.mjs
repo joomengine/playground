@@ -41,7 +41,9 @@ export function readSavedState(storage, key) {
     for (const [name, site] of Object.entries(value.sites)) {
       if (!SITE_KEY.test(name) || !site || typeof site !== 'object' || site.storageKey !== name || site.persistence !== true
           || !Array.isArray(site.extensions) || !Array.isArray(site.startupCommands)) continue;
-      result.sites[name] = { ...publicConfiguration(site), displayName: savedSiteName(site.displayName || site.siteName), lastPath: safeSavedRoute(site.lastPath, site.initialPath) };
+      try {
+        result.sites[name] = { ...publicConfiguration(site), displayName: savedSiteName(site.displayName || site.siteName), lastPath: safeSavedRoute(site.lastPath, site.initialPath) };
+      } catch { /* A damaged entry must not hide the other saved installations. */ }
     }
     if (typeof value.active === 'string' && Object.hasOwn(result.sites, value.active)) result.active = value.active;
     return result;

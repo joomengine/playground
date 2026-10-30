@@ -377,3 +377,23 @@ test('project scope retrieves bounded context without recursively uploading the 
   assert.equal((await tools.execute('read_file', { path: '/templates/site.css' })).path, '/templates/site.css');
   await assert.rejects(tools.execute('read_file', { path: '/configuration.php' }), /Explicitly select/);
 });
+
+test('separate assistant views cannot widen another conversation scope', async () => {
+  const { workspace, review } = fixture();
+  const embedded = createAiWorkspaceTools({ workspace, review, scope: { mode: 'current' } });
+  const detached = createAiWorkspaceTools({ workspace, review, scope: { mode: 'project' } });
+  await embedded.context({ scope: { mode: 'current' }, activePath: '/index.php', openFiles: ['/index.php'] });
+  await detached.context({ scope: { mode: 'project' } });
+  assert.equal((await detached.execute('read_file', { path: '/templates/site.css' })).path, '/templates/site.css');
+  await assert.rejects(embedded.execute('read_file', { path: '/templates/site.css' }), /outside the selected/);
+});
+
+test('context budget includes selected text as well as file contents', async () => {
+  const { workspace, review } = fixture();
+  const tools = createAiWorkspaceTools({ workspace, review, scope: { mode: 'current' } });
+  const content = 'editor text', text = 'text';
+  const context = await tools.context({ scope: { mode: 'current' }, activePath: '/index.php',
+    openFiles: [{ path: '/index.php', canonicalPath: '/index.php', content }],
+    selection: { path: '/index.php', canonicalPath: '/index.php', text } });
+  assert.equal(context.bytes, new TextEncoder().encode(content + text).byteLength);
+});

@@ -32,17 +32,23 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
         window.layoutCounts = { mounted: 0, disposed: 0, refreshed: 0, detachAttempts: 0 };
         window.layoutPreferences = new Map([['joomengine-code-layout', JSON.stringify({ mode: 'right', dock: 44,
           bottom: 320, x: 600, y: 80, width: 640, height: 460 })]]);
-        const workspace = { id: 'layout-proof', request: async () => null,
-          withBatch: callback => callback(workspace), subscribe: () => () => {} };
-        window.mockLayoutMount = async () => {
+        const listeners = new Set();
+        const workspace = { id: 'layout-proof', storageId: null, request: async () => 'temporary',
+          withBatch: callback => callback(workspace), subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); } };
+        const savedWorkspace = { ...workspace, id: 'saved-layout-proof', storageId: 'saved-layout-proof', request: async () => 'saved' };
+        const originalRuntime = { healthy: true, workspace, configuration: { phpVersion: '8.5' }, debugger: { state: 'idle' },
+          async keep() { for (const listener of [...listeners]) listener({ type: 'workspace-closed' }); return { ...originalRuntime, workspace: savedWorkspace }; } };
+        window.mockLayoutMount = async options => {
+          window.boundWorkspace = options.workspace;
           window.layoutCounts.mounted++;
           return { layout() {}, hasDirty: () => false, getActivePath: () => '/', isDirty: () => false,
             async dispose() { window.layoutCounts.disposed++; },
+            async rebindStorage(id) { window.savedEditorStorageId = id; },
             // Exercise the layout's real blocked-popup fallback contract.
             async detach() { window.layoutCounts.detachAttempts++; return null; } };
         };
         window.layoutHost = await createCodeHost({ host: container, preview,
-          runtime: { healthy: true, workspace, configuration: { phpVersion: '8.5' }, debugger: { state: 'idle' } },
+          runtime: originalRuntime,
           refreshSite: () => { window.layoutCounts.refreshed++; }, t: key => english[key] || key,
           storage: { getItem: key => window.layoutPreferences.get(key), setItem: (key, value) => window.layoutPreferences.set(key, value) },
           onError: error => { feedback.textContent = error.message; } });
@@ -177,6 +183,11 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await assertDocuments();
       assert.equal(await page.evaluate(() => window.layoutCounts.detachAttempts), 1);
       assert.deepEqual(errors, []);
+      await page.evaluate(() => window.layoutHost.keepSite());
+      assert.equal(await page.evaluate(() => window.savedEditorStorageId), 'saved-layout-proof');
+      assert.equal(await page.evaluate(() => window.boundWorkspace.request('stat', { path: '/' })), 'saved', 'The same editor bridge now reads the saved replacement runtime.');
+      assert.equal(await page.evaluate(() => window.layoutHost.closed), false, 'An expected temporary runtime close does not dispose the editor.');
+      await assertDocuments();
       await page.evaluate(() => window.layoutHost.dispose());
     } finally { await browser?.close(); await server.close(); }
   });

@@ -75,7 +75,7 @@ export default Object.freeze({
   "code.aiPanel.selectedPaths": "Gekose paaie",
   "code.aiPanel.refreshContext": "Opdateer konteks",
   "code.aiPanel.openFolder": "Maak lêergids oop",
-  "code.aiPanel.parentFolder": "Boonste lêergids",
+  "code.aiPanel.parentFolder": "Boonliggende lêergids",
   "code.aiPanel.searchContext": "Soek lêers en lêergidse",
   "code.aiPanel.contextHelp": "Die keuse van 'n lêergids sluit lêers in alle sublêergidse in. Hele projek laat beperkte herwinning toe; dit laai nie die hele projek op nie.",
   "code.aiPanel.scopeProject": "Hele projek",

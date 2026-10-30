@@ -44,6 +44,7 @@ let selectedProfile;
 let hideToolbar = false;
 let initialFocusChoice;
 let pendingFresh = false;
+let resumeLastRoute = true;
 let freshKeyPending = false;
 let automaticLaunchPaused = false;
 let approvedCustomSetup;
@@ -176,6 +177,10 @@ function destroyPreview() {
   $('site-mount').replaceChildren();
   $('site-mount').hidden = true;
 }
+function updateRuntimeLocation() {
+  if (!runtime || !currentInput) return;
+  history.replaceState(null, '', runtimeLocation(location.href, { ...currentInput, initialPath: safeSavedRoute(currentSitePath, currentInput.initialPath) }));
+}
 function updateNavigation() {
   const available = Boolean(runtime?.healthy && !runtime?.recovery && !busy && !launching);
   const admin = /^\/administrator(?:\/|[?#]|$)/.test(currentSitePath);
@@ -214,6 +219,7 @@ function mountPreview(url) {
       if (runningSiteId && currentConfig.persistence) {
         const next = rememberSiteRoute(savedState, runningSiteId, currentSitePath);
         if (next !== savedState) { savedState = next; writePreferences({ render: false }); }
+        updateRuntimeLocation();
       }
       updateNavigation();
     }
@@ -233,12 +239,12 @@ async function openCode() {
       codeHost = await createCodeHost({
         runtime: owner, host: document.querySelector('.workspace'), preview: document.querySelector('.preview-panel'),
         t, storage: preferences,
-        getPreviewURL: () => resolveSiteURL(currentSitePath, owner.baseUrl),
+        getPreviewURL: () => resolveSiteURL(currentSitePath, runtime?.baseUrl || owner.baseUrl),
         refreshSite() {
-          if (runtime !== owner || !owner.healthy) throw new Error('Open the active Joomla site before refreshing.');
+          if (!runtime?.healthy) throw new Error('Open the active Joomla site before refreshing.');
           // currentSitePath follows Joomla navigation. Refresh never restarts PHP,
           // reuses the launch URL, or implicitly saves an editor buffer.
-          mountPreview(resolveSiteURL(currentSitePath, owner.baseUrl));
+          mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
         },
         onError: error => feedback(error, { error: true, persistent: true }),
         onState(state) {
@@ -346,7 +352,7 @@ function displayError(error, title = t('title.error')) {
 async function recoverSite() {
   if (busy || !catalog || !deployCatalog || !fields.persistence.checked) return;
   pauseAutomaticLaunch();
-  if (runtime && !await closeSite({ save: currentConfig.persistence && !runtime.recovery })) return;
+  if (runtime && !await closeSite({ save: runtime.healthy && currentConfig.persistence && !runtime.recovery })) return;
   setBusy(true);
   destroyPreview();
   show('loading-view');
@@ -529,7 +535,7 @@ async function launch() {
     currentConfig = resolved.configuration;
     $('preview-label').textContent = currentConfig.siteName;
     activity(`Starting ${resolved.deploy?.title || currentConfig.deployId} with Joomla ${currentConfig.joomlaVersion} and PHP ${currentConfig.phpVersion}.`);
-    const resumePath = !input.fresh && currentConfig.persistence && savedState.sites[currentConfig.storageKey]?.lastPath;
+    const resumePath = resumeLastRoute && !input.fresh && currentConfig.persistence && savedState.sites[currentConfig.storageKey]?.lastPath;
     runtime = await createPlayground({ ...currentConfig, ...(resumePath ? { initialPath: safeSavedRoute(resumePath, currentConfig.initialPath) } : {}) }, { onProgress: progress });
     runningSiteId = currentConfig.storageKey;
     selectedSiteId = currentConfig.persistence ? currentConfig.storageKey : null;
@@ -557,10 +563,11 @@ async function launch() {
     lastSavedAt = currentConfig.persistence ? new Date() : undefined;
     setDrawer(false);
     $('deploy-dialog').close();
-    history.replaceState(null, '', runtimeLocation(location.href, currentInput));
+    updateRuntimeLocation();
     pendingFresh = false;
     freshKeyPending = false;
     currentInput.fresh = false;
+    resumeLastRoute = true;
     const resumeSaved = rememberCurrentSite();
     selectedProfile = { deployId: currentConfig.deployId, joomlaVersion: currentConfig.joomlaVersion };
     rememberDraft({ deployId: currentConfig.deployId, joomlaVersion: currentConfig.joomlaVersion });
@@ -616,7 +623,13 @@ async function closeSite({ reset = false, save = false } = {}) {
     if (runtime) {
       if (previewRemoved) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
       feedback(error, { error: true, persistent: true });
-    } else { runningSiteId = null; runningAdministrator = null; displayError(error); }
+    } else {
+      // Failed workers must still release the storage lock before a recovery retry.
+      try { await handle.close(); } catch (cleanupError) { activity(cleanupError); }
+      try { await codeHost?.dispose(); } catch (cleanupError) { activity(cleanupError); }
+      codeHost = undefined; runningSiteId = null; runningAdministrator = null;
+      displayError(error);
+    }
     return false;
   } finally { closing = false; setBusy(false); }
 }
@@ -631,7 +644,7 @@ async function newSite() {
   $('admin-password').value = password();
   pendingFresh = false;
   freshKeyPending = false;
-  selectedSiteId = null;
+  selectedSiteId = null; resumeLastRoute = false;
   renderSavedSites('');
   if (!runtime) show('welcome');
   setBusy(false);
@@ -649,7 +662,7 @@ async function openSavedSite(key) {
     const input = { ...savedState.sites[key], hideToolbar, admin: administrator() };
     const resolved = await resolve(input);
     applyConfiguration(resolved.configuration, input, resolved.deploy);
-    selectedSiteId = key;
+    selectedSiteId = key; resumeLastRoute = true;
     freshKeyPending = false;
     if (!runtime) show('welcome');
     $('retry-button').hidden = false;
@@ -715,6 +728,7 @@ async function changeProfile() {
     freshKeyPending = false;
     applyConfiguration(resolved.configuration, input, resolved.deploy);
     selectedSiteId = savedState.sites[input.storageKey] ? input.storageKey : null;
+    resumeLastRoute = Boolean(selectedSiteId);
     renderSavedSites();
     if (!runtime) show('welcome');
     $('retry-button').hidden = false;
@@ -823,6 +837,7 @@ $('log-toggle').addEventListener('click', () => {
 });
 fields.deployId.addEventListener('change', () => void changeProfile());
 fields.joomlaVersion.addEventListener('change', () => void changeProfile());
+fields.initialPath.addEventListener('input', () => { resumeLastRoute = false; });
 fields.phpVersion.addEventListener('change', () => { pauseAutomaticLaunch(); setBusy(busy); });
 fields.persistence.addEventListener('change', () => { pauseAutomaticLaunch(); setBusy(busy); });
 fields.storageKey.addEventListener('change', () => {
@@ -886,7 +901,7 @@ async function saveSite({ quiet = false } = {}) {
   if (wasTemporary) { destroyPreview(); show('loading-view'); }
   try {
     if (wasTemporary) {
-      runtime = await runtime.keep();
+      runtime = codeHost && !codeHost.closed ? await codeHost.keepSite() : await runtime.keep();
       currentConfig = runtime.configuration;
       currentInput = { ...currentInput, persistence: true, storageKey: currentConfig.storageKey };
       runningSiteId = currentConfig.storageKey;
@@ -894,7 +909,7 @@ async function saveSite({ quiet = false } = {}) {
       mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
     } else await runtime.flush();
     lastSavedAt = new Date(); rememberCurrentSite();
-    history.replaceState(null, '', runtimeLocation(location.href, currentInput));
+    updateRuntimeLocation();
     if (!quiet) { activity('Files and database saved to browser storage.'); feedback(t('status.savedAt', { time: lastSavedAt.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) })); }
     return true;
   } catch (error) {
@@ -939,7 +954,7 @@ async function useDeployment() {
     if (runtime) input = { ...input, storageKey: `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`, admin: { ...input.admin, password: password() } };
     const resolved = await resolve(input);
     applyConfiguration(resolved.configuration, input, resolved.deploy); applyAdministrator(input.admin);
-    selectedSiteId = null; renderSavedSites();
+    selectedSiteId = null; resumeLastRoute = false; renderSavedSites();
     $('deploy-dialog').close();
     await launch();
     if (runtime && runtime !== previousRuntime) showShare(currentInput);
@@ -963,9 +978,10 @@ async function applyDeployment() {
     applyAdministrator(runningAdministrator);
     lastSavedAt = currentConfig.persistence ? new Date() : undefined;
     rememberCurrentSite();
-    mountPreview(resolveSiteURL(currentConfig.initialPath, runtime.baseUrl));
+    currentSitePath = currentConfig.initialPath;
+    mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
     $('deploy-dialog').close(); feedback(t('status.ready'));
-    history.replaceState(null, '', runtimeLocation(location.href, currentInput));
+    updateRuntimeLocation();
   } catch (error) {
     if (typeof error.recover === 'function') {
       try {
@@ -978,7 +994,7 @@ async function applyDeployment() {
         runningAdministrator = runtime.installation?.administrator || currentInput.admin;
         currentInput = { ...currentInput, storageKey: currentConfig.storageKey, persistence: currentConfig.persistence };
         applyConfiguration(currentConfig, currentInput); rememberCurrentSite();
-        history.replaceState(null, '', runtimeLocation(location.href, currentInput));
+        updateRuntimeLocation();
         try { await oldRuntime.close(); } catch (cleanupError) { activity(cleanupError); }
       }
       catch (recoveryError) { feedback(recoveryError, { error: true, persistent: true }); }
@@ -1058,7 +1074,7 @@ function setupInterface() {
   $('import-config').addEventListener('change', async event => { try {
     const file = event.target.files[0]; if (!file) return; if (file.size > 1024 * 1024) throw new RangeError('The deployment document exceeds 1 MiB.');
     const input = { ...parseDeploymentDocument(await file.text()), admin: administrator() };
-    const resolved = await resolve(input); applyConfiguration(resolved.configuration, input, resolved.deploy); openEditor();
+    const resolved = await resolve(input); applyConfiguration(resolved.configuration, input, resolved.deploy); resumeLastRoute = false; openEditor();
   } catch (error) { editorError(error); } finally { event.target.value = ''; } });
   $('php-settings-button').addEventListener('click', () => { populatePhpSettings(runtime ? currentConfig.phpSettings : phpSettings); openDialog('php-dialog'); });
   $('reset-php').addEventListener('click', () => populatePhpSettings(DEFAULT_PHP_SETTINGS));
@@ -1072,7 +1088,7 @@ function setupInterface() {
         await runtime.updatePhpSettings(settings);
         currentConfig = runtime.configuration; currentInput = { ...currentInput, phpSettings: settings };
         rememberCurrentSite(); mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
-        history.replaceState(null, '', runtimeLocation(location.href, currentInput));
+        updateRuntimeLocation();
       }
       phpSettings = settings; $('php-dialog').close(); feedback(t('status.ready'));
     } catch (error) { $('php-error').textContent = messageOf(error); $('php-error').hidden = false; if (runtime?.healthy) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl)); else if (runtime) displayError(error); }
@@ -1091,6 +1107,7 @@ async function initialize() {
     const parsed = readURLConfiguration(location.href);
     if (parsed.document) parsed.config = { ...await loadDeploymentDocument(parsed.document.url, { ...parsed.document, baseURL: deploymentURL }), ...parsed.config };
     const params = new URL(location.href).searchParams;
+    resumeLastRoute = !parsed.document && !new URL(location.href).hash.startsWith('#deploy=') && !params.has('path') && !params.has('initialPath') && !parsed.config.fresh;
     setFocusMode(parsed.config.hideToolbar);
     $('embedded-launch').hidden = false;
     activity('Preparing browser support for PHP and MariaDB…');
@@ -1125,7 +1142,7 @@ async function initialize() {
     let input = { ...(previous || {}), ...(previous?.deployId ? { deployId: previous.deployId } : {}), ...parsed.config, admin: administrator() };
     let resolved = await resolve(input);
     input.storageKey ||= defaultSiteKey(resolved.configuration.deployId, resolved.configuration.joomlaVersion);
-    if (!previous && !parsed.config.storageKey && !parsed.config.fresh) {
+    if (!hasOptions && !previous && !parsed.config.storageKey && !parsed.config.fresh) {
       const saved = findProfile(resolved.configuration.deployId, resolved.configuration.joomlaVersion);
       if (saved) input = { ...saved, ...parsed.config, admin: administrator() };
     }

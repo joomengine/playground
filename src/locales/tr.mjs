@@ -460,5 +460,6 @@ export default Object.freeze({
   "language.limit": "En fazla 30 dil seçin.",
   "code.accounts": "Hesaplar",
   "help.technologyIntro": "Bu projeler Joomla, PHP, MariaDB ve kod çalışma alanını tarayıcınızda çalıştırmak için birlikte çalışır. Playground sitenizin dosyaları ve veritabanı bu tarayıcıda yerel olarak saklanır.",
-  "confirm.unsavedSiteForm": "Bu Joomla sayfasında kaydedilmemiş form değişiklikleri var. Sayfadan ayrılıp devam edilsin mi?"
+  "confirm.unsavedSiteForm": "Bu Joomla sayfasında kaydedilmemiş form değişiklikleri var. Sayfadan ayrılıp devam edilsin mi?",
+  "code.aiPanel.scopeChanged": "Bağlam değişti. Yeni konuşma yalnızca bu kapsamı kullanacak."
 });

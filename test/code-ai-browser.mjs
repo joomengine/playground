@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { createServer } from 'node:http';
 import { chromium, firefox } from 'playwright';
 import { createStaticServer } from './server.mjs';
 
@@ -41,10 +42,11 @@ for (const name of names) test(`AI credential sandbox and explicit review contro
       const review = { accept(id) { window.accepted++; return { ...prepared, id, status: 'applied', recoveryId: 'snapshot-1' }; },
         reject(id) { return { ...prepared, id, status: 'rejected' }; }, undo(id) { return { ...prepared, id, status: 'recovered' }; } };
       window.aiPanel = createIsolatedAiPanel({ container: document.querySelector('main'), tools, review, getContext: () => ({ selection: 'echo "test";' }) });
+      window.aiPanel.showSettings();
     });
     const panel = page.frameLocator('iframe.jec-ai-frame');
     await panel.locator('#send').waitFor({ state: 'visible' });
-    await panel.locator('summary').first().click();
+    await panel.locator('#settings[open]').waitFor();
     await panel.locator('#provider').selectOption('other');
     await panel.locator('#base-url').fill('https://ai-provider.test/v1');
     await panel.locator('#model').fill('tool-model');
@@ -58,6 +60,18 @@ for (const name of names) test(`AI credential sandbox and explicit review contro
     assert.equal(sent, 2);
     assert.equal(await page.evaluate(() => window.accepted), 0);
     assert.equal(await page.evaluate(() => JSON.stringify(window.hostRequests).includes('session-test-key')), false);
+    const replayAccepted = await page.evaluate(async () => {
+      const frame = document.querySelector('.jec-ai-connection-broker');
+      const nonce = /"nonce":"([^"]+)"/.exec(frame.srcdoc)[1];
+      const control = new MessageChannel(), direct = new MessageChannel();
+      let leaked = false; direct.port1.onmessage = () => { leaked = true; };
+      frame.contentWindow.postMessage({ type: 'jec-ai-broker-connect', nonce }, '*', [control.port2]);
+      control.port1.postMessage({ operation: 'attach' }, [direct.port2]);
+      direct.port1.postMessage({ id: 1, operation: 'read', args: {} });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      control.port1.close(); direct.port1.close(); return leaked;
+    });
+    assert.equal(replayAccepted, false, 'replayed broker handshake must not reveal credentials');
     await panel.getByRole('button', { name: 'Accept and save changes' }).click();
     await panel.getByText('Change set applied.').waitFor();
     assert.equal(await page.evaluate(() => window.accepted), 1);
@@ -95,4 +109,58 @@ for (const name of names) test(`AI credential sandbox and explicit review contro
     await popup.close();
     assert.deepEqual(errors, []);
   } finally { await browser?.close(); await server.close(); }
+});
+
+for (const name of names) test(`AI local optional-key transport, model selection and theme in ${name}`, { timeout: 45_000 }, async () => {
+  const server = await createStaticServer({ directory: root });
+  let chats = 0, catalogues = 0;
+  const api = createServer((request, response) => {
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+    response.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    if (request.method === 'OPTIONS') return response.writeHead(204).end();
+    assert.equal(request.headers.authorization, undefined);
+    assert.equal(request.headers.origin, 'null');
+    if (request.url === '/v1/models') {
+      catalogues++; response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify({ data: [{ id: 'local-coder' }] }));
+    }
+    if (request.url === '/v1/chat/completions') {
+      chats++; response.setHeader('Content-Type', 'text/event-stream');
+      return response.end('data: ' + JSON.stringify({ choices: [{ index: 0, delta: { content: 'Local connection works.' }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n\n');
+    }
+    response.writeHead(404).end();
+  });
+  await new Promise(resolve => api.listen(0, '127.0.0.1', resolve));
+  let browser;
+  try {
+    browser = await { chromium, firefox }[name].launch({ headless: true, ...(process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`] ? { executablePath: process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`] } : {}) });
+    const page = await browser.newPage();
+    await page.goto(`${server.url}__test__.html`);
+    await page.evaluate(async () => {
+      const { createIsolatedAiPanel } = await import('./src/code/ai-panel.mjs');
+      window.localPanel = createIsolatedAiPanel({ container: document.querySelector('main'),
+        tools: { definitions: [], execute() {}, getScope: () => ({ mode: 'current', paths: [] }) }, review: { accept() {} },
+        getContext: ({ scope }) => ({ files: [], bytes: 0, maxContextBytes: 524288, scope }) });
+      window.localPanel.showSettings();
+    });
+    const panel = page.frameLocator('.jec-ai-frame');
+    await panel.locator('#provider').selectOption('other');
+    await panel.locator('#base-url').fill(`http://127.0.0.1:${api.address().port}/v1`);
+    await panel.locator('#fetch-models').click();
+    await panel.locator('#status').filter({ hasText: 'Available models refreshed.' }).waitFor();
+    assert.equal(await panel.locator('#model').inputValue(), 'local-coder');
+    assert.equal(chats, 0, 'model listing must not generate content');
+    assert.ok(catalogues >= 1);
+    await panel.locator('#prompt').fill('Say hello'); await panel.locator('#send').click();
+    await panel.getByText('Local connection works.', { exact: true }).waitFor();
+    assert.equal(chats, 1);
+    await page.evaluate(() => window.localPanel.setTheme('dark'));
+    await panel.locator('html[data-theme="dark"]').waitFor();
+    await page.evaluate(() => window.localPanel.setTheme('light'));
+    await panel.locator('html[data-theme="light"]').waitFor();
+  } finally {
+    await browser?.close(); await server.close(); api.closeAllConnections();
+    await new Promise(resolve => api.close(resolve));
+  }
 });
