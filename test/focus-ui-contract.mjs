@@ -26,6 +26,8 @@ export async function assertLiveFocusMode(page, frame, { capture } = {}) {
   const viewport = page.viewportSize();
   const originalURL = frame.url();
   const originalSource = await page.locator('#site-frame').getAttribute('src');
+  const originalDirection = await page.locator('html').getAttribute('dir');
+  const originalReducedMotion = await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches);
   const workers = [];
   const observeWorker = worker => workers.push(worker.url());
   page.on('worker', observeWorker);
@@ -39,15 +41,24 @@ export async function assertLiveFocusMode(page, frame, { capture } = {}) {
   try {
     for (const width of [1440, 390, 768]) {
       await page.setViewportSize({ width, height: 900 });
+      if (width === 768) {
+        await page.locator('html').evaluate(html => { html.dir = 'rtl'; });
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+      }
       for (const [hide, restore, keyboard] of [
         ['focus-header-button', 'focus-restore-bottom', true],
         ['focus-footer-button', 'focus-restore-top', false],
       ]) {
         const hideControl = page.locator(`#${hide}`);
         await hideControl.scrollIntoViewIfNeeded();
+        const hideLeft = await hideControl.evaluate(button => button.getBoundingClientRect().left);
+        assert.ok(hideLeft <= 12, 'Hide controls stay beside the left-boundary restore tabs, including RTL.');
         if (keyboard) { await hideControl.focus(); await page.keyboard.press('Enter'); }
         else await hideControl.click();
         await assertHiddenControls(page);
+        const sameEdge = page.locator(`#focus-restore-${hide === 'focus-header-button' ? 'top' : 'bottom'}`);
+        assert.ok(Math.abs(await sameEdge.evaluate(button => button.getBoundingClientRect().left) - hideLeft) <= 2,
+          'Hiding chrome must not move its restore affordance to the opposite edge.');
         await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight / 2 - innerHeight / 2));
         for (const id of restoreControls) assert.equal(await page.locator(`#${id}`).evaluate(button => {
           const box = button.getBoundingClientRect(); return box.bottom > 0 && box.top < innerHeight;
@@ -62,6 +73,8 @@ export async function assertLiveFocusMode(page, frame, { capture } = {}) {
         else await restoreControl.click();
         await assertVisibleControls(page);
         await page.waitForFunction(edge => { const area = document.getElementById(edge === 'focus-restore-bottom' ? 'site-footer' : 'site-header').getBoundingClientRect(); return edge === 'focus-restore-bottom' ? area.bottom <= innerHeight + 2 : Math.abs(area.top) <= 2; }, restore);
+        assert.equal(await page.evaluate(() => document.activeElement?.id), restore === 'focus-restore-bottom' ? 'focus-footer-button' : 'focus-header-button',
+          'Restoration focuses the revealed control without moving focus back into Joomla.');
         assert.equal(await page.evaluate(() => document.getElementById('site-frame') === window.__focusFrameProof), true,
           'Showing or hiding controls must keep the same iframe element.');
         assert.equal(await frame.evaluate(() => document === window.__focusDocumentProof), true,
@@ -78,6 +91,8 @@ export async function assertLiveFocusMode(page, frame, { capture } = {}) {
     page.off('worker', observeWorker);
     await frame.evaluate(() => { document.getElementById('rocket-unsaved-focus-proof')?.remove(); delete window.__focusDocumentProof; });
     await page.evaluate(() => { delete window.__focusFrameProof; window.scrollTo(0, 0); });
+    await page.locator('html').evaluate((html, direction) => { if (direction === null) html.removeAttribute('dir'); else html.dir = direction; }, originalDirection);
+    await page.emulateMedia({ reducedMotion: originalReducedMotion ? 'reduce' : 'no-preference' });
     await page.setViewportSize(viewport);
   }
   return { sameIframe: true, sameDocument: true, unsavedForm: true, noReplacementWorkers: true, keyboard: true, responsive: true };

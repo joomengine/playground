@@ -131,7 +131,14 @@ function setDrawer(open) {
   if (open) pauseAutomaticLaunch();
   $('settings').hidden = !open;
   $('settings-toggle').setAttribute('aria-expanded', String(open));
-  $('settings-toggle').setAttribute('aria-label', t(open ? 'action.collapse' : 'action.expand'));
+  updateDrawerLabels();
+}
+function updateDrawerLabels() {
+  const key = $('settings').hidden ? 'action.expand' : 'action.collapse';
+  for (const attribute of ['title', 'aria-label']) {
+    $('settings-toggle').setAttribute(`data-i18n-${attribute}`, key);
+    $('settings-toggle').setAttribute(attribute, t(key));
+  }
 }
 function setFocusMode(hidden, { focus = false, edge = 'top' } = {}) {
   // Asynchronous startup configuration must retain an explicit hide/restore action.
@@ -1025,8 +1032,9 @@ function populatePhpSettings(settings = phpSettings) {
   $('php-error').hidden = true;
 }
 function setupInterface() {
-  initializeTheme(); observeIcons();
+  initializeTheme();
   $('theme-preference').value = getThemeState().preference;
+  observeIcons();
   $('theme-preference').addEventListener('change', event => setTheme(event.target.value));
   languageSelector = createLanguageSelector(fields.language, { t, getLocale });
   deploymentLanguageSelector = createLanguageSelector($('deploy-languages'), { multiple: true, t, getLocale });
@@ -1039,7 +1047,7 @@ function setupInterface() {
     if (runtime && currentConfig) $('preview-label').textContent = currentConfig.siteName;
     $('credentials-button').textContent = `${t('title.credentials')}${$('credentials-button').dataset.signedOut === 'true' ? ` · ${t('status.signedOut')}` : ''}`;
     $('site-frame')?.setAttribute('title', t('a11y.site'));
-    $('settings-toggle').setAttribute('aria-label', t($('settings').hidden ? 'action.expand' : 'action.collapse'));
+    updateDrawerLabels();
     renderSavedSites(); renderEditorLists();
     languageSelector?.refresh(); deploymentLanguageSelector?.refresh();
   });
