@@ -63,7 +63,7 @@ Check an item only after its implementation and stated evidence are available. R
 - [x] L05 — Dock, detach, maximize, restore and close controls remain reachable; remember layout/dimensions and clamp them after viewport changes. Evidence: resize to a smaller viewport and restore preferences.
 - [x] L06 — Detach/redock uses relocation or a narrow validated view bridge; messages validate expected origin/window and cannot create competing document authorities. Evidence: stale/foreign messages are ignored and shared edits cannot overwrite each other silently.
 - [x] L07 — Closing a detached window restores the host editor intact; owner loss/site end clearly disconnects or closes the detached view and preserves recoverable saved-site drafts. Evidence: window close, owner close and site reset flows; no ownership-transfer requirement is invented.
-- [ ] L08 — Desktop Firefox and Chromium, keyboard navigation, visible focus, contrast and smaller viewports remain usable. Evidence: focused browser checks and accessible controls; the site preview gains no new device restrictions.
+- [x] L08 — Desktop Firefox and Chromium, keyboard navigation, visible focus, contrast and smaller viewports remain usable. Evidence: focused browser checks and accessible controls; the site preview gains no new device restrictions.
 - [x] R01 — Manual refresh is the default; Save/Save All/autosave never reload in manual mode. Evidence: save and undo/redo flows keep the preview document until explicit refresh.
 - [x] R02 — Refresh site appears in both the editor and Playground toolbars while enabled, including detached mode; saved-since-refresh status stays distinct from dirty buffers. Evidence: both controls and status transitions work.
 - [x] R03 — Refresh waits for in-flight saves and reloads the current preview URL without saving dirty buffers, restarting PHP, reinstalling Joomla or changing database/site/editor identity. Evidence: current-location refresh after a queued save.
@@ -117,7 +117,7 @@ Check an item only after its implementation and stated evidence are available. R
 ## 7 — Stabilization and readiness
 
 - [x] V01 — Focused Joomla browser smoke: open/edit/save/refresh and observe a real change; create/upload/rename/delete and reopen a saved site. Evidence: browser receipt linked to final implementation commit.
-- [ ] V02 — Focused multi-tab smoke: preserve dirty state/undo/selections through docks, floating, detach/redock and hide/reopen. Evidence: Firefox/Chromium coverage across the focused suite.
+- [x] V02 — Focused multi-tab smoke: preserve dirty state/undo/selections through docks, floating, detach/redock and hide/reopen. Evidence: Firefox/Chromium coverage across the focused suite.
 - [x] V03 — Focused refresh checks: manual mode never reloads on save; automatic mode reloads once per completed batch and stays suppressed during debug pause. Evidence: behavior-driven checks.
 - [ ] V04 — Focused AI flow: review/apply one set, reject another, detect a conflict and recover accepted changes. Evidence: deterministic CI receipt plus the separate real-provider receipt required by A02.
 - [x] V05 — Focused debugger flow: authenticated Joomla request, object/caller-frame inspection, stepping, valid continuation, POST once-only behavior and stop/recovery. Evidence: actual phpdbg request execution, not simulated DAP events or isolated snippets.
@@ -144,7 +144,7 @@ The following local receipts establish the checked implementation requirements. 
 | Requirements | Behavior and receipt | Result |
 | --- | --- | --- |
 | I01–I07, F01–F07, F10–F18 | Locked dependency and asset build; `test/code-workbench.browser.mjs` exercises real native groups/tabs, dirty recovery, breakpoints, PHP/JS/CSS/HTML completion, PHP definitions and diagnostics, JSON diagnostics, reviewed project replacement, stale-write conflict/explicit overwrite, UTF-16 BOM/CRLF preservation and malformed UTF-8 rejection | Chromium pass (124 seconds); full verified distribution build passes for all three PHP and both Joomla catalog versions |
-| I05, F02–F05, F12, A03–A08, R05–R06, V06 | Workspace/file/AI tests exercise root confinement, equal-byte symlink retargeting, original-buffer canonical provenance, late dirty checks after queue reservation, bounded snapshots, partial failures and conflict-safe recovery | Focused cases and complete source suite pass; latest source suite: 190 tests |
+| I05, F02–F05, F12, A03–A08, R05–R06, V06 | Workspace/file/AI tests exercise root confinement, equal-byte symlink retargeting, original-buffer canonical provenance, late dirty checks after queue reservation, bounded snapshots, partial failures and conflict-safe recovery | Focused cases and complete source suite pass; latest source suite: 193 tests |
 | A01, A04–A10, L06, G06 | `test/code-ai-browser.mjs` exercises opaque credential isolation, expected window/origin/nonce validation, detached handshake, hostile localized strings, review/accept/reject/recovery and cancellation fixtures | Chromium pass; no real-provider claim |
 | I06, L07, G06 | `test/code-host-lifecycle.browser.mjs` exercises pending panel/mount disposal and independent cleanup after teardown failures | Chromium pass |
 | R01–R03, R05–R08, V01 | `test/code-joomla.browser.mjs` uses the freshly built distribution: native edit/save, zero automatic refresh in manual mode, explicit refresh with changed live bytes, binary upload/rename/delete/recovery, separate Joomla cache clearing and persisted-site reopen with healthy Joomla response | Chromium pass (34 seconds); save/refresh and owner-queue unit cases also pass |
@@ -155,6 +155,8 @@ The following local receipts establish the checked implementation requirements. 
 
 Additional stabilized behavior:
 
+- L08/V02: CI run [40977112652](https://github.com/joomengine/playground/actions/runs/40977112652), code head `53155a6e0cd442ac981ffaf2e1b308e7ab705d10`, passes the complete new Code browser step in Chromium (job `123809847200`) and Firefox (job `123809847280`). This includes native workbench/document continuity, AI isolation, host layouts, actual Rocket launcher, real Joomla edit/reopen and native PHP debugging. The original full Playground regression step and final all-jobs gate remain separate requirements.
+
 - Full built distribution at `3e45edb`: authenticated real Joomla debugger flows pass for PHP 8.3/8.4/8.5 in Chromium (134 seconds), including the native workbench UI on the default version. The distribution inventory matches all 1,046 shipped files.
 
 - L01–L05: actual host controls exercise left/right/bottom divider drags, floating drag and resize, interactive uncovered site, saved geometry, maximize/restore, viewport clamping, narrow-layout collapse, hide/reopen and blocked-popup feedback while editor and preview documents retain identity. Chromium host suite passes both cases.
@@ -164,6 +166,7 @@ Additional stabilized behavior:
 - Responsive regression: CI run `40969011264` reproduced toolbar overflow at 768 pixels (document width 893 pixels). The focused fix lets the header and toolbar wrap within the viewport. The original 390/768/1440 widths, Refresh shown/hidden, and 80 width/locale combinations pass. The original full regression assertions remain unchanged for final CI.
 
 - Startup focus race: restoring controls before the runtime catalog finished loading could be overwritten by the initial URL configuration. Startup now preserves an explicit user choice, with unchanged defaults and post-startup configuration behavior. Five delayed-catalog cases and eight fresh initial-focus checks pass; the existing regression helper retains its immediate assertion and adds another after initialization completes.
+- F11/A04/A06: AI preparation preserves existing UTF-8 BOM presence and uniform CRLF/LF/CR before presenting the exact applied text. Regression cases verify accepted bytes, exact recovery, unsupported encodings and malformed Unicode rejection; mixed existing line endings require explicit editor normalization. The combined AI/workspace/file-action suite passes 39 tests.
 - I01/I03/I04/F08: the real Rocket launcher browser test passes (24 seconds): no Code source or assets are requested before clicking the actual Code button; native Quick Open and dirty editing work; the existing Joomla iframe/document and native editor iframe/document retain identity through Hide/Reopen; both refresh surfaces remain available.
 - Local build instructions now compile the phpdbg bridge for each supported runtime, matching CI, and link the new usage and completion records.
 

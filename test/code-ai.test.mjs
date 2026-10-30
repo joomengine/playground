@@ -120,6 +120,62 @@ test('prepare/reject is read-only; accept uses one recoverable batch and cannot 
   assert.equal(applied(), 2);
 });
 
+test('AI edits preserve existing UTF-8 BOM and uniform line endings in review, apply and recovery', async () => {
+  const { directory, review } = fixture();
+  const cases = [
+    { name: 'bom-crlf', before: '\ufeff<?php\r\necho "before";\r\n', proposed: '<?php\necho "after";\n', after: '\ufeff<?php\r\necho "after";\r\n' },
+    { name: 'plain-lf', before: '<?php\necho "before";\n', proposed: '\ufeff<?php\r\necho "after";\r\n', after: '<?php\necho "after";\n' },
+    { name: 'plain-cr', before: 'first\rsecond\r', proposed: 'first\nchanged\n', after: 'first\rchanged\r' },
+  ];
+  for (const item of cases) {
+    const filename = path.join(directory, `${item.name}.txt`);
+    const before = Buffer.from(item.before, 'utf8');
+    fs.writeFileSync(filename, before);
+    const prepared = await review.prepare({ summary: 'Change text without changing file format', changes: [
+      { operation: 'write', path: `/${item.name}.txt`, content: item.proposed },
+    ] });
+    const operation = prepared.operations[0];
+    assert.equal(operation.before, item.before, item.name);
+    assert.equal(operation.after, item.after, item.name);
+    assert.equal(operation.bytes, Buffer.byteLength(item.after, 'utf8'));
+    assert.deepEqual(fs.readFileSync(filename), before, 'preparation is read-only');
+    assert.equal((await review.accept(prepared.id)).status, 'applied');
+    assert.deepEqual(fs.readFileSync(filename), Buffer.from(operation.after, 'utf8'), 'review describes the exact applied bytes');
+    assert.equal((await review.undo(prepared.id)).status, 'recovered');
+    assert.deepEqual(fs.readFileSync(filename), before, 'recovery restores the exact original format and contents');
+  }
+});
+
+test('AI creates preserve provided format and existing mixed line endings require deliberate normalization', async () => {
+  const { directory, review } = fixture();
+  const content = '\ufefffirst\r\nsecond\nthird\r';
+  const created = await review.prepare({ summary: 'Create a text file', changes: [
+    { operation: 'write', path: '/new.txt', content },
+  ] });
+  assert.equal(created.operations[0].after, content);
+  await review.accept(created.id);
+  assert.deepEqual(fs.readFileSync(path.join(directory, 'new.txt')), Buffer.from(content, 'utf8'));
+  await assert.rejects(review.prepare({ summary: 'Rewrite mixed line endings', changes: [
+    { operation: 'write', path: '/new.txt', content: 'first\nchanged\nthird\n' },
+  ] }), /mixed line endings.*editor.*save.*again/i);
+  assert.deepEqual(fs.readFileSync(path.join(directory, 'new.txt')), Buffer.from(content, 'utf8'));
+});
+
+test('AI review refuses unsupported file encodings and malformed proposed Unicode without writes', async () => {
+  const { directory, review } = fixture();
+  const filename = path.join(directory, 'legacy.txt');
+  const bytes = Buffer.from([0xff, 0xfe, 0x61, 0x00]);
+  fs.writeFileSync(filename, bytes);
+  await assert.rejects(review.prepare({ summary: 'Rewrite unsupported text', changes: [
+    { operation: 'write', path: '/legacy.txt', content: 'replacement' },
+  ] }), /unsupported encoding/);
+  assert.deepEqual(fs.readFileSync(filename), bytes);
+  await assert.rejects(review.prepare({ summary: 'Create malformed text', changes: [
+    { operation: 'write', path: '/malformed.txt', content: 'unpaired surrogate: \ud800' },
+  ] }), /valid Unicode/);
+  assert.equal(fs.existsSync(path.join(directory, 'malformed.txt')), false);
+});
+
 test('disk, dirty-buffer and folder membership conflicts prevent all AI writes', async () => {
   let dirty = false;
   const { directory, review } = fixture({ dirty: () => dirty });
