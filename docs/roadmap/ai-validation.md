@@ -29,7 +29,7 @@ Standard presets derive endpoints internally. Changing a named preset's visible 
 
 Other chooses its catalog adapter from the selected API format. Native Anthropic and Cohere connections accept the service root or their conventional versioned base without doubling `/v1` or `/v2`; Cohere still lists models through v1 while streaming chat through v2.
 
-Model listing performs only GET requests. It has bounded bytes, pages and entries, rejects repeated or missing cursors, preserves a still-available selection, and uses preference rules after capability filtering. Where discovery is unavailable, a catalog/manual result is distinguished from a successful live connection.
+Model listing performs only GET requests. It has bounded bytes, pages and entries, rejects repeated or missing cursors, preserves a still-available selection, and uses preference rules after capability filtering. Azure deployment aliases, Fireworks dedicated IDs, custom IDs and IDs beyond a published fallback remain explicitly selectable because those catalogs cannot establish that an unlisted ID is invalid. This preservation flag travels with the cached catalog. Where discovery is unavailable, a catalog/manual result is distinguished from a successful live connection.
 
 Every adapter checks terminal events before returning tool calls. Truncated, cancelled, oversized, invalid, or failed streams produce no completed proposal. Request/error bodies, authentication headers and nested network causes are not forwarded in errors. Provider-native continuation fields stay in the isolated conversation and do not become executable project instructions.
 

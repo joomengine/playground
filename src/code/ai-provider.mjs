@@ -259,8 +259,10 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
       const preferences = provider.preferences || ['coder', 'code', 'instruct', 'chat'];
       const rank = item => { const index = preferences.findIndex(value => item.id.toLowerCase().includes(value.toLowerCase())); return index < 0 ? preferences.length : index; };
       models.sort((a, b) => Number(b.tools === true) - Number(a.tools === true) || rank(a) - rank(b) || a.id.localeCompare(b.id, 'en', { numeric: true }));
-      return { models, selectedModel: models.some(item => item.id === currentModel) ? currentModel
-        : (source === 'manual' || (id === 'bedrock' && route === 'runtime') ? currentModel : models[0]?.id || ''), source };
+      const runtimeCatalog = id === 'bedrock' && route === 'runtime';
+      const preserveManualSelection = source !== 'live' || runtimeCatalog || ['other', 'azure', 'fireworks'].includes(id);
+      return { models, preserveManualSelection, selectedModel: currentModel && (preserveManualSelection || models.some(item => item.id === currentModel)) ? currentModel
+        : (runtimeCatalog ? '' : models[0]?.id || ''), source };
     });
   }
   function checkedMessages(messages, tools) {
