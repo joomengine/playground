@@ -80,9 +80,18 @@ async function assertShellAppearance(page, capture) {
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
           'The expanded dashboard must fit the viewport.');
         backgrounds[mode] = await page.locator('#settings').evaluate(node => getComputedStyle(node).backgroundColor);
-        await theme.focus(); await page.keyboard.press('Tab'); await page.keyboard.press('Shift+Tab');
-        assert.equal(await theme.evaluate(node => node === document.activeElement && node.matches(':focus-visible')), true,
-          'The theme selector keeps a visible keyboard focus indicator.');
+        // Theme is the final dashboard control. Going forward first enters
+        // Joomla's iframe, where Firefox retains an independent tab sequence.
+        // Enter the selector from its preceding shell control instead.
+        await theme.focus(); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab');
+        const focus = await theme.evaluate(node => {
+          const style = getComputedStyle(node);
+          return { active: document.activeElement?.id, visible: node.matches(':focus-visible'),
+            outline: style.outlineStyle, width: parseFloat(style.outlineWidth) };
+        });
+        assert.equal(focus.active, 'theme-preference', `Keyboard focus returns to the selector: ${JSON.stringify(focus)}`);
+        assert.ok(focus.visible && focus.outline !== 'none' && focus.width >= 2,
+          `The theme selector keeps a visible keyboard focus indicator: ${JSON.stringify(focus)}`);
         await capture?.(`shell-theme-control-${mode}-${width}`);
         await page.locator('#site-footer').scrollIntoViewIfNeeded();
         await capture?.(`shell-footer-${mode}-${width}`);
