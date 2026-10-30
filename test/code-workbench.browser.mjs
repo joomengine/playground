@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -10,21 +10,55 @@ import { createStaticServer } from './server.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const browserNames = (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split(',');
 
-// Allow the added native close/rename dialogs and view-state round trips while
-// retaining the language, encoding, recovery and conflict checks in this suite.
-test('bundled JoomEngine Code preserves native document models through edits and detachment', { timeout: 240000 * browserNames.length }, async () => {
+// Firefox completed this full smoke in 232s on CI before a later run exhausted
+// its 240s aggregate budget. Allow setup/worker variance without relaxing any
+// operation timeout or assertion, and retain the last phase if progress stalls.
+test('bundled JoomEngine Code preserves native document models through edits and detachment', { timeout: 360000 * browserNames.length }, async t => {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const directory = await mkdtemp(path.join(root, '.cache/code-browser-'));
-  let server;
+  const receipts = path.join(root, 'test-results');
+  await mkdir(receipts, { recursive: true });
+  const started = Date.now(), phases = [];
+  let server, activeBrowser, activePage, browserName = 'setup', phase = 'prepare assets', failureCapture;
+  const receipt = (status, error) => ({ browser: browserName, phase, status, elapsedMs: Date.now() - started,
+    phases, ...(error ? { error: error.stack || error.message || String(error) } : {}) });
+  const checkpoint = async (label, status = 'running') => {
+    if (t.signal.aborted) throw t.signal.reason;
+    phase = label; phases.push({ browser: browserName, phase, elapsedMs: Date.now() - started });
+    console.log(`Code ${browserName}: ${phase} (${((Date.now() - started) / 1000).toFixed(1)}s)`);
+    await writeFile(path.join(receipts, `code-workbench-${browserName}.json`), `${JSON.stringify(receipt(status), null, 2)}\n`);
+  };
+  const captureFailure = error => failureCapture ||= (async () => {
+    let timer;
+    try {
+      await Promise.race([Promise.allSettled([
+        writeFile(path.join(receipts, `code-workbench-${browserName}.json`), `${JSON.stringify(receipt(t.signal.aborted ? 'timed-out' : 'failed', error), null, 2)}\n`),
+        activePage?.screenshot({ path: path.join(receipts, `code-workbench-${browserName}-failure.png`), timeout: 5000 }),
+      ]), new Promise(resolve => { timer = setTimeout(resolve, 6000); })]);
+    } catch (diagnosticError) {
+      console.warn(`Could not capture Code failure diagnostics: ${diagnosticError.message || diagnosticError}`);
+    } finally { clearTimeout(timer); }
+  })();
+  const onAbort = () => {
+    // Capture first, then close the browser to release any pending evaluation.
+    void captureFailure(t.signal.reason).finally(() => activeBrowser?.close().catch(() => {}));
+  };
+  t.signal.addEventListener('abort', onAbort, { once: true });
   try {
+    await checkpoint('bundle assets');
     await stageCodeAssets({ root, assets: path.join(directory, 'assets') });
     server = await createStaticServer({ directory });
     for (const name of browserNames) {
       assert.ok({ chromium, firefox }[name], `Unsupported browser ${name}`);
+      browserName = name;
+      await checkpoint('launch browser');
       const executablePath = process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`];
       const browser = await { chromium, firefox }[name].launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+      activeBrowser = browser;
       try {
         const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+        activePage = page;
+        await checkpoint('mount workbench and create dirty tabs');
         const errors = [];
         const expectedOperationErrors = new Set();
         page.on('pageerror', error => {
@@ -102,6 +136,7 @@ test('bundled JoomEngine Code preserves native document models through edits and
         });
         assert.equal(await page.evaluate(() => window.code.getDirtyCount()), 2);
         assert.equal(await page.evaluate(() => window.codeWrites.length), 0);
+        await checkpoint('native layout and view continuity');
         await page.evaluate(() => window.code.command('workbench.action.editorLayoutTwoColumns'));
         await page.evaluate(async () => {
           const pane = await window.code.openFile('/index.php');
@@ -130,6 +165,7 @@ test('bundled JoomEngine Code preserves native document models through edits and
         const editorLayout = await page.evaluate(() => window.code.getEditorLayout());
         const editorGroups = await page.evaluate(() => window.code.getEditorGroups());
         assert.equal(editorLayout.groups.length, 2);
+        await checkpoint('detach and redock native groups');
         const popupPromise = page.waitForEvent('popup');
         await page.evaluate(() => window.code.detach());
         const popup = await popupPromise;
@@ -145,6 +181,7 @@ test('bundled JoomEngine Code preserves native document models through edits and
         assert.deepEqual(await page.evaluate(() => window.code.getEditorLayout()), editorLayout, 'Redocked groups preserve split layout');
         assert.deepEqual(await page.evaluate(() => window.readNativeView()), viewBeforeMoving, 'Redocking retains the native selection, cursor and scroll position');
         assert.equal(await page.evaluate(() => window.code.getDirtyCount()), 2);
+        await checkpoint('save all and preserve undo');
         const saved = await page.evaluate(() => window.code.saveAll());
         assert.equal(saved.success, true);
         assert.equal(await page.evaluate(() => window.code.getDirtyCount()), 0);
@@ -159,6 +196,7 @@ test('bundled JoomEngine Code preserves native document models through edits and
         await page.waitForFunction(() => window.code.getBreakpoints().length === 1);
         const breakpoints = await page.evaluate(() => window.code.getBreakpoints());
         assert.equal(breakpoints.length, 1);
+        await checkpoint('persist and restore native drafts');
         const drafts = await page.evaluate(() => window.code.getOpenFiles());
         await page.evaluate(async () => {
           await window.code.flushDrafts();
@@ -175,6 +213,7 @@ test('bundled JoomEngine Code preserves native document models through edits and
         for (const [path, lineNumber, column, expected] of [
           ['/script.js', 2, 8, 'charAt'], ['/style.css', 1, 8, 'color'], ['/page.html', 1, 9, 'class'], ['/mixed.php', 1, 29, 'class'],
         ]) {
+          await checkpoint(`language completion: ${path}`);
           await page.evaluate(path => window.code.openFile(path), path);
           let labels = [];
           const deadline = Date.now() + 30000;
@@ -188,6 +227,7 @@ test('bundled JoomEngine Code preserves native document models through edits and
           }
           assert.ok(labels.includes(expected), `${path} native completion must contain ${expected}; got ${labels.slice(0, 20)}`);
         }
+        await checkpoint('PHP navigation and diagnostics');
         await page.evaluate(() => window.code.openFile('/use.php'));
         await page.evaluate(() => window.code.command('joomengineCode.refreshPhpIndex'));
         const definitions = await page.evaluate(() => window.code.command('_executeDefinitionProvider', window.code.provider.uri('/use.php'), { lineNumber: 1, column: 37 }));
@@ -197,6 +237,7 @@ test('bundled JoomEngine Code preserves native document models through edits and
         await page.evaluate(() => window.code.openFile('/data.json'));
         await page.waitForFunction(() => window.code.getDiagnostics('/data.json').length > 0, { timeout: 30000 });
         await page.evaluate(() => window.code.saveAll());
+        await checkpoint('reviewed workspace replacement');
         await page.evaluate(() => window.code.command('workbench.action.findInFiles', { query: 'second file', replace: 'reviewed replacement', triggerSearch: true }));
         const codeFrame = page.frames().find(frame => frame.url().endsWith('/assets/code/editor.html'));
         await codeFrame.getByRole('button', { name: /Replace All/ }).click();
@@ -208,6 +249,7 @@ test('bundled JoomEngine Code preserves native document models through edits and
           await window.code.command('type', { text: '// local draft\n' });
           window.changeFixtureFile('/conflict.php', '<?php echo "external";');
         });
+        await checkpoint('external conflict and explicit overwrite');
         const conflict = await page.evaluate(() => window.code.saveAll());
         assert.equal(conflict.success, false, 'External mutation must keep the local draft dirty');
         await page.evaluate(() => window.code.provider.readFile(window.code.provider.uri('/conflict.php')));
@@ -216,6 +258,7 @@ test('bundled JoomEngine Code preserves native document models through edits and
         await codeFrame.getByRole('button', { name: 'Overwrite', exact: true }).first().click();
         await page.waitForFunction(() => !window.code.isDirty('/conflict.php'));
         assert.ok(await page.evaluate(() => window.codeWrites.some(write => write.path === '/conflict.php' && write.text.includes('local draft') && write.text.includes('original'))), 'Explicit native Overwrite writes the reviewed local buffer');
+        await checkpoint('text decoding and encoding preservation');
         await page.evaluate(() => window.code.openFile('/invalid-utf8.txt'));
         assert.equal(await page.evaluate(() => window.code.getOpenFiles().find(file => file.path === '/invalid-utf8.txt')?.text), undefined, 'Invalid UTF8 has no editable replacement-character model');
         assert.ok(await codeFrame.getByText(/bytes that are not valid UTF-8/).count(), 'Unsupported decoding explains how to recover original bytes');
@@ -224,6 +267,7 @@ test('bundled JoomEngine Code preserves native document models through edits and
         await page.evaluate(async () => { await window.code.openFile('/utf16.txt'); await window.code.command('type', { text: 'b' }); await window.code.saveAll(); });
         const utf16 = await page.evaluate(() => window.codeWrites.find(write => write.path === '/utf16.txt')?.bytes);
         assert.deepEqual(utf16, [0xff, 0xfe, 98, 0, 97, 0, 13, 0, 10, 0], 'UTF16 BOM and CRLF survive native editing and saving');
+        await checkpoint('AI rename reconciliation and recovery');
         const groupsBeforeRename = await page.evaluate(() => window.code.getEditorGroups());
         await page.evaluate(async () => {
           window.renameFixtureFile('/second.php', '/renamed.php');
@@ -236,6 +280,7 @@ test('bundled JoomEngine Code preserves native document models through edits and
           await window.code.reconcileApplied({ ok: true, recoveryId: 'rename-smoke', results: [{ operation: 'recover', path: '/second.php' }, { operation: 'recover', path: '/renamed.php' }] });
         });
         assert.deepEqual(await page.evaluate(() => window.code.getEditorGroups()), groupsBeforeRename, 'Successful recovery reverses tracked native-tab renames');
+        await checkpoint('native dirty close and deletion choices');
         await page.evaluate(async () => { await window.code.openFile('/close-cancel.php'); await window.code.command('type', { text: '// keep draft\n' }); });
         await page.evaluate(() => { window.pendingNativeClose = window.code.command('workbench.action.closeActiveEditor'); });
         await codeFrame.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -257,11 +302,13 @@ test('bundled JoomEngine Code preserves native document models through edits and
         assert.equal(await page.evaluate(() => window.codeWrites.some(write => write.path === '/close-cancel.php')), false, 'Discard does not write its rejected draft');
         await page.evaluate(() => window.code.openFile('/close-cancel.php'));
         assert.equal(await page.evaluate(() => window.code.getOpenFiles().find(file => file.path === '/close-cancel.php')?.text), '<?php // original cancel');
+        await checkpoint('native save on close');
         await page.evaluate(async () => { await window.code.openFile('/close-save.php'); await window.code.command('type', { text: '// accepted save\n' }); window.pendingNativeClose = window.code.command('workbench.action.closeActiveEditor'); });
         await codeFrame.getByRole('button', { name: 'Save', exact: true }).click();
         await page.evaluate(() => window.pendingNativeClose);
         assert.equal(await page.evaluate(() => window.code.getOpenFiles().some(file => file.path === '/close-save.php')), false, 'Save closes the native tab after writing');
         assert.ok(await page.evaluate(() => window.codeWrites.find(write => write.path === '/close-save.php')?.text.includes('accepted save')));
+        await checkpoint('failed and successful dirty rename');
         expectedOperationErrors.add('Fixture rename blocked');
         await page.evaluate(async () => { await window.code.openFile('/rename-source.php'); await window.code.command('type', { text: '// rename draft\n' }); await window.code.command('revealInExplorer', window.code.provider.uri('/rename-source.php')); await window.code.command('renameFile'); });
         const renameInput = codeFrame.getByRole('textbox', { name: 'Type file name. Press Enter to confirm or Escape to cancel.', exact: true });
@@ -276,6 +323,7 @@ test('bundled JoomEngine Code preserves native document models through edits and
         assert.equal(await page.evaluate(() => window.code.getOpenFiles().some(file => file.path === '/rename-source.php')), false, 'Successful native rename updates the dirty document identity');
         await page.evaluate(() => window.code.saveAll());
         assert.ok(await page.evaluate(() => window.codeWrites.some(write => write.path === '/renamed-dirty.php' && write.text.includes('rename draft'))), 'The renamed dirty buffer saves under its new path');
+        await checkpoint('unsupported command filtering');
         for (const query of ['terminal', 'remote-ssh']) {
           await page.evaluate(() => window.code.command('workbench.action.showCommands'));
           await codeFrame.locator('.quick-input-box input').fill(`>${query}`);
@@ -283,7 +331,13 @@ test('bundled JoomEngine Code preserves native document models through edits and
           await codeFrame.locator('.quick-input-box input').press('Escape');
         }
         assert.deepEqual(errors, [], `${name} should mount and use the actual workbench without uncaught errors`);
-      } finally { await browser.close(); }
+        await checkpoint('complete', 'passed');
+      } catch (error) { await captureFailure(error); throw error; }
+      finally { await browser.close(); activePage = null; activeBrowser = null; }
     }
-  } finally { await server?.close(); await rm(directory, { recursive: true, force: true }); }
+  } catch (error) { await captureFailure(error); throw error; }
+  finally {
+    try { await failureCapture; await server?.close(); await rm(directory, { recursive: true, force: true }); }
+    finally { t.signal.removeEventListener('abort', onAbort); }
+  }
 });
