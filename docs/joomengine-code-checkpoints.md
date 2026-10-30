@@ -174,6 +174,8 @@ Additional stabilized behavior:
 - I01/I03/I04/F08: the real Rocket launcher browser test passes (24 seconds): no Code source or assets are requested before clicking the actual Code button; native Quick Open and dirty editing work; the existing Joomla iframe/document and native editor iframe/document retain identity through Hide/Reopen; both refresh surfaces remain available.
 - Local build instructions now compile the phpdbg bridge for each supported runtime, matching CI, and link the new usage and completion records.
 
+- CI timing correction: the identical Firefox workbench suite passed in 232.3 seconds on `2256a32`, leaving only 7.7 seconds below its 240-second aggregate deadline. The documentation-only `107762e` run [40985268526](https://github.com/joomengine/playground/actions/runs/40985268526) hit that exact deadline; Chromium passed the same suite in 152.5 seconds before matrix cancellation. The cumulative workbench budget is now 360 seconds per browser, with phase timings and bounded failure diagnostics. All behavior assertions and existing action deadlines remain. The browser job allows 45 minutes for Code validation plus the existing 30-minute regression contract; that regression's own limit is unchanged. Final-head results remain tracked in the PR.
+
 ### Complete implementation validation
 
 Implementation commit `2256a32c7677a5b54c4f29c78f91e21e3ae6d8bd` passes all five jobs in [CI run 40981221627](https://github.com/joomengine/playground/actions/runs/40981221627): source checks, native/build/provisioning, Chromium, Firefox and the aggregate validation gate. This closes G05 and V07 for the implemented code; the run includes the complete original regression suites, not only Code-focused checks.

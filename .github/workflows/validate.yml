@@ -196,7 +196,8 @@ jobs:
     name: Browser validation (${{ matrix.browser }})
     needs: [checks, build]
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    # The Code suites run before the existing 30-minute regression contract.
+    timeout-minutes: 45
     strategy:
       fail-fast: true
       matrix:
