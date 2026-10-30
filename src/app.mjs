@@ -32,6 +32,7 @@ let currentSitePath = '/';
 let closing = false;
 let selectedProfile;
 let hideToolbar = false;
+let initialFocusChoice;
 let pendingFresh = false;
 let freshKeyPending = false;
 let automaticLaunchPaused = false;
@@ -120,6 +121,11 @@ function setDrawer(open) {
   $('settings-toggle').setAttribute('aria-label', t(open ? 'action.collapse' : 'action.expand'));
 }
 function setFocusMode(hidden, { focus = false, edge = 'top' } = {}) {
+  // Asynchronous startup configuration must retain an explicit hide/restore action.
+  if (!initialized) {
+    if (focus) initialFocusChoice = Boolean(hidden);
+    else if (initialFocusChoice !== undefined) hidden = initialFocusChoice;
+  }
   const frame = $('site-frame');
   const previousTop = frame ? frame.getBoundingClientRect().top + window.scrollY : 0;
   const previousScroll = window.scrollY;

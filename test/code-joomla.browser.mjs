@@ -92,4 +92,72 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await page.evaluate(async () => window.codeSite.reset());
     } finally { await browser.close(); await server.close(); }
   });
+
+  test(`Rocket opens JoomEngine Code lazily without replacing its live preview (${name})`, { timeout: 240_000 }, async () => {
+    assert.ok(browsers[name], `Unknown browser ${name}`);
+    const server = await createStaticServer({ directory });
+    let browser;
+    try {
+      const executablePath = process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`];
+      browser = await browsers[name].launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+      const page = await browser.newPage({ viewport: { width: 1500, height: 960 } });
+      const errors = [], codeRequests = [];
+      page.on('pageerror', error => errors.push(error.message));
+      page.on('request', request => {
+        if (/\/(?:assets|src)\/code\//.test(new URL(request.url()).pathname)) codeRequests.push(request.url());
+      });
+      await page.goto(`${server.url}?deploy=blank&persist=0&start=1&path=%2F`);
+      await page.waitForFunction(() => document.getElementById('site-frame')
+        || !document.getElementById('error-view').hidden, undefined, { timeout: 120_000 });
+      assert.equal(await page.locator('#error-view').isVisible(), false, await page.locator('#error-message').textContent());
+      await page.locator('#code-button:enabled').waitFor();
+      const site = await (await page.locator('#site-frame').elementHandle()).contentFrame();
+      await site.waitForURL(url => url.pathname.includes('/__site/'), { waitUntil: 'load' });
+      await site.locator('body').waitFor();
+      assert.deepEqual(codeRequests, [], 'Launching Joomla must not load the editor source or assets.');
+      await page.evaluate(() => {
+        window.originalSiteFrame = document.getElementById('site-frame');
+        window.originalSiteDocument = window.originalSiteFrame.contentDocument;
+      });
+      await page.locator('#code-button').click();
+      const editor = page.frameLocator('.jec-workbench-frame');
+      await editor.locator('.monaco-workbench').waitFor({ timeout: 60_000 });
+      assert.ok(codeRequests.some(url => url.includes('/assets/code/')), 'The actual Code button loads the workbench assets.');
+      assert.equal(await page.locator('#code-refresh-button').isVisible(), true);
+      assert.equal(await page.locator('#code-button').getAttribute('aria-expanded'), 'true');
+      assert.equal(await page.evaluate(() => document.getElementById('site-frame') === window.originalSiteFrame
+        && window.originalSiteFrame.contentDocument === window.originalSiteDocument), true, 'Opening Code keeps the live site frame and document.');
+      await page.evaluate(() => {
+        window.originalEditorFrame = document.querySelector('.jec-workbench-frame');
+        window.originalEditorDocument = window.originalEditorFrame.contentDocument;
+      });
+      await editor.locator('.monaco-workbench').click({ position: { x: 100, y: 100 } });
+      await page.keyboard.press('Control+p');
+      const quickOpen = editor.locator('.quick-input-box input');
+      await quickOpen.fill('index.php');
+      await editor.locator('.quick-input-list .monaco-list-row').filter({ hasText: 'index.php' }).first().waitFor();
+      await quickOpen.press('Enter');
+      await editor.locator('.monaco-editor .view-lines').first().click();
+      await page.keyboard.press('Control+Home');
+      await page.keyboard.type('// Rocket entrypoint unsaved proof\n');
+      await editor.locator('.tab.dirty').first().waitFor();
+      const draftLine = editor.locator('.monaco-editor .view-line').filter({ hasText: 'Rocket entrypoint unsaved proof' });
+      await draftLine.first().waitFor();
+      await page.locator('[data-i18n-aria-label="code.hide"]').click();
+      await page.locator('.jec-panel').waitFor({ state: 'hidden' });
+      assert.equal(await page.locator('#code-button').getAttribute('aria-expanded'), 'false');
+      await page.locator('#code-button').click();
+      await page.locator('.jec-panel').waitFor({ state: 'visible' });
+      assert.equal(await page.evaluate(() => document.querySelector('.jec-workbench-frame') === window.originalEditorFrame
+        && window.originalEditorFrame.contentDocument === window.originalEditorDocument), true, 'Reopening uses the same native editor realm.');
+      await editor.locator('.tab.dirty').first().waitFor();
+      await draftLine.first().waitFor();
+      assert.equal(await page.evaluate(() => document.getElementById('site-frame') === window.originalSiteFrame
+        && window.originalSiteFrame.contentDocument === window.originalSiteDocument), true, 'Hiding and reopening Code never reloads the running site.');
+      assert.equal(await page.locator('#code-refresh-button').isVisible(), true);
+      await mkdir('test-results', { recursive: true });
+      await page.screenshot({ path: `test-results/code-rocket-entry-${name}.png` });
+      assert.deepEqual(errors, []);
+    } finally { await browser?.close(); await server.close(); }
+  });
 }

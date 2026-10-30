@@ -137,7 +137,7 @@ Check an item only after its implementation and stated evidence are available. R
 | D01–D14 | `cc65be0`; native HTTP SAPI bridge and execution controls | 21 local native checks across PHP 8.3/8.4/8.5 cover form/raw bodies, multipart, sessions, conditions, steps, frame evaluation, progressive objects, pause/stop and errors | Earlier native milestone; subsequent real Joomla and UI evidence is recorded below |
 | V07 | CI run [40966451725](https://github.com/joomengine/playground/actions/runs/40966451725) on `48f58e9` | Source checks and verified distribution build passed; provisioning correctly failed the three new POST-body cases | Failed, corrected by `cc65be0`; no readiness claim |
 
-### Integration stabilization evidence (current source milestone)
+### Integration stabilization evidence
 
 The following local receipts establish the checked implementation requirements. They do **not** replace the final-head workflow requirement, the Firefox requirement or authenticated provider verification. The main integration milestone is `ea11303d2607273a1348d18185434e1862b99fc4`. Subsequent focused fixes and evidence are identified by the PR commit history and final verification record.
 
@@ -155,11 +155,17 @@ The following local receipts establish the checked implementation requirements. 
 
 Additional stabilized behavior:
 
+- Full built distribution at `3e45edb`: authenticated real Joomla debugger flows pass for PHP 8.3/8.4/8.5 in Chromium (134 seconds), including the native workbench UI on the default version. The distribution inventory matches all 1,046 shipped files.
+
 - L01–L05: actual host controls exercise left/right/bottom divider drags, floating drag and resize, interactive uncovered site, saved geometry, maximize/restore, viewport clamping, narrow-layout collapse, hide/reopen and blocked-popup feedback while editor and preview documents retain identity. Chromium host suite passes both cases.
 - D01/D07: corrected phpdbg call-site behavior for Step Over and Continue. Thirty native integration cases pass across PHP 8.3/8.4/8.5, including nested calls, enabled call-site/callee breakpoints, final-line completion and preserved HTTP output. Twenty-one adapter/request/assets checks pass. The native UI steps over real Joomla dispatch in the caller, then continues to an authenticated HTTP 200 (latest pass: 60 seconds).
 
 - F08/F09: the extended native workbench suite passes in Chromium (144 seconds), preserving exact selection/cursor/scroll/draft state through hide, movement, resize and detach/redock; actual Save/Discard/Cancel dialogs, denied dirty deletion, failed dirty rename recovery and successful rename/save all preserve the expected documents and bytes. Deliberately denied operations are identified by their exact expected test errors; unexpected errors still fail the suite.
 - Responsive regression: CI run `40969011264` reproduced toolbar overflow at 768 pixels (document width 893 pixels). The focused fix lets the header and toolbar wrap within the viewport. The original 390/768/1440 widths, Refresh shown/hidden, and 80 width/locale combinations pass. The original full regression assertions remain unchanged for final CI.
+
+- Startup focus race: restoring controls before the runtime catalog finished loading could be overwritten by the initial URL configuration. Startup now preserves an explicit user choice, with unchanged defaults and post-startup configuration behavior. Five delayed-catalog cases and eight fresh initial-focus checks pass; the existing regression helper retains its immediate assertion and adds another after initialization completes.
+- I01/I03/I04/F08: the real Rocket launcher browser test passes (24 seconds): no Code source or assets are requested before clicking the actual Code button; native Quick Open and dirty editing work; the existing Joomla iframe/document and native editor iframe/document retain identity through Hide/Reopen; both refresh surfaces remain available.
+- Local build instructions now compile the phpdbg bridge for each supported runtime, matching CI, and link the new usage and completion records.
 
 Remaining open evidence is deliberate: full existing regressions and Firefox on the final head, and **A02 authenticated browser provider verification**. A02 requires an actual user-owned credential in the isolated settings panel; fixture tests and an unverified candidate endpoint do not satisfy it.
 
