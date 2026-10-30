@@ -393,3 +393,23 @@ test('catalog lifecycle filtering recognizes nested status without imposing Qwen
   const malformed = createChatProvider({ provider: preset('other'), baseURL: 'http://localhost:11434/v1', fetcher: async () => json({ data: [null] }) });
   await assert.rejects(malformed.listModels(), { code: 'INVALID_CATALOG' });
 });
+
+test('nonauthoritative catalogs preserve explicit deployment, dedicated, custom and published-fallback model IDs', async () => {
+  const cases = [
+    ['azure', { resource: 'my-resource' }, { data: [{ id: 'gpt-catalog-base-model' }] }],
+    ['fireworks', { accountId: 'my-account' }, { models: [{ name: 'accounts/fireworks/models/serverless-chat', supportsServerless: true }] }],
+    ['other', { baseURL: 'http://localhost:1234/v1' }, { data: [{ id: 'public-chat' }] }],
+    ['minimax', {}, null], ['zai', {}, null], ['nvidia', {}, null],
+  ];
+  for (const [id, options, response] of cases) {
+    const provider = createChatProvider({ provider: preset(id), ...options, apiKey: key, fetcher: async () => json(response) });
+    const result = await provider.listModels({ currentModel: 'explicit-unlisted-model' });
+    assert.equal(result.selectedModel, 'explicit-unlisted-model', id);
+    assert.equal(result.preserveManualSelection, true, id);
+    const initial = await provider.listModels({ currentModel: '' });
+    assert.equal(initial.selectedModel, initial.models[0].id, id);
+  }
+  const authoritative = createChatProvider({ provider: preset('deepseek'), apiKey: key, fetcher: async () => json({ data: [{ id: 'deepseek-chat' }] }) });
+  const result = await authoritative.listModels({ currentModel: 'removed-model' });
+  assert.equal(result.selectedModel, 'deepseek-chat'); assert.equal(result.preserveManualSelection, false);
+});
