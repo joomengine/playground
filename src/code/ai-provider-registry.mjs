@@ -17,7 +17,7 @@ export const AI_PROVIDERS = Object.freeze([
     documentation: 'https://developers.openai.com/api/reference/resources/models/methods/list',
   }),
   preset('anthropic', 'Anthropic / Claude', 'https://api.anthropic.com', {
-    protocol: 'anthropic', auth: 'anthropic', catalog: 'anthropic', preferences: ['claude-sonnet', 'claude-opus', 'claude-haiku'],
+    protocol: 'anthropic', apiVersion: '2026-10-21', auth: 'anthropic', catalog: 'anthropic', preferences: ['claude-sonnet', 'claude-opus', 'claude-haiku'],
     documentation: 'https://platform.claude.com/docs/en/api/models/list',
   }),
   preset('google', 'Google / Gemini', 'https://generativelanguage.googleapis.com/v1beta', {

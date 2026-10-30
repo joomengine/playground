@@ -114,14 +114,15 @@ for (const name of names) test(`AI credential sandbox and explicit review contro
 for (const name of names) test(`AI local optional-key transport, model selection and theme in ${name}`, { timeout: 45_000 }, async () => {
   const server = await createStaticServer({ directory: root });
   let chats = 0, catalogues = 0;
+  const authHeaders = [];
   const api = createServer((request, response) => {
     response.setHeader('Access-Control-Allow-Origin', '*');
     response.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
     response.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
     if (request.method === 'OPTIONS') return response.writeHead(204).end();
-    assert.equal(request.headers.authorization, undefined);
+    authHeaders.push({ path: request.url, authorization: request.headers.authorization });
     assert.equal(request.headers.origin, 'null');
-    if (request.url === '/v1/models') {
+    if (request.url === '/v1/models' || request.url === '/other/v1/models') {
       catalogues++; response.setHeader('Content-Type', 'application/json');
       return response.end(JSON.stringify({ data: [{ id: 'local-coder' }] }));
     }
@@ -155,10 +156,45 @@ for (const name of names) test(`AI local optional-key transport, model selection
     await panel.locator('#prompt').fill('Say hello'); await panel.locator('#send').click();
     await panel.getByText('Local connection works.', { exact: true }).waitFor();
     assert.equal(chats, 1);
+    assert.ok(authHeaders.every(request => request.authorization === undefined), 'blank local key never creates an Authorization header');
     await page.evaluate(() => window.localPanel.setTheme('dark'));
     await panel.locator('html[data-theme="dark"]').waitFor();
     await page.evaluate(() => window.localPanel.setTheme('light'));
     await panel.locator('html[data-theme="light"]').waitFor();
+    await panel.locator('#api-key').fill('connection-A-key');
+    await panel.locator('#model').click();
+    await panel.locator('#base-url').fill(`http://127.0.0.1:${api.address().port}/other/v1`);
+    assert.equal(await panel.locator('#api-key').inputValue(), '', 'typing a new URL immediately removes the previous key');
+    await panel.locator('#fetch-models').click();
+    await panel.locator('#status').filter({ hasText: 'Available models refreshed.' }).waitFor();
+    assert.ok(authHeaders.filter(request => request.path.startsWith('/other/')).every(request => request.authorization === undefined), 'new endpoint receives no previous connection key');
+    await panel.locator('#base-url').fill(`http://127.0.0.1:${api.address().port}/v1`);
+    await panel.locator('#model').click();
+    await panel.locator('#api-key').waitFor();
+    // Waiting on the input value makes the broker lookup part of the assertion.
+    await panel.locator('#api-key').evaluate(input => new Promise((resolve, reject) => {
+      const start = performance.now();
+      function check() { if (input.value === 'connection-A-key') resolve(); else if (performance.now() - start > 3000) reject(new Error('Original connection key was not restored')); else setTimeout(check, 20); }
+      check();
+    }));
+    await panel.locator('#protocol').selectOption('anthropic');
+    assert.equal(await panel.locator('#api-key').inputValue(), '', 'another protocol is a distinct connection');
+    await page.evaluate(async () => {
+      window.localPanel.dispose();
+      const { createIsolatedAiPanel } = await import('./src/code/ai-panel.mjs');
+      window.restoredScopes = [];
+      window.contextPanel = createIsolatedAiPanel({ container: document.querySelector('main'), sessionKey: 'context-test',
+        tools: { definitions: [], execute() {}, getScope: () => ({ mode: 'selected', paths: ['/templates'], excluded: [] }),
+          browse: () => ({ entries: [{ path: '/templates', canonicalPath: '/templates', type: 'directory', size: 0, sensitive: false }] }) },
+        review: { accept() {} }, getContext: ({ scope }) => { window.restoredScopes.push(scope); return { files: [], scope }; } });
+    });
+    const restored = page.frameLocator('.jec-ai-frame');
+    await restored.locator('#context-tree input[type="checkbox"]').waitFor();
+    assert.equal(await restored.locator('#context-scope').inputValue(), 'selected');
+    assert.equal(await restored.locator('#exclude-generated').isChecked(), false);
+    assert.equal(await restored.locator('#context-tree input[type="checkbox"]').isChecked(), true);
+    assert.deepEqual(await page.evaluate(() => window.restoredScopes.at(-1).excluded), []);
+
   } finally {
     await browser?.close(); await server.close(); api.closeAllConnections();
     await new Promise(resolve => api.close(resolve));

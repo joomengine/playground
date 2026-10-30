@@ -192,6 +192,43 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  interaction:
+    name: Editor and interaction checks (${{ matrix.browser }})
+    needs: checks
+    if: needs.checks.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: '.node-version'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Install selected browser engine
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Validate Code, isolated AI, layout and language interactions
+        env:
+          PLAYGROUND_BROWSERS: ${{ matrix.browser }}
+        run: |
+          result=0
+          for suite in test/code-workbench.browser.mjs test/code-ai-browser.mjs test/code-host-lifecycle.browser.mjs test/language-selector.browser.mjs; do
+            node --test "$suite" || result=1
+          done
+          exit "$result"
+      - name: Retain interaction receipts and diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playground-interaction-results-${{ matrix.browser }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
   browser:
     name: Browser validation (${{ matrix.browser }})
     needs: [checks, build]
@@ -199,7 +236,7 @@ jobs:
     # The Code suites run before the existing 30-minute regression contract.
     timeout-minutes: 45
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         browser: [chromium, firefox]
     steps:
@@ -215,17 +252,16 @@ jobs:
           path: dist
       - name: Install selected browser engine
         run: npx playwright install --with-deps ${{ matrix.browser }}
-      - name: Validate JoomEngine Code workbench and isolated AI review
+      - name: Validate Code against the running Joomla runtime
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
           PLAYGROUND_PHP_VERSIONS: ${{ needs.checks.outputs.php }}
         run: |
-          npm run test:code-browser
-          node --test test/code-ai-browser.mjs
-          node --test test/code-host-lifecycle.browser.mjs
-          node --test test/language-selector.browser.mjs
-          node --test test/code-joomla.browser.mjs
-          node --test test/code-debug-joomla.browser.mjs
+          result=0
+          for suite in test/code-joomla.browser.mjs test/code-debug-joomla.browser.mjs; do
+            node --test "$suite" || result=1
+          done
+          exit "$result"
       - name: Validate the exact candidate build
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
@@ -244,7 +280,7 @@ jobs:
 
   validate:
     name: Validate playground
-    needs: [checks, build, browser]
+    needs: [checks, build, browser, interaction]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -255,9 +291,11 @@ jobs:
           BUILD_REQUIRED: ${{ needs.checks.outputs.build }}
           BUILD: ${{ needs.build.result }}
           BROWSERS: ${{ needs.browser.result }}
+          INTERACTIONS: ${{ needs.interaction.result }}
         run: |
           test "$CHECKS" = success
           if [ "$BUILD_REQUIRED" = true ]; then
             test "$BUILD" = success
             test "$BROWSERS" = success
+            test "$INTERACTIONS" = success
           fi

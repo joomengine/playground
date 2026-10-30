@@ -65,6 +65,7 @@ export function createAiReview({ workspace, isDirty = () => false, onApplied = (
     throw new TypeError('AI review requires the shared workspace service and its write reservation.');
   }
   const reviews = new Map();
+  const reviewSession = globalThis.crypto.randomUUID();
   let sequence = 0, busy = false;
   const known = id => {
     const review = reviews.get(id);
@@ -167,7 +168,7 @@ export function createAiReview({ workspace, isDirty = () => false, onApplied = (
       if (totalBytes > maxBytes) throw new Error('This AI change set is too large to review safely. Propose a smaller change.');
       operations.push(operation);
     }
-    const id = `ai-review-${++sequence}`;
+    const id = `ai-review-${reviewSession}-${++sequence}`;
     const record = { id, summary: proposal.summary.trim(), status: 'pending', operations,
       changes, preconditions: [...preconditions].map(([path, condition]) => ({ path, ...condition })), paths: [...paths] };
     reviews.set(id, record);

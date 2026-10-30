@@ -397,3 +397,14 @@ test('context budget includes selected text as well as file contents', async () 
     selection: { path: '/index.php', canonicalPath: '/index.php', text } });
   assert.equal(context.bytes, new TextEncoder().encode(content + text).byteLength);
 });
+
+test('review identifiers never resolve a stale transcript to a new service proposal', async () => {
+  const { workspace, review, directory } = fixture();
+  const old = await review.prepare({ summary: 'Old review', changes: [{ operation: 'write', path: '/index.php', content: 'old' }] });
+  const replacement = createAiReview({ workspace });
+  const current = await replacement.prepare({ summary: 'New review', changes: [{ operation: 'write', path: '/index.php', content: 'new' }] });
+  assert.notEqual(old.id, current.id);
+  await assert.rejects(replacement.accept(old.id), /expired/);
+  assert.match(fs.readFileSync(path.join(directory, 'index.php'), 'utf8'), /before/);
+  assert.equal(replacement.get(current.id).status, 'pending');
+});

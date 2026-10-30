@@ -1,7 +1,7 @@
 /** Isolated session vault. This function is serialized into an opaque sandbox. */
 export function runConnectionBroker({ nonce, hostOrigin }) {
   const connections = new Map(), sessions = new Map(), peers = new Set();
-  let latest;
+  let latest, credentialGeneration = 0;
   function connect(event) {
     if (event.source !== parent || event.origin !== hostOrigin || event.data?.type !== 'jec-ai-broker-connect' || event.data.nonce !== nonce || event.ports.length !== 1) return;
     removeEventListener('message', connect);
@@ -22,7 +22,7 @@ export function runConnectionBroker({ nonce, hostOrigin }) {
         else if (operation === 'session-save' && typeof args.key === 'string' && args.key.length < 256
           && Array.isArray(args.messages) && args.messages.length <= 128 && Array.isArray(args.transcript) && args.transcript.length <= 256
           && JSON.stringify(args).length <= 4 * 1024 * 1024) {
-          sessions.set(args.key, { messages: args.messages, transcript: args.transcript, scopeKey: typeof args.scopeKey === 'string' ? args.scopeKey.slice(0, 32768) : null });
+          sessions.set(args.key, { messages: args.messages, transcript: args.transcript, scopeKey: typeof args.scopeKey === 'string' ? args.scopeKey.slice(0, 32768) : null, connectionKey: typeof args.connectionKey === 'string' ? args.connectionKey.slice(0, 32768) : null });
           broadcast({ type: 'session', key: args.key, state: sessions.get(args.key) });
           while (sessions.size > 8) sessions.delete(sessions.keys().next().value);
         }
@@ -36,7 +36,9 @@ export function runConnectionBroker({ nonce, hostOrigin }) {
             const value = args.settings[key];
             if (typeof value === 'string' && value.length <= 4096 && !/[\r\n]/.test(value)) record[key] = value;
           }
-          connections.set(args.id, record); latest = args.id; broadcast({ type: 'settings', settings: record });
+          const previous = connections.get(args.id);
+          record.revision = previous && previous.apiKey === record.apiKey ? previous.revision : String(++credentialGeneration);
+          connections.set(args.id, record); latest = args.id; result = record; broadcast({ type: 'settings', settings: record });
           while (connections.size > 64) connections.delete(connections.keys().next().value);
         }
         port.postMessage({ id, result });

@@ -18,7 +18,7 @@ Implementation review: 30 October 2026. This document records engineering covera
 | MiniMax | Chat Completions, preserving reasoning content and complete response content | Published model fallback plus editable ID |
 | Perplexity | Native `/v1/agent`, Responses-style streaming and custom functions | `/v1/models`; no automatic switch to private Orchestrator APIs |
 | Fireworks | Inference Chat Completions | Paginated account catalog; only entries explicitly reporting serverless availability are offered |
-| OpenRouter | Chat Completions gateway | `/models`, text/tool filters |
+| OpenRouter | Chat Completions gateway, exact signed/encrypted reasoning sequence replay | `/models`, text/tool filters |
 | Hugging Face Inference Providers | Routed Chat Completions | `/models`, text and live tool-capable provider filters |
 | NVIDIA hosted APIs | Hosted Chat Completions | Published model fallback plus editable ID; self-hosted NIM uses Other |
 | Azure / Foundry | Resource-specific v1 Chat Completions using `api-key` | Resource v1 models; editable deployment ID |
@@ -71,4 +71,5 @@ Bedrock Runtime has no compatible model-list endpoint. Its native control-plane 
 - [xAI models](https://docs.x.ai/developers/rest-api-reference/inference/models), [Kimi models](https://platform.kimi.ai/docs/api/list-models), [Groq API](https://console.groq.com/docs/api-reference), [Cerebras models](https://inference-docs.cerebras.ai/api-reference/models/list-models), [Together compatibility](https://docs.together.ai/docs/inference/openai-compatibility).
 - [Fireworks models](https://docs.fireworks.ai/api-reference/list-models), [Hugging Face router catalog](https://huggingface.co/docs/inference-providers/hub-api), [NVIDIA hosted APIs](https://docs.api.nvidia.com/nim/reference/llm-apis), [Azure models](https://learn.microsoft.com/en-us/rest/api/microsoft-foundry/azureopenai/models).
 - [Bedrock endpoint routing](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-chat-completions.html), [discovery distinction](https://docs.aws.amazon.com/bedrock/latest/userguide/models-get-info.html).
+- [OpenRouter reasoning continuation](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
 - [Ollama compatibility](https://docs.ollama.com/api/openai-compatibility), [LM Studio compatibility](https://lmstudio.ai/docs/developer/openai-compat).

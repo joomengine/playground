@@ -32,6 +32,12 @@ export function mountDetachedTools({ part, provider, openFile, saveAll, redock, 
   root.className = 'jec-detached-root';
   root.setAttribute('aria-label', message('code.detached.workspace'));
   root.style.cssText = 'position:absolute;inset:0;pointer-events:none;font:13px system-ui;color:var(--jec-text,#ddd);z-index:5';
+  // The pinned native auxiliary container cancels every bubbling wheel event
+  // (AuxiliaryWindow.registerListeners). Our file/search/AI companion uses
+  // browser scrolling, so stop only its wheel bubbling without cancelling the
+  // default scroll. The native editor is a sibling and keeps its own handling.
+  const allowCompanionScroll = event => event.stopPropagation();
+  root.addEventListener('wheel', allowCompanionScroll, { passive: true });
   const sharedStyle = document.createElement('link'); sharedStyle.rel = 'stylesheet';
   if (shellStylesheet) { sharedStyle.href = shellStylesheet; document.head.append(sharedStyle); }
   const style = document.createElement('style');
@@ -175,6 +181,7 @@ export function mountDetachedTools({ part, provider, openFile, saveAll, redock, 
     disposed = true; sequence++; void cancelSearch().catch(() => {}); external?.dispose?.();
     editor.removeEventListener('focusin', editorFocus); navigation.removeEventListener('focusin', fileFocus);
     toolbarObserver.disconnect(); sharedStyle.remove();
+    root.removeEventListener('wheel', allowCompanionScroll);
     part.layout = originalLayout; root.remove();
   } };
 }

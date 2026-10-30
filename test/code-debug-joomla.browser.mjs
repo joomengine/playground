@@ -56,7 +56,7 @@ async function assertNativeDebugWorkbench(page, browserName, phpVersion) {
     && response.url().endsWith('/administrator/index.php') && response.request().resourceType() === 'document', { timeout: 120_000 });
   // Keep the deferred HTTP response observed while assertions inspect the pause.
   responsePromise.catch(() => {});
-  await page.locator('button[data-i18n="code.debugRefresh"]').click();
+  await page.locator('button[data-i18n-title="code.debugRefresh"]').click();
   await page.waitForFunction(() => window.playground.debugger.state === 'paused');
   await editor.locator('.debug-toolbar').waitFor();
   await editor.locator('.debug-call-stack').getByText('AdministratorApplication.php', { exact: false }).first().waitFor();
@@ -101,7 +101,7 @@ async function assertNativeDebugWorkbench(page, browserName, phpVersion) {
   await page.keyboard.press('Enter');
   await page.keyboard.insertText(marker);
   await editor.locator('.tab.dirty').getByText(calleeName, { exact: true }).waitFor();
-  await page.locator('button[data-i18n="code.saveAll"]').click();
+  await page.locator('button[data-i18n-title="code.saveAll"]').click();
   const pausedSources = await page.evaluate(async paths => Promise.all(paths.map(path => window.playground.workspace.request('read', { path })
     .then(value => new TextDecoder().decode(value.bytes)))), [originalPath.slice('/persist/www'.length), calleePath]);
   assert.ok(pausedSources.every(source => !source.includes(marker)), 'Queued saves cannot change the active PHP snapshot while paused.');

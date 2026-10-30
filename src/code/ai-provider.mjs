@@ -59,7 +59,7 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
       else result.Authorization = `Bearer ${apiKey.trim()}`;
     }
     if (protocol === 'anthropic') {
-      result['anthropic-version'] = '2023-06-01';
+      result['anthropic-version'] = provider.apiVersion || '2023-06-01';
       result['anthropic-dangerous-direct-browser-access'] = 'true';
     }
     return result;
@@ -112,7 +112,9 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
     if (/embed|rerank|whisper|tts|dall-e|moderation|imagen|veo|(^|[/-])audio|transcri|realtime|safety|guard/i.test(id)) return null;
     const methods = item.supportedGenerationMethods;
     if (Array.isArray(methods) && !methods.includes('generateContent')) return null;
-    if (item.capabilities?.completion_chat === false || item.capabilities?.function_calling === false) return null;
+    if (item.capabilities?.completion_chat === false || item.capabilities?.function_calling === false
+      || item.capabilities?.tools === false || item.capabilities?.tools?.supported === false
+      || item.capabilities?.streaming === false || item.capabilities?.streaming?.supported === false) return null;
     if (Array.isArray(item.supported_parameters) && !item.supported_parameters.includes('tools')) return null;
     if (Array.isArray(item.capabilities) && !item.capabilities.some(value => ['TG', 'Reasoning', 'text-generation'].includes(value))) return null;
     if (provider.catalog === 'qwen' && Array.isArray(item.features) && !item.features.includes('function-calling')) return null;
@@ -125,7 +127,7 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
     if (provider.id === 'openai' && (!/^(gpt-|o[1-9])/.test(id) || /instruct|search|image|deep-research|computer-use/i.test(id))) return null;
     if (provider.catalog === 'fireworks' && item.supportsServerless !== true) return null;
     return { id, label: item.display_name || item.displayName || id,
-      tools: item.providers?.some(route => route.status === 'live' && route.supports_tools === true) || item.capabilities?.function_calling === true || item.supports_tools === true || item.supportsTools === true || item.tool_calling === true
+      tools: item.capabilities?.tools === true || item.capabilities?.tools?.supported === true || item.providers?.some(route => route.status === 'live' && route.supports_tools === true) || item.capabilities?.function_calling === true || item.supports_tools === true || item.supportsTools === true || item.tool_calling === true
         || (Array.isArray(item.supported_parameters) && item.supported_parameters.includes('tools')) ? true : null };
   }
   async function listModels({ signal, currentModel = model } = {}) {
@@ -168,7 +170,7 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
       const models = [...new Map(items.map(usable).filter(Boolean).map(item => [item.id, item])).values()];
       const preferences = provider.preferences || ['coder', 'code', 'instruct', 'chat'];
       const rank = item => { const index = preferences.findIndex(value => item.id.toLowerCase().includes(value.toLowerCase())); return index < 0 ? preferences.length : index; };
-      models.sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id, 'en', { numeric: true }));
+      models.sort((a, b) => Number(b.tools === true) - Number(a.tools === true) || rank(a) - rank(b) || a.id.localeCompare(b.id, 'en', { numeric: true }));
       return { models, selectedModel: models.some(item => item.id === currentModel) ? currentModel : (source === 'manual' ? currentModel : models[0]?.id || ''), source };
     });
   }
@@ -220,11 +222,14 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
         ...(protocol === 'agent' ? { max_output_tokens: 8192 } : { include: ['reasoning.encrypted_content'] }),
         ...(tools.length ? { tools: tools.map(({ function: fn }) => ({ type: 'function', ...fn, strict: false })), tool_choice: 'auto' } : {}) };
     }
-    const turns = messages.map(({ _anthropic, _gemini, _responses, ...message }) => message);
+    const turns = messages.map(({ _anthropic, _gemini, _responses, tool_plan, ...message }) => ({ ...message,
+      ...(protocol === 'cohere' && tool_plan ? { tool_plan } : {}) }));
     if (protocol === 'cohere') for (const message of turns) {
       if (message.role === 'tool') message.content = [{ type: 'text', text: message.content }];
       if (message.role === 'assistant' && message.content == null) delete message.content;
       delete message.reasoning_content;
+      delete message.reasoning;
+      delete message.reasoning_details;
     }
     return { model: model.trim(), messages: turns, stream: true, ...(tools.length ? { tools, ...(protocol === 'cohere' ? {} : { tool_choice: 'auto' }) } : {}) };
   }
@@ -243,8 +248,8 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
         await response.body?.cancel(); throw failure('The endpoint did not return a supported event stream.', 'INVALID_STREAM');
       }
       const reader = response.body.getReader(), decoder = new TextDecoder('utf-8', { fatal: true });
-      const calls = new Map(), blocks = new Map(), geminiParts = [], responseItems = new Map();
-      let buffer = '', data = [], content = '', reasoning = '', toolPlan = '', bytes = 0, done = false, finishReason = null;
+      const calls = new Map(), blocks = new Map(), geminiParts = [], responseItems = new Map(), reasoningDetails = [];
+      let buffer = '', data = [], content = '', reasoning = '', reasoningAlias = '', toolPlan = '', bytes = 0, done = false, finishReason = null;
       function append(value) { if (typeof value === 'string') { content += value; onDelta(value); } }
       function call(index, fragment, replace = false) {
         if (!Number.isInteger(index) || index < 0 || index >= 128) throw failure('Invalid streamed tool index.', 'TOOL_LIMIT');
@@ -322,6 +327,13 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
         if (choice.finish_reason != null) finishReason = choice.finish_reason;
         append(choice.delta?.content);
         if (typeof choice.delta?.reasoning_content === 'string') reasoning += choice.delta.reasoning_content;
+        if (typeof choice.delta?.reasoning === 'string') reasoningAlias += choice.delta.reasoning;
+        if (choice.delta?.reasoning_details !== undefined) {
+          if (!Array.isArray(choice.delta.reasoning_details) || choice.delta.reasoning_details.some(item => !item || typeof item !== 'object' || Array.isArray(item))) throw failure('Invalid reasoning metadata.', 'INVALID_STREAM');
+          // OpenRouter requires the complete, unmodified sequence, including
+          // signed/encrypted chunks, when continuing a turn after tool results.
+          reasoningDetails.push(...choice.delta.reasoning_details);
+        }
         if (choice.delta?.tool_calls !== undefined && !Array.isArray(choice.delta.tool_calls)) throw failure('Invalid streamed tool calls.', 'INVALID_STREAM');
         for (const fragment of choice.delta?.tool_calls || []) { if (fragment.type && fragment.type !== 'function') throw failure('Unsupported tool type.', 'INVALID_STREAM'); call(fragment.index, fragment); }
       }
@@ -349,6 +361,8 @@ export function createChatProvider({ provider = {}, baseURL, protocol = provider
         if (protocol === 'anthropic') for (const [index, value] of calls) blocks.get(index).input = JSON.parse(value.function.arguments);
         return { role: 'assistant', content: content || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
           ...(reasoning ? { reasoning_content: reasoning } : {}),
+          ...(reasoningAlias ? { reasoning: reasoningAlias } : {}),
+          ...(reasoningDetails.length ? { reasoning_details: reasoningDetails } : {}),
           ...(toolPlan ? { tool_plan: toolPlan } : {}),
           ...(protocol === 'anthropic' ? { _anthropic: [...blocks.values()] } : {}),
           ...(protocol === 'gemini' ? { _gemini: geminiParts } : {}),

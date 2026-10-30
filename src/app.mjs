@@ -90,9 +90,6 @@ function activity(message) {
 function show(view) {
   for (const name of ['welcome', 'loading-view', 'error-view', 'site-mount']) $(name).hidden = name !== view;
   document.querySelector('.preview-panel').classList.toggle('launching', view === 'loading-view');
-  const video = $('launch-video');
-  if (video && view === 'loading-view' && !matchMedia('(prefers-reduced-motion: reduce)').matches) video.play().catch(() => {});
-  else video?.pause();
 }
 function feedback(message, { error = false, persistent = false } = {}) {
   clearTimeout(feedbackTimer);
