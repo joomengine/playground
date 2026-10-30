@@ -204,6 +204,11 @@ async function saveBrowserDiagnostics(page, name, error) {
     return {
       url: location.href, readyState: document.readyState,
       status: text('status-message') || text('message'), loading: text('loading-message'), error: text('error-message'), feedback: text('header-feedback'), activity: text('activity-log')?.slice(-5000),
+      savedSite: {
+        selected: document.getElementById('saved-site')?.value, staged: document.getElementById('storage-key')?.value,
+        name: document.getElementById('saved-site-name')?.value, renameDisabled: document.getElementById('rename-site-button')?.disabled,
+        launchDisabled: document.getElementById('launch-button')?.disabled, saveDisabled: document.getElementById('save-button')?.disabled,
+      },
       iframe: frame ? { src: frame.getAttribute('src'), hidden: frame.hidden, connected: frame.isConnected } : null,
       progress: window.validationProgress,
     };
@@ -385,6 +390,53 @@ async function launchStagedSite(page) {
     }, { previous, key }, { timeout: requestTimeout });
     return await renderedSiteFrame(page);
   } finally { await previous?.dispose(); }
+}
+
+async function waitForSiteClosed(page) {
+  await page.waitForFunction(() => !document.getElementById('site-frame')
+    && !document.getElementById('launch-button').disabled, null, { timeout: requestTimeout });
+}
+
+async function stageSavedSite(page, key) {
+  await page.locator('#saved-site').selectOption(key);
+  await page.waitForFunction(key => document.getElementById('saved-site').value === key
+    && document.getElementById('storage-key').value === key
+    && !document.getElementById('rename-site-button').disabled, key);
+}
+
+async function saveRunningSite(page) {
+  const previous = await page.locator('#activity-log li').last().elementHandle();
+  try {
+    await page.locator('#save-button').click();
+    await page.waitForFunction(previous => {
+      const entry = document.querySelector('#activity-log li:last-child');
+      return entry !== previous && entry?.textContent.includes('Files and database saved to browser storage.')
+        && !document.getElementById('save-button').disabled;
+    }, previous, { timeout: requestTimeout });
+  } finally { await previous?.dispose(); }
+}
+
+async function dismissAutomaticTour(page) {
+  const frame = await renderedSiteFrame(page);
+  // A new administrator's tour fetch can redirect after document load. Use
+  // Joomla's actual Hide forever action and await its persisted acknowledgement
+  // before the fixture starts navigating or saving this installation.
+  const hideTour = frame.locator('[data-shepherd-step-id="tourinfo"] .shepherd-button-secondary');
+  await hideTour.waitFor({ timeout: requestTimeout });
+  const [acknowledged] = await Promise.all([
+    page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return response.request().frame() === frame && url.searchParams.get('option') === 'com_guidedtours'
+        && url.searchParams.get('task') === 'ajax.fetchUserState' && url.searchParams.get('context') === 'tour.skip';
+    }),
+    hideTour.click(),
+  ]);
+  assert.equal(acknowledged.status(), 200);
+  const payload = await acknowledged.json();
+  assert.equal(payload.success, true, JSON.stringify(payload));
+  assert.equal(payload.data.state, 'skipped');
+  await hideTour.waitFor({ state: 'hidden' });
+  assert.equal(await frame.evaluate(() => sessionStorage.getItem('tourId')), null);
 }
 
 async function previewContract(page, action = 'read', frameId = 'site-frame') {
@@ -963,6 +1015,7 @@ for (const name of browserNames) {
         page.testStep = 'launch administrator';
         await approveFixtureLaunch(page, page.locator('#launch-button'), new URL('__test_extension.zip', server.url).href);
         await renderedSiteFrame(page);
+        await dismissAutomaticTour(page);
         assert.match(await page.frameLocator('#site-frame').locator('html').innerHTML(), /com_cpanel|task=logout|value=["']logout["']/i);
         await mkdir(path.join(root, 'test-results'), { recursive: true });
         await page.screenshot({ path: path.join(root, 'test-results', `interface-${name}.png`), fullPage: true });
@@ -1030,8 +1083,7 @@ for (const name of browserNames) {
         assert.deepEqual(navigationWorkers, [], 'Site/Admin never creates replacement runtime workers.');
         page.off('worker', observeNavigationWorker);
         page.testStep = 'save site';
-        await page.locator('#save-button').click();
-        await page.locator('#status-message').filter({ hasText: /saved/i }).waitFor();
+        await saveRunningSite(page);
         const changedPHP = manifest.joomla.find((entry) => entry.version === defaultPair.joomlaVersion).php.find((version) => version !== defaultPair.phpVersion);
         assert.ok(changedPHP, 'The interface contract needs two compatible PHP versions.');
         page.testStep = 'switch PHP with saved files and database';
@@ -1042,9 +1094,7 @@ for (const name of browserNames) {
         await showQuickSettings(page);
         await page.locator('#php-version').selectOption(changedPHP);
         assert.deepEqual(await previewContract(page), marker, 'Staging PHP must keep the active runtime unchanged.');
-        await page.locator('#launch-button').click();
-        await page.waitForFunction(() => !document.getElementById('launch-button').disabled, null, { timeout: requestTimeout });
-        const switchedFrame = await renderedSiteFrame(page);
+        const switchedFrame = await launchStagedSite(page);
         assert.equal(new URL(switchedFrame.url()).pathname.split('/administrator/')[1], new URL(originalFrameURL).pathname.split('/administrator/')[1]);
         assert.equal(new URL(switchedFrame.url()).search, new URL(originalFrameURL).search, 'Launching a staged PHP change restores the safe Joomla route.');
         const afterSwitch = await previewContract(page);
@@ -1052,6 +1102,7 @@ for (const name of browserNames) {
         page.testStep = 'reopen saved site from origin';
         await showSiteActions(page);
         await page.locator('#close-button').click();
+        await waitForSiteClosed(page);
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         await page.goto(server.url);
@@ -1079,6 +1130,7 @@ for (const name of browserNames) {
         const savedKey = await page.locator('#storage-key').inputValue();
         await showSiteActions(page);
         await page.locator('#close-button').click();
+        await waitForSiteClosed(page);
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         const freshURL = new URL(server.url);
@@ -1086,12 +1138,14 @@ for (const name of browserNames) {
         await page.goto(freshURL.href);
         await reviewFixtureLink(page, new URL('__test_extension.zip', server.url).href);
         await renderedSiteFrame(page);
+        await dismissAutomaticTour(page);
         const freshKey = await page.locator('#storage-key').inputValue();
         assert.notEqual(freshKey, savedKey, 'fresh=1 must give the new saved site its own storage key.');
         assert.equal(new URL(page.url()).searchParams.has('fresh'), false, 'Reloading the new site must resume it instead of repeatedly creating sites.');
         assert.equal((await previewContract(page)).database, null);
         await showSiteActions(page);
         await page.locator('#close-button').click();
+        await waitForSiteClosed(page);
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         const savedURL = new URL(server.url);
@@ -1103,6 +1157,7 @@ for (const name of browserNames) {
         page.testStep = 'changed sources on a saved-site link still require review';
         await showSiteActions(page);
         await page.locator('#close-button').click();
+        await waitForSiteClosed(page);
         await page.locator('#embedded-launch:enabled').waitFor();
         const changedSourceURL = new URL(savedURL);
         const unreviewedSource = new URL('unreviewed-extension.zip', server.url).href;
@@ -1126,27 +1181,43 @@ for (const name of browserNames) {
         assert.equal(await page.locator('#site-frame').count(), 1);
         assert.deepEqual(await previewContract(page), afterSwitch, 'Staging a new site leaves the running site intact.');
         await launchStagedSite(page);
+        await dismissAutomaticTour(page);
         assert.equal((await previewContract(page)).database, null, 'New site must install an independent database.');
         await showQuickSettings(page);
-        await page.locator('#saved-site').selectOption(savedKey);
+        await stageSavedSite(page, savedKey);
         assert.equal((await previewContract(page)).database, null, 'Selecting a saved site does not launch it.');
+        page.testStep = 'rename preserves an inactive name draft across route and save updates';
+        await page.locator('#saved-site-name').fill('');
+        await saveRunningSite(page);
+        assert.equal(await page.locator('#saved-site-name').inputValue(), '', 'Catalog refresh must preserve an intentionally empty name draft.');
         await page.locator('#saved-site-name').fill('Renamed original site');
+        const renameFrame = await renderedSiteFrame(page);
+        await renameFrame.evaluate(() => { location.hash = '#rename-draft'; });
+        await page.waitForFunction(() => new URL(location.href).searchParams.get('path')?.endsWith('#rename-draft'));
+        await saveRunningSite(page);
+        assert.equal(await page.locator('#saved-site-name').inputValue(), 'Renamed original site', 'Saving the running site must preserve the inactive site name draft.');
         await page.locator('#rename-site-button').click();
+        await page.locator('#header-feedback').filter({ hasText: 'Saved site renamed.' }).waitFor();
         assert.equal(await page.locator('#saved-site').inputValue(), savedKey);
         assert.match(await page.locator(`#saved-site option[value="${savedKey}"]`).textContent(), /Renamed original site/);
+        assert.equal(await page.evaluate(key => Object.entries(localStorage)
+          .filter(([entry]) => entry.startsWith('joomengine:launch:'))
+          .some(([, value]) => JSON.parse(value).sites?.[key]?.displayName === 'Renamed original site'), savedKey), true,
+        'The renamed label must be persisted under the original site identity.');
         assert.equal((await previewContract(page)).database, null, 'Renaming an inactive entry does not change the running database.');
-        await page.locator('#saved-site').selectOption(freshKey);
+        await stageSavedSite(page, freshKey);
         page.once('dialog', dialog => dialog.accept());
         await page.locator('#delete-site-button').click();
         await page.waitForFunction(key => !document.querySelector(`#saved-site option[value="${key}"]`), freshKey);
         assert.equal((await previewContract(page)).database, null, 'Deleting an inactive entry never launches it or deletes the running database.');
-        await page.locator('#saved-site').selectOption(savedKey);
+        await stageSavedSite(page, savedKey);
         await launchStagedSite(page);
         assert.deepEqual(await previewContract(page), afterSwitch, 'The saved-site selector must reopen the original files and database.');
         page.testStep = 'reset site';
         page.once('dialog', (dialog) => dialog.accept());
         await showSiteActions(page);
         await page.locator('#reset-button').click();
+        await waitForSiteClosed(page);
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         assert.equal(await page.locator('#site-frame').isVisible(), false);
@@ -1165,6 +1236,7 @@ for (const name of browserNames) {
         page.testStep = 'close site';
         await showSiteActions(page);
         await page.locator('#close-button').click();
+        await waitForSiteClosed(page);
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         await bounded(Promise.allSettled([...page.responseChecks]), 'Read dashboard responses', 10_000);
