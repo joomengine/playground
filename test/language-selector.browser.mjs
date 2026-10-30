@@ -54,6 +54,8 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await single.press('Enter');
 
       const multi = page.locator('#languages-entry');
+      assert.equal(await page.getByRole('combobox', { name: 'Site languages', exact: true }).count(), 1,
+        'The multi-selector retains its visible field label as the accessible name.');
       await multi.focus();
       assert.equal(await page.locator('#languages-choices [role="option"]').count(), 3, 'Already selected English is excluded.');
       await multi.fill('de'); await multi.press('ArrowDown'); await multi.press('Enter');
@@ -75,14 +77,36 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       assert.equal(await multi.inputValue(), 'invalid', 'Invalid pending text stays editable after blur.');
       assert.equal(await multi.evaluate(input => input.checkValidity()), false);
       assert.equal(await page.locator('.language-tag').count(), 4, 'Invalid text is never promoted to a selected tag.');
+      await multi.focus();
+      await page.evaluate(() => { window.multiLanguage.setCatalog(['af-ZA', 'fr-FR', 'de-DE', 'it-IT']); window.multiLanguage.refresh(); });
+      assert.equal(await multi.inputValue(), 'invalid', 'Catalog/locale refresh preserves unfinished text.');
+      assert.equal(await multi.getAttribute('aria-invalid'), 'true');
+      assert.equal(await page.locator('.language-tag').count(), 4, 'Refresh never promotes invalid text to a chip.');
+      assert.equal(await multi.evaluate(input => input === document.activeElement), true);
       await multi.fill('fr-FR'); await multi.press('Tab');
       assert.equal(await page.locator('#languages').inputValue(), 'en-GB, sr-Latn-RS, af-ZA, fr-FR');
       assert.equal(await page.locator('.language-tag').count(), 4, 'Committing a repeated tag does not duplicate it.');
+      await page.getByRole('button', { name: 'Remove fr-FR', exact: true }).focus();
+      await page.evaluate(() => window.multiLanguage.refresh());
+      assert.equal(await page.getByRole('button', { name: 'Remove fr-FR', exact: true }).evaluate(button => button === document.activeElement), true,
+        'A catalog/locale refresh preserves keyboard focus on the same remove action.');
       await page.evaluate(() => { document.getElementById('languages').value = 'de-DE'; window.multiLanguage.refresh(); });
       assert.equal(await page.locator('.language-tag').count(), 1);
       assert.equal(await page.locator('.language-tag').innerText(), 'de-DE×');
       await multi.focus(); await multi.press('Escape');
       assert.equal(await multi.getAttribute('aria-expanded'), 'false');
+      await page.addStyleTag({ url: `${server.url}src/styles.css` });
+      await page.setViewportSize({ width: 320, height: 640 });
+      await page.evaluate(() => { document.documentElement.dir = 'rtl'; document.documentElement.dataset.theme = 'light'; });
+      await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
+      await multi.focus(); await multi.press('ArrowDown');
+      assert.equal(await page.locator('#languages-choices').isVisible(), true);
+      assert.ok(await page.locator('#languages-choices').evaluate(list => {
+        const box = list.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth && list.scrollWidth <= list.clientWidth + 1;
+      }), 'Catalog remains readable within a narrow RTL viewport and forced colors.');
+      assert.equal(await page.locator('#languages-choices bdi').first().getAttribute('dir'), 'ltr', 'Language codes retain their order in RTL.');
+      await multi.press('ArrowDown'); await multi.press('Enter');
+      assert.equal(await multi.getAttribute('aria-invalid'), 'false');
       await page.locator('#submit').click();
       assert.equal(await page.evaluate(() => window.languageSubmissions), 1);
       const events = await page.evaluate(() => window.languageEvents);

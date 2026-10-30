@@ -155,3 +155,43 @@ html,body{background:var(--canvas);color:var(--ink)}
 .dashboard-countdown>p{flex:1 1 180px;min-width:0;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
 .dashboard-countdown>.button{flex:0 0 auto;min-height:36px;padding:7px 12px}
 @media(max-width:540px){.dashboard-countdown{gap:8px}.dashboard-countdown>p{flex-basis:calc(100% - 64px)}.dashboard-countdown>.button{margin-inline-start:auto}}
+
+/* Restore/hide controls share a physical left edge, including RTL. Their own
+   document rows and reserved chrome space keep every hit area outside Joomla. */
+.header-bar{padding-left:52px}
+#focus-header-button{position:absolute;left:8px;top:3px;width:34px;min-width:34px;height:32px;min-height:32px;padding:0}
+.focus-restore{margin-left:8px;margin-right:auto}
+.site-footer{padding-bottom:44px}
+.footer-focus{inset-inline:auto;inset-block:auto;left:8px;bottom:3px;width:34px;min-width:34px;height:32px;min-height:32px;padding:0}
+.language-option,.language-note,.language-empty{overflow-wrap:anywhere;white-space:normal}
+.language-options{max-width:min(24rem,calc(100vw - 36px));max-height:min(16rem,45dvh)}
+.language-tag{padding-inline:9px 5px;max-width:100%}
+.language-tag bdi{min-width:0;overflow-wrap:anywhere}
+.language-tag button{flex:none}
+.language-toggle:focus-visible,.language-tag button:focus-visible{outline-offset:2px}
+.config-file-controls>label:has(+input:focus-visible){outline:2px solid var(--focus);outline-offset:4px}
+@media(max-width:540px){
+  :is(.dashboard-actions,.saved-site-management,.footer-tools,.rocket-dialog) .je-action>.je-action-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  :is(.dashboard-actions,.saved-site-management,.footer-tools,.rocket-dialog) .je-action{min-width:38px;min-height:38px}
+  .launch-countdown{flex-wrap:wrap;gap:10px}
+  .launch-countdown>p{flex:1 1 150px;min-width:0;overflow-wrap:anywhere}
+}
+@media(pointer:coarse){
+  #focus-header-button,.footer-focus,.focus-restore{width:44px;min-width:44px;height:44px;min-height:44px}
+  .header-bar{padding-left:60px}
+  .site-footer{padding-bottom:54px}
+  .language-input-row>.language-toggle,.language-tag button,.language-option{min-width:44px;min-height:44px}
+  :is(.header-actions,.dashboard-actions,.saved-site-management,.footer-tools,.rocket-dialog) .je-action{min-width:44px;min-height:44px}
+}
+@media(forced-colors:active){
+  :is(button,a,summary,input,select,textarea):focus-visible{outline-color:Highlight}
+  .config-file-controls>label:has(+input:focus-visible){outline-color:Highlight}
+  .nav-area[aria-pressed=true],#nav-site[aria-pressed=true],#nav-admin[aria-pressed=true]{outline:2px solid Highlight;outline-offset:-2px}
+  .toggle-row .toggle{forced-color-adjust:none;background:Canvas;border:1px solid ButtonText}
+  .toggle-row input:checked+.toggle{background:Highlight}
+  .toggle-row .toggle:after{background:ButtonText;top:2px;left:2px}
+  .toggle-row input:checked+.toggle:after{background:HighlightText}
+  .toggle-row input:disabled+.toggle{border-color:GrayText}
+  .je-icon{fill:currentColor}
+  button:disabled .je-icon{fill:GrayText}
+}

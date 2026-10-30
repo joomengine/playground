@@ -40,7 +40,8 @@ export function createLanguageSelector(input, { multiple = false, t, getLocale =
   const listeners = [];
   const original = { type: input.type, hidden: input.hidden, list: input.getAttribute('list'),
     pattern: input.getAttribute('pattern'), autocomplete: input.getAttribute('autocomplete'),
-    role: input.getAttribute('role'), labelled: input.getAttribute('aria-label'), described: input.getAttribute('aria-describedby') };
+    role: input.getAttribute('role'), labelled: input.getAttribute('aria-label'), described: input.getAttribute('aria-describedby'),
+    invalid: input.getAttribute('aria-invalid') };
   const labels = [...(input.labels || [])];
   const wrapper = document.createElement('div'); wrapper.className = 'language-selector';
   input.before(wrapper);
@@ -49,7 +50,6 @@ export function createLanguageSelector(input, { multiple = false, t, getLocale =
   if (multiple) {
     input.type = 'hidden'; wrapper.append(input);
     entry.type = 'text'; entry.id = `${input.id}-entry`;
-    entry.setAttribute('aria-label', t('language.add'));
     for (const label of labels) label.htmlFor = entry.id;
   }
   row.append(entry);
@@ -70,7 +70,7 @@ export function createLanguageSelector(input, { multiple = false, t, getLocale =
   entry.setAttribute('aria-describedby', [original.described, note.id].filter(Boolean).join(' '));
   wrapper.append(list, note);
   let catalog = languageCatalog([], getLocale()), tags = [], selected = [], options = [], active = -1;
-  let open = false, internal = false, disposed = false;
+  let open = false, internal = false, disposed = false, synchronizedValue;
   const on = (target, event, handler, options) => {
     target.addEventListener(event, handler, options);
     listeners.push(() => target.removeEventListener(event, handler, options));
@@ -86,11 +86,16 @@ export function createLanguageSelector(input, { multiple = false, t, getLocale =
   function validity() {
     const pending = entry.value.trim();
     const valid = !pending || (multiple ? pending.split(',').every(value => normalizeLanguageTag(value)) : normalizeLanguageTag(pending));
-    entry.setCustomValidity(valid ? '' : t('language.invalid'));
-    return Boolean(valid);
+    const withinLimit = !multiple || new Set([...selected, ...pending.split(',').map(normalizeLanguageTag).filter(Boolean)]).size <= 30;
+    entry.setCustomValidity(!valid ? t('language.invalid') : !withinLimit ? t('language.limit') : '');
+    entry.setAttribute('aria-invalid', String(!valid || !withinLimit));
+    return Boolean(valid && withinLimit);
   }
   function syncPending() {
-    if (multiple) input.value = [...selected, ...(entry.value.trim() ? entry.value.split(',').map(canonical) : [])].join(', ');
+    if (multiple) {
+      input.value = [...selected, ...(entry.value.trim() ? entry.value.split(',').map(canonical) : [])].join(', ');
+      synchronizedValue = input.value;
+    }
     validity();
   }
   function updateNote() {
@@ -99,7 +104,13 @@ export function createLanguageSelector(input, { multiple = false, t, getLocale =
     note.textContent = custom.length ? t('language.customPackage', { tags: custom.join(', ') }) : t(multiple ? 'language.multipleHelp' : 'language.singleHelp');
     note.classList.toggle('language-custom', custom.length > 0);
     toggle.title = t('language.show'); toggle.setAttribute('aria-label', t('language.show'));
-    if (multiple) entry.setAttribute('aria-label', t('language.add'));
+    list.setAttribute('aria-label', t('language.show'));
+    if (multiple) {
+      entry.placeholder = t('language.add');
+      // Keep the visible field label in its accessible name. The placeholder
+      // describes adding a tag without replacing "Site languages" for AT.
+      if (!labels.length) entry.setAttribute('aria-label', original.labelled || t('language.add'));
+    }
   }
   function setActive(index) {
     active = index;
@@ -120,7 +131,11 @@ export function createLanguageSelector(input, { multiple = false, t, getLocale =
       const node = document.createElement('div'); node.className = 'language-option';
       node.id = `${list.id}-${index}`; node.setAttribute('role', 'option');
       node.setAttribute('aria-selected', 'false');
-      node.textContent = option.custom ? option.name : `${option.tag} — ${option.name}`;
+      if (option.custom) node.textContent = option.name;
+      else {
+        const tag = document.createElement('bdi'); tag.dir = 'ltr'; tag.textContent = option.tag;
+        node.append(tag, ` — ${option.name}`);
+      }
       node.addEventListener('pointerdown', event => event.preventDefault());
       node.addEventListener('click', () => choose(option.tag));
       return node;
@@ -143,11 +158,13 @@ export function createLanguageSelector(input, { multiple = false, t, getLocale =
   }
   function renderChips() {
     if (!multiple) return;
+    const focusedTag = chips.contains(document.activeElement) ? document.activeElement.dataset.languageTag : null;
     chips.replaceChildren(...selected.map(tag => {
       const chip = document.createElement('span'); chip.className = 'language-tag';
-      const label = document.createElement('span'); label.textContent = tag;
+      const label = document.createElement('bdi'); label.dir = 'ltr'; label.textContent = tag;
       const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×';
       remove.dataset.icon = 'remove-item'; remove.dataset.iconOnly = 'true';
+      remove.dataset.languageTag = tag;
       remove.title = t('language.remove', { tag }); remove.setAttribute('aria-label', remove.title);
       remove.addEventListener('click', () => {
         selected = selected.filter(value => value !== tag); syncPending(); renderChips(); signal();
@@ -155,6 +172,10 @@ export function createLanguageSelector(input, { multiple = false, t, getLocale =
       });
       chip.append(label, remove); return chip;
     }));
+    if (focusedTag) {
+      const replacement = [...chips.querySelectorAll('button')].find(button => button.dataset.languageTag === focusedTag);
+      (replacement || entry).focus({ preventScroll: true });
+    }
   }
   function choose(tag) {
     if (multiple) {
@@ -177,8 +198,15 @@ export function createLanguageSelector(input, { multiple = false, t, getLocale =
     if (disposed) return;
     catalog = languageCatalog(tags, getLocale());
     if (multiple) {
-      selected = [...new Set(input.value.split(',').map(canonical).filter(Boolean))];
-      entry.value = ''; renderChips();
+      // Locale/catalog refreshes must not turn unfinished or invalid text into
+      // selected chips. Only a changed external configuration replaces edits.
+      if (input.value !== synchronizedValue) {
+        const values = input.value.split(',').map(canonical).filter(Boolean);
+        selected = [...new Set(values.filter(value => normalizeLanguageTag(value)))];
+        entry.value = values.filter(value => !normalizeLanguageTag(value)).join(', ');
+        synchronizedValue = input.value;
+      }
+      renderChips();
     }
     validity(); updateNote();
     if (open) renderChoices({ all: true });
@@ -235,7 +263,7 @@ export function createLanguageSelector(input, { multiple = false, t, getLocale =
       for (const label of labels) label.htmlFor = input.id;
       wrapper.before(input); wrapper.remove(); input.type = original.type; input.hidden = original.hidden;
       for (const [attribute, value] of [['list', original.list], ['pattern', original.pattern], ['autocomplete', original.autocomplete],
-        ['role', original.role], ['aria-label', original.labelled], ['aria-describedby', original.described]]) {
+        ['role', original.role], ['aria-label', original.labelled], ['aria-describedby', original.described], ['aria-invalid', original.invalid]]) {
         if (value === null) input.removeAttribute(attribute); else input.setAttribute(attribute, value);
       }
       for (const attribute of ['aria-autocomplete', 'aria-haspopup', 'aria-expanded', 'aria-controls', 'aria-activedescendant']) input.removeAttribute(attribute);
