@@ -21,7 +21,7 @@ async function assertHiddenControls(page) {
     });
     assert.equal(geometry.position, 'absolute', `${id} must overlay its document corner without reserving a row.`);
     assert.equal(geometry.left, 0, `${id} must sit entirely in the physical left corner, including RTL.`);
-    assert.equal(geometry.width, 24); assert.equal(geometry.height, 24,
+    assert.equal(geometry.width, 20); assert.equal(geometry.height, 20,
       `${id} must have a compact corner hit area rather than cover Joomla controls.`);
     assert.equal(id.endsWith('top') ? geometry.top : geometry.bottom,
       id.endsWith('top') ? 0 : geometry.documentHeight, `${id} must touch its document edge.`);
@@ -228,8 +228,17 @@ export async function assertLiveFocusMode(page, frame, { capture } = {}) {
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
         const restoreControl = page.locator(`#${restore}`);
         await restoreControl.scrollIntoViewIfNeeded();
+        const hitArea = await restoreControl.evaluate(button => {
+          const rect = button.getBoundingClientRect(), top = button.id.endsWith('top');
+          const inside = document.elementFromPoint(rect.left + 3, rect.top + (top ? 3 : 17));
+          const outside = document.elementFromPoint(rect.left + 17, rect.top + (top ? 17 : 3));
+          return { inside: inside === button || button.contains(inside),
+            outside: outside === button || button.contains(outside) };
+        });
+        assert.equal(hitArea.inside, true, 'The small corner triangle accepts activation.');
+        assert.equal(hitArea.outside, false, 'The clipped area passes through to Joomla instead of covering its controls.');
         if (keyboard) { await restoreControl.focus(); await page.keyboard.press('Enter'); }
-        else await restoreControl.click();
+        else await restoreControl.click({ position: { x: 3, y: restore.endsWith('top') ? 3 : 17 } });
         await assertVisibleControls(page);
         await page.waitForFunction(edge => { const area = document.getElementById(edge === 'focus-restore-bottom' ? 'site-footer' : 'site-header').getBoundingClientRect(); return edge === 'focus-restore-bottom' ? area.bottom <= innerHeight + 2 : Math.abs(area.top) <= 2; }, restore);
         assert.equal(await page.evaluate(() => document.activeElement?.id), restore === 'focus-restore-bottom' ? 'focus-footer-button' : 'focus-header-button',

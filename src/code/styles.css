@@ -25,7 +25,7 @@
 .jec-toolbar label{display:flex;align-items:center;gap:4px;white-space:nowrap;flex:none;min-height:30px}
 .jec-toolbar input[type=checkbox]{margin:0;flex:none}
 .jec-toolbar [role=status]{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
-.jec-panel[data-actions=icons] .jec-toolbar .je-action-label,.jec-panel[data-actions=strip] .jec-toolbar .je-action-label{display:none}
+.jec-toolbar .jec-action-icon .je-action-label,.jec-panel[data-actions=icons] .jec-toolbar .je-action-label,.jec-panel[data-actions=strip] .jec-toolbar .je-action-label{display:none}
 .jec-panel[data-actions=strip] .jec-titlebar{grid-template-areas:'identity windows' 'actions actions';grid-template-columns:minmax(0,1fr) auto}
 .jec-panel[data-actions=strip] .jec-toolbar{overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;overscroll-behavior-inline:contain;padding:2px 0}
 .jec-editor-mount{flex:1;min-height:0;min-width:0;position:relative;overflow:hidden}

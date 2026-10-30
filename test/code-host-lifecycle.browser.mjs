@@ -94,8 +94,19 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
           detachAttempts: window.layoutCounts.detachAttempts })));
         assert.equal(await page.frameLocator('#layout-preview').locator('body').evaluate(() => window.siteIdentity), previewIdentity);
       };
-      const assertWideHeader = async () => {
-        await page.waitForFunction(() => document.querySelector('.jec-panel')?.dataset.actions !== 'strip');
+      const assertWideHeader = async ({ allLabels = false } = {}) => {
+        await page.waitForFunction(all => {
+          const panel = document.querySelector('.jec-panel'), toolbar = panel?.querySelector('.jec-toolbar');
+          return (all ? panel?.dataset.actions === 'labels' : ['labels', 'mixed'].includes(panel?.dataset.actions))
+            && toolbar.scrollWidth <= toolbar.clientWidth + 1;
+        }, allLabels);
+        const text = await page.locator('.jec-toolbar').evaluate(toolbar => {
+          const labels = [...toolbar.querySelectorAll(':scope > :not(.je-icon-only) > .je-action-label')];
+          return { total: labels.length, visible: labels.filter(label => getComputedStyle(label).display !== 'none').length,
+            fits: toolbar.scrollWidth <= toolbar.clientWidth + 1 };
+        });
+        assert.ok(text.visible >= 2 && text.fits, 'A wide editor uses the available action area for readable labels without overflow.');
+        if (allLabels) assert.equal(text.visible, text.total, 'All action words return when the editor is wide enough.');
         const boxes = await page.locator('.jec-titlebar').evaluate(header => {
           const rect = selector => {
             const box = header.querySelector(selector).getBoundingClientRect();
@@ -174,11 +185,18 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
         label.dataset.originalLabel = label.textContent;
         label.textContent = 'A translated action with a substantially longer descriptive label '.repeat(8);
       });
-      await page.waitForFunction(() => document.querySelector('.jec-panel').dataset.actions === 'icons');
+      await page.waitForFunction(() => {
+        const label = document.querySelector('.jec-toolbar button[data-i18n-title="code.saveAll"] .je-action-label');
+        return getComputedStyle(label).display === 'none';
+      });
       assert.equal(await saveControl.evaluate(button => button === document.activeElement), true,
         'Collapsing a long translated label preserves the focused action.');
       await assertWideHeader();
       await saveControl.locator('.je-action-label').evaluate(label => { label.textContent = label.dataset.originalLabel; });
+      await page.setViewportSize({ width: 2400, height: 900 });
+      await assertWideHeader({ allLabels: true });
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await assertWideHeader();
       await page.locator('[data-i18n-aria-label="code.restore"]').click();
       assert.equal(await mode.inputValue(), 'floating');
       after = await panel.boundingBox();
@@ -215,6 +233,9 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       });
       assert.ok(headerBoxes.windows.right <= 391 && headerBoxes.windows.x >= 0);
       assert.ok(headerBoxes.actions.y >= headerBoxes.windows.bottom, 'Only the action strip moves below window controls at narrow widths.');
+      assert.equal(await page.locator('.jec-toolbar .je-action-label').evaluateAll(labels =>
+        labels.some(label => getComputedStyle(label).display !== 'none')), false,
+      'Narrow editor controls use icons while preserving their accessible names.');
       await captureHostVisual(page, name, 'narrow-light');
       await page.evaluate(() => {
         document.documentElement.dataset.theme = 'dark';

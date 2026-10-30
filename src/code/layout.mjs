@@ -1,5 +1,6 @@
 import english from '../locales/en.mjs';
 import { createIcon } from '../icons.mjs';
+import { fitToolbarActions } from './toolbar-layout.mjs';
 
 const MODES = new Set(['left', 'right', 'bottom', 'full', 'floating']);
 const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
@@ -260,16 +261,9 @@ export function createCodeLayout({
   listen(doc, 'rocket:languagechange', () => render({ persist: false }));
   const fitActions = () => {
     if (!panel.clientWidth) return;
-    // Size against the editor container, including a narrow dock inside a wide
-    // browser. Only the action area may move down; window controls stay put.
-    // Measure actual translated controls, including labels/checkboxes, against
-    // the grid space left by protected window controls. Reset the candidate
-    // before measuring so expanding can always leave a collapsed strip.
-    panel.dataset.actions = 'labels';
-    if (toolbar.scrollWidth > toolbar.clientWidth + 1) {
-      panel.dataset.actions = 'icons';
-      if (toolbar.scrollWidth > toolbar.clientWidth + 1) panel.dataset.actions = 'strip';
-    }
+    // Reset and remeasure every time: a dock may grow, maximize, or translate.
+    // Window controls keep their grid area while action text uses the remainder.
+    fitToolbarActions(panel, toolbar);
     scheduleLayout();
   };
   const observer = new win.ResizeObserver(fitActions);
