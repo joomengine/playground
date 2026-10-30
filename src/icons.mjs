@@ -91,8 +91,9 @@ export function decorateAction(button, actionId, { iconOnly = alwaysIconOnly.has
 }
 export function decorateIcons(root = globalThis.document) {
   if (!root?.querySelectorAll) return;
-  const nodes = [...root.querySelectorAll('button,a,summary')];
-  if (root.matches?.('button,a,summary')) nodes.unshift(root);
+  const selector = 'button,a,summary,label.button[for]';
+  const nodes = [...root.querySelectorAll(selector)];
+  if (root.matches?.(selector)) nodes.unshift(root);
   for (const button of nodes) {
     const key = button.getAttribute('data-i18n') || button.getAttribute('data-i18n-title') || button.getAttribute('data-i18n-aria-label');
     const changingIcon = ['action.show', 'action.hide', 'code.maximize', 'code.restore'].includes(key) ? keyMapping[key] : null;

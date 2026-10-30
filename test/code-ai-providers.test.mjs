@@ -27,6 +27,8 @@ test('all named presets are ordered, internally configured and serialize as publ
   assert.deepEqual(AI_PROVIDERS.slice(0, 3).map(item => item.id), ['openai', 'anthropic', 'google']);
   assert.equal(AI_PROVIDERS.length, 23);
   assert.equal(AI_PROVIDERS.at(-1).id, 'other');
+  assert.deepEqual([...new Set(AI_PROVIDERS.map(item => item.group))], ['providers', 'services', 'custom']);
+  assert.equal(AI_PROVIDERS.find(item => item.group === 'services').id, 'groq');
   assert.equal(new Set(AI_PROVIDERS.map(item => item.id)).size, AI_PROVIDERS.length);
   for (const item of AI_PROVIDERS) assert.ok(item.baseURL || item.fields.length || item.id === 'other', item.id);
   assert.doesNotMatch(JSON.stringify(AI_PROVIDERS), /unverified|verification required|apiKey/);
@@ -355,4 +357,39 @@ test('Bedrock discovery remains self-contained when the factory is serialized in
   const result = await provider.listModels();
   assert.equal(result.models[0].id, 'example.chat');
   assert.equal(result.selectedModel, '');
+});
+
+test('Other uses the selected native catalog and composes native versions without doubling the API base', async () => {
+  for (const [protocol, suffix, catalogPath, catalog, terminal, chatPath, authHeader] of [
+    ['anthropic', '/v1', '/v1/models', { data: [{ id: 'custom-chat' }] }, [{ type: 'message_delta', delta: { stop_reason: 'end_turn' } }, { type: 'message_stop' }], '/v1/messages', 'x-api-key'],
+    ['cohere', '/v2', '/v1/models', { models: [{ name: 'custom-chat', endpoints: ['chat'] }] }, [{ type: 'message-end', delta: { finish_reason: 'COMPLETE' } }], '/v2/chat', 'Authorization'],
+    ['gemini', '/v1beta', '/v1beta/models', { models: [{ name: 'models/custom-chat', supportedGenerationMethods: ['generateContent'] }] }, [{ candidates: [{ index: 0, finishReason: 'STOP' }] }], '/v1beta/models/custom-chat:streamGenerateContent', 'x-goog-api-key'],
+  ]) {
+    for (const basePath of protocol === 'gemini' ? [suffix] : ['', suffix]) {
+      const requests = [];
+      const provider = createChatProvider({ provider: preset('other'), baseURL: `https://private.example/gateway${basePath}`, protocol, model: 'custom-chat', apiKey: key,
+        fetcher: async (url, init) => { requests.push({ url, ...init }); return init.method === 'GET' ? json(catalog) : sse(terminal); } });
+      const result = await provider.listModels(); await provider.stream({ messages });
+      assert.equal(result.models.length, 1, protocol);
+      assert.equal(new URL(requests[0].url).pathname, `/gateway${catalogPath}`);
+      assert.equal(new URL(requests[1].url).pathname, `/gateway${chatPath}`);
+      assert.equal(requests[1].headers[authHeader], protocol === 'cohere' ? `Bearer ${key}` : key);
+      assert.equal(requests[1].redirect, 'error');
+    }
+  }
+});
+
+test('catalog lifecycle filtering recognizes nested status without imposing Qwen capability vocabulary on other APIs', async () => {
+  const provider = createChatProvider({ provider: preset('other'), baseURL: 'http://localhost:11434/v1', fetcher: async () => json({ data: [
+    { id: 'local-coder', capabilities: ['completion', 'tools'] },
+    { id: 'retired-chat', lifecycle: { status: 'retired' } },
+    { id: 'inactive-chat', status: 'INACTIVE' },
+    { id: 'legacy-status-chat', modelLifecycle: { status: 'DEPRECATED' } },
+    { id: 'no-stream-chat', supports_streaming: false },
+  ] }) });
+  const result = await provider.listModels();
+  assert.deepEqual(result.models.map(item => item.id), ['local-coder']);
+  assert.equal(result.models[0].tools, null, 'unknown capability schema is not advertised as verified tool support');
+  const malformed = createChatProvider({ provider: preset('other'), baseURL: 'http://localhost:11434/v1', fetcher: async () => json({ data: [null] }) });
+  await assert.rejects(malformed.listModels(), { code: 'INVALID_CATALOG' });
 });

@@ -203,9 +203,29 @@ test('bundled JoomEngine Code preserves native document models through edits and
         await popup.waitForFunction(() => document.documentElement.dataset.theme === 'dark' && document.querySelector('.monaco-workbench')?.classList.contains('vs-dark'));
         const fileArea = popup.locator('.jec-detached-nav');
         await fileArea.evaluate(node => { const spacer = document.createElement('div'); spacer.style.height = '1600px'; node.append(spacer); });
+        assert.equal(await fileArea.evaluate(node => {
+          for (let ancestor = node; ancestor; ancestor = ancestor.parentElement) {
+            if (getComputedStyle(ancestor).touchAction === 'none') return false;
+          }
+          return true;
+        }), true, 'Companion scroll areas are outside native containers that disable browser touch panning.');
+        await fileArea.focus(); await popup.keyboard.press('PageDown');
+        await popup.waitForFunction(() => document.querySelector('.jec-detached-nav').scrollTop > 0);
+        await fileArea.evaluate(node => { node.scrollTop = 0; });
         await fileArea.hover(); await popup.mouse.wheel(0, 450);
         await popup.waitForFunction(() => document.querySelector('.jec-detached-nav').scrollTop > 0);
+        await popup.locator('.jec-detached-toolbar').evaluate(toolbar => {
+          const action = toolbar.querySelector('button');
+          for (let index = 0; index < 12; index++) toolbar.append(action.cloneNode(true));
+        });
+        await popup.waitForFunction(() => document.querySelector('.jec-detached-root').dataset.actions === 'strip');
         await popup.setViewportSize({ width: 1100, height: 800 });
+        await popup.waitForFunction(() => document.querySelector('.jec-detached-root').dataset.actions !== 'strip');
+        assert.equal(await popup.locator('.jec-detached-header').evaluate(header => {
+          const actions = header.querySelector('.jec-detached-toolbar').getBoundingClientRect();
+          const windows = header.querySelector('.jec-detached-window-controls').getBoundingClientRect();
+          return Math.abs(actions.y - windows.y) < 2 && actions.right <= windows.x;
+        }), true, 'Expanding a populated detached toolbar restores one row without overlapping Return.');
         await popup.close();
         await page.waitForFunction(() => window.code.getOpenFiles().length === 2);
         assert.deepEqual(await page.evaluate(() => window.code.getEditorLayout()), editorLayout, 'Redocked groups preserve split layout');

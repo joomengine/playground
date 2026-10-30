@@ -262,20 +262,21 @@ export function createCodeLayout({
     if (!panel.clientWidth) return;
     // Size against the editor container, including a narrow dock inside a wide
     // browser. Only the action area may move down; window controls stay put.
-    const actions = [...toolbar.children].filter(node => !node.hidden && node.getAttribute('role') !== 'status');
-    // The title aligns to the start of its grid area so strip mode measures its
-    // intrinsic width, not free space that would prevent returning to one row.
-    const reserved = windowControls.getBoundingClientRect().width + title.getBoundingClientRect().width + 32;
-    const iconWidth = actions.length * 36;
-    panel.dataset.actions = panel.clientWidth < reserved + iconWidth ? 'strip'
-      : panel.clientWidth < reserved + actions.length * 112 ? 'icons' : 'labels';
+    // Measure actual translated controls, including labels/checkboxes, against
+    // the grid space left by protected window controls. Reset the candidate
+    // before measuring so expanding can always leave a collapsed strip.
+    panel.dataset.actions = 'labels';
+    if (toolbar.scrollWidth > toolbar.clientWidth + 1) {
+      panel.dataset.actions = 'icons';
+      if (toolbar.scrollWidth > toolbar.clientWidth + 1) panel.dataset.actions = 'strip';
+    }
     scheduleLayout();
   };
   const observer = new win.ResizeObserver(fitActions);
   observer.observe(panel);
   observer.observe(editor);
   const toolbarObserver = new win.MutationObserver(fitActions);
-  toolbarObserver.observe(toolbar, { childList: true });
+  toolbarObserver.observe(toolbar, { childList: true, subtree: true, characterData: true });
   render({ persist: false });
   return {
     panel, toolbar, editor,

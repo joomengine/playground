@@ -32,12 +32,15 @@ export function mountDetachedTools({ part, provider, openFile, saveAll, redock, 
   root.className = 'jec-detached-root';
   root.setAttribute('aria-label', message('code.detached.workspace'));
   root.style.cssText = 'position:absolute;inset:0;pointer-events:none;font:13px system-ui;color:var(--jec-text,#ddd);z-index:5';
-  // The pinned native auxiliary container cancels every bubbling wheel event
-  // (AuxiliaryWindow.registerListeners). Our file/search/AI companion uses
-  // browser scrolling, so stop only its wheel bubbling without cancelling the
-  // default scroll. The native editor is a sibling and keeps its own handling.
+  // Keep companion browser scrolling out of native workbench wheel/keybinding
+  // handlers without cancelling the browser's default action or save shortcuts.
   const allowCompanionScroll = event => event.stopPropagation();
+  const allowCompanionKeyboardScroll = event => {
+    if (!event.ctrlKey && !event.metaKey && !event.altKey
+      && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) event.stopPropagation();
+  };
   root.addEventListener('wheel', allowCompanionScroll, { passive: true });
+  root.addEventListener('keydown', allowCompanionKeyboardScroll);
   const sharedStyle = document.createElement('link'); sharedStyle.rel = 'stylesheet';
   if (shellStylesheet) { sharedStyle.href = shellStylesheet; document.head.append(sharedStyle); }
   const style = document.createElement('style');
@@ -51,7 +54,7 @@ export function mountDetachedTools({ part, provider, openFile, saveAll, redock, 
 .jec-detached-root .je-icon-only .je-action-label{display:none}
 .jec-detached-root button svg{width:20px;height:20px;flex:none}.jec-detached-root [hidden]{display:none!important}
 .jec-detached-header{position:absolute;top:0;left:0;right:0;box-sizing:border-box;display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:'identity actions windows';align-items:center;gap:6px;padding:6px;background:var(--jec-surface,#202020);pointer-events:auto;border-bottom:1px solid var(--jec-border,#555)}
-.jec-detached-identity{grid-area:identity;padding:0 4px}.jec-detached-window-controls{grid-area:windows;flex:none}
+.jec-detached-identity{grid-area:identity;justify-self:start;padding:0 4px}.jec-detached-window-controls{grid-area:windows;flex:none}
 .jec-detached-toolbar{grid-area:actions;display:flex;align-items:center;gap:4px;min-width:0}
 .jec-detached-toolbar>*{flex:none}.jec-detached-toolbar>[role=status]{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 .jec-detached-root[data-actions=icons] .je-action-label,.jec-detached-root[data-actions=strip] .jec-detached-toolbar .je-action-label{display:none}
@@ -59,7 +62,7 @@ export function mountDetachedTools({ part, provider, openFile, saveAll, redock, 
 .jec-detached-root[data-actions=strip] .jec-detached-header{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:'identity windows' 'actions actions'}
 .jec-detached-root[data-actions=strip] .jec-detached-toolbar{overflow:auto;overscroll-behavior-inline:contain;scrollbar-width:thin;padding-bottom:2px}
 .jec-detached-nav{position:absolute;bottom:24px;left:0;box-sizing:border-box;overflow:auto;overscroll-behavior:contain;padding:8px;background:var(--jec-bg,#252526);pointer-events:auto;border-right:1px solid var(--jec-border,#555);scrollbar-width:thin}
-.jec-detached-nav button{text-align:left}.jec-detached-root button:focus-visible,.jec-detached-nav summary:focus-visible{outline:2px solid var(--jec-focus,#75beff);outline-offset:1px}
+.jec-detached-nav button{text-align:left}.jec-detached-root button:focus-visible,.jec-detached-nav:focus-visible,.jec-detached-nav summary:focus-visible{outline:2px solid var(--jec-focus,#75beff);outline-offset:1px}
 .jec-detached-nav summary{cursor:pointer;padding:5px}.jec-detached-nav ul{list-style:none;padding-left:12px;margin:0}.jec-detached-nav li>button{display:block;border:0;background:transparent;overflow-wrap:anywhere;white-space:normal;width:100%}.jec-detached-nav input{box-sizing:border-box;width:100%}
 @media(forced-colors:active){.jec-detached-header,.jec-detached-nav,.jec-detached-root button,.jec-detached-nav input{border-color:ButtonText}.jec-detached-root button:focus-visible{outline-color:Highlight}}
 `;
@@ -73,6 +76,8 @@ export function mountDetachedTools({ part, provider, openFile, saveAll, redock, 
   header.append(identity, toolbar, windowControls);
   const sidebar = document.createElement('aside');
   sidebar.className = 'jec-detached-nav';
+  sidebar.tabIndex = 0;
+  sidebar.setAttribute('aria-label', message('code.detached.files'));
   const status = document.createElement('p');
   status.setAttribute('role', 'status');
   status.textContent = message('code.detached.owner');
@@ -99,9 +104,11 @@ export function mountDetachedTools({ part, provider, openFile, saveAll, redock, 
   let lastLayout = [window.innerWidth, window.innerHeight - 22, 0, 0];
   part.layout = (width, height, top, left) => {
     lastLayout = [width, height, top, left];
-    const count = toolbar.querySelectorAll(':scope > button').length;
-    const reserved = identity.getBoundingClientRect().width + windowControls.getBoundingClientRect().width + 30;
-    root.dataset.actions = width < reserved + count * 36 ? 'strip' : width < reserved + count * 115 ? 'icons' : 'labels';
+    root.dataset.actions = 'labels';
+    if (toolbar.scrollWidth > toolbar.clientWidth + 1) {
+      root.dataset.actions = 'icons';
+      if (toolbar.scrollWidth > toolbar.clientWidth + 1) root.dataset.actions = 'strip';
+    }
     const toolbarHeight = Math.ceil(header.getBoundingClientRect().height);
     const offset = hidden ? 0 : Math.min(260, Math.max(width < 500 ? 140 : 180, Math.floor(width * .32)));
     sidebar.style.width = `${offset}px`; sidebar.style.top = `${toolbarHeight}px`;
@@ -168,20 +175,26 @@ export function mountDetachedTools({ part, provider, openFile, saveAll, redock, 
     if (cursor) { truncated = true; await cancelSearch(); }
     status.textContent = `${message('code.detached.matchCount', { count })}${truncated ? ` (${message('code.detached.limit')})` : ''}${skipped ? `; ${message('code.detached.skipped', { count: skipped })}` : ''}.`;
   }
-  root.append(style, header, sidebar); editor.parentElement.append(root); part.layout(...lastLayout);
+  // The native auxiliary container disables touch panning for its editor.
+  // Mount the companion beside it so its scrollable areas retain browser touch
+  // gestures, while the native pane keeps its own event/gesture handling.
+  root.append(style, header, sidebar); document.body.append(root); part.layout(...lastLayout);
   let external;
   try { external = onDetachedTools?.({ window, toolbar, container, getActivePath, openFile }); }
   catch (error) { onError(error); }
   decorateIcons(toolbar);
   const toolbarObserver = new window.ResizeObserver(() => { if (!disposed) part.layout(...lastLayout); });
   toolbarObserver.observe(header);
+  const labelsObserver = new window.MutationObserver(() => { if (!disposed) part.layout(...lastLayout); });
+  labelsObserver.observe(toolbar, { childList: true, subtree: true, characterData: true });
   part.layout(...lastLayout);
   void loadTree().catch(onError);
   return { getActivePath, dispose() {
     disposed = true; sequence++; void cancelSearch().catch(() => {}); external?.dispose?.();
     editor.removeEventListener('focusin', editorFocus); navigation.removeEventListener('focusin', fileFocus);
-    toolbarObserver.disconnect(); sharedStyle.remove();
+    toolbarObserver.disconnect(); labelsObserver.disconnect(); sharedStyle.remove();
     root.removeEventListener('wheel', allowCompanionScroll);
+    root.removeEventListener('keydown', allowCompanionKeyboardScroll);
     part.layout = originalLayout; root.remove();
   } };
 }
