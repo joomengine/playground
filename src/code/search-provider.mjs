@@ -16,7 +16,7 @@ export class JoomlaSearchProvider {
     const pattern = query.contentPattern || {};
     if (kind === 'text' && pattern.isRegExp) throw new Error('Regular-expression workspace search is not available yet. Turn off .* to search literal text.');
     const matches = new Map();
-    let cursor = null, count = 0, skipped = 0, truncated = false;
+    let cursor = null, count = 0, skipped = 0, truncated = false, restarted = false, interrupted = false;
     const folder = query.folderQueries?.[0];
     const arguments_ = { kind, query: kind === 'text' ? pattern.pattern : '',
       path: folder?.folder ? this.provider.path(folder.folder) : '/',
@@ -26,9 +26,24 @@ export class JoomlaSearchProvider {
       maxResults: Math.min(100, maximum),
     };
     try {
-      do {
+      while (true) {
         if (token?.isCancellationRequested) break;
-        const page = await this.provider.request('search', cursor ? { cursor, maxResults: Math.min(100, maximum - count) } : arguments_);
+        let page;
+        try {
+          page = await this.provider.request('search', cursor ? { cursor, maxResults: Math.min(100, maximum - count) } : arguments_);
+        } catch (error) {
+          if ((error.workspaceCode || error.code) !== 'SEARCH_EXPIRED') throw error;
+          cursor = null;
+          // A debugger pause can switch the active filesystem between pages.
+          // Restart only before accepting matches; streamed results cannot be
+          // retracted, and appending a new search would mix source revisions.
+          if (count === 0 && !restarted) {
+            restarted = true; skipped = 0; truncated = false;
+            continue;
+          }
+          interrupted = true;
+          break;
+        }
         cursor = page.cursor;
         skipped = page.skipped;
         truncated ||= page.truncated;
@@ -47,12 +62,18 @@ export class JoomlaSearchProvider {
           matches.set(item.path, match);
           if (++count >= maximum) break;
         }
-      } while (cursor && count < maximum);
+        if (!cursor || count >= maximum) break;
+      }
     } finally {
-      if (cursor) await this.provider.request('cancelSearch', { cursor });
+      if (cursor) {
+        try { await this.provider.request('cancelSearch', { cursor }); }
+        catch { /* Cleanup is best effort; never hide results or the original search failure. */ }
+      }
     }
-    return { results: [...matches.values()], limitHit: truncated || Boolean(cursor && count >= maximum),
-      messages: skipped ? [{ text: `${skipped} binary, large, unreadable or unsupported files were skipped.`, type: TextSearchCompleteMessageType.Warning }] : [],
+    const messages = [];
+    if (interrupted) messages.push({ text: 'The active workspace changed or this search expired. Results are incomplete; run the search again.', type: TextSearchCompleteMessageType.Warning });
+    if (skipped) messages.push({ text: `${skipped} binary, large, unreadable or unsupported files were skipped.`, type: TextSearchCompleteMessageType.Warning });
+    return { results: [...matches.values()], limitHit: interrupted || truncated || Boolean(cursor && count >= maximum), messages,
       exit: token?.isCancellationRequested ? SearchCompletionExitCode.NewSearchStarted : SearchCompletionExitCode.Normal };
   }
 }

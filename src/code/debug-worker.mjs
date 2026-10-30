@@ -63,6 +63,6 @@ self.addEventListener('message', event => {
       if (!runtime) throw new Error('PHP debugging has not started.');
       return runtime.command(message.command, message.args);
     }).then(value => self.postMessage({ type: 'debug-command-result', id: message.id, value }),
-      error => self.postMessage({ type: 'debug-command-result', id: message.id, error: errorMessage(error) }));
+      error => self.postMessage({ type: 'debug-command-result', id: message.id, error: errorMessage(error), code: error.code }));
   }
 });

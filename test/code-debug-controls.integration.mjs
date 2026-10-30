@@ -144,6 +144,40 @@ echo $value;
   } finally { await runtime.stop(); await execution.catch(() => {}); }
 });
 
+test(`native PHP ${version} reads paused source from its active filesystem without allowing writes or symlink escapes`, { timeout: 20_000 }, async () => {
+  const runtime = runtimeFor(`<?php
+file_put_contents('/persist/www/generated.php', '<?php // before continue');
+file_put_contents('/config/secret', 'private');
+symlink('/config/secret', '/persist/www/escape');
+symlink('generated.php', '/persist/www/alias.php');
+echo 'ready';
+file_put_contents('/persist/www/generated.php', '<?php // after continue');
+`);
+  await assert.rejects(runtime.workspaceRead('read', { path: '/index.php' }), { code: 'DEBUG_NOT_PAUSED' });
+  await runtime.setBreakpoints('/persist/www/index.php', [{ line: 6 }]);
+  const stopped = nextStop(runtime);
+  const execution = runtime.execute(request); execution.catch(() => {});
+  try {
+    await Promise.race([stopped, execution.then(() => { throw new Error('Breakpoint was not reached.'); })]);
+    const read = await runtime.command('workspaceRead', { operation: 'read', args: { path: '/alias.php' } });
+    assert.equal(new TextDecoder().decode(read.bytes), '<?php // before continue');
+    assert.equal(read.canonicalPath, '/generated.php');
+    assert.equal(read.stat.readonly, false, 'Readonly transport must still allow editing in-memory buffers.');
+    assert.match(read.revision, /^[a-f0-9]{64}$/);
+    const entries = await runtime.workspaceRead('list', { path: '/' });
+    assert.ok(entries.some(entry => entry.name === 'generated.php'));
+    await assert.rejects(runtime.workspaceRead('read', { path: '/escape' }), { code: 'PATH_OUTSIDE_WORKSPACE' });
+    await assert.rejects(runtime.workspaceRead('write', { path: '/generated.php', bytes: 'forbidden' }), { code: 'INVALID_OPERATION' });
+    const heldRead = runtime.workspaceRead('read', { path: '/generated.php' });
+    const continuing = runtime.continue();
+    assert.equal(new TextDecoder().decode((await heldRead).bytes), '<?php // before continue');
+    await continuing;
+    await assert.rejects(runtime.workspaceRead('stat', { path: '/index.php' }), { code: 'DEBUG_NOT_PAUSED' });
+    assert.equal(new TextDecoder().decode((await execution).body), 'ready');
+    assert.equal(new TextDecoder().decode(new Map(runtime.snapshotEntries).get('/persist/www/generated.php').bytes), '<?php // after continue');
+  } finally { await runtime.stop(); await execution.catch(() => {}); }
+});
+
 test(`native PHP ${version} evaluates conditional breakpoints and paged recursive values`, { timeout: 20_000 }, async () => {
   const runtime = runtimeFor(`<?php
 class DebugValue { public $label = 'root'; public $self; protected $secret = 'hidden'; public function __get($name) { throw new RuntimeException('Inspection invoked __get'); } public function __debugInfo() { throw new RuntimeException('Inspection invoked __debugInfo'); } } $object = new DebugValue(); $object->self = $object;

@@ -82,6 +82,135 @@ test('Explorer bursts remain bounded and duplicate metadata failures retain VS C
   provider.dispose();
 });
 
+test('four queued saves cannot block paused source reads or change a dirty model baseline', async () => {
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const writes = [];
+  let dirty = false, revision = 'original', canonicalPath = '/original.php';
+  const provider = new JoomlaFileSystemProvider({ async request(operation, args) {
+    if (operation === 'read') return { bytes: new Uint8Array([7]), revision, canonicalPath };
+    if (operation === 'stat') return { type: 'file', size: 1, mtime: 1, ctime: 1 };
+    if (operation === 'list') return [{ name: 'other.php', type: 'file' }];
+    writes.push(args.path);
+    await held;
+    return { ok: true, results: [], changes: [] };
+  } }, 'test');
+  provider.isDirty = () => dirty;
+  const uri = provider.uri('/alias.php');
+  await provider.readFile(uri);
+  dirty = true; revision = 'changed-during-request'; canonicalPath = '/changed.php';
+  const pending = Array.from({ length: 5 }, (_, index) => provider.request('write', { path: `/save-${index}.php` }));
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(writes, ['/save-0.php', '/save-1.php', '/save-2.php', '/save-3.php']);
+    const reading = Promise.all([provider.readFile(uri), provider.stat(uri), provider.readdir(provider.uri('/'))]);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(provider.readRevisions.get('/alias.php'), revision, 'A stack-frame source read must finish while every mutation slot is held.');
+    assert.equal(provider.readCanonicalPaths.get('/alias.php'), canonicalPath);
+    assert.equal(provider.revisions.get('/alias.php'), 'original');
+    assert.equal(provider.canonicalPaths.get('/alias.php'), '/original.php');
+    assert.deepEqual((await reading)[0], new Uint8Array([7]));
+    assert.equal(writes.length, 4, 'Reading must not start a fifth queued mutation.');
+  } finally {
+    release();
+    await Promise.all(pending);
+    provider.dispose();
+  }
+  assert.deepEqual(writes, Array.from({ length: 5 }, (_, index) => `/save-${index}.php`));
+});
+
+test('source backpressure remains bounded independently from mutation dispatch', async () => {
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const reads = [], writes = [];
+  const provider = new JoomlaFileSystemProvider({ async request(operation, args) {
+    if (operation === 'stat') {
+      reads.push(args.path);
+      await held;
+      return { type: 'file', size: 1, mtime: 1, ctime: 1 };
+    }
+    writes.push(args.path);
+    return { ok: true, results: [], changes: [] };
+  } }, 'test');
+  const pending = Array.from({ length: 8 }, (_, index) => provider.request('stat', { path: `/read-${index}.php` }));
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(reads, ['/read-0.php', '/read-1.php', '/read-2.php', '/read-3.php']);
+    const writing = provider.request('write', { path: '/save.php' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(writes, ['/save.php'], 'Four held source reads must not occupy mutation slots.');
+    await writing;
+    assert.equal(reads.length, 4);
+  } finally {
+    release();
+    await Promise.all(pending);
+    provider.dispose();
+  }
+  assert.deepEqual(reads, Array.from({ length: 8 }, (_, index) => `/read-${index}.php`));
+});
+
+test('paused workspace search and cancellation use source slots while four writes wait', async () => {
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const reads = [];
+  const provider = new JoomlaFileSystemProvider({ async request(operation) {
+    if (operation === 'write') { await held; return {}; }
+    reads.push(operation);
+    return operation === 'search' ? { results: [], cursor: 'search-cursor' } : { cancelled: true };
+  } }, 'test');
+  const pending = Array.from({ length: 4 }, (_, index) => provider.request('write', { path: `/save-${index}.php` }));
+  try {
+    const searching = provider.request('search', { query: 'Joomla' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(reads, ['search']);
+    const { cursor } = await searching;
+    const cancelling = provider.request('cancelSearch', { cursor });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(reads, ['search', 'cancelSearch']);
+    assert.deepEqual(await cancelling, { cancelled: true });
+  } finally {
+    release();
+    await Promise.all(pending);
+    provider.dispose();
+  }
+});
+
+test('pausing revalidates open files and reloads clean revisions without accepting dirty disk changes', async () => {
+  let listener, changed = false;
+  const provider = new JoomlaFileSystemProvider({
+    subscribe(callback) { listener = callback; return () => {}; },
+    async request(operation, args) {
+      const revision = `${changed ? 'paused' : 'initial'}:${args.path}`;
+      const canonicalPath = `${changed ? '/paused' : '/initial'}${args.path}`;
+      if (operation === 'read') return { bytes: new Uint8Array([changed ? 2 : 1]), revision, canonicalPath };
+      if (operation === 'stat') return { type: 'file', revision, canonicalPath };
+    },
+  }, 'test');
+  const notifications = [];
+  provider.onDidChangeFile(changes => notifications.push(...changes));
+  await provider.readFile(provider.uri('/clean.php'));
+  await provider.readFile(provider.uri('/dirty.php'));
+  provider.isDirty = path => path === '/dirty.php';
+  changed = true;
+  listener({ type: 'debug-state', state: 'running' });
+  assert.equal(provider.revalidating, undefined);
+  listener({ type: 'debug-state', state: 'paused' });
+  await provider.revalidating;
+  assert.deepEqual(notifications.map(({ resource }) => resource.path), ['/clean.php', '/dirty.php']);
+  assert.equal(provider.revisions.get('/dirty.php'), 'initial:/dirty.php');
+  // File change notifications ask VS Code to refresh clean models. A comparison
+  // read of an already-dirty model still cannot accept its new disk baseline.
+  assert.deepEqual(await provider.readFile(provider.uri('/clean.php')), new Uint8Array([2]));
+  await provider.readFile(provider.uri('/dirty.php'));
+  assert.equal(provider.revisions.get('/clean.php'), 'paused:/clean.php');
+  assert.equal(provider.canonicalPaths.get('/clean.php'), '/paused/clean.php');
+  assert.equal(provider.readRevisions.get('/dirty.php'), 'paused:/dirty.php');
+  assert.equal(provider.readCanonicalPaths.get('/dirty.php'), '/paused/dirty.php');
+  assert.equal(provider.revisions.get('/dirty.php'), 'initial:/dirty.php');
+  assert.equal(provider.canonicalPaths.get('/dirty.php'), '/initial/dirty.php');
+  provider.dispose();
+});
+
 test('disk comparison reads cannot authorize overwriting a dirty editor buffer baseline', async () => {
   let revision = 'original', dirty = false, attempted;
   const provider = new JoomlaFileSystemProvider({ async request(operation, args) {
