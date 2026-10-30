@@ -230,15 +230,16 @@ jobs:
           retention-days: 14
 
   browser:
-    name: Browser validation (${{ matrix.browser }})
+    name: Browser validation (${{ matrix.browser }}, ${{ matrix.suite }})
     needs: [checks, build]
     runs-on: ubuntu-24.04
-    # The Code suites run before the existing 30-minute regression contract.
-    timeout-minutes: 45
+    # Independent jobs keep a UI failure from suppressing runtime or visual evidence.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
         browser: [chromium, firefox]
+        suite: [code, ui, rocket, runtime]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -254,6 +255,7 @@ jobs:
         id: browser_install
         run: npx playwright install --with-deps ${{ matrix.browser }}
       - name: Validate Code against the running Joomla runtime
+        if: matrix.suite == 'code'
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
           PLAYGROUND_PHP_VERSIONS: ${{ needs.checks.outputs.php }}
@@ -263,11 +265,27 @@ jobs:
             node --test "$suite" || result=1
           done
           exit "$result"
+      - name: Select independent runtime scenarios
+        id: scenarios
+        if: matrix.suite != 'code'
+        env:
+          SELECTED_SCENARIOS: ${{ needs.checks.outputs.scenarios }}
+          VALIDATION_SUITE: ${{ matrix.suite }}
+        run: |
+          node --input-type=module <<'JS'
+          import { appendFileSync } from 'node:fs';
+          const all = ['matrix', 'memory', 'timeout', 'static', 'ui', 'deploys', 'export', 'rocket'];
+          const selected = process.env.SELECTED_SCENARIOS?.split(',').filter(Boolean);
+          const suite = process.env.VALIDATION_SUITE;
+          const scenarios = (selected?.length ? selected : all).filter(name => suite === 'runtime'
+            ? !['ui', 'rocket'].includes(name) : name === suite);
+          appendFileSync(process.env.GITHUB_OUTPUT, `scenarios=${scenarios.join(',')}\n`);
+          JS
       - name: Validate the exact candidate build
-        if: ${{ !cancelled() && steps.browser_install.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.browser_install.outcome == 'success' && steps.scenarios.outputs.scenarios != '' }}
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
-          PLAYGROUND_SCENARIOS: ${{ needs.checks.outputs.scenarios }}
+          PLAYGROUND_SCENARIOS: ${{ steps.scenarios.outputs.scenarios }}
           PLAYGROUND_PHP_VERSIONS: ${{ needs.checks.outputs.php }}
           PLAYGROUND_JOOMLA_VERSIONS: ${{ needs.checks.outputs.joomla }}
         run: npm run test:browser
@@ -275,7 +293,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: playground-test-results-${{ matrix.browser }}
+          name: playground-test-results-${{ matrix.browser }}-${{ matrix.suite }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 14
