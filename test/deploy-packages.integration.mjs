@@ -104,7 +104,8 @@ test('manual Service Directory package keeps normal PHP settings and installs ev
     };
     const archive = await runtime.fetchAsset(new URL(release.url, manifestURL));
     assert.equal(archive.status, 200);
-    await installJoomla(instrumented, configuration, { archiveBytes: await archive.arrayBuffer(), sha256: release.sha256,
+    const archiveBytes = await archive.arrayBuffer();
+    await installJoomla(instrumented, configuration, { archiveBytes, sha256: release.sha256,
       sourceLoader: checkedSourceLoader, fetchPackage: runtime.fetchAsset });
     assert.equal(packageChecks.length, 1, 'The package installer runs once without automatic replay.');
     assert.ok(packageChecks[0] >= 210_000, 'The host deadline must allow PHP its full 180 seconds and cleanup grace.');
@@ -130,5 +131,35 @@ test('manual Service Directory package keeps normal PHP settings and installs ev
     const html = await response.text();
     assert.match(html, /com_servicedirectory/);
     assert.doesNotMatch(html, /name=["']passwd["']|Fatal error|Uncaught (?:Error|Exception)|Call to undefined function/i);
+    await runtime.close();
+
+    // A fatal exit after writes must remain incomplete and must not replay the installer.
+    const failedRuntime = await createNodeRuntime({ directory: process.env.PLAYGROUND_DIST, phpVersion: '8.4' });
+    try {
+      let attempts = 0;
+      const fatalSourceLoader = async name => {
+        const source = await sourceLoader(name);
+        if (name !== 'console') return source;
+        attempts++;
+        const entry = '$exitCode = playgroundRunConsole($application);';
+        assert.ok(source.includes(entry));
+        return source.replace(entry, `file_put_contents('/persist/meta/installer-attempts.txt', 'attempt\\n', FILE_APPEND);
+    register_shutdown_function(static function (): void { echo '<!DOCTYPE html><html><style>fatal-report</style></html>'; });
+    exit(97);`);
+      };
+      await assert.rejects(installJoomla(failedRuntime, configuration, { archiveBytes, sha256: release.sha256,
+        sourceLoader: fatalSourceLoader, fetchPackage: failedRuntime.fetchAsset }), error => {
+        assert.equal(error.incomplete, true);
+        assert.doesNotMatch(error.message, /<!DOCTYPE|<style>|Invalid PHP provisioning response/i);
+        assert.match(error.technicalDetails, /fatal-report/);
+        return true;
+      });
+      const marker = JSON.parse(await failedRuntime.fs.readFile(failedRuntime.installMarkerPath, { encoding: 'utf8' }));
+      assert.equal(marker.state, 'installing');
+      assert.equal(attempts, 1);
+      assert.equal(await failedRuntime.fs.readFile('/persist/meta/installer-attempts.txt', { encoding: 'utf8' }), 'attempt\\n');
+      await assert.rejects(installJoomla(failedRuntime, configuration, { sourceLoader }), /installation is incomplete/i);
+      assert.equal(attempts, 1, 'Reopening the partial deployment must never replay its installer.');
+    } finally { await failedRuntime.close(); }
   } finally { await runtime.close(); }
 });
