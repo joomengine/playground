@@ -454,6 +454,7 @@ export default Object.freeze({
   "a11y.site": "Sitio Joomla en ejecución",
   "noscript": "Rocket necesita JavaScript y WebAssembly para ejecutar PHP y MariaDB en tu navegador.",
   "action.about": "Acerca de",
+  "action.agentGuide": "Guía para agentes",
   "action.add": "Añadir",
   "action.addMenu": "Añadir elemento de menú",
   "action.administrator": "Abrir administración",

@@ -362,6 +362,7 @@ export default Object.freeze({
   "a11y.site": "Ιστότοπος Joomla σε λειτουργία",
   "noscript": "Το Rocket χρειάζεται JavaScript και WebAssembly για την εκτέλεση PHP και MariaDB στο πρόγραμμα περιήγησης.",
   "action.about": "Σχετικά",
+  "action.agentGuide": "Οδηγός πρακτόρων",
   "action.add": "Προσθήκη",
   "action.addMenu": "Προσθήκη στοιχείου μενού",
   "action.administrator": "Άνοιγμα διαχείρισης",

@@ -23,6 +23,9 @@ presets, custom/local endpoints and scoped context are implemented; the
 from outstanding real-service browser checks. Local editing and debugging do not
 require AI credentials.
 
+For an agent-oriented introduction to configuring a site, working with JCB,
+testing extensions and exporting results, see the [Playground agent guide](docs/agent-guide.md).
+
 ## Upstream foundations and credits
 
 This project builds directly on the work of these maintainers and contributors:
