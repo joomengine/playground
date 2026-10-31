@@ -44,8 +44,20 @@ try {
     $application->setLogger($container->get(\Psr\Log\LoggerInterface::class));
     $application->setSession($container->get(\Joomla\Session\SessionInterface::class));
     $exitCode = playgroundRunConsole($application);
-    if ($exitCode !== 0 || !is_file($root . '/configuration.php') || is_dir($root . '/installation')) {
+    if ($exitCode !== 0 || !is_file($root . '/configuration.php')) {
         throw new RuntimeException('Joomla installation failed with exit status ' . $exitCode . '. ' . $output->fetch());
+    }
+    // Joomla's CLI intentionally retains its installer in development builds.
+    // Complete the same official cleanup used for stable builds before opening
+    // the site; a successful nightly must not remain in the installation state.
+    if (is_dir($root . '/installation') && (new \Joomla\CMS\Version())->isInDevelopmentState()) {
+        $cleanup = $application->getMVCFactory()->createModel('Cleanup', 'Installation');
+        if (!$cleanup->deleteInstallationFolder()) {
+            throw new RuntimeException('Joomla was configured, but its development installer could not be removed.');
+        }
+    }
+    if (is_dir($root . '/installation')) {
+        throw new RuntimeException('Joomla was configured, but its installation directory remains.');
     }
     // Keep browser sessions alongside the site's persisted files. The database
     // session handler closes/reopens PDO during session ID rotation; outstanding
