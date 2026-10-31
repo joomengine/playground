@@ -113,3 +113,115 @@ test('private checkpoint import restores without rotating accounts or replaying 
   assert.equal(result.fromCheckpoint, true);
   assert.equal(result.resumed, true);
 });
+
+test('failure envelope survives Joomla fatal HTML while keeping diagnostics bounded and private', async () => {
+  const text = '\n__JOOMENGINE_RESULT__' + JSON.stringify({ ok: false, error: 'Maximum execution time of 60 seconds exceeded',
+    output: 'https://user:private@example.test/pkg.zip?token=secret\n{"password":"sensitive"}' }) + '<!DOCTYPE html><style>' + 'x'.repeat(12000) + '</style>';
+  await assert.rejects(parseProvisioningResult({ status: 500, text }), error => {
+    assert.equal(error.message, 'Maximum execution time of 60 seconds exceeded');
+    assert.ok(error.technicalDetails.length <= 8192);
+    assert.match(error.technicalDetails, /<!DOCTYPE html>/);
+    assert.doesNotMatch(error.technicalDetails, /private|sensitive|token=secret/);
+    return true;
+  });
+});
+
+test('JSON framing handles quotes, nesting, Unicode and marker text inside strings', async () => {
+  const result = { ok: true, output: 'Quoted " braces } { ☃ \n__JOOMENGINE_RESULT__', nested: [{ brackets: '[{}]' }] };
+  assert.deepEqual(await parseProvisioningResult({ status: 200, text: '\n__JOOMENGINE_RESULT__' + JSON.stringify(result) }), result);
+  const failed = { ...result, ok: false, error: 'Known failure' };
+  await assert.rejects(parseProvisioningResult({ text: '\n__JOOMENGINE_RESULT__' + JSON.stringify(failed) + '<html>Fatal error</html>' }), /Known failure/);
+});
+
+test('malformed, truncated, conflicting and worker-failed results never become success', async () => {
+  const marker = '\n__JOOMENGINE_RESULT__';
+  for (const text of ['{}', '{"ok":"true"}', '[{"ok":true}]', '{"ok":true', '{"ok":true] ',
+    '{"ok":true}<!DOCTYPE html>', '{"ok":false,"error":"failed"}' + marker + '{"ok":true}',
+    '{"ok":true}' + marker + '{"ok":false}', '{"ok":true}' + marker + '{"ok":true}']) {
+    await assert.rejects(parseProvisioningResult({ status: 200, text: marker + text }), /Invalid PHP provisioning response/);
+  }
+  for (const extra of [{ fatal: true }, { error: 'Worker died' }, { failed: true }, { diagnostic: 'PHP restarted after an application error.' }]) {
+    await assert.rejects(parseProvisioningResult({ status: 200, text: marker + '{"ok":true}', ...extra }), /PHP failed/);
+  }
+  await assert.rejects(parseProvisioningResult({ text: '<!DOCTYPE html><style>body{color:red}</style>' }), error => {
+    assert.doesNotMatch(error.message, /DOCTYPE|style|color/);
+    return true;
+  });
+});
+
+test('extension installer applies matching PHP and host budgets before any work', async () => {
+  const { installExtension, runStartupCommand } = await import('../src/joomla/index.mjs');
+  const sourceLoader = async name => `<?php\n// operation:${name}\n`;
+  const calls = [], writes = [];
+  const runtime = { fs: { writeFile: async (...args) => writes.push(args) }, runPhp: async (source, options) => {
+    const payload = JSON.parse(Buffer.from(/base64_decode\('([^']+)'\)/.exec(source)[1], 'base64'));
+    calls.push({ payload, options });
+    return { status: 200, text: '\n__JOOMENGINE_RESULT__{"ok":true}' };
+  } };
+  const bytes = new Uint8Array([0x50, 0x4b, 3, 4]);
+  await assert.rejects(installExtension(runtime, bytes, { sourceLoader, executionTimeSeconds: 300, timeoutMs: 180000 }), /Installation timeout/);
+  assert.equal(writes.length, 0);
+  assert.equal(calls.length, 0);
+  await installExtension(runtime, bytes, { sourceLoader });
+  assert.equal(calls[0].payload.installationExecutionTimeSeconds, 180);
+  assert.equal(calls[0].options.timeoutMs, 210000);
+  await installExtension(runtime, bytes, { sourceLoader, executionTimeSeconds: 300, timeoutMs: 400000 });
+  assert.equal(calls[1].payload.installationExecutionTimeSeconds, 300);
+  assert.equal(calls[1].options.timeoutMs, 400000);
+  await runStartupCommand(runtime, ['extension:install', '--path=/tmp/package.zip'], { sourceLoader });
+  assert.equal(calls[2].payload.installationExecutionTimeSeconds, 180);
+  await runStartupCommand(runtime, ['cache:clean'], { sourceLoader });
+  assert.equal(calls[3].payload.installationExecutionTimeSeconds, undefined);
+  assert.equal(calls[3].options, undefined);
+});
+
+test('installer errors identify package, phase and deadline without exposing HTML or URL secrets', async () => {
+  const { installExtension } = await import('../src/joomla/index.mjs');
+  const bytes = new Uint8Array([0x50, 0x4b, 3, 4]);
+  let calls = 0;
+  const runtime = { fs: { writeFile: async () => {} }, runPhp: async () => {
+    calls++;
+    return { status: 500, text: '\n__JOOMENGINE_RESULT__{"ok":false,"error":"Maximum execution time of 180 seconds exceeded"}<!DOCTYPE html>' };
+  } };
+  await assert.rejects(installExtension(runtime, bytes, { sourceLoader: async () => '<?php', packageUrl: 'https://example.test/package.zip?token=secret' }), error => {
+    assert.match(error.message, /package.zip installation exceeded PHP's 180-second limit/);
+    assert.doesNotMatch(error.message, /DOCTYPE|secret/);
+    assert.equal(error.packageUrl, 'https://example.test/package.zip');
+    assert.equal(error.phase, 'installation');
+    assert.equal(error.incomplete, true);
+    assert.equal(error.executionTimeSeconds, 180);
+    return true;
+  });
+  assert.equal(calls, 1, 'A partially completed install must never be replayed.');
+});
+
+test('applying packages distinguishes unreadable downloads, verification and installer work', async () => {
+  const { applyJoomlaConfiguration } = await import('../src/joomla/index.mjs');
+  const sourceLoader = async name => `<?php\n// operation:${name}\n`;
+  const writes = [], progress = [], calls = [];
+  const runtime = { fs: { writeFile: async (...args) => writes.push(args) }, runPhp: async (source, options) => {
+    const payload = JSON.parse(Buffer.from(/base64_decode\('([^']+)'\)/.exec(source)[1], 'base64'));
+    calls.push({ payload, options });
+    return { status: 200, text: '\n__JOOMENGINE_RESULT__' + JSON.stringify(calls.length === 1
+      ? { ok: true, marker: { state: 'complete', joomlaVersion: '6.2.0' }, configured: true, installerPresent: false }
+      : { ok: false, error: 'Installer failed' }) };
+  } };
+  const config = { ...configuration, extensions: [{ url: 'https://example.test/extension.zip?key=private' }] };
+  await assert.rejects(applyJoomlaConfiguration(runtime, config, { sourceLoader, progress: event => progress.push(event),
+    fetchPackage: async () => { throw new TypeError('Failed to fetch'); } }), error => {
+    assert.equal(error.phase, 'download');
+    assert.match(error.message, /browser could not read/);
+    assert.doesNotMatch(error.message, /private/);
+    return true;
+  });
+  assert.equal(writes.length, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(progress.at(-1).phase, 'download');
+  calls.length = 0; progress.length = 0;
+  await assert.rejects(applyJoomlaConfiguration(runtime, config, { sourceLoader, progress: event => progress.push(event),
+    fetchPackage: async () => new Response(new Uint8Array([0x50, 0x4b, 3, 4])) }), /Installer failed/);
+  assert.deepEqual(progress.filter(event => event.phase).map(event => event.phase), ['download', 'verification', 'installation']);
+  assert.equal(calls.at(-1).payload.installationExecutionTimeSeconds, 180);
+  assert.equal(calls.at(-1).options.timeoutMs, 210000);
+  assert.equal(writes.length, 1, 'Failure must not rewrite the complete marker or replay installation.');
+});

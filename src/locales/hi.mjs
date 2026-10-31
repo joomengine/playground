@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "कार्रवाई पूरी नहीं हो सकी। अधिक जानकारी के लिए तकनीकी विवरण खोलें।",
+  "title.technicalDetails": "तकनीकी विवरण",
+  "help.temporaryRetry": "यह अस्थायी परिनियोजन अधूरा है। दोबारा कोशिश करने से एक नई अस्थायी साइट बनती है। सहेजी गई साइट को पुनर्प्राप्त और रीसेट करने के विकल्प तभी उपलब्ध होते हैं जब सहेजना चालू हो।",
+  "help.savedRetry": "यह सहेजा गया परिनियोजन अधूरा हो सकता है। जाँच के लिए सहेजी गई साइट को पुनर्प्राप्त करें, या नए परिनियोजन के लिए नई साइट कुंजी का उपयोग करें। रीसेट करके शुरू करने पर पुष्टि के बाद यह साइट मिटा दी जाती है।",
+  "action.downloadDiagnostics": "निदान लॉग डाउनलोड करें",
   "help.codeCredits": "JoomEngine Code में Microsoft VS Code/Monaco, CodinGame, PHP/phpdbg, Sean Morris का PHP-WASM और Emscripten शामिल हैं।",
   "license.codeInventory": "भाषा, व्याकरण, थीम और आइकन के योगदानकर्ताओं को साथ दी गई निर्भरता सूची में श्रेय दिया गया है।",
   "help.codeEncoding": "jschardet 3.1.4 का कॉपीराइट © Netscape Communications Corporation और योगदानकर्ताओं के पास है। इसे António Afonso ने पोर्ट किया है और यह LGPL-2.1-or-later के अंतर्गत है।",

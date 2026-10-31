@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "De bewerking kon niet worden voltooid. Open Technische details voor meer informatie.",
+  "title.technicalDetails": "Technische details",
+  "help.temporaryRetry": "Deze tijdelijke implementatie is onvolledig. Opnieuw proberen maakt een nieuwe tijdelijke website. Herstel en reset van opgeslagen websites zijn alleen beschikbaar als opslaan is ingeschakeld.",
+  "help.savedRetry": "Deze opgeslagen implementatie is mogelijk onvolledig. Herstel de opgeslagen website om deze te onderzoeken, of gebruik een nieuwe websitesleutel voor een nieuwe implementatie. Resetten en starten verwijdert deze website na bevestiging.",
+  "action.downloadDiagnostics": "Diagnoselog downloaden",
   "code.aiPanel.omittedScope": "Buiten het geselecteerde bereik of uitgesloten door je instellingen.",
   "code.aiPanel.omittedFile": "Dit bestand kon niet worden opgenomen. Kies een ondersteund tekstbestand op het oorspronkelijke pad in de werkruimte.",
   "code.aiPanel.connections": "Opgeslagen aangepaste verbindingen",

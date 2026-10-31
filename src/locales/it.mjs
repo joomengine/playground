@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "Impossibile completare l’operazione. Apri i dettagli tecnici per maggiori informazioni.",
+  "title.technicalDetails": "Dettagli tecnici",
+  "help.temporaryRetry": "Questa distribuzione temporanea è incompleta. Riprova crea un nuovo sito temporaneo. Il recupero e il ripristino dei siti salvati sono disponibili solo quando il salvataggio è abilitato.",
+  "help.savedRetry": "Questa distribuzione salvata potrebbe essere incompleta. Recupera il sito salvato per esaminarlo oppure usa una nuova chiave del sito per una nuova distribuzione. Ripristina e avvia elimina questo sito dopo la conferma.",
+  "action.downloadDiagnostics": "Scarica il registro diagnostico",
   "code.aiPanel.omittedScope": "Al di fuori dell’ambito selezionato o escluso dalle tue impostazioni.",
   "code.aiPanel.omittedFile": "Non è stato possibile includere questo file. Scegli un file di testo supportato nel suo percorso originale nell’area di lavoro.",
   "code.aiPanel.connections": "Connessioni personalizzate salvate",

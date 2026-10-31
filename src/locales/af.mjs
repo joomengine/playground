@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "Die bewerking kon nie voltooi word nie. Maak Tegniese besonderhede oop vir meer inligting.",
+  "title.technicalDetails": "Tegniese besonderhede",
+  "help.temporaryRetry": "Hierdie tydelike ontplooiing is onvolledig. Probeer weer skep ’n nuwe tydelike webwerf. Herstel en terugstel van gestoorde webwerwe is slegs beskikbaar wanneer stoor geaktiveer is.",
+  "help.savedRetry": "Hierdie gestoorde ontplooiing is dalk onvolledig. Herstel die gestoorde webwerf om dit te ondersoek, of gebruik ’n nuwe webwerfsleutel vir ’n vars ontplooiing. Terugstel en begin verwyder hierdie webwerf ná bevestiging.",
+  "action.downloadDiagnostics": "Laai diagnostiese log af",
   "code.aiPanel.omittedScope": "Buite die gekose omvang of deur jou instellings uitgesluit.",
   "code.aiPanel.omittedFile": "Hierdie lêer kon nie ingesluit word nie. Kies 'n ondersteunde tekslêer by sy oorspronklike werkruimtepad.",
   "code.aiPanel.connections": "Gestoorde pasgemaakte verbindings",

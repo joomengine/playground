@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "処理を完了できませんでした。詳細は「技術情報」を開いて確認してください。",
+  "title.technicalDetails": "技術情報",
+  "help.temporaryRetry": "この一時的なデプロイは未完了です。再試行すると新しい一時サイトが作成されます。保存済みサイトの復旧とリセットは、保存が有効な場合にのみ利用できます。",
+  "help.savedRetry": "この保存済みデプロイは未完了の可能性があります。保存済みサイトを復旧して確認するか、新しいサイトキーで新規デプロイを行ってください。「リセットして起動」は確認後にこのサイトを削除します。",
+  "action.downloadDiagnostics": "診断ログをダウンロード",
   "help.codeCredits": "JoomEngine Code には Microsoft VS Code/Monaco、CodinGame、PHP/phpdbg、Sean Morris の PHP-WASM、Emscripten が含まれています。",
   "license.codeInventory": "言語、文法、テーマ、アイコンの貢献者は、同梱の依存関係一覧に記載されています。",
   "help.codeEncoding": "jschardet 3.1.4 は © Netscape Communications Corporation および貢献者に帰属し、António Afonso によって移植され、LGPL-2.1-or-later に基づいて提供されています。",

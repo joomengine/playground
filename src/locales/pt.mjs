@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "Não foi possível concluir a operação. Abra os detalhes técnicos para mais informações.",
+  "title.technicalDetails": "Detalhes técnicos",
+  "help.temporaryRetry": "Esta implantação temporária está incompleta. Tentar novamente cria um novo site temporário. A recuperação e a redefinição de sites salvos só estão disponíveis quando o salvamento está ativado.",
+  "help.savedRetry": "Esta implantação salva pode estar incompleta. Recupere o site salvo para examiná-lo ou use uma nova chave de site para uma nova implantação. Redefinir e iniciar exclui este site após a confirmação.",
+  "action.downloadDiagnostics": "Baixar registro de diagnóstico",
   "code.aiPanel.omittedScope": "Fora do âmbito selecionado ou excluído pelas suas definições.",
   "code.aiPanel.omittedFile": "Não foi possível incluir este ficheiro. Escolha um ficheiro de texto suportado no seu caminho original no espaço de trabalho.",
   "code.aiPanel.connections": "Ligações personalizadas guardadas",

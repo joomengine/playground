@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "操作未能完成。请展开技术详情以了解更多信息。",
+  "title.technicalDetails": "技术详情",
+  "help.temporaryRetry": "此临时部署尚未完成。重试将创建一个新的临时站点。只有启用保存功能后，才能恢复和重置已保存的站点。",
+  "help.savedRetry": "此已保存的部署可能尚未完成。请恢复已保存的站点进行检查，或使用新的站点密钥重新部署。重置并启动将在确认后删除此站点。",
+  "action.downloadDiagnostics": "下载诊断日志",
   "help.codeCredits": "JoomEngine Code 包含 Microsoft VS Code/Monaco、CodinGame、PHP/phpdbg、Sean Morris 的 PHP-WASM 和 Emscripten。",
   "license.codeInventory": "随附的依赖清单列出了语言、语法、主题和图标的贡献者。",
   "help.codeEncoding": "jschardet 3.1.4 的版权归 Netscape Communications Corporation 及贡献者所有（©），由 António Afonso 移植，采用 LGPL-2.1-or-later 许可证。",

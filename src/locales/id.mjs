@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "Operasi tidak dapat diselesaikan. Buka detail teknis untuk informasi selengkapnya.",
+  "title.technicalDetails": "Detail teknis",
+  "help.temporaryRetry": "Penerapan sementara ini belum selesai. Coba lagi membuat situs sementara baru. Pemulihan dan pengaturan ulang situs tersimpan hanya tersedia jika penyimpanan diaktifkan.",
+  "help.savedRetry": "Penerapan tersimpan ini mungkin belum selesai. Pulihkan situs tersimpan untuk memeriksanya, atau gunakan kunci situs baru untuk penerapan baru. Atur ulang dan jalankan menghapus situs ini setelah konfirmasi.",
+  "action.downloadDiagnostics": "Unduh log diagnostik",
   "code.aiPanel.omittedScope": "Di luar cakupan yang dipilih atau dikecualikan oleh pengaturan Anda.",
   "code.aiPanel.omittedFile": "File ini tidak dapat disertakan. Pilih file teks yang didukung pada jalur aslinya di ruang kerja.",
   "code.aiPanel.connections": "Koneksi kustom tersimpan",
