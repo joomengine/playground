@@ -96,9 +96,51 @@ The current pinned catalog is:
 
 These are the patch versions contained in the selected upstream `0.2.0`
 packages. They are recorded explicitly for ABI compatibility; the minor-version
-selector does not imply a newer PHP patch release. Defaults are Joomla 6.2.0 and
-PHP 8.4.1. PHP 8.5 remains selectable, and existing saved sites retain their selected
-runtime. [versions.json](versions.json) is the authoritative build catalog.
+selector does not imply a newer PHP patch release. The pinned baseline is Joomla
+6.2.0 and PHP 8.4.1. PHP 8.5 remains selectable, and existing saved sites retain
+their selected runtime. [versions.json](versions.json) is the authoritative runtime
+build catalog; the published version catalog adds current and forward packages.
+
+## Current and forward version selection
+
+Choose Joomla, JCB and PHP, then launch. The selected Joomla and JCB packages are
+fetched automatically from the Playground's own static assets and installed inside
+the browser. Choosing a version records the choice; it does not open a ZIP download
+or upload dialog. Custom extension URLs remain subject to their host's browser
+access rules.
+
+The selectors show **Current stable** first, **Nightly builds** next and
+**Upcoming releases** last. Joomla choices cover majors 5, 6 and 7: one latest
+stable per major, the current nightly for each active development line, and the
+newest alpha, beta or RC for each future release. Joomla 4 and historical releases
+are excluded. JCB uses the same current-and-forward policy for major 5 onwards and
+follows the selected Joomla major. Joomla 7 can use JCB 6 for forward testing while
+JCB 7 is unavailable; this pairing is experimental. A previously selected archive
+that falls outside the current list appears separately as **Saved version**.
+Reopening it preserves the installed site rather than upgrading it.
+
+At build time, discovery follows Joomla's official
+[next patch](https://update.joomla.org/core/nightlies/next_patch_list.xml),
+[next minor](https://update.joomla.org/core/nightlies/next_minor_list.xml) and
+[next major](https://update.joomla.org/core/nightlies/next_major_list.xml) XML lists
+to their details feeds and selects **Full Package** ZIPs for fresh installations.
+JCB discovery reads only its
+[5.x](https://raw.githubusercontent.com/joomengine/Joomla-Component-Builder/refs/heads/5.x/componentbuilder_update_server.xml)
+and
+[6.x](https://raw.githubusercontent.com/joomengine/Joomla-Component-Builder/refs/heads/6.x/componentbuilder_update_server.xml)
+XML manifests. One recent Joomla release request, limited to 100 records, supplies
+stable and published preview releases missing from the nightly feeds. Discovery
+does not enumerate JCB branches or tags or paginate through old releases.
+
+The build verifies published SHA-256/SHA-512 checksums, fingerprints full packages
+without a published checksum, and writes immutable package paths alongside
+`dist/assets/version-catalog.json`. Its `generatedAt` field identifies when the
+catalog was built. The selectors refresh that published local catalog; they do not
+query upstream servers or fetch a newer nightly on their own. Pages rebuilds daily
+at 03:15 UTC and on changes to `main`, then publishes only after validation of that
+same artifact. A failed upstream refresh or validation leaves the previous deployed
+catalog and packages available. Use a new site to try a newly published nightly;
+retain a complete site export when the exact old build must remain portable.
 
 ## Build and run locally
 
@@ -511,8 +553,10 @@ Prepared JCB copies use the stable package releases pinned in
 stable release, update its versioned URL and SHA-256 in that recipe and the
 optional MCP recipe, update any applicable compatibility inputs, and rebuild.
 CI installs and independently restores the new copies before publishing them.
-Existing saved sites are preserved; a new deployment receives the new prepared
-version. There is no unverified latest-release download during launch.
+Existing saved sites are preserved. A new deployment uses a prepared copy only
+when its exact Joomla/JCB selection matches that copy; other listed versions
+install automatically from their verified staged packages. Updating the prepared
+recipe and rebuilding remains necessary to publish a new prepared snapshot.
 
 The interface recognizes these query parameters:
 
@@ -713,9 +757,11 @@ breaks extension assets. Responsive layout does not imply runtime support on
 every mobile browser.
 
 The **Publish playground to Pages** workflow runs on every push or merge to
-`main`, and can also be started manually on `main`. It validates first, then
-deploys that exact tested artifact through the `github-pages` environment.
-Failed validation prevents deployment.
+`main`, daily at 03:15 UTC to refresh the current and nightly packages, and can
+also be started manually on `main`. It validates first, then deploys that exact
+tested artifact through the `github-pages` environment. Scheduled runs use the
+same checks and installation gates as other releases. Upstream download failures
+or failed validation prevent deployment and leave the last published site intact.
 
 Configure Pages with source **GitHub Actions** and custom domain
 **playground.joomengine.org**. The committed `CNAME` is copied into the build.
@@ -751,6 +797,7 @@ npx playwright install --with-deps chromium firefox
 npm run test:provisioning
 npm run build:deploys
 npm run test:browser
+node --test test/version-catalog.browser.mjs
 ```
 
 The browser suite uses real PHP, native PDO, MariaDB, and Joomla. It exercises
@@ -773,6 +820,10 @@ the same built artifact. Native/compiler caches require exact source and toolcha
 identities; downloads retain checksum validation. Provisioning uses bounded
 concurrency and browser scenarios fail promptly. Pages publishes only the exact
 artifact whose selected checks passed, and CI retains diagnostic output.
+A separate Chromium/Firefox version-catalog job installs the actual staged
+selection packages from that same candidate artifact and retains receipts in
+`test-results/`. Its success is required whenever a build is selected; it does not
+replace the existing runtime or interaction checks.
 Warm-cache presentation changes reuse already validated native extensions and skip
 the duplicate complete provisioning suite; runtime changes and native cache misses
 still execute those contracts.

@@ -11,6 +11,8 @@ test('nightly PHP choices intersect official minimum with shipped runtime binari
   assert.deepEqual(compatibleDynamicPhp({ version: '7.0.0-alpha1-dev', phpMinimum: '8.3.30' }, catalog), ['8.4', '8.5']);
   assert.deepEqual(compatibleDynamicPhp({ version: '7.0.0-alpha1-dev', phpMinimum: '8.6.0' }, catalog), []);
   assert.deepEqual(compatibleDynamicPhp({ version: '6.3.0-beta1' }, catalog), ['8.3', '8.4', '8.5']);
+  assert.deepEqual(compatibleDynamicPhp({ version: '7.0.0-alpha1' }, catalog), [], 'A new major needs explicit compatibility metadata.');
+  assert.deepEqual(compatibleDynamicPhp({ version: '7.0.0-alpha1', php: ['8.3', '8.4', '8.6'], phpMinimum: '8.4.0' }, catalog), ['8.4']);
   assert.deepEqual(compatibleDynamicPhp({ version: '3.10.12' }, catalog), []);
 });
 
@@ -25,6 +27,18 @@ test('refresh adds and removes discovered releases without replacing pinned or s
   assert.equal(catalog.defaults.joomlaVersion, '6.2.0');
 });
 
+test('a newer stable hides the old pinned version while an existing saved selection retains its archive', () => {
+  const current = { version: '6.2.1', url: '/current.zip', sha256: 'c'.repeat(64) };
+  const choices = dynamicJoomlaChoices(catalog, [current, { version: '4.4.14' }, { version: '6.2.0-rc2' }]);
+  assert.deepEqual(choices.map(entry => [entry.version, entry.channel]), [['6.2.1', 'stable']]);
+  const exact = { url: '/saved-archive.zip', sha256: 'd'.repeat(64), php: ['8.4'] };
+  const reopened = dynamicJoomlaChoices(catalog, [current], new Map([['6.2.0', exact]]));
+  assert.deepEqual(reopened.map(entry => [entry.version, entry.channel]), [['6.2.1', 'stable'], ['6.2.0', 'saved']]);
+  assert.equal(reopened[1].url, exact.url);
+  assert.equal(reopened[1].sha256, exact.sha256);
+  assert.deepEqual(reopened[1].php, ['8.4']);
+});
+
 test('JCB choices match Joomla major and switch from 6 fallback when 7 is published', () => {
   const entries = [{ version: '5.5.0' }, { version: '6.2.0' }, { version: '6.3.0-beta1' }];
   const pinned = new Map([['6', { version: '6.2.0', package: { url: '/pinned-jcb.zip' } }]]);
@@ -32,4 +46,7 @@ test('JCB choices match Joomla major and switch from 6 fallback when 7 is publis
   assert.deepEqual(matchingJcbChoices('7', entries, pinned).map(entry => entry.version), ['6.2.0', '6.3.0-beta1']);
   assert.equal(matchingJcbChoices('6', entries, pinned)[0].package.url, '/pinned-jcb.zip');
   assert.deepEqual(matchingJcbChoices('7', [...entries, { version: '7.0.0-alpha1' }], pinned).map(entry => entry.version), ['7.0.0-alpha1']);
+  assert.deepEqual(matchingJcbChoices('4', [{ version: '4.2.0' }], pinned), []);
+  assert.deepEqual(matchingJcbChoices('6', [...entries, { version: '6.2.1' }, { version: '6.2.1-rc1' }], pinned)
+    .map(entry => [entry.version, entry.channel]), [['6.2.1', 'stable'], ['6.3.0-beta1', 'preview']]);
 });

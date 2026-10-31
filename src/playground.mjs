@@ -344,7 +344,7 @@ export async function resetPlayground({ storageKey = 'default' } = {}) {
 }
 
 /** Create a real Joomla installation backed by upstream PHP and MariaDB WASM. */
-export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, recovery = false, resolvePackage } = {}) {
+export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, recovery = false } = {}) {
   const environment = await prepareEnvironment();
   if (environment.reloadRequired) throw new Error('Reload this page once to activate browser isolation, then start the playground.');
   const progress = value => onProgress({ ...value, phase: value.phase ?? value.stage });
@@ -359,8 +359,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     manifest.joomla.push(selected);
   }
   const config = normalizeConfiguration(input, { catalog: selectedCatalog, baseURL: base.href });
-  const fetchPackage = createPackageFetcher([config.joomlaPackage, config.jcbPackage]
-    .filter(entry => entry && new URL(entry.url).origin !== base.origin), fetch, { resolvePackage });
+  const fetchPackage = createPackageFetcher([config.joomlaPackage, config.jcbPackage].filter(Boolean), fetch);
   let phpEntry = manifest.php.find(entry => entry.version === config.phpVersion);
   const joomlaEntry = manifest.joomla.find(entry => entry.version === config.joomlaVersion);
   const resolveAsset = value => new URL(value, manifestUrl).href;

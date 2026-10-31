@@ -1,4 +1,8 @@
 export default Object.freeze({
+  "version.stable": "当前稳定版",
+  "version.nightly": "每夜构建",
+  "version.preview": "即将发布的版本",
+  "version.saved": "已保存的版本",
   "title.packageDownload": "加载 {package}",
   "help.packageDownload": "下载此 ZIP，然后选择已下载的文件以继续。",
   "label.packageFile": "已下载的 ZIP",

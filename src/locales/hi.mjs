@@ -1,4 +1,8 @@
 export default Object.freeze({
+  "version.stable": "वर्तमान स्थिर संस्करण",
+  "version.nightly": "रात्रिकालीन बिल्ड",
+  "version.preview": "आगामी संस्करण",
+  "version.saved": "सहेजा गया संस्करण",
   "title.packageDownload": "{package} लोड करें",
   "help.packageDownload": "यह ZIP डाउनलोड करें, फिर जारी रखने के लिए डाउनलोड की गई फ़ाइल चुनें।",
   "label.packageFile": "डाउनलोड की गई ZIP",

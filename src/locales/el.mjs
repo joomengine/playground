@@ -1,4 +1,8 @@
 export default Object.freeze({
+  "version.stable": "Τρέχουσα σταθερή έκδοση",
+  "version.nightly": "Νυχτερινές εκδόσεις",
+  "version.preview": "Επερχόμενες εκδόσεις",
+  "version.saved": "Αποθηκευμένη έκδοση",
   "title.packageDownload": "Φόρτωση {package}",
   "help.packageDownload": "Κατεβάστε αυτό το ZIP και επιλέξτε το ληφθέν αρχείο για να συνεχίσετε.",
   "label.packageFile": "Ληφθέν ZIP",
