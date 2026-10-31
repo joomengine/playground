@@ -3,6 +3,7 @@ import { createRefreshController } from './refresh.mjs';
 import { mountFileActions } from './file-actions.mjs';
 import { decorateAction, decorateIcons, createIcon } from '../icons.mjs';
 import { syncThemeDocument } from '../theme.mjs';
+import { ownedClientURL } from '../isolation.mjs';
 
 const mutations = new Set(['write', 'batch', 'mkdir', 'copy', 'rename', 'delete', 'recover']);
 let stylesheet;
@@ -285,7 +286,10 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
         cancelFrameLoad = () => { cleanup(); resolve(); };
         frame.onload = () => { cleanup(); resolve(); };
         frame.onerror = () => { cleanup(); reject(new Error('JoomEngine Code assets could not load. Retry opening the editor.')); };
-        frame.src = new URL('../../assets/code/editor.html', import.meta.url).href;
+        const editorURL = new URL('../../assets/code/editor.html', import.meta.url);
+        frame.src = runtime.isolation?.ownerId
+          ? ownedClientURL(editorURL, { ...runtime.isolation, baseURL: new URL('../../', import.meta.url).href })
+          : editorURL.href;
         editor.replaceChildren(frame);
       });
       if (disposed) return;
@@ -403,6 +407,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     },
     hide: () => layout.hide(),
     get visible() { return layout.state.visible; },
+    get detached() { return layout.state.detached; },
     refresh: () => refresh.refresh(),
     get closed() { return disposed; },
     async beforeClose() {

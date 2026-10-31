@@ -1,0 +1,750 @@
+{
+  "schemaVersion": 1,
+  "version": "jcb-2026-10-31-v1",
+  "assets": [
+    {
+      "id": "jcb-banner-joomla-heart-wide",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/banner/joomla-heart-wide.gif",
+      "owner": "Joomla Component Builder dashboard banner",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "f857e3a38facaeac9eba3cffa912b620",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-banner-jcm-2010-120x600",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/banner/JCM_2010_120x600.png",
+      "owner": "Joomla Component Builder dashboard banner",
+      "mime": "image/png",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "5389cf3be8569cb3f6793e8bd4013d19",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-banner-tlwebdesign-jcb-sponsor-728-90",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/banner/tlwebdesign_jcb_sponsor_728_90.png",
+      "owner": "Joomla Component Builder dashboard banner",
+      "mime": "image/png",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "d19be1f9f5b2049ff901096aafc246be",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-banner-vdm-jcb-sponsor-728-90",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/banner/vdm_jcb_sponsor_728_90.gif",
+      "owner": "Joomla Component Builder dashboard banner",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "84478dfa0cd880395815e0ee026812a4",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-banner-agerix-loves-jcb-728-90",
+      "url": "https://cms-experts.org/images/banners/agerix/agerix-loves-jcb-728-90.gif",
+      "owner": "Joomla Component Builder dashboard banner",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "b24c0726aa809cdcc04bcffe7e1e1529",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-banner-joomla-heart-tall",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/banner/joomla-heart-tall.gif",
+      "owner": "Joomla Component Builder dashboard banner",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "9a75e4929b86c318128b53cf78251678",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-original",
+      "url": "https://www.joomlacomponentbuilder.com/images/builder/original.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "676e37a949add8f4573381195cd1061c",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-1",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/1.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "ce6e36456fa794ba95d981547b2f54f8",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-2",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/2.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "0a54dbc393359747e33db90cabb1e2d7",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-3",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/3.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "4e5498713ff69a64a0a79dbf620372a3",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-4",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/4.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "3554ffab2a6df95a116fd9f0db63925c",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-5",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/5.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "08f0cdf188593eca65c6dafd7af27ef9",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-6",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/6.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "103b46a7ac3fcb974e25d06f417a4e87",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-7",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/7.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "ffa8547099b7286f89ab7ff5a140dd90",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-8",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/8.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "316df780f9e4ce81200a65d3c4303c41",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-9",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/9.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "9ab6ba78b6e63a285fdef2ff5e447c93",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-10",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/10.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "cd9abaa1cb95f51a70916da6b70614f2",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-11",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/11.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "cfe53095b5249618e2348223b89262b9",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-12",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/12.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "15a6690647d5160d67c80ce4dd1f5602",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-13",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/13.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "2f77562e92c8a3b7c47664c98f551fe8",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-14",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/14.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "46db15517ef5bd063be85134e1cc575d",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-15",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/15.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "e6c96eff157ea648ceb1583f2cc22544",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-16",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/16.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "76010b7d1f99952eb9645df660467ae8",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-17",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/17.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "021219ddd72d8fcfc7f80bd4a874d651",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-18",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/18.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "383af3179d4ae27301c1292e630d7155",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-19",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/19.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "8537e6d7be93447241b521f851e8a61d",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-20",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/20.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "10d96f70e3d43086a925b00a7dc0022e",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-21",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/21.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "161de9865b171b44039353b8d50491d3",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-22",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/22.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "6a2354e43eb97d278d74bb2c12890988",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-23",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/23.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "2cb6e2f9562a8dc8eef6d5d8d1a84f5e",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    },
+    {
+      "id": "jcb-builder-24",
+      "url": "https://raw.githubusercontent.com/vdm-io/jcb-external/refs/heads/master/src/images/builder/24.gif",
+      "owner": "Joomla Component Builder compiler animation",
+      "mime": "image/gif",
+      "maxBytes": 8388608,
+      "redirects": [],
+      "md5": "745b3fb5e16515689132432bf02ab1b4",
+      "compatibilityRequired": true,
+      "cache": {
+        "maxAgeSeconds": 900,
+        "immutable": false
+      },
+      "updatePolicy": "revalidate",
+      "source": {
+        "packages": [
+          "pkg-component-builder v5.2.0",
+          "pkg-component-builder v6.2.0"
+        ],
+        "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
+        "member": "dynamicContent",
+        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
+      }
+    }
+  ]
+}

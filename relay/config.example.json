@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "development": false,
+  "listen": { "host": "127.0.0.1", "port": 8787 },
+  "allowedOrigins": ["https://playground.joomengine.org"],
+  "timeoutMs": 15000,
+  "maxConcurrency": 8,
+  "requestsPerMinute": 120,
+  "globalRequestsPerMinute": 1200,
+  "maxTrackedClients": 4096,
+  "maxCacheBytes": 67108864,
+  "maxCacheEntries": 128
+}

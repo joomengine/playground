@@ -1,25 +1,19 @@
 import { serializeRequest, restoreResponse } from './src/http.mjs';
 import { StaticAssetCache } from './src/static-assets.mjs';
+import { ISOLATION_BOOTSTRAP_VERSION, isolationMarker, isolationResponseHeaders, isOwnerClient, resolveRequestIsolation, runtimeResource } from './src/isolation.mjs';
+import { createPublicAssetHandler } from './src/public-assets-worker.mjs';
 
 const scope = new URL(self.registration.scope);
 const sitePrefix = `${scope.pathname}__site/`;
 const staticAssets = new StaticAssetCache();
-const isolationHeaders = headers => {
-  const result = new Headers(headers);
-  result.set('Cross-Origin-Opener-Policy', 'same-origin');
-  // Keep MariaDB's shared memory available without requiring public image,
-  // classic script and stylesheet hosts to opt into our document's policy.
-  // Cross-origin no-cors requests omit credentials; CORS requests retain CORS.
-  result.set('Cross-Origin-Embedder-Policy', 'credentialless');
-  result.set('Cross-Origin-Resource-Policy', 'same-origin');
-  return result;
-};
+const publicAssets = createPublicAssetHandler({ baseURL: scope.href });
 
 self.addEventListener('install', event => event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
 self.addEventListener('message', event => {
-  if (event.data?.type === 'playground-client' && event.ports[0] && event.source?.id) {
-    event.ports[0].postMessage({ clientId: event.source.id });
+  if (['playground-client', 'playground-environment'].includes(event.data?.type) && event.ports[0] && event.source?.id) {
+    event.ports[0].postMessage({ clientId: event.source.id, bootstrapVersion: ISOLATION_BOOTSTRAP_VERSION,
+      policy: isolationMarker(event.source.url)?.policy ?? 'credentialless' });
   }
 });
 
@@ -63,7 +57,7 @@ async function routeToPlayground(request) {
   const url = new URL(request.url);
   const [ownerId, instanceId] = url.pathname.slice(sitePrefix.length).split('/');
   const owner = await self.clients.get(ownerId);
-  if (!owner || !new URL(owner.url).pathname.startsWith(scope.pathname)) {
+  if (!isOwnerClient(owner, scope.href)) {
     return new Response('This playground is closed. Open the playground page to start the site.', { status: 503, headers: { 'Cache-Control': 'no-store' } });
   }
   const serialized = await serializeRequest(request);
@@ -72,7 +66,7 @@ async function routeToPlayground(request) {
     port: channel.port1,
     async ownerAlive() {
       const active = await self.clients.get(ownerId);
-      return Boolean(active && new URL(active.url).pathname.startsWith(scope.pathname));
+      return isOwnerClient(active, scope.href);
     },
   });
   try {
@@ -91,23 +85,43 @@ async function routeToPlayground(request) {
 
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
-  if (url.origin !== scope.origin || !url.pathname.startsWith(scope.pathname)) return;
+  const local = url.origin === scope.origin && url.pathname.startsWith(scope.pathname);
+  // The only cross-origin interception is an exact registry-approved image in
+  // confirmed compatibility mode. Other requests retain ordinary Fetch rules.
+  if (!local && event.request.destination !== 'image') return;
   if (event.request.cache === 'only-if-cached' && event.request.mode !== 'same-origin') return;
   event.respondWith((async () => {
+    let policy = 'credentialless';
     try {
-      const response = url.pathname.startsWith(sitePrefix)
+      const isolation = await resolveRequestIsolation(event, { baseURL: scope.href, getClient: id => self.clients.get(id) });
+      policy = isolation.policy;
+      const compatibleImage = await publicAssets(event.request, { policy, onDiagnostic: detail => {
+        if (isolation.ownerId) void self.clients.get(isolation.ownerId).then(owner => owner?.postMessage(detail));
+      } });
+      if (!local && !compatibleImage) return fetch(event.request);
+      const resource = local ? runtimeResource(url, scope.href) : null;
+      if (resource && !['GET', 'HEAD'].includes(event.request.method)) {
+        return new Response('Owned runtime assets support GET and HEAD only.', { status: 405,
+          headers: isolationResponseHeaders({ Allow: 'GET, HEAD', 'Cache-Control': 'no-store' }, policy) });
+      }
+      const sourceURL = resource ? new URL(resource.url) : url;
+      const response = compatibleImage ?? (url.pathname.startsWith(sitePrefix)
         ? await routeToPlayground(event.request)
-        : await fetch(event.request, {
+        : await fetch(resource ? new Request(resource.url, {
+          method: event.request.method, headers: event.request.headers, mode: 'same-origin',
+          credentials: event.request.credentials, redirect: event.request.redirect,
+          cache: event.request.cache, signal: event.request.signal,
+        }) : event.request, {
           // Revalidate the shell/module graph and catalog after a release. Large
           // runtime binaries use versioned/content-hashed URLs in the manifest.
-          ...(!url.pathname.startsWith(`${scope.pathname}assets/`) || url.pathname === `${scope.pathname}assets/manifest.json`
+          ...(!sourceURL.pathname.startsWith(`${scope.pathname}assets/`) || sourceURL.pathname === `${scope.pathname}assets/manifest.json`
             ? { cache: event.request.cache === 'no-store' ? 'no-store' : 'no-cache' } : {}),
-        });
+        }));
       if (response.type === 'opaque' || response.status === 0) return response;
-      const headers = isolationHeaders(response.headers);
+      const headers = isolationResponseHeaders(response.headers, policy);
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     } catch (error) {
-      return new Response(error.message, { status: 503, headers: isolationHeaders({ 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }) });
+      return new Response(error.message, { status: 503, headers: isolationResponseHeaders({ 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }, policy) });
     }
   })());
 });

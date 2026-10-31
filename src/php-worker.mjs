@@ -6,6 +6,7 @@ import { createPhpFetch } from './php-network.mjs';
 import { installPhpRecovery } from './php-recovery.mjs';
 import { applyJcbRuntimeCompatibility } from './jcb-compatibility.mjs';
 import { staticAssetResponse } from './static-assets.mjs';
+import { installAdminer, withAdminerRequest, adminerRequestPath } from './database/runtime.mjs';
 
 const MAX_OPERATIONS = 64;
 const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
@@ -123,14 +124,15 @@ function clearHeaders() {
 
 async function request(value) {
   try {
-    if (debugOwner && php.docroot === '/persist/www') {
+    if (debugOwner && php.docroot === '/persist/www' && !adminerRequestPath(value, routePrefix, self.location.origin)) {
       const bytes = value.body?.byteLength ?? 0;
       if (bytes > requestBodyLimit) throw new RangeError(`The HTTP request exceeds post_max_size (${phpSettings.post_max_size}).`);
       if (!readOnly) applyJcbRuntimeCompatibility(binary, php.docroot);
       const result = await debugOwner.maybeRequest(value);
       if (result) return result.response;
     }
-    return await requestResponse(value);
+    return await withAdminerRequest({ php, fs: binary.FS, request: value, sitePrefix: routePrefix,
+      origin: self.location.origin, execute: requestResponse });
   }
   finally {
     if (workspaceFiles) self.postMessage({ type: 'workspace-invalidated' });
@@ -221,7 +223,8 @@ async function initialize(args) {
   }
   routePrefix = `${args.prefix.replace(/\/+$/, '')}/`;
   globalThis.fetch = createPhpFetch(globalThis.fetch.bind(globalThis),
-    new URL(routePrefix, self.location.origin), () => requestActive);
+    new URL(routePrefix, self.location.origin), () => requestActive,
+    { ...args.publicAssets, policy: args.isolationPolicy });
   phpSettings = normalizePhpSettings(args.phpSettings);
   requestBodyLimit = phpRequestBodyLimit(phpSettings);
   persistent = args.persistence === true;
@@ -238,6 +241,7 @@ async function initialize(args) {
   if (args.debugger) debugOptions = {
     moduleUrl: args.debugger.moduleUrl, adapterUrl: adapterURL.href, phpVersion: args.phpVersion,
     sharedLibs: args.debugger.sharedLibs, files: args.files || [],
+    isolationPolicy: args.isolationPolicy, publicAssets: args.publicAssets,
     ini: `${adapter.ini}${phpIni(phpSettings)}`, siteURL: new URL(routePrefix, self.location.origin).href,
   };
   php = new PhpCgiWorker({
@@ -340,6 +344,10 @@ async function operation(name, args = {}) {
     return (await getDebugOwner()).arm(args);
   }
   switch (name) {
+    case 'database.install': {
+      if (readOnly) throw new Error('Database viewing is unavailable in read-only file recovery.');
+      return installAdminer({ fs: binary.FS, baseURL: new URL('../', import.meta.url) });
+    }
     case 'request': return request(args);
     case 'runPhp': return runPhp(args.source ?? args.code);
     case 'flush': await flush(); return null;

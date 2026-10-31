@@ -1,6 +1,7 @@
 import english from '../locales/en.mjs';
 import { createIcon } from '../icons.mjs';
 import { fitToolbarActions } from './toolbar-layout.mjs';
+import { toolPanelGroup } from './tool-panels.mjs';
 
 const MODES = new Set(['left', 'right', 'bottom', 'full', 'floating']);
 const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
@@ -37,6 +38,8 @@ export function createCodeLayout({
   onState = () => {},
   storage,
   storageKey = 'joomengine-code-layout',
+  titleText = 'Code',
+  labelKeys = {},
   detachView,
   t = key => english[key] ?? key,
 } = {}) {
@@ -44,6 +47,8 @@ export function createCodeLayout({
   if (preview.parentNode !== host) throw new Error('The preview must already belong to the layout host; moving a running iframe is not safe.');
   if (editor.parentNode) throw new Error('Mount the editor in its layout before initializing the workbench.');
   const doc = host.ownerDocument, win = doc.defaultView;
+  const group = toolPanelGroup(host), panelId = Symbol(titleText);
+  const labelKey = key => labelKeys[key] || key;
   const viewport = () => ({ width: win.innerWidth, height: win.innerHeight });
   let saved;
   try { saved = JSON.parse(storage?.getItem(storageKey) || 'null'); } catch { /* Storage is optional for temporary use. */ }
@@ -59,6 +64,7 @@ export function createCodeLayout({
     return element;
   };
   const button = (key, text) => {
+    key = labelKey(key);
     const label = t(key);
     const element = create('button', 'jec-control', text);
     element.type = 'button'; element.title = label; element.setAttribute('aria-label', label);
@@ -71,11 +77,11 @@ export function createCodeLayout({
   };
   const report = error => { try { onError(error); } catch { /* Failure reporting must not replace site UI. */ } };
   const panel = create('section', 'jec-panel');
-  panel.setAttribute('aria-label', t('code.title')); panel.setAttribute('data-i18n-aria-label', 'code.title');
+  panel.setAttribute('aria-label', t(labelKey('code.title'))); panel.setAttribute('data-i18n-aria-label', labelKey('code.title'));
   const titlebar = create('div', 'jec-titlebar');
   const title = button('code.move', t('code.title'));
   title.classList.add('jec-panel-title');
-  title.textContent = 'Code';
+  title.textContent = titleText;
   const windowControls = create('div', 'jec-window-controls');
   const modeLabel = create('label', 'jec-mode-label');
   const label = create('span', 'jec-visually-hidden', t('code.layout'));
@@ -92,9 +98,9 @@ export function createCodeLayout({
   hideButton.append(createIcon('hide-editor', doc));
   windowControls.append(modeLabel, detachButton, maximize, hideButton);
   const toolbar = create('div', 'jec-toolbar');
-  toolbar.setAttribute('role', 'toolbar'); toolbar.setAttribute('aria-label', t('code.actions')); toolbar.setAttribute('data-i18n-aria-label', 'code.actions');
-  const notice = create('p', 'jec-detached-notice', t('code.detachedNotice'));
-  notice.hidden = true; notice.setAttribute('role', 'status'); notice.setAttribute('data-i18n', 'code.detachedNotice');
+  toolbar.setAttribute('role', 'toolbar'); toolbar.setAttribute('aria-label', t(labelKey('code.actions'))); toolbar.setAttribute('data-i18n-aria-label', labelKey('code.actions'));
+  const notice = create('p', 'jec-detached-notice', t(labelKey('code.detachedNotice')));
+  notice.hidden = true; notice.setAttribute('role', 'status'); notice.setAttribute('data-i18n', labelKey('code.detachedNotice'));
   editor.classList.add('jec-editor-mount');
   const resize = button('code.resize');
   resize.append(createIcon('resize-editor', doc));
@@ -104,10 +110,11 @@ export function createCodeLayout({
   const divider = create('div', 'jec-divider');
   divider.tabIndex = 0;
   divider.setAttribute('role', 'separator');
-  divider.setAttribute('aria-label', t('code.resize')); divider.setAttribute('data-i18n-aria-label', 'code.resize');
+  divider.setAttribute('aria-label', t(labelKey('code.resize'))); divider.setAttribute('data-i18n-aria-label', labelKey('code.resize'));
   divider.setAttribute('aria-valuemin', '20'); divider.setAttribute('aria-valuemax', '80');
   host.classList.add('jec-layout-host'); preview.classList.add('jec-preview');
   host.append(divider, panel);
+  group.register(panelId, () => { visible = false; render({ persist: false }); });
 
   const state = () => Object.freeze({ ...preferences, visible, detached: Boolean(detached), detaching });
   function emit() {
@@ -128,25 +135,28 @@ export function createCodeLayout({
     // The owner realm remains mounted, but a confirmed auxiliary window owns
     // the visible editor. Release all embedded grid space until it returns.
     const embedded = visible && !detached;
-    host.dataset.jecMode = embedded ? effectiveMode : 'hidden';
-    host.dataset.jecDetached = String(Boolean(detached));
+    const ownsGrid = group.update(panelId, { visible, detached: Boolean(detached) });
+    if (ownsGrid || group.active === undefined) {
+      host.dataset.jecMode = ownsGrid ? effectiveMode : 'hidden';
+      host.dataset.jecDetached = String(Boolean(detached));
+      host.style.setProperty('--jec-dock', `${preferences.dock}%`);
+      host.style.setProperty('--jec-bottom', `${preferences.bottom}px`);
+    }
     panel.hidden = !embedded;
     divider.hidden = !embedded || !['left', 'right', 'bottom'].includes(effectiveMode);
     resize.hidden = mode !== 'floating';
     title.disabled = mode !== 'floating';
-    host.style.setProperty('--jec-dock', `${preferences.dock}%`);
-    host.style.setProperty('--jec-bottom', `${preferences.bottom}px`);
     for (const key of ['x', 'y', 'width', 'height']) panel.style.setProperty(`--jec-${key}`, `${preferences[key]}px`);
     modeSelect.value = mode;
     maximize.replaceChildren(createIcon(mode === 'full' ? 'restore-workspace' : 'full-workspace', doc));
-    const maximizeKey = mode === 'full' ? 'code.restore' : 'code.maximize';
+    const maximizeKey = labelKey(mode === 'full' ? 'code.restore' : 'code.maximize');
     maximize.title = t(maximizeKey);
     maximize.setAttribute('data-i18n-title', maximizeKey); maximize.setAttribute('data-i18n-aria-label', maximizeKey);
     maximize.setAttribute('aria-label', maximize.title);
     notice.hidden = !detached;
     detachButton.disabled = detaching;
     detachButton.replaceChildren(createIcon(detached ? 'redock' : 'detach', doc));
-    const detachKey = detached ? 'code.redock' : 'code.detach';
+    const detachKey = labelKey(detached ? 'code.redock' : 'code.detach');
     detachButton.title = t(detachKey);
     detachButton.setAttribute('data-i18n-title', detachKey); detachButton.setAttribute('data-i18n-aria-label', detachKey);
     detachButton.setAttribute('aria-label', detachButton.title);
@@ -287,10 +297,15 @@ export function createCodeLayout({
       listeners.clear();
       if (detached) void detached.redock().catch(report);
       panel.remove(); divider.remove();
-      host.classList.remove('jec-layout-host', 'jec-interacting');
-      preview.classList.remove('jec-preview');
-      delete host.dataset.jecMode; delete host.dataset.jecDetached;
-      host.style.removeProperty('--jec-dock'); host.style.removeProperty('--jec-bottom');
+      const ownedGrid = group.active === panelId;
+      group.remove(panelId);
+      if (ownedGrid) { host.dataset.jecMode = 'hidden'; host.dataset.jecDetached = 'false'; }
+      if (!group.size) {
+        host.classList.remove('jec-layout-host', 'jec-interacting');
+        preview.classList.remove('jec-preview');
+        delete host.dataset.jecMode; delete host.dataset.jecDetached;
+        host.style.removeProperty('--jec-dock'); host.style.removeProperty('--jec-bottom');
+      }
     },
   };
 }

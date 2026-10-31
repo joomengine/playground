@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "enabled": false,
+  "relayBaseURL": null,
+  "registryVersions": [
+    "jcb-2026-10-31-v1"
+  ],
+  "timeoutMs": 15000
+}

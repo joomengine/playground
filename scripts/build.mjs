@@ -10,12 +10,22 @@ import { stageCurl } from './curl.mjs';
 import { stageSodium } from './sodium.mjs';
 import { applyCgiRequestOverlay } from './cgi-request-overlay.mjs';
 import { stageCodeAssets } from './code-assets.mjs';
+import { stageAdminer } from './prepare-adminer.mjs';
+import { validatePublicAssetRegistry, validatePublicAssetConfiguration } from '../src/public-assets.mjs';
+import { validateCompatibilityConfiguration } from '../src/isolation-bootstrap.mjs';
 import { stagePhpDebugHttp, applyPhpDebugWorkerOverlay } from './phpdbg.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const versions = JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
 const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
+const approvedImages = validatePublicAssetRegistry(JSON.parse(await readFile(path.join(root, 'config/public-assets.json'), 'utf8')));
+const imageDelivery = validatePublicAssetConfiguration(JSON.parse(await readFile(path.join(root, 'config/public-assets-config.json'), 'utf8')));
+const browserCompatibility = validateCompatibilityConfiguration(JSON.parse(await readFile(path.join(root, 'config/browser-compatibility.json'), 'utf8')));
+if (!imageDelivery.registryVersions.includes(approvedImages.version)) throw new Error('The image relay configuration must support the staged registry version.');
+if (browserCompatibility.fallbackEnabled && !imageDelivery.enabled) {
+  throw new Error('Deploy and configure the approved-image relay before enabling the compatibility release.');
+}
 const domain = (await readFile(path.join(root, 'CNAME'), 'utf8')).trim();
 if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
   throw new Error('CNAME must contain one valid deployment hostname.');
@@ -77,6 +87,7 @@ async function relativeLibraryFile(url) {
 try {
   console.log('Staging pinned upstream PHP runtime and extensions…');
   await mkdir(assets, { recursive: true });
+  await stageAdminer(path.join(assets, 'adminer'));
   console.log('Bundling the lazy-loaded JoomEngine Code workbench…');
   const code = await stageCodeAssets({ root, assets });
   const packages = [];
@@ -185,7 +196,7 @@ try {
   console.log('Staging current and forward Joomla/JCB packages…');
   const versionCatalog = await stageVersionCatalog({ assets, cache, pinnedJoomla: versions.joomla,
     stagedJoomla: joomla, deployPackages: deploys.packages });
-  for (const name of ['index.html', 'src', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
+  for (const name of ['index.html', 'src', 'config', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
     await cp(path.join(root, name), path.join(staging, name), { recursive: true });
   }
   await writeFile(path.join(staging, '.nojekyll'), '');
@@ -195,6 +206,7 @@ try {
   const manifest = {
     schemaVersion: 1, projectVersion: pkg.version, sourceCommit, code,
     deployment: { canonicalUrl, domain },
+    browserCompatibility, publicAssets: { registryVersion: approvedImages.version, enabled: imageDelivery.enabled },
     upstream: { ...versions.upstream, cgiRequestOverlay, debuggerWorkerOverlay }, nativeDriver: versions.nativeDriver, packages, php, joomla, deploys, versionCatalog,
     bridge: {
       protocolVersion: versions.bridge.protocolVersion,

@@ -1,10 +1,9 @@
 {
-  "source_archive": "black-svg-icons.zip",
   "source_svg_count": 2785,
-  "style": "Coherent line control icons plus the user-supplied full-color pearl rocket brand asset",
-  "status": "Selected proposals for user review; not yet implemented in the app",
-  "policy": "Preserve supplied SVG geometry. Monochrome controls receive only a root fill in black, white or currentColor; the separately supplied pearl rocket stays full color with root sizing/framing changes only. No replacement drawings.",
-  "source_licensing": "No README, LICENSE or other non-SVG file was present in the archive. Preserve provenance and confirm the applicable original icon license before publishing the integrated application.",
+  "style": "Coherent line control icons and the full-color pearl rocket brand asset",
+  "status": "Implemented application control icons",
+  "policy": "Preserve original SVG geometry. Monochrome controls receive only a root fill in black, white or currentColor; the pearl rocket stays full color with root sizing/framing changes only.",
+  "source_licensing": "Remix Icon v2.5.0, Apache License 2.0. Exact upstream originals and hashes are retained.",
   "coverage": "Application-owned controls from the reviewed header/dashboard/footer, deployment dialogs, editor tools and AI panel. Preserve native VS Code file-type/language/product icons unless separately requested.",
   "notes": [
     "Selections are deliberately coherent line icons rather than a mix of line and fill variants.",
@@ -18,7 +17,7 @@
       "label": "Deployment",
       "area": "Main header",
       "source_path": "JoomEngine_Pearl_Logo.svg",
-      "rationale": "New user-supplied pearl rocket is the authoritative project rocket, shared with the favicon.",
+      "rationale": "New project pearl rocket is the authoritative project rocket, shared with the favicon.",
       "asset_kind": "brand-rocket",
       "selection_note": "Preserve full-color pearl artwork in both themes. The generic bundle rocket is superseded.",
       "number": "001",
@@ -132,8 +131,8 @@
       "label": "Fork",
       "area": "Main header",
       "source_path": "Development/git-branch-line.svg",
-      "rationale": "Branching source-control graphic is the closest supplied fork symbol.",
-      "selection_note": "The bundle has no git-fork icon. Keep the tooltip “Fork on GitHub”.",
+      "rationale": "Branching source-control graphic is the closest original fork symbol.",
+      "selection_note": "The bundle has no git-fork icon. Keep the tooltip \u201cFork on GitHub\u201d.",
       "number": "009",
       "source_sha256": "67aea9b75cce4298883a810149c3aac880ddc87fc313b84cd5264606c4200031",
       "files": {
@@ -233,7 +232,7 @@
       "area": "Advanced dashboard",
       "source_path": "Device/cpu-line.svg",
       "rationale": "Processor denotes runtime configuration; accompanying PHP label disambiguates.",
-      "selection_note": "No PHP-logo icon exists in this supplied bundle.",
+      "selection_note": "No PHP-logo icon exists in this original bundle.",
       "number": "016",
       "source_sha256": "805bc8a99ac5b34f529730138893eba4537779331c5c9dd56e1e634ffe177bad",
       "files": {
@@ -276,7 +275,7 @@
       "label": "Launch",
       "area": "Advanced dashboard",
       "source_path": "JoomEngine_Pearl_Logo.svg",
-      "rationale": "New user-supplied pearl rocket is the authoritative project rocket, shared with the favicon.",
+      "rationale": "New project pearl rocket is the authoritative project rocket, shared with the favicon.",
       "asset_kind": "brand-rocket",
       "selection_note": "Preserve full-color pearl artwork in both themes. The generic bundle rocket is superseded.",
       "number": "019",
@@ -404,7 +403,7 @@
       "label": "System theme",
       "area": "Advanced dashboard",
       "source_path": "Device/computer-line.svg",
-      "rationale": "Monitor denotes following the computer’s current appearance.",
+      "rationale": "Monitor denotes following the computer\u2019s current appearance.",
       "number": "028",
       "source_sha256": "dc46436cd7f4b32f272a4fac3d3fbf745816431feb7e4e73280ddd0016634bb1",
       "files": {
@@ -783,8 +782,8 @@
       "label": "Return to owner tab",
       "area": "Editor header and layout",
       "source_path": "Media/picture-in-picture-exit-line.svg",
-      "rationale": "Returning inset pane is the closest supplied redocking symbol.",
-      "selection_note": "Confirm the preview is intuitive; retain the tooltip “Return to owner tab”.",
+      "rationale": "Returning inset pane is the closest original redocking symbol.",
+      "selection_note": "Confirm the preview is intuitive; retain the tooltip \u201cReturn to owner tab\u201d.",
       "number": "055",
       "source_sha256": "11dd8f27b488dbbce97cb6ece399f816341bfd72e5a5b72e90d2f484d5cb20d4",
       "files": {
@@ -1097,7 +1096,7 @@
       "label": "Choose AI context",
       "area": "AI API and conversation",
       "source_path": "Document/folder-shared-line.svg",
-      "rationale": "Folder with sharing mark identifies files being supplied to the assistant.",
+      "rationale": "Folder with sharing mark identifies files being original to the assistant.",
       "number": "077",
       "source_sha256": "df1ef088e1409731318e9e0cf53b758d0510e7e24e90683c4ac859c6b2fde03a",
       "files": {
@@ -1210,7 +1209,7 @@
       "label": "Refresh AI models",
       "area": "AI API and conversation",
       "source_path": "System/refresh-line.svg",
-      "rationale": "Reload symbol refreshes the selected provider’s model list.",
+      "rationale": "Reload symbol refreshes the selected provider\u2019s model list.",
       "number": "085",
       "source_sha256": "174dde7692f9715dd07ab278e5c49a12abfa3d6e0455f208465286816e87320c",
       "files": {
@@ -1266,7 +1265,7 @@
       "label": "Other / custom AI API",
       "area": "AI API and conversation",
       "source_path": "Device/server-line.svg",
-      "rationale": "Server stack identifies a user-supplied hosted or local endpoint.",
+      "rationale": "Server stack identifies a project hosted or local endpoint.",
       "number": "089",
       "source_sha256": "97992b82491bcb5302a63dbea887bbcd0e4902c20cc361ed98e88ef84547168a",
       "files": {
@@ -1448,7 +1447,7 @@
       "label": "Open administrator",
       "area": "Shared dialogs and deployment",
       "source_path": "System/dashboard-line.svg",
-      "rationale": "Reuse Admin’s dashboard glyph in the Login details dialog.",
+      "rationale": "Reuse Admin\u2019s dashboard glyph in the Login details dialog.",
       "number": "102",
       "source_sha256": "43ae41eb1e0a16b249d0315696be5563064ae0af8d5b36804060482fa7e6a70a",
       "files": {
@@ -1469,6 +1468,20 @@
         "black": "black/link.svg",
         "white": "white/link.svg",
         "currentColor": "currentColor/link.svg"
+      }
+    },
+    {
+      "id": "database",
+      "label": "Database",
+      "area": "Main header",
+      "source_path": "Device/database-2-line.svg",
+      "rationale": "Database cylinder identifies the active site database viewer.",
+      "number": "104",
+      "source_sha256": "2993e013dc0d38a4978b5d7b76f3df593096d5831b2ee0f8408159de8f1c49bf",
+      "files": {
+        "black": "black/database.svg",
+        "white": "white/database.svg",
+        "currentColor": "currentColor/database.svg"
       }
     }
   ],
@@ -1502,5 +1515,6 @@
     "white": "#FFFFFF",
     "currentColor": "currentColor"
   },
-  "geometry_validation": "All 303 monochrome variants differ only by root fill. The two brand derivatives change only root sizing/framing; paths and colors are preserved."
+  "geometry_validation": "All 303 monochrome variants differ only by root fill. The two brand derivatives change only root sizing/framing; paths and colors are preserved.",
+  "source_repository": "https://github.com/Remix-Design/RemixIcon/tree/v2.5.0"
 }

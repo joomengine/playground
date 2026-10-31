@@ -311,11 +311,15 @@ async function openHarness(context, url, { isolation = true } = {}) {
   await page.goto(new URL('__test__.html', url).href);
   if (!isolation) {
     assert.equal(await page.evaluate(() => crossOriginIsolated), false, 'The static host fixture must not supply isolation headers.');
+  }
+  for (let attempt = 0; attempt < 3; attempt++) {
     const preparation = await page.evaluate(async () => {
       const { prepareEnvironment } = await import('./src/playground.mjs');
       return prepareEnvironment();
     });
-    if (preparation.reloadRequired) await page.reload();
+    if (!preparation.reloadRequired) break;
+    assert.ok(attempt < 2, 'Browser environment startup must remain bounded.');
+    await page.goto(preparation.reloadURL);
   }
   assert.equal(await page.evaluate(() => crossOriginIsolated), true, 'The fixture must enable shared memory.');
   return page;

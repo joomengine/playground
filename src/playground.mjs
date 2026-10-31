@@ -5,6 +5,9 @@ import { serializeRequest, restoreResponse } from './http.mjs';
 import { normalizePhpSettings, phpRequestTimeoutMs } from './php-settings.mjs';
 import { openSiteDatabase } from './saved-site-recovery.mjs';
 import { createPackageFetcher } from './dynamic-packages.mjs';
+import { prepareBrowserIsolation } from './isolation-bootstrap.mjs';
+import { ownedClientURL } from './isolation.mjs';
+import { loadPublicAssetConfiguration } from './public-assets.mjs';
 
 const base = new URL('../', import.meta.url);
 const manifestUrl = new URL('assets/manifest.json', base);
@@ -16,26 +19,12 @@ let listenerInstalled = false;
 export function prepareEnvironment() {
   if (preparation) return preparation;
   preparation = (async () => {
-    if (!globalThis.isSecureContext || !navigator.serviceWorker) throw new Error('The playground needs HTTPS or localhost and service worker support.');
-    if (!navigator.locks || !globalThis.indexedDB) throw new Error('This browser does not provide the storage and locking APIs required by the playground.');
-    const registration = await navigator.serviceWorker.register(new URL('service-worker.mjs', base), { type: 'module', scope: base.pathname, updateViaCache: 'none' });
-    const active = registration.installing ?? registration.waiting;
-    if (active && active.state !== 'activated') await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Service worker activation timed out.')), 30_000);
-      active.addEventListener('statechange', () => {
-        if (active.state === 'activated') { clearTimeout(timer); resolve(); }
-        if (active.state === 'redundant') { clearTimeout(timer); reject(new Error('Service worker installation failed.')); }
-      });
-    });
-    if (!navigator.serviceWorker.controller) await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('The service worker did not take control. Reload this page.')), 30_000);
-      navigator.serviceWorker.addEventListener('controllerchange', () => { clearTimeout(timer); resolve(); }, { once: true });
-    });
+    const environment = await prepareBrowserIsolation({ baseURL: base.href });
     if (!listenerInstalled) {
       navigator.serviceWorker.addEventListener('message', receiveSiteRequest);
       listenerInstalled = true;
     }
-    return { reloadRequired: !globalThis.crossOriginIsolated || typeof SharedArrayBuffer !== 'function' };
+    return environment;
   })().catch(error => { preparation = undefined; throw error; });
   return preparation;
 }
@@ -61,11 +50,11 @@ async function clientIdentity() {
 }
 
 export class PhpSession {
-  constructor(database, onFailure, onDiagnostic) {
+  constructor(database, onFailure, onDiagnostic, isolation) {
     this.database = database;
     this.onFailure = onFailure;
     this.onDiagnostic = onDiagnostic;
-    this.worker = new Worker(new URL('./php-worker.mjs', import.meta.url), { type: 'module' });
+    this.worker = new Worker(isolation ? ownedClientURL(new URL('./php-worker.mjs', import.meta.url), { baseURL: base.href, ...isolation }) : new URL('./php-worker.mjs', import.meta.url), { type: 'module' });
     this.sequence = 0;
     this.pending = new Map();
     this.queue = Promise.resolve();
@@ -346,7 +335,7 @@ export async function resetPlayground({ storageKey = 'default' } = {}) {
 /** Create a real Joomla installation backed by upstream PHP and MariaDB WASM. */
 export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, recovery = false } = {}) {
   const environment = await prepareEnvironment();
-  if (environment.reloadRequired) throw new Error('Reload this page once to activate browser isolation, then start the playground.');
+  if (environment.reloadRequired) throw new Error(environment.reason + ' Complete the controlled page navigation before starting the playground.');
   const progress = value => onProgress({ ...value, phase: value.phase ?? value.stage });
   progress({ phase: 'assets', message: 'Reading the verified runtime catalog…' });
   const response = await fetch(manifestUrl);
@@ -362,7 +351,9 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   const fetchPackage = createPackageFetcher([config.joomlaPackage, config.jcbPackage].filter(Boolean), fetch);
   let phpEntry = manifest.php.find(entry => entry.version === config.phpVersion);
   const joomlaEntry = manifest.joomla.find(entry => entry.version === config.joomlaVersion);
-  const resolveAsset = value => new URL(value, manifestUrl).href;
+  const isolation = Object.freeze({ policy: environment.policy, mode: environment.mode, ownerId: environment.ownerId, bootstrapVersion: environment.bootstrapVersion });
+  const publicAssets = environment.mode === 'compatibility' ? await loadPublicAssetConfiguration(base.href) : undefined;
+  const resolveAsset = value => ownedClientURL(new URL(value, manifestUrl), { baseURL: base.href, ...isolation });
   const identity = await storageIdentity(config.storageKey);
   const clientId = await clientIdentity();
   const release = config.persistence ? await acquireSiteLock(identity) : async () => {};
@@ -420,7 +411,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     const createSession = () => {
       const created = new PhpSession(database,
         error => { workspaceEvent({ type: 'workspace-failed', message: error.message }); progress({ phase: 'failed', message: error.message }); },
-        message => progress({ phase: 'warning', message }));
+        message => progress({ phase: 'warning', message }), isolation);
       created.workspaceListeners.add(workspaceEvent);
       created.debugListeners.add(message => {
         if (message.type === 'debug-state') { debugState = message.state; workspaceEvent(message); }
@@ -433,7 +424,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     const initializeSession = (target, settings = config.phpSettings) => target.send('initialize', {
       moduleUrl: resolveAsset(phpEntry.moduleUrl), adapterUrl: resolveAsset(manifest.bridge.adapterUrl),
       phpVersion: config.phpVersion, prefix, persistence: config.persistence, mountPath: `/joomengine-${identity}`, readOnly: filesOnly,
-      phpSettings: settings,
+      phpSettings: settings, isolationPolicy: isolation.policy, publicAssets,
       sharedLibs: phpEntry.sharedLibs.map(lib => ({ ...lib, url: resolveAsset(lib.url) })),
       files: (phpEntry.files ?? []).map(file => ({ ...file, url: resolveAsset(file.url) })),
       debugger: phpEntry.debugger ? { moduleUrl: resolveAsset(phpEntry.debugger.moduleUrl),
@@ -441,7 +432,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     });
     const runtimeInfo = await initializeSession(session);
     const handle = {
-      url: resolveSiteURL(config.initialPath, siteUrl), baseUrl: siteUrl,
+      url: resolveSiteURL(config.initialPath, siteUrl), baseUrl: siteUrl, isolation,
       documentRoot: '/persist/www', installMarkerPath: '/persist/meta/joomla-install.json', runtimeInfo,
       get configuration() { return structuredClone(config); },
       get closed() { return Boolean(closePromise); },
@@ -496,6 +487,13 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       fs: Object.fromEntries(['mkdir', 'readFile', 'writeFile', 'readdir', 'stat', 'unlink'].map(method => [method,
         (path, data) => session.send(`fs.${method}`, { path, data })])),
       runPhp: (source, options = {}) => session.send('runPhp', { source }, options.timeoutMs ?? 180_000),
+      async openDatabase() {
+        requireDatabase();
+        if (changing || closePromise) throw new Error('Wait for the current site operation before opening Database.');
+        if (debugState === 'paused') throw new Error('Continue or stop the paused PHP request before opening Database.');
+        await session.send('database.install');
+        return { url: new URL('__adminer/', siteUrl).href };
+      },
       async clearJoomlaCache() {
         requireDatabase();
         if (changing || closePromise) throw new Error('Wait for the current site operation before clearing Joomla caches.');
