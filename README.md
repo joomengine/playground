@@ -77,7 +77,11 @@ Thank you to these communities for the engineering and maintenance this project
 relies on. Their licenses and notices remain with the distributed assets; see
 [NOTICE](NOTICE).
 
-Reference: [Official Joomla playground](https://github.com/joomla-projects/joomla-playground/).
+Joomla also maintains an [official Joomla Playground](https://joomla-projects.github.io/joomla-playground/)
+([source](https://github.com/joomla-projects/joomla-playground/)).
+JoomEngine Playground was developed independently and is not based on that
+project's codebase. It uses a different PHP runtime and database architecture,
+with its upstream foundations credited separately above.
 
 ## What is assembled
 
