@@ -1,4 +1,4 @@
-import { resolveSiteURL, createShareURL, createDeploymentDocument, parseDeploymentDocument, loadDeploymentDocument, normalizeConfiguration, parseCatalog, readURLConfiguration } from './config.mjs';
+import { resolveSiteURL, createShareURL, createDeploymentDocument, parseDeploymentDocument, loadDeploymentDocument, normalizeConfiguration, parseCatalog, readURLConfiguration, catalogWithSelectedJoomlaPackage } from './config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from './deploys.mjs';
 import { createPlayground, prepareEnvironment, resetPlayground } from './playground.mjs';
 import { customSetupDetails, defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, rememberSiteRoute, renameSavedSite, safeSavedRoute, resolveResumePath, runtimeLocation, savedStateKey } from './ui-state.mjs';
@@ -13,12 +13,13 @@ import { UI_LANGUAGES, getLocale, initializeLocale, setLocale, t } from './i18n.
 import { createLaunchCountdown, deploymentNeedsReview } from './launch-countdown.mjs';
 import { presentError } from './error-presentation.mjs';
 import { createExtensionInputs } from './extension-inputs.mjs';
+import { initialJcbSelection, jcbSelectionInput, pinnedJcbPackages } from './jcb-selection.mjs';
 
 const $ = (id) => document.getElementById(id);
 const deploymentURL = new URL('../', import.meta.url).href;
 const preferenceKey = savedStateKey(deploymentURL);
 const fields = {
-  deployId: $('deploy'), phpVersion: $('php-version'), joomlaVersion: $('joomla-version'),
+  deployId: $('deploy'), phpVersion: $('php-version'), joomlaVersion: $('joomla-version'), jcbVersion: $('jcb-version'),
   language: $('language'), siteName: $('site-name'), initialPath: $('initial-path'), storageKey: $('storage-key'),
   persistence: $('persistence'), autoLogin: $('auto-login'), extensions: $('extensions'), startupCommands: $('startup-commands'),
 };
@@ -54,6 +55,10 @@ let approvedCustomSetup;
 let codeHost;
 let openingCode;
 let extensionInputs;
+let pinnedJcb = new Map();
+const selectedJoomlaPackages = new Map();
+let currentDeployRecipe;
+let jcbSelection = { version: 'none', omit: true };
 const launchCountdown = createLaunchCountdown({
   onTick(seconds) {
     $('launch-countdown').hidden = $('dashboard-countdown').hidden = false;
@@ -297,6 +302,7 @@ function setBusy(value) {
   $('installation-fields').disabled = locked || unavailable;
   fields.persistence.disabled = locked || unavailable;
   fields.phpVersion.disabled = locked || unavailable;
+  fields.jcbVersion.disabled = locked || unavailable;
   const targetRunning = Boolean(runtime && fields.storageKey.value === currentConfig?.storageKey && fields.persistence.checked === currentConfig?.persistence);
   $('launch-button').disabled = locked || unavailable;
   $('embedded-launch').disabled = locked || unavailable;
@@ -413,6 +419,9 @@ function applyAdministrator(value) {
   }
 }
 function formInput(overrides = {}) {
+  const joomlaVersion = overrides.joomlaVersion ?? fields.joomlaVersion.value;
+  const jcbInput = jcbSelectionInput({ selection: { ...jcbSelection, version: fields.jcbVersion.value },
+    major: joomlaVersion.split('.')[0], deploy: currentDeployRecipe, pinned: pinnedJcb });
   return normalizeConfiguration({
     ...extraDeploymentFields,
     deployId: fields.deployId.value,
@@ -422,12 +431,21 @@ function formInput(overrides = {}) {
     persistence: fields.persistence.checked, autoLogin: fields.autoLogin.checked,
     hideToolbar, fresh: pendingFresh, admin: administrator(),
     extensions: extensionInputs.read(), startupCommands: fields.startupCommands.value,
-    phpSettings, multilingual: $('multilingual').checked, languageTags: $('deploy-languages').value.split(',').map(value => value.trim()).filter(Boolean),
+    phpSettings, ...jcbInput, multilingual: $('multilingual').checked, languageTags: $('deploy-languages').value.split(',').map(value => value.trim()).filter(Boolean),
     menus: parseEditorJSON('deploy-menus', []), template: templateInput(), ...overrides,
   }, { catalog, baseURL: deploymentURL });
 }
 async function resolve(input) {
-  return resolveDeployConfiguration(input, { catalog, deployCatalog, baseURL: deploymentURL });
+  const selectedCatalog = catalogWithSelectedJoomlaPackage(catalog, input, deploymentURL);
+  const resolved = await resolveDeployConfiguration(input, { catalog: selectedCatalog, deployCatalog, baseURL: deploymentURL });
+  if (selectedCatalog !== catalog) {
+    selectedJoomlaPackages.set(resolved.configuration.joomlaVersion, structuredClone(resolved.configuration.joomlaPackage));
+    const previous = fields.joomlaVersion.value;
+    catalog = selectedCatalog;
+    fillOptions(fields.joomlaVersion, catalog.joomla);
+    fields.joomlaVersion.value = previous;
+  }
+  return resolved;
 }
 function fillOptions(select, items) {
   select.replaceChildren(...items.map((item) => {
@@ -447,13 +465,27 @@ function updateCompatibility({ preserve = false } = {}) {
   }
   $('compatibility-note').textContent = `${joomla.label} · PHP ${joomla.php.join(', ')}`;
   const major = joomla.version.split('.')[0];
-  for (const option of fields.deployId.options) { const descriptor = deployCatalog.deploys.find(item => item.id === option.value); option.disabled = Boolean(descriptor?.joomla && !descriptor.joomla.includes(major)); }
+  for (const option of fields.deployId.options) { const descriptor = deployCatalog.deploys.find(item => item.id === option.value); option.disabled = Boolean(descriptor?.joomla && !descriptor.joomla.includes(major) && !(major === '7' && descriptor.joomla.includes('6'))); }
   const tags = [...new Set(['en-GB', ...(deployCatalog.languages?.[major] || []).map((item) => item.tag)])];
   languageSelector?.setCatalog(tags);
   deploymentLanguageSelector?.setCatalog(tags);
 }
+function renderJcbOptions(major, selection = jcbSelection) {
+  const pinned = pinnedJcb.get(major === '7' ? '6' : major);
+  const versions = new Set([...(pinned ? [pinned.version] : []),
+    ...(selection.package && selection.version !== 'none' ? [selection.version] : [])]);
+  fields.jcbVersion.replaceChildren(...[{ version: 'none', label: t('label.jcbNone') },
+    ...[...versions].map(version => ({ version, label: `JCB ${version}` }))].map(item => {
+    const option = document.createElement('option'); option.value = item.version; option.textContent = item.label; return option;
+  }));
+  if (![...fields.jcbVersion.options].some(option => option.value === selection.version)) {
+    throw new TypeError(`The selected JCB ${selection.version} package is unavailable.`);
+  }
+  fields.jcbVersion.value = selection.version;
+}
 function applyConfiguration(config, input = config, deploy) {
-  extraDeploymentFields = Object.fromEntries(['content', 'languages'].filter(key => input[key] !== undefined).map(key => [key, structuredClone(input[key])]));
+  if (deploy) currentDeployRecipe = deploy;
+  extraDeploymentFields = Object.fromEntries(['content', 'languages', 'joomlaPackage'].filter(key => input[key] !== undefined).map(key => [key, structuredClone(input[key])]));
   templateOptions = structuredClone(input.template || config.template || {});
   for (const name of ['deployId', 'joomlaVersion', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language']) {
     if (config[name] !== undefined) fields[name].value = config[name];
@@ -478,6 +510,11 @@ function applyConfiguration(config, input = config, deploy) {
   const description = deploy?.description ?? deployCatalog.deploys.find((item) => item.id === config.deployId)?.description;
   $('deploy-description').textContent = description || 'A verified Joomla installation with the selected setup steps.';
   updateCompatibility({ preserve: true });
+  const major = config.joomlaVersion.split('.')[0];
+  const isSaved = config.persistence && Object.hasOwn(savedState.sites, config.storageKey);
+  jcbSelection = initialJcbSelection({ input: { ...input, deployId: input.deployId ?? config.deployId },
+    deploy: currentDeployRecipe, major, pinned: pinnedJcb, isSaved });
+  renderJcbOptions(major);
   languageSelector?.refresh(); deploymentLanguageSelector?.refresh();
 }
 
@@ -677,6 +714,9 @@ async function newSite() {
   pendingFresh = false;
   freshKeyPending = false;
   selectedSiteId = null; resumeLastRoute = false;
+  jcbSelection = initialJcbSelection({ input: { deployId: fields.deployId.value }, deploy: currentDeployRecipe,
+    major: fields.joomlaVersion.value.split('.')[0], pinned: pinnedJcb, isSaved: false });
+  renderJcbOptions(fields.joomlaVersion.value.split('.')[0]);
   renderSavedSites('');
   if (!runtime) show('welcome');
   setBusy(false);
@@ -743,7 +783,7 @@ async function changeProfile() {
   if (busy || launching || !catalog) return;
   const major = fields.joomlaVersion.value.split('.')[0];
   const descriptor = deployCatalog.deploys.find(item => item.id === fields.deployId.value);
-  if (descriptor?.joomla && !descriptor.joomla.includes(major)) fields.deployId.value = deployCatalog.defaultsByJoomla?.[major] || deployCatalog.default;
+  if (descriptor?.joomla && !descriptor.joomla.includes(major) && !(major === '7' && descriptor.joomla.includes('6'))) fields.deployId.value = deployCatalog.defaultsByJoomla?.[major] || deployCatalog.default;
   const target = { deployId: fields.deployId.value, joomlaVersion: fields.joomlaVersion.value };
   const previous = selectedProfile;
   pauseAutomaticLaunch();
@@ -758,11 +798,14 @@ async function changeProfile() {
       hideToolbar,
       ...(!stored && target.deployId === previous?.deployId ? { language: fields.language.value } : {}),
       storageKey: stored?.storageKey || defaultSiteKey(target.deployId, target.joomlaVersion),
+      ...(!stored?.joomlaPackage && selectedJoomlaPackages.has(target.joomlaVersion)
+        ? { joomlaPackage: structuredClone(selectedJoomlaPackages.get(target.joomlaVersion)) } : {}),
       admin: { ...administrator(), ...(!stored ? { password: password() } : {}) },
     };
     applyAdministrator(input.admin);
     fields.storageKey.value = input.storageKey;
-    const compatible = catalog.joomla.find((item) => item.version === target.joomlaVersion)?.php;
+    const selectedCatalog = catalogWithSelectedJoomlaPackage(catalog, input, deploymentURL);
+    const compatible = selectedCatalog.joomla.find((item) => item.version === target.joomlaVersion)?.php;
     if (!compatible?.includes(input.phpVersion)) input.phpVersion = compatible?.includes(catalog.defaults.phpVersion) ? catalog.defaults.phpVersion : compatible?.[0];
     const resolved = await resolve(input);
     freshKeyPending = false;
@@ -890,6 +933,11 @@ $('log-toggle').addEventListener('click', () => {
 });
 fields.deployId.addEventListener('change', () => void changeProfile());
 fields.joomlaVersion.addEventListener('change', () => void changeProfile());
+fields.jcbVersion.addEventListener('change', () => {
+  const version = fields.jcbVersion.value;
+  jcbSelection = { version, omit: false, ...(jcbSelection.version === version && jcbSelection.package ? { package: jcbSelection.package } : {}) };
+  pauseAutomaticLaunch(); setBusy(busy);
+});
 fields.initialPath.addEventListener('input', () => { resumeLastRoute = false; });
 fields.phpVersion.addEventListener('change', () => { pauseAutomaticLaunch(); setBusy(busy); });
 fields.persistence.addEventListener('change', () => { pauseAutomaticLaunch(); setBusy(busy); });
@@ -1107,6 +1155,7 @@ function setupInterface() {
     renderSavedSites(); renderEditorLists();
     languageSelector?.refresh(); deploymentLanguageSelector?.refresh();
     extensionInputs?.refresh();
+    if (catalog && fields.joomlaVersion.value) renderJcbOptions(fields.joomlaVersion.value.split('.')[0]);
   });
   $('settings-toggle').addEventListener('click', () => setDrawer($('settings').hidden));
   for (const [id, hidden, edge] of [
@@ -1209,11 +1258,14 @@ async function initialize() {
     ]);
     catalog = parseCatalog(manifest);
     deployCatalog = recipes;
+    const jcbRecipe = await resolveDeployConfiguration({ deployId: 'jcb', joomlaVersion: catalog.defaults.joomlaVersion, admin: administrator() },
+      { catalog, deployCatalog, baseURL: deploymentURL });
+    pinnedJcb = pinnedJcbPackages(jcbRecipe.deploy);
     renderSavedSites();
     fillOptions(fields.joomlaVersion, catalog.joomla);
     fillOptions(fields.phpVersion, catalog.php);
     fillOptions(fields.deployId, deployCatalog.deploys);
-    const hasOptions = Boolean(parsed.document) || new URL(location.href).hash.startsWith('#deploy=') || ['deploy', 'joomla', 'php', 'language', 'login', 'fresh', 'key', 'persist', 'path', 'initialPath', 'extensions', 'extension', 'commands', 'startupCommands', 'name', 'phpSettings', 'languageTags', 'menus', 'template'].some((name) => params.has(name));
+    const hasOptions = Boolean(parsed.document) || new URL(location.href).hash.startsWith('#deploy=') || ['deploy', 'joomla', 'jcb', 'php', 'language', 'login', 'fresh', 'key', 'persist', 'path', 'initialPath', 'extensions', 'extension', 'commands', 'startupCommands', 'name', 'phpSettings', 'languageTags', 'menus', 'template'].some((name) => params.has(name));
     const keyed = parsed.config.storageKey && Object.hasOwn(savedState.sites, parsed.config.storageKey)
       ? savedState.sites[parsed.config.storageKey] : null;
     const previous = keyed || (!hasOptions && savedState.active ? savedState.sites[savedState.active] : null);

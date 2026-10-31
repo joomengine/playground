@@ -1,4 +1,4 @@
-import { normalizeConfiguration, parseCatalog, normalizeInitialPath, resolveSiteURL } from './config.mjs';
+import { catalogWithSelectedJoomlaPackage, normalizeConfiguration, parseCatalog, normalizeInitialPath, resolveSiteURL } from './config.mjs';
 import { installJoomla, inspectJoomla, sha256, importJoomlaSnapshot, importJoomlaCheckpoint, checkJoomla, restoreJoomlaSession, applyJoomlaConfiguration, discoverJoomlaConfiguration, getMcpConnection, readJoomlaAdministrator, repairJoomlaConfiguration, runStartupCommand } from './joomla/index.mjs';
 import { exportSite } from './export.mjs';
 import { serializeRequest, restoreResponse } from './http.mjs';
@@ -351,7 +351,13 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   const response = await fetch(manifestUrl);
   if (!response.ok) throw new Error(`Cannot load the runtime catalog: HTTP ${response.status}.`);
   const manifest = await response.json();
-  const config = normalizeConfiguration(input, { catalog: parseCatalog(manifest), baseURL: base.href });
+  const selectedCatalog = catalogWithSelectedJoomlaPackage(parseCatalog(manifest), input, base.href);
+  if (input.joomlaPackage !== undefined) {
+    const selected = selectedCatalog.joomla.find(entry => entry.version === input.joomlaVersion);
+    manifest.joomla = manifest.joomla.filter(entry => entry.version !== input.joomlaVersion);
+    manifest.joomla.push(selected);
+  }
+  const config = normalizeConfiguration(input, { catalog: selectedCatalog, baseURL: base.href });
   let phpEntry = manifest.php.find(entry => entry.version === config.phpVersion);
   const joomlaEntry = manifest.joomla.find(entry => entry.version === config.joomlaVersion);
   const resolveAsset = value => new URL(value, manifestUrl).href;
@@ -561,9 +567,12 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       async applyConfiguration(inputConfiguration) {
         requireDatabase();
         if (changing || closePromise) throw new Error('Wait for the current site operation.');
-        const next = normalizeConfiguration({ ...config, ...inputConfiguration, admin: handle.installation.administrator }, { catalog: parseCatalog(manifest), baseURL: base.href });
+        const next = normalizeConfiguration({ ...config, ...inputConfiguration, admin: handle.installation.administrator }, { catalog: selectedCatalog, baseURL: base.href });
         if (next.phpVersion !== config.phpVersion || next.joomlaVersion !== config.joomlaVersion || next.persistence !== config.persistence || next.storageKey !== config.storageKey) {
           throw new Error('Use a new deployment or the PHP settings control to change the runtime or storage.');
+        }
+        if (next.jcbVersion !== config.jcbVersion || JSON.stringify(next.jcbPackage ?? null) !== JSON.stringify(config.jcbPackage ?? null)) {
+          throw new Error('Use a new deployment to change the selected JCB version.');
         }
         if (JSON.stringify(next.phpSettings) !== JSON.stringify(config.phpSettings)) throw new Error('Apply PHP settings using the PHP settings dialog before changing site configuration.');
         changing = true; instances.delete(instanceId);
@@ -572,7 +581,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           progress({ phase: 'saving', message: 'Creating a recovery checkpoint before applying deployment changes…' });
           recoveryCheckpoint = await handle.checkpoint(pausedOperation);
           const signature = value => JSON.stringify(value);
-          const additions = next.extensions.filter(entry => !config.extensions.some(previous => previous.url === entry.url && previous.sha256 === entry.sha256));
+          const additions = next.extensions.filter(entry => !config.extensions.some(previous => previous.url === entry.url && previous.sha256 === entry.sha256 && previous.sha512 === entry.sha512));
           const commands = next.startupCommands.filter(argv => !config.startupCommands.some(previous => signature(previous) === signature(argv)));
           const template = next.template ? { ...next.template } : null;
           if (template?.url && template.url === config.template?.url && template.sha256 === config.template?.sha256) { delete template.url; delete template.sha256; }

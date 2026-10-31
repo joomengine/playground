@@ -61,24 +61,31 @@ ${original(reference)}`;
 
 /** Protect browser-owned connection settings while preserving Joomla's own connection validation. */
 export async function managedDatabaseSource(source, version, kind = 'model') {
-  const reference = REFERENCES.find(item => item.version === version && item.kind === kind);
-  if (!reference) throw new Error('This Joomla release has no reviewed browser database configuration adapter.');
-  const before = original(reference);
-  const after = replacement(reference);
-  const previous = previousReplacement(reference);
-  if (source.includes(previous) && await digest(source.replace(previous, before)) === reference.sha256) {
-    return { source: source.replace(previous, after), changed: true, sourceSha256: reference.sha256 };
-  }
-  if (source.includes(marker)) {
-    if (!source.includes(after) || await digest(source.replace(after, before)) !== reference.sha256) {
-      throw new Error('The managed Joomla configuration model has changed; its source must be reviewed before adapting it.');
+  const reviewed = REFERENCES.filter(item => item.kind === kind);
+  const exact = reviewed.filter(item => item.version === version);
+  // A new Joomla release can reuse an existing adapter only when the *entire*
+  // source file is byte-for-byte identical to a reviewed reference. This lets
+  // unchanged development snapshots use the guard without weakening it to a
+  // best-effort text match. For a pinned release, keep its exact reference.
+  const candidates = exact.length ? exact : reviewed;
+  const hasMarker = source.includes(marker);
+  const sourceDigest = hasMarker ? null : await digest(source);
+  for (const reference of candidates) {
+    const before = original(reference);
+    const after = replacement(reference);
+    const previous = previousReplacement(reference);
+    if (hasMarker) {
+      if (source.includes(previous) && await digest(source.replace(previous, before)) === reference.sha256) {
+        return { source: source.replace(previous, after), changed: true, sourceSha256: reference.sha256 };
+      }
+      if (source.includes(after) && await digest(source.replace(after, before)) === reference.sha256) {
+        return { source, changed: false, sourceSha256: reference.sha256 };
+      }
+    } else if (sourceDigest === reference.sha256 && source.split(before).length === 2) {
+      return { source: source.replace(before, after), changed: true, sourceSha256: reference.sha256 };
     }
-    return { source, changed: false, sourceSha256: reference.sha256 };
   }
-  if (await digest(source) !== reference.sha256 || source.split(before).length !== 2) {
-    throw new Error('The Joomla configuration model does not match its reviewed source checksum.');
-  }
-  return { source: source.replace(before, after), changed: true, sourceSha256: reference.sha256 };
+  throw new Error('The Joomla configuration model does not match a reviewed source checksum; its source must be reviewed before adapting it.');
 }
 
 export async function ensureManagedDatabaseConfiguration(runtime, version) {

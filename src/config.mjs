@@ -4,6 +4,7 @@ export { parseMenus, parseTemplate, parseLanguageTags } from './site-configurati
 
 const VERSION = /^\d+\.\d+(?:\.\d+)?(?:-[A-Za-z0-9.-]+)?$/;
 const SHA256 = /^[a-f\d]{64}$/i;
+const SHA512 = /^[a-f\d]{128}$/i;
 const STORAGE_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 const LANGUAGE = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?-[A-Z]{2}$/;
 const DEPLOY_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -93,7 +94,11 @@ export function parseExtensions(value = [], baseURL = 'https://playground.invali
     if (entry.sha256 !== undefined && (typeof entry.sha256 !== 'string' || !SHA256.test(entry.sha256))) {
       throw new TypeError(`Extension ${index + 1} SHA-256 must contain 64 hexadecimal characters.`);
     }
-    return { url: url.href, ...(entry.sha256 ? { sha256: entry.sha256.toLowerCase() } : {}) };
+    if (entry.sha512 !== undefined && (typeof entry.sha512 !== 'string' || !SHA512.test(entry.sha512))) {
+      throw new TypeError(`Extension ${index + 1} SHA-512 must contain 128 hexadecimal characters.`);
+    }
+    return { url: url.href, ...(entry.sha256 ? { sha256: entry.sha256.toLowerCase() } : {}),
+      ...(entry.sha512 ? { sha512: entry.sha512.toLowerCase() } : {}) };
   });
 }
 
@@ -152,7 +157,10 @@ export function resolveJoomlaVersion(value, catalog) {
   const exact = catalog.joomla.find((entry) => entry.version === value);
   if (exact) return exact.version;
   const releases = catalog.joomla.filter((entry) => entry.version.startsWith(`${value}.`))
-    .sort((a, b) => b.version.localeCompare(a.version, 'en', { numeric: true }));
+    // A shorthand such as 6.2 must not silently switch an existing stable
+    // configuration to a newer nightly when the dynamic catalogue updates.
+    .sort((a, b) => Number(a.version.includes('-')) - Number(b.version.includes('-'))
+      || b.version.localeCompare(a.version, 'en', { numeric: true }));
   if (!releases.length) throw new TypeError(`Joomla ${value} is not available in the tested runtime catalog.`);
   return releases[0].version;
 }
@@ -172,6 +180,18 @@ export function normalizeConfiguration(input = {}, { catalog, baseURL = 'https:/
   for (const key of ['persistence', 'autoLogin', 'hideToolbar', 'fresh']) config[key] = requireBoolean(config[key], key);
   config.language = normalizeLanguage(config.language);
   if (config.deployId !== undefined) config.deployId = normalizeDeployId(config.deployId);
+  if (config.joomlaPackage !== undefined) {
+    if (typeof input.joomlaVersion !== 'string' || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(input.joomlaVersion)) {
+      throw new TypeError('A Joomla package requires an exact Joomla version.');
+    }
+    config.joomlaPackage = normalizeJoomlaPackage(config.joomlaPackage, baseURL);
+    if (!config.joomlaPackage.php.includes(config.phpVersion)) throw new TypeError('The Joomla package does not support the selected PHP runtime.');
+  }
+  if (config.jcbVersion !== undefined) config.jcbVersion = normalizeJcbVersion(config.jcbVersion);
+  if (config.jcbPackage !== undefined) {
+    if (!config.jcbVersion || config.jcbVersion === 'none') throw new TypeError('A JCB package requires a selected JCB version.');
+    config.jcbPackage = normalizeJcbPackage(config.jcbPackage, baseURL);
+  }
   config.admin.name = requireText(config.admin.name, 'Administrator name', 100);
   config.admin.username = requireText(config.admin.username, 'Administrator username', 100);
   config.admin.email = requireText(config.admin.email, 'Administrator email', 254);
@@ -190,6 +210,46 @@ export function normalizeConfiguration(input = {}, { catalog, baseURL = 'https:/
   return config;
 }
 
+export function normalizeJcbVersion(value) {
+  if (value === 'none') return value;
+  if (typeof value !== 'string' || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(value)) throw new TypeError('Select a valid JCB version or none.');
+  return value;
+}
+
+export function normalizeJcbPackage(value, baseURL = 'https://playground.invalid/') {
+  const result = parseExtensions([value], baseURL, { allowHttp: false })[0];
+  if (!result.sha256 && !result.sha512) throw new TypeError('The JCB package requires a SHA-256 or SHA-512 checksum.');
+  return result;
+}
+
+export function normalizeJoomlaPackage(value, baseURL = 'https://playground.invalid/') {
+  const result = parseExtensions([value], baseURL, { allowHttp: false })[0];
+  if (!result.sha256) throw new TypeError('The Joomla package requires a SHA-256 checksum.');
+  if (!Array.isArray(value.php) || !value.php.length || value.php.length > 30 || value.php.some(version => typeof version !== 'string' || !/^\d+\.\d+$/.test(version))) {
+    throw new TypeError('The Joomla package must list its available PHP versions.');
+  }
+  return { url: result.url, sha256: result.sha256, php: [...new Set(value.php)] };
+}
+
+/** Reconstruct an explicitly selected, integrity-pinned release when a shared
+ * configuration or saved site is opened without the online discovery catalog.
+ * Runtime binaries still come exclusively from the local catalog. */
+export function catalogWithSelectedJoomlaPackage(catalog, input, baseURL = 'https://playground.invalid/') {
+  if (input.joomlaPackage === undefined) return catalog;
+  if (typeof input.joomlaVersion !== 'string' || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(input.joomlaVersion)) {
+    throw new TypeError('A Joomla package requires an exact Joomla version.');
+  }
+  const selected = normalizeJoomlaPackage(input.joomlaPackage, baseURL);
+  const current = catalog.joomla.find(entry => entry.version === input.joomlaVersion);
+  for (const version of selected.php) {
+    if (!catalog.php.some(entry => entry.version === version) || (current && !current.php.includes(version))) {
+      throw new TypeError(`PHP ${version} is not available for the selected Joomla release in this runtime catalog.`);
+    }
+  }
+  return { ...catalog, joomla: [...catalog.joomla.filter(entry => entry.version !== input.joomlaVersion),
+    { ...selected, version: input.joomlaVersion, label: `Joomla ${input.joomlaVersion}` }] };
+}
+
 export function readURLConfiguration(url) {
   const location = new URL(url);
   if (location.href.length > 65_536) throw new TypeError('The playground configuration link is too long.');
@@ -205,6 +265,7 @@ export function readURLConfiguration(url) {
   if (params.has('deploy')) config.deployId = normalizeDeployId(params.get('deploy'));
   if (params.has('php')) config.phpVersion = params.get('php');
   if (params.has('joomla')) config.joomlaVersion = params.get('joomla');
+  if (params.has('jcb')) config.jcbVersion = normalizeJcbVersion(params.get('jcb'));
   if (params.has('name')) config.siteName = requireText(params.get('name'), 'Site name', 100);
   if (params.has('language')) config.language = normalizeLanguage(params.get('language'));
   if (params.has('login')) config.autoLogin = boolean('login');
@@ -220,7 +281,7 @@ export function readURLConfiguration(url) {
   if (params.has('extensions')) config.extensions = parseExtensions(params.get('extensions'), location.href);
   if (params.has('extension')) config.extensions = parseExtensions([...(config.extensions ?? []), ...params.getAll('extension').map((value) => ({ url: value }))], location.href);
   if (params.has('commands') || params.has('startupCommands')) config.startupCommands = parseStartupCommands(params.get('commands') ?? params.get('startupCommands'));
-  const deploymentOptions = ['name', 'deploy', 'php', 'joomla', 'language', 'login', 'fresh', 'extensions', 'extension', 'commands', 'startupCommands'];
+  const deploymentOptions = ['name', 'deploy', 'php', 'joomla', 'jcb', 'language', 'login', 'fresh', 'extensions', 'extension', 'commands', 'startupCommands'];
   const document = params.has('config') ? parseExtensions([{ url: params.get('config'), ...(params.has('sha256') ? { sha256: params.get('sha256') } : {}) }], location.href, { allowHttp: false })[0] : null;
   return { config, autostart: params.has('start') ? boolean('start') : !!document || fragment.has('deploy') || deploymentOptions.some((name) => params.has(name)), ...(document ? { document } : {}) };
 }
@@ -233,6 +294,7 @@ export function createShareURL(location, config) {
   if (config.siteName && config.siteName !== DEFAULTS.siteName) url.searchParams.set('name', requireText(config.siteName, 'Site name', 100));
   if (config.deployId) url.searchParams.set('deploy', normalizeDeployId(config.deployId));
   if (config.joomlaVersion) url.searchParams.set('joomla', config.joomlaVersion);
+  if (config.jcbVersion) url.searchParams.set('jcb', normalizeJcbVersion(config.jcbVersion));
   if (config.phpVersion) url.searchParams.set('php', config.phpVersion);
   if (config.initialPath && config.initialPath !== '/') url.searchParams.set('path', config.initialPath);
   if (config.hideToolbar) url.searchParams.set('toolbar', '0');
@@ -242,7 +304,7 @@ export function createShareURL(location, config) {
   if (config.fresh) url.searchParams.set('fresh', '1');
   if (config.extensions?.length) url.searchParams.set('extensions', JSON.stringify(parseExtensions(config.extensions, url.href)));
   if (config.startupCommands?.length) url.searchParams.set('commands', JSON.stringify(parseStartupCommands(config.startupCommands)));
-  const advanced = config.template || config.menus?.length || config.languageTags?.length || config.multilingual || config.content || config.phpSettings;
+  const advanced = config.joomlaPackage || config.jcbPackage || config.template || config.menus?.length || config.languageTags?.length || config.multilingual || config.content || config.phpSettings;
   if (advanced) {
     url.search = '';
     url.searchParams.set('start', '1');
@@ -254,7 +316,7 @@ export function createShareURL(location, config) {
 
 export const MAX_DEPLOYMENT_BYTES = 1_048_576;
 export const MAX_SHARE_URL_LENGTH = 16_384;
-const DEPLOYMENT_FIELDS = ['deployId', 'joomlaVersion', 'phpVersion', 'siteName', 'initialPath', 'language', 'languageTags', 'multilingual', 'autoLogin', 'hideToolbar', 'persistence', 'fresh', 'extensions', 'startupCommands', 'languages', 'menus', 'template', 'phpSettings', 'content'];
+const DEPLOYMENT_FIELDS = ['deployId', 'joomlaVersion', 'joomlaPackage', 'jcbVersion', 'jcbPackage', 'phpVersion', 'siteName', 'initialPath', 'language', 'languageTags', 'multilingual', 'autoLogin', 'hideToolbar', 'persistence', 'fresh', 'extensions', 'startupCommands', 'languages', 'menus', 'template', 'phpSettings', 'content'];
 
 function assertPublic(value, path = 'configuration') {
   if (!value || typeof value !== 'object') return;
@@ -303,6 +365,11 @@ export function parseDeploymentDocument(input, { baseURL = 'https://playground.j
     result[key] = value[key];
   }
   if (value.deployId !== undefined) result.deployId = normalizeDeployId(value.deployId);
+  if (value.joomlaPackage !== undefined) result.joomlaPackage = normalizeJoomlaPackage(value.joomlaPackage, baseURL);
+  if (value.jcbVersion !== undefined) result.jcbVersion = normalizeJcbVersion(value.jcbVersion);
+  if (value.jcbPackage !== undefined) result.jcbPackage = normalizeJcbPackage(value.jcbPackage, baseURL);
+  if (result.joomlaPackage && (!result.joomlaVersion || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(result.joomlaVersion))) throw new TypeError('A Joomla package requires an exact Joomla version.');
+  if (result.jcbPackage && (!result.jcbVersion || result.jcbVersion === 'none')) throw new TypeError('A JCB package requires a selected JCB version.');
   if (value.siteName !== undefined) result.siteName = requireText(value.siteName, 'Site name', 100);
   if (value.initialPath !== undefined) result.initialPath = normalizeInitialPath(value.initialPath);
   if (value.language !== undefined) result.language = normalizeLanguage(value.language);

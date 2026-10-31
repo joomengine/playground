@@ -1,14 +1,18 @@
 import { createShareURL } from './config.mjs';
 const SITE_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
-const PUBLIC_FIELDS = ['deployId', 'joomlaVersion', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'phpSettings', 'menus', 'template', 'languageTags', 'multilingual', 'content'];
+const PUBLIC_FIELDS = ['deployId', 'joomlaVersion', 'joomlaPackage', 'jcbVersion', 'jcbPackage', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'phpSettings', 'menus', 'template', 'languageTags', 'multilingual', 'content'];
 
 /** Approval must preserve command argument boundaries as well as source URLs. */
 export function customSetupDetails(input) {
-  const sources = [...(input.extensions || []).map(item => item.url), input.template?.url,
+  const sources = [input.joomlaPackage?.url, input.jcbPackage?.url, ...(input.extensions || []).map(item => item.url), input.template?.url,
     ...(input.languages || []).map(item => item.url)].filter(Boolean);
   const commands = (input.startupCommands || []).map(command => [...command]);
   return { sources, commands, extensions: input.extensions || [], template: input.template || null,
-    languages: input.languages || [], content: input.content || null, menus: input.menus || [] };
+    languages: input.languages || [], content: input.content || null, menus: input.menus || [],
+    joomlaVersion: input.joomlaPackage ? input.joomlaVersion : null,
+    joomlaPackage: input.joomlaPackage ? structuredClone(input.joomlaPackage) : null,
+    jcbVersion: input.jcbPackage ? input.jcbVersion : null,
+    jcbPackage: input.jcbPackage ? structuredClone(input.jcbPackage) : null };
 }
 
 /** Scope resume preferences to this deployment, like its browser database stores. */
@@ -25,7 +29,7 @@ export function defaultSiteKey(deployId, joomlaVersion) {
 /** Persist setup preferences, never administrator credentials or runtime objects. */
 export function publicConfiguration(config) {
   const result = Object.fromEntries(PUBLIC_FIELDS.filter((name) => config[name] !== undefined).map((name) => [name, structuredClone(config[name])]));
-  result.extensions = (config.extensions || []).map(({ url, sha256 }) => ({ url, ...(sha256 ? { sha256 } : {}) }));
+  result.extensions = (config.extensions || []).map(({ url, sha256, sha512 }) => ({ url, ...(sha256 ? { sha256 } : {}), ...(sha512 ? { sha512 } : {}) }));
   result.languages = (config.languages || []).map(({ tag, url, sha256 }) => ({ tag, url, ...(sha256 ? { sha256 } : {}) }));
   result.startupCommands = (config.startupCommands || []).map((argv) => [...argv]);
   result.fresh = false;
@@ -135,8 +139,9 @@ export function runtimeLocation(currentURL, config) {
   const params = url.searchParams;
   if (config.siteName) params.set('name', config.siteName);
   else params.delete('name');
-  for (const [parameter, name] of [['deploy', 'deployId'], ['joomla', 'joomlaVersion'], ['php', 'phpVersion'], ['language', 'language'], ['key', 'storageKey']]) {
+  for (const [parameter, name] of [['deploy', 'deployId'], ['joomla', 'joomlaVersion'], ['jcb', 'jcbVersion'], ['php', 'phpVersion'], ['language', 'language'], ['key', 'storageKey']]) {
     if (config[name]) params.set(parameter, config[name]);
+    else if (name === 'jcbVersion') params.delete(parameter);
   }
   params.set('path', config.initialPath || '/');
   params.set('login', config.autoLogin ? 'yes' : 'no');
@@ -161,7 +166,7 @@ export function runtimeLocation(currentURL, config) {
 /** A changed setup recipe must not silently reopen a site built with older steps. */
 export async function isolateSetup(state, config) {
   const previous = Object.hasOwn(state.sites, config.storageKey) ? state.sites[config.storageKey] : null;
-  const signature = (value) => JSON.stringify({ extensions: value.extensions || [], startupCommands: value.startupCommands || [], siteName: value.siteName, menus: value.menus || [], template: value.template || null, languageTags: value.languageTags || [], multilingual: value.multilingual || false, content: value.content || null });
+  const signature = (value) => JSON.stringify({ joomlaPackage: value.joomlaPackage ?? null, jcbVersion: value.jcbVersion ?? null, jcbPackage: value.jcbPackage ?? null, extensions: value.extensions || [], startupCommands: value.startupCommands || [], siteName: value.siteName, menus: value.menus || [], template: value.template || null, languageTags: value.languageTags || [], multilingual: value.multilingual || false, content: value.content || null });
   if (!config.persistence || !previous || signature(previous) === signature(config)) return { configuration: config, changed: false };
   const content = JSON.stringify({ key: config.storageKey, deployId: config.deployId, joomlaVersion: config.joomlaVersion, setup: signature(config) });
   const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content))), (byte) => byte.toString(16).padStart(2, '0')).join('');

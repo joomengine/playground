@@ -1,7 +1,7 @@
 import { normalizePhpSettings } from './php-settings.mjs';
 import {
   DEFAULTS, normalizeDeployId, normalizeConfiguration, normalizeInitialPath,
-  normalizeLanguage, parseExtensions, parseStartupCommands, resolveJoomlaVersion, parseMenus, parseTemplate, parseLanguageTags, readDeploymentBytes,
+  normalizeLanguage, normalizeJcbVersion, normalizeJcbPackage, catalogWithSelectedJoomlaPackage, parseExtensions, parseStartupCommands, resolveJoomlaVersion, parseMenus, parseTemplate, parseLanguageTags, readDeploymentBytes,
 } from './config.mjs';
 import { validateContent } from './joomla/index.mjs';
 
@@ -27,7 +27,7 @@ function properties(value, allowed, name) {
 
 function packageEntry(value, baseURL, requireIntegrity, allowHttp = true) {
   object(value, 'Package');
-  properties(value, ['url', 'sha256', 'sourceUrl', 'tag'], 'Package');
+  properties(value, ['url', 'sha256', 'sha512', 'sourceUrl', 'tag'], 'Package');
   const result = parseExtensions([value], baseURL, { allowHttp })[0];
   if (requireIntegrity && !PACKAGE_DIGEST.test(result.sha256 ?? '')) throw new TypeError('Repository deploy packages require a SHA-256 digest.');
   if (value.sourceUrl !== undefined) result.sourceUrl = parseExtensions([{ url: value.sourceUrl }], baseURL, { allowHttp })[0].url;
@@ -197,10 +197,18 @@ function uniquePackages(entries) {
   const result = new Map();
   for (const entry of entries) {
     const existing = result.get(entry.url);
-    if (existing && existing.sha256 !== entry.sha256) throw new TypeError(`Conflicting checksums for package ${entry.url}.`);
+    if (existing && (existing.sha256 !== entry.sha256 || existing.sha512 !== entry.sha512)) throw new TypeError(`Conflicting checksums for package ${entry.url}.`);
     result.set(entry.url, entry);
   }
   return [...result.values()];
+}
+
+// Prepared recipes may reference a same-origin staged package. sourceUrl retains
+// its upstream identity even when the staged archive has a different checksum.
+function jcbRecipeVersion(entry) {
+  const source = entry.sourceUrl || entry.url;
+  const match = /\/(?:joomengine\/)?pkg-component-builder\/(?:archive\/refs\/tags\/|zip\/refs\/tags\/)?v?(\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?)(?:\.zip)?(?:$|[?#])/i.exec(source);
+  return match?.[1]?.replace(/\.zip$/i, '') ?? null;
 }
 
 /** Resolve repository recipe defaults followed by explicit caller settings. */
@@ -208,6 +216,7 @@ export async function resolveDeployConfiguration(input = {}, {
   catalog, deployCatalog, baseURL = globalThis.location?.href ?? 'https://playground.joomengine.org/', fetcher = fetch,
 } = {}) {
   if (!catalog) throw new TypeError('A verified runtime catalog is required to resolve a deploy.');
+  catalog = catalogWithSelectedJoomlaPackage(catalog, input, baseURL);
   const registry = deployCatalog ?? await loadDeployCatalog({ fetcher });
   const selectedMajor = resolveJoomlaVersion(input.joomlaVersion ?? catalog.defaults.joomlaVersion, catalog).split('.')[0];
   const id = normalizeDeployId(input.deployId ?? registry.defaultsByJoomla?.[selectedMajor] ?? registry.default);
@@ -218,10 +227,15 @@ export async function resolveDeployConfiguration(input = {}, {
   if (deploy.id !== id) throw new TypeError(`Deploy manifest ID does not match ${id}.`);
   let release = resolveJoomlaVersion(input.joomlaVersion ?? deploy.configuration.joomlaVersion ?? catalog.defaults.joomlaVersion, catalog);
   const major = release.split('.')[0];
-  if (!deploy.joomla.includes(major)) throw new TypeError(`${deploy.title} is not available for Joomla ${major}.`);
+  // Joomla 7 development builds can exercise the immediately preceding
+  // Joomla 6 recipe. This explicitly chooses a testing fallback; it does not
+  // claim the recipe's other extensions are Joomla 7 compatible.
+  const recipeMajor = deploy.joomla.includes(major) ? major
+    : major === '7' && deploy.joomla.includes('6') ? '6' : null;
+  if (!recipeMajor && !['blank', 'jcb'].includes(id)) throw new TypeError(`${deploy.title} is not available for Joomla ${major}.`);
   const common = deploy.configuration;
-  const variant = deploy.variants[major] ?? {};
-  if (input.joomlaVersion === undefined && variant.joomlaVersion !== undefined) release = resolveJoomlaVersion(variant.joomlaVersion, catalog);
+  const variant = deploy.variants[recipeMajor ?? major] ?? {};
+  if (input.joomlaVersion === undefined && recipeMajor === major && variant.joomlaVersion !== undefined) release = resolveJoomlaVersion(variant.joomlaVersion, catalog);
   const overrides = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
   const setup = { ...common, ...variant, ...overrides, deployId: id, joomlaVersion: release };
   if (common.phpSettings || variant.phpSettings || input.phpSettings) setup.phpSettings = normalizePhpSettings({ ...common.phpSettings, ...variant.phpSettings, ...input.phpSettings });
@@ -229,7 +243,34 @@ export async function resolveDeployConfiguration(input = {}, {
   setup.addonExtensions = parseExtensions(input.extensions ?? [], baseURL);
   setup.addonStartupCommands = parseStartupCommands(input.startupCommands ?? []);
   setup.addonLanguages = languagePackages(input.languages ?? [], baseURL, true);
-  setup.extensions = uniquePackages([...common.extensions, ...(variant.extensions ?? []), ...setup.addonExtensions]);
+  const presetExtensions = [...common.extensions, ...(variant.extensions ?? [])];
+  let selectedPresetExtensions = presetExtensions;
+  let snapshotCompatible = true;
+  if (input.jcbVersion !== undefined) {
+    const selectedVersion = normalizeJcbVersion(input.jcbVersion);
+    // Only inherit the reviewed preset when no explicit package was supplied.
+    // A caller who supplies a package selected those exact bytes, even if it
+    // happens to use the same version string as the pinned default.
+    const matching = input.jcbPackage === undefined && presetExtensions.find((entry) => jcbRecipeVersion(entry) === selectedVersion);
+    let selectedPackage;
+    if (selectedVersion === 'none') {
+      if (input.jcbPackage !== undefined) throw new TypeError('A JCB package cannot be provided when JCB is set to none.');
+    } else {
+      const jcbMajor = selectedVersion.split('.')[0];
+      if (jcbMajor !== major && !(major === '7' && jcbMajor === '6')) throw new TypeError(`JCB ${selectedVersion} is not a selectable package for Joomla ${major}.`);
+      if (matching) selectedPackage = matching;
+      else {
+        if (!input.jcbPackage) throw new TypeError(`The selected JCB ${selectedVersion} package is unavailable.`);
+        selectedPackage = normalizeJcbPackage(input.jcbPackage, baseURL);
+      }
+    }
+    selectedPresetExtensions = presetExtensions.filter((entry) => !jcbRecipeVersion(entry));
+    if (selectedPackage) selectedPresetExtensions.unshift(selectedPackage);
+    snapshotCompatible = JSON.stringify(selectedPresetExtensions) === JSON.stringify(presetExtensions);
+    setup.jcbVersion = selectedVersion;
+    if (input.jcbPackage !== undefined) setup.jcbPackage = normalizeJcbPackage(input.jcbPackage, baseURL);
+  }
+  setup.extensions = uniquePackages([...selectedPresetExtensions, ...setup.addonExtensions]);
   setup.startupCommands = [...common.startupCommands, ...(variant.startupCommands ?? []), ...setup.addonStartupCommands];
   setup.languages = [...common.languages, ...(variant.languages ?? []), ...setup.addonLanguages];
   const requiredLanguages = new Set([setup.language ?? DEFAULTS.language, ...(setup.languageTags ?? []),
@@ -237,7 +278,7 @@ export async function resolveDeployConfiguration(input = {}, {
     ...(setup.content?.categories ?? []).map((entry) => entry.language), ...(setup.content?.articles ?? []).map((entry) => entry.language)]);
   for (const tag of requiredLanguages) {
     if (tag === 'en-GB' || setup.languages.some((entry) => entry.tag === tag)) continue;
-    const language = registry.languages?.[major]?.find((entry) => entry.tag === tag);
+    const language = registry.languages?.[recipeMajor ?? major]?.find((entry) => entry.tag === tag);
     if (!language) throw new TypeError(`No pinned ${tag} language package is configured for Joomla ${major}.`);
     setup.languages.push(language);
   }
@@ -250,7 +291,7 @@ export async function resolveDeployConfiguration(input = {}, {
   setup.languages = [...languages.values()];
   const snapshot = variant.snapshot ?? common.snapshot ?? deploy.snapshot;
   delete setup.snapshot;
-  if (!setup.fresh && input.content === undefined && snapshot?.joomlaVersion === release) setup.snapshot = snapshot;
+  if (!setup.fresh && snapshotCompatible && input.joomlaPackage === undefined && input.content === undefined && snapshot?.joomlaVersion === release) setup.snapshot = snapshot;
   const configuration = normalizeConfiguration(setup, { catalog, baseURL });
-  return { configuration, deploy };
+  return { configuration, deploy, recipeMajor: recipeMajor ?? major };
 }
