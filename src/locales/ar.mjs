@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "تعذر إكمال العملية. افتح التفاصيل التقنية لمزيد من المعلومات.",
+  "title.technicalDetails": "التفاصيل التقنية",
+  "help.temporaryRetry": "هذا النشر المؤقت غير مكتمل. تؤدي إعادة المحاولة إلى إنشاء موقع مؤقت جديد. لا تتوفر استعادة المواقع المحفوظة وإعادة تعيينها إلا عند تمكين الحفظ.",
+  "help.savedRetry": "قد يكون هذا النشر المحفوظ غير مكتمل. استعد الموقع المحفوظ لفحصه، أو استخدم مفتاح موقع جديدًا لنشر جديد. تؤدي إعادة التعيين والتشغيل إلى حذف هذا الموقع بعد التأكيد.",
+  "action.downloadDiagnostics": "تنزيل سجل التشخيص",
   "help.codeCredits": "يتضمن JoomEngine Code كلاً من Microsoft VS Code/Monaco وCodinGame وPHP/phpdbg وPHP-WASM من Sean Morris وEmscripten.",
   "license.codeInventory": "تُذكر مساهمات اللغات والقواعد والسمات والأيقونات في قائمة التبعيات المرفقة.",
   "help.codeEncoding": "حقوق نشر jschardet 3.1.4 محفوظة © لشركة Netscape Communications Corporation والمساهمين، وقد نقله António Afonso، بموجب ترخيص LGPL-2.1-or-later.",

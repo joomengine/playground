@@ -68,3 +68,67 @@ for (const [deployId, major] of pairs) {
     } finally { await runtime?.close(); }
   });
 }
+
+test('manual Service Directory package keeps normal PHP settings and installs every seeded city', { timeout: 360_000 }, async () => {
+  const runtime = await createNodeRuntime({ directory: process.env.PLAYGROUND_DIST, phpVersion: '8.4' });
+  try {
+    assert.equal(runtime.phpSettings.max_execution_time, 60);
+    const catalog = parseCatalog(runtime.manifest);
+    const release = catalog.joomla.find(item => item.version.startsWith('6.'));
+    assert.ok(release, 'The candidate must stage Joomla 6.');
+    const manifestURL = new URL('assets/manifest.json', runtime.assetBaseUrl);
+    const deployCatalog = await loadDeployCatalog({ url: new URL(runtime.manifest.deploys.url, manifestURL), fetcher: runtime.fetchAsset });
+    const shared = { catalog, deployCatalog, baseURL: runtime.assetBaseUrl, fetcher: runtime.fetchAsset };
+    const { configuration: preset } = await resolveDeployConfiguration({ deployId: 'servicedirectory',
+      joomlaVersion: release.version, phpVersion: '8.4' }, shared);
+    const { configuration } = await resolveDeployConfiguration({ deployId: 'blank', joomlaVersion: release.version,
+      phpVersion: '8.4', persistence: false, fresh: true, extensions: preset.extensions,
+      admin: { name: 'Manual Package Administrator', username: 'admin', email: 'admin@example.test', password: `Manual-${crypto.randomUUID()}!` },
+    }, shared);
+    assert.equal(configuration.phpSettings.max_execution_time, 60, 'Entering a package URL must not import the preset PHP settings.');
+    assert.equal(configuration.menus.length, 0, 'This exercises manual package entry, not the Service Directory preset.');
+    const recipe = JSON.parse(await readFile(new URL('../deploys/servicedirectory.json', import.meta.url), 'utf8'));
+    assert.equal(configuration.extensions[0].sha256, recipe.variants['6'].extensions[0].sha256, 'Install the exact reviewed package.');
+    const packageChecks = [];
+    const instrumented = { ...runtime, runPhp: async (source, options) => {
+      if (source.includes('manual-package-execution-budget')) packageChecks.push(options?.timeoutMs);
+      return runtime.runPhp(source, options);
+    } };
+    const checkedSourceLoader = async name => {
+      const source = await sourceLoader(name);
+      if (name !== 'console') return source;
+      // Observe the real PHP setting immediately after the production helper applies it.
+      const setup = 'playgroundInstallationAllowance($playground);';
+      assert.ok(source.includes(setup));
+      return source.replace(setup, `${setup}\n    if ((int) ini_get('max_execution_time') !== 180) throw new RuntimeException('manual-package-execution-budget');`);
+    };
+    const archive = await runtime.fetchAsset(new URL(release.url, manifestURL));
+    assert.equal(archive.status, 200);
+    await installJoomla(instrumented, configuration, { archiveBytes: await archive.arrayBuffer(), sha256: release.sha256,
+      sourceLoader: checkedSourceLoader, fetchPackage: runtime.fetchAsset });
+    assert.equal(packageChecks.length, 1, 'The package installer runs once without automatic replay.');
+    assert.ok(packageChecks[0] >= 210_000, 'The host deadline must allow PHP its full 180 seconds and cleanup grace.');
+    const result = await runtime.runPhp(`<?php
+      $db = new PDO('mysql:dbname=joomla;charset=utf8mb4', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+      $tables = $db->query("SHOW TABLES LIKE 'jml\\_servicedirectory\\_%'")->fetchAll(PDO::FETCH_COLUMN);
+      $rows = 0; foreach ($tables as $table) $rows += (int) $db->query('SELECT COUNT(*) FROM ' . chr(96) . str_replace(chr(96), chr(96) . chr(96), $table) . chr(96))->fetchColumn();
+      echo json_encode(['cities' => (int) $db->query('SELECT COUNT(*) FROM jml_servicedirectory_city')->fetchColumn(),
+        'states' => (int) $db->query('SELECT COUNT(*) FROM jml_servicedirectory_state')->fetchColumn(),
+        'tables' => count($tables), 'rows' => $rows, 'executionTime' => (int) ini_get('max_execution_time'),
+        'marker' => json_decode(file_get_contents('/persist/meta/joomla-install.json'), true)['state']], JSON_THROW_ON_ERROR);
+    `);
+    assert.equal(result.status, 200, result.text);
+    const proof = JSON.parse(result.text);
+    assert.equal(proof.cities, 151233);
+    assert.equal(proof.states, 5073);
+    assert.equal(proof.tables, 24);
+    assert.ok(proof.rows >= 157847, 'Every supplied seed row must remain installed.');
+    assert.equal(proof.executionTime, 60, 'The installation allowance must not leak into subsequent PHP requests.');
+    assert.equal(proof.marker, 'complete');
+    const response = await requestJoomlaPage(runtime, 'administrator/index.php?option=com_servicedirectory&view=cities');
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, /com_servicedirectory/);
+    assert.doesNotMatch(html, /name=["']passwd["']|Fatal error|Uncaught (?:Error|Exception)|Call to undefined function/i);
+  } finally { await runtime.close(); }
+});

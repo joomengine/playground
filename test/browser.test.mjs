@@ -863,6 +863,35 @@ for (const name of browserNames) {
           proof.push({ ...item, administrator: true });
           await close(page);
         }
+        page.testStep = 'manual Service Directory URL installs all city data with default PHP settings';
+        const servicePackage = await page.evaluate(async () => {
+          const { parseCatalog } = await import('./src/config.mjs');
+          const { loadDeployCatalog, resolveDeployConfiguration } = await import('./src/deploys.mjs');
+          const catalog = parseCatalog(await (await fetch('./assets/manifest.json')).json());
+          const deployCatalog = await loadDeployCatalog();
+          const release = catalog.joomla.find(item => item.version.startsWith('6.'));
+          const { configuration } = await resolveDeployConfiguration({ deployId: 'servicedirectory',
+            joomlaVersion: release.version, phpVersion: '8.4' }, { catalog, deployCatalog, baseURL: location.href });
+          return { extensions: configuration.extensions, joomlaVersion: release.version };
+        });
+        const manualService = await startDeploy(page, new URLSearchParams({ deploy: 'blank',
+          joomla: servicePackage.joomlaVersion, php: '8.4', fresh: '1',
+        }).toString(), { ...setup(), extensions: servicePackage.extensions });
+        assert.equal(manualService.configuration.phpSettings.max_execution_time, 60,
+          'A manually supplied package must install without inheriting preset PHP settings.');
+        assert.equal(manualService.configuration.menus.length, 0);
+        const serviceData = await phpJSON(page, `${PDO}
+          echo json_encode(['cities' => (int) $db->query('SELECT COUNT(*) FROM jml_servicedirectory_city')->fetchColumn(),
+            'states' => (int) $db->query('SELECT COUNT(*) FROM jml_servicedirectory_state')->fetchColumn(),
+            'executionTime' => (int) ini_get('max_execution_time'),
+            'state' => json_decode(file_get_contents('/persist/meta/joomla-install.json'), true)['state']], JSON_THROW_ON_ERROR);`);
+        assert.deepEqual(serviceData, { cities: 151233, states: 5073, executionTime: 60, state: 'complete' });
+        const servicePage = await request(page, '/administrator/index.php?option=com_servicedirectory&view=cities');
+        assert.equal(servicePage.status, 200, servicePage.text.slice(0, 1000));
+        assert.match(servicePage.text, /com_servicedirectory/);
+        assert.doesNotMatch(servicePage.text, /name=["']passwd["']|Fatal error|Uncaught (?:Error|Exception)|Call to undefined function/i);
+        proof.push({ id: 'manual-servicedirectory', ...serviceData, administrator: true });
+        await close(page);
         page.testStep = 'Dutch URL recipe with explicit logged-out session and extension command';
         const dutch = await startDeploy(page, new URLSearchParams({
           deploy: 'blank', joomla: '5.4', php: defaultPair.phpVersion, language: 'nl-NL', login: 'no',

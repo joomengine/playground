@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "İşlem tamamlanamadı. Daha fazla bilgi için teknik ayrıntıları açın.",
+  "title.technicalDetails": "Teknik ayrıntılar",
+  "help.temporaryRetry": "Bu geçici dağıtım tamamlanmadı. Yeniden denemek yeni bir geçici site oluşturur. Kayıtlı siteyi kurtarma ve sıfırlama yalnızca kaydetme etkinleştirildiğinde kullanılabilir.",
+  "help.savedRetry": "Bu kayıtlı dağıtım tamamlanmamış olabilir. İncelemek için kayıtlı siteyi kurtarın veya yeni bir dağıtım için yeni bir site anahtarı kullanın. Sıfırla ve başlat, onaylandıktan sonra bu siteyi siler.",
+  "action.downloadDiagnostics": "Tanı günlüğünü indir",
   "code.aiPanel.omittedScope": "Seçilen kapsamın dışında veya ayarlarınız tarafından hariç tutuluyor.",
   "code.aiPanel.omittedFile": "Bu dosya eklenemedi. Çalışma alanındaki özgün yolunda bulunan, desteklenen bir metin dosyası seçin.",
   "code.aiPanel.connections": "Kaydedilmiş özel bağlantılar",

@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "কাজটি সম্পূর্ণ করা যায়নি। আরও তথ্যের জন্য প্রযুক্তিগত বিবরণ খুলুন।",
+  "title.technicalDetails": "প্রযুক্তিগত বিবরণ",
+  "help.temporaryRetry": "এই অস্থায়ী স্থাপনা অসম্পূর্ণ। আবার চেষ্টা করলে একটি নতুন অস্থায়ী সাইট তৈরি হয়। সংরক্ষণ চালু থাকলেই সংরক্ষিত সাইট পুনরুদ্ধার ও রিসেট করা যায়।",
+  "help.savedRetry": "এই সংরক্ষিত স্থাপনা অসম্পূর্ণ হতে পারে। পরীক্ষা করতে সংরক্ষিত সাইট পুনরুদ্ধার করুন, অথবা নতুন স্থাপনার জন্য নতুন সাইট কী ব্যবহার করুন। রিসেট করে চালু করলে নিশ্চিত করার পরে এই সাইটটি মুছে যায়।",
+  "action.downloadDiagnostics": "রোগনির্ণয় লগ ডাউনলোড করুন",
   "help.codeCredits": "JoomEngine Code-এ Microsoft VS Code/Monaco, CodinGame, PHP/phpdbg, Sean Morris-এর PHP-WASM এবং Emscripten অন্তর্ভুক্ত আছে।",
   "license.codeInventory": "ভাষা, ব্যাকরণ, থিম এবং আইকনের অবদানকারীদের স্বীকৃতি সংযুক্ত নির্ভরতার তালিকায় দেওয়া হয়েছে।",
   "help.codeEncoding": "jschardet 3.1.4-এর কপিরাইট © Netscape Communications Corporation এবং অবদানকারীদের। এটি António Afonso পোর্ট করেছেন এবং LGPL-2.1-or-later-এর অধীনে রয়েছে।",

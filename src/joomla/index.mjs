@@ -1,6 +1,8 @@
 import { ensureManagedDatabaseConfiguration } from './managed-database.mjs';
 import { parseMenus, parseTemplate, parseLanguageTags } from '../site-configuration.mjs';
 import { createMcpClient } from '../mcp.mjs';
+import { installationBudget } from '../php-settings.mjs';
+import { conciseFailure, packageLabel, provisioningError } from '../provisioning-errors.mjs';
 const RESULT_MARKER = '\n__JOOMENGINE_RESULT__';
 const phpSourceCache = new Map();
 const MAX_PACKAGE_BYTES = 128 * 1024 * 1024;
@@ -175,26 +177,61 @@ export async function buildPhpProgram(operation, payload, sourceLoader = default
     + common.replace(/^<\?php\s*/, '') + '\n' + script.replace(/^<\?php\s*/, '');
 }
 
+/** Locate a complete JSON object without treating braces or markers in strings as frames. */
+function resultFrameEnd(text, start) {
+  let depth = 0, quoted = false, escaped = false;
+  if (text[start] !== '{') return -1;
+  for (let index = start; index < text.length; index++) {
+    const character = text[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') quoted = false;
+    } else if (character === '"') quoted = true;
+    else if (character === '{' || character === '[') depth++;
+    else if (character === '}' || character === ']') {
+      if (--depth === 0) return index + 1;
+    }
+  }
+  return -1;
+}
+
 export async function parseProvisioningResult(response) {
   const text = typeof response.text === 'function' ? await response.text()
     : typeof response.text === 'string' ? response.text
       : typeof response.body === 'string' ? response.body : new TextDecoder().decode(response.body ?? new Uint8Array());
-  const start = text.lastIndexOf(RESULT_MARKER);
-  if (start === -1) throw new Error(`PHP did not complete the Joomla operation (HTTP ${response.status ?? 'unknown'}): ${text.slice(0, 2000)}`);
+  const start = text.indexOf(RESULT_MARKER);
+  const diagnostic = { technicalDetails: text, phase: 'installation' };
+  if (start === -1) throw provisioningError(`PHP did not complete the Joomla operation (HTTP ${response.status ?? 'unknown'}).`, diagnostic);
+  const bodyStart = start + RESULT_MARKER.length;
+  const end = resultFrameEnd(text, bodyStart);
   let result;
-  try { result = JSON.parse(text.slice(start + RESULT_MARKER.length)); }
-  catch { throw new Error(`Invalid PHP provisioning response: ${text.slice(start, start + 2000)}`); }
-  if (result.ok !== true) {
-    throw new Error(result.error || result.output || `Joomla command failed with exit status ${result.exitCode ?? 'unknown'}.`);
+  try {
+    if (end === -1) throw new Error('Incomplete result');
+    result = JSON.parse(text.slice(bodyStart, end));
+    if (!result || typeof result !== 'object' || Array.isArray(result) || typeof result.ok !== 'boolean') throw new Error('Invalid envelope');
+  } catch { throw provisioningError('Invalid PHP provisioning response. The operation did not complete safely.', diagnostic); }
+  const tail = text.slice(end).trim();
+  // A second frame is ambiguous even if one frame claims success. Failure tails
+  // from Joomla's shutdown handlers remain diagnostics, never a success signal.
+  if (tail.includes('__JOOMENGINE_RESULT__') || (result.ok && tail)) {
+    throw provisioningError('Invalid PHP provisioning response. The operation did not complete safely.', diagnostic);
+  }
+  if (!result.ok) {
+    throw provisioningError(conciseFailure(result.error || result.output,
+      `Joomla command failed with exit status ${result.exitCode ?? 'unknown'}.`), diagnostic);
   }
   if (response.status !== undefined && (response.status < 200 || response.status >= 300)) {
-    throw new Error(`PHP returned HTTP ${response.status} after the Joomla operation.`);
+    throw provisioningError(`PHP returned HTTP ${response.status} after the Joomla operation.`, diagnostic);
+  }
+  if (response.fatal || response.error || response.failed || /PHP restarted after an application error|Fatal error|Uncaught (?:Error|Exception)/i.test(String(response.diagnostic ?? ''))) {
+    throw provisioningError('PHP failed while completing the Joomla operation.', diagnostic);
   }
   return result;
 }
 
-async function execute(runtime, operation, payload, sourceLoader) {
-  return parseProvisioningResult(await runtime.runPhp(await buildPhpProgram(operation, payload, sourceLoader)));
+async function execute(runtime, operation, payload, sourceLoader, options) {
+  return parseProvisioningResult(await runtime.runPhp(await buildPhpProgram(operation, payload, sourceLoader), options));
 }
 
 function paths(runtime) {
@@ -246,15 +283,42 @@ export async function checkMcpRuntime(runtime, { sourceLoader, admin, initialize
   } finally { await client.close(); }
 }
 
-export async function runStartupCommand(runtime, argv, { sourceLoader } = {}) {
-  return execute(runtime, 'console', { ...paths(runtime), argv: validateCommand(argv) }, sourceLoader);
+export async function runStartupCommand(runtime, argv, { sourceLoader, executionTimeSeconds, timeoutMs } = {}) {
+  const command = validateCommand(argv);
+  const budget = command[0] === 'extension:install' ? installationBudget({ executionTimeSeconds, timeoutMs }) : null;
+  return execute(runtime, 'console', { ...paths(runtime), argv: command,
+    ...(budget ? { installationExecutionTimeSeconds: budget.executionTimeSeconds } : {}),
+  }, sourceLoader, budget ? { timeoutMs: budget.timeoutMs } : undefined);
 }
 
-export async function installExtension(runtime, bytes, { sha256: digest, sourceLoader } = {}) {
-  const verified = await verifyPackage(bytes, digest);
-  const archive = `/tmp/playground-extension-${crypto.randomUUID()}.zip`;
-  await runtime.fs.writeFile(archive, verified);
-  return execute(runtime, 'console', { ...paths(runtime), archive, argv: ['extension:install', `--path=${archive}`] }, sourceLoader);
+export async function installExtension(runtime, bytes, {
+  sha256: digest, sourceLoader, executionTimeSeconds, timeoutMs, packageUrl, progress = () => {},
+} = {}) {
+  // Reject contradictory limits before writing the archive or invoking PHP.
+  const budget = installationBudget({ executionTimeSeconds, timeoutMs });
+  const context = { packageUrl: packageUrl ? packageLabel(packageUrl) : undefined, ...budget };
+  let phase = 'verification';
+  try {
+    const verified = await verifyPackage(bytes, digest);
+    const archive = `/tmp/playground-extension-${crypto.randomUUID()}.zip`;
+    phase = 'installation';
+    progress({ stage: 'extensions', phase, message: `Installing ${packageLabel(packageUrl)}…` });
+    await runtime.fs.writeFile(archive, verified);
+    return await execute(runtime, 'console', { ...paths(runtime), archive,
+      argv: ['extension:install', `--path=${archive}`], installationExecutionTimeSeconds: budget.executionTimeSeconds,
+    }, sourceLoader, { timeoutMs: budget.timeoutMs });
+  } catch (error) {
+    const phpTimeout = /Maximum execution time of \d+ seconds exceeded/i.test(error.message);
+    const hostTimeout = error.code === 'TIMEOUT';
+    const summary = phpTimeout
+      ? `${packageLabel(packageUrl)} installation exceeded PHP's ${budget.executionTimeSeconds}-second limit.`
+      : hostTimeout ? `${packageLabel(packageUrl)} installation exceeded the ${budget.timeoutMs / 1000}-second runtime deadline.`
+        : `${packageLabel(packageUrl)} ${phase} failed: ${conciseFailure(error.message)}`;
+    throw provisioningError(summary, { ...context, phase, code: error.code,
+      incomplete: phase === 'installation',
+      technicalDetails: error.technicalDetails || error.message,
+    });
+  }
 }
 
 function hiddenFields(html) {
@@ -368,20 +432,34 @@ export async function restoreJoomlaSession(runtime, config, { sourceLoader, rota
   return administrator;
 }
 
-async function downloadAndInstall(runtime, item, fetchPackage, sourceLoader) {
-  const response = await fetchPackage(item.url);
-  if (!response.ok) throw new Error(`Extension download failed: HTTP ${response.status}.`);
-  const length = Number(response.headers.get('Content-Length'));
-  if (length > MAX_PACKAGE_BYTES) throw new Error('Extension package exceeds 128 MiB.');
-  return installExtension(runtime, await response.arrayBuffer(), { sha256: item.sha256, sourceLoader });
+async function downloadAndInstall(runtime, item, fetchPackage, sourceLoader, progress = () => {}) {
+  const label = packageLabel(item.url);
+  progress({ stage: 'extensions', phase: 'download', message: `Downloading ${label}…` });
+  let bytes;
+  try {
+    const response = await fetchPackage(item.url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}.`);
+    const length = Number(response.headers.get('Content-Length'));
+    if (length > MAX_PACKAGE_BYTES) throw new Error('Extension package exceeds 128 MiB.');
+    bytes = await response.arrayBuffer();
+  } catch (error) {
+    const reason = error instanceof TypeError
+      ? 'The browser could not read this download. Check the URL, your connection, and whether the host permits cross-origin downloads.'
+      : conciseFailure(error.message);
+    throw provisioningError(`${label} download failed. ${reason}`, {
+      phase: 'download', packageUrl: label, technicalDetails: error.message,
+    });
+  }
+  progress({ stage: 'extensions', phase: 'verification', message: `Verifying ${label}…` });
+  return installExtension(runtime, bytes, { sha256: item.sha256, sourceLoader, packageUrl: item.url, progress });
 }
 
-async function installMissingLanguages(runtime, languages, fetchPackage, sourceLoader) {
+async function installMissingLanguages(runtime, languages, fetchPackage, sourceLoader, progress = () => {}) {
   for (const pack of languages) {
     const root = paths(runtime).root;
     const metadata = await runtime.fs.stat(`${root}/language/${pack.tag}/langmetadata.xml`);
     const administratorMetadata = await runtime.fs.stat(`${root}/administrator/language/${pack.tag}/langmetadata.xml`);
-    if (!metadata?.isFile || !administratorMetadata?.isFile) await downloadAndInstall(runtime, pack, fetchPackage, sourceLoader);
+    if (!metadata?.isFile || !administratorMetadata?.isFile) await downloadAndInstall(runtime, pack, fetchPackage, sourceLoader, progress);
   }
 }
 
@@ -414,7 +492,7 @@ export async function installJoomla(runtime, config, {
     if (health.version !== options.joomlaVersion) throw new Error('The saved Joomla files do not match the selected release.');
     if (health.language !== options.language) {
       progress({ stage: 'languages', message: `Changing the saved site language to ${options.language}…` });
-      await installMissingLanguages(runtime, options.languages, fetchPackage, sourceLoader);
+      await installMissingLanguages(runtime, options.languages, fetchPackage, sourceLoader, progress);
       await execute(runtime, 'customize', { ...location, language: options.language, content: null }, sourceLoader);
       await logoutAdministrator(runtime);
       health = await checkJoomla(runtime, { sourceLoader });
@@ -439,15 +517,15 @@ export async function installJoomla(runtime, config, {
   await execute(runtime, 'administrator', { ...location, mode: 'write', admin: options.admin }, sourceLoader);
   for (const pack of options.languages) {
     progress({ stage: 'languages', message: `Installing ${pack.tag}…` });
-    await downloadAndInstall(runtime, pack, fetchPackage, sourceLoader);
+    await downloadAndInstall(runtime, pack, fetchPackage, sourceLoader, progress);
   }
   for (const [index, extension] of options.extensions.entries()) {
     progress({ stage: 'extensions', message: `Installing extension ${index + 1} of ${options.extensions.length}…` });
-    await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader);
+    await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader, progress);
   }
   if (options.template?.url) {
     progress({ stage: 'extensions', message: 'Installing the site template…' });
-    await downloadAndInstall(runtime, options.template, fetchPackage, sourceLoader);
+    await downloadAndInstall(runtime, options.template, fetchPackage, sourceLoader, progress);
   }
   progress({ stage: 'configure', message: options.content ? 'Preparing the deploy content and languages…' : 'Applying the site language…' });
   await execute(runtime, 'customize', { ...location, language: options.language, content: options.content, admin: options.admin, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
@@ -487,15 +565,15 @@ export async function importJoomlaSnapshot(runtime, config, {
   await execute(runtime, 'import', { ...location, archive, joomlaVersion: options.joomlaVersion, siteName: options.siteName, database: options.database }, sourceLoader);
   await ensureManagedDatabaseConfiguration(runtime, options.joomlaVersion);
   const administrator = await restoreJoomlaSession(runtime, { ...options, autoLogin: false }, { sourceLoader, rotateAdministrator: true });
-  await installMissingLanguages(runtime, options.languages, fetchPackage, sourceLoader);
+  await installMissingLanguages(runtime, options.languages, fetchPackage, sourceLoader, progress);
   const additions = validateInstallOptions({
     ...options, extensions: config.addonExtensions ?? [], startupCommands: config.addonStartupCommands ?? [], content: null,
   });
   for (const extension of additions.extensions) {
     progress({ stage: 'extensions', message: 'Installing an additional extension…' });
-    await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader);
+    await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader, progress);
   }
-  if (options.template?.url) await downloadAndInstall(runtime, options.template, fetchPackage, sourceLoader);
+  if (options.template?.url) await downloadAndInstall(runtime, options.template, fetchPackage, sourceLoader, progress);
   await execute(runtime, 'customize', { ...location, language: options.language, content: null, admin: administrator, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
   if (options.menus.length || options.template) await execute(runtime, 'configure', { ...location, menus: options.menus, template: options.template, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
   for (const argv of additions.startupCommands) {
@@ -548,13 +626,13 @@ export async function applyJoomlaConfiguration(runtime, config, {
   const state = await inspectJoomla(runtime, { sourceLoader });
   if (state.marker?.state !== 'complete' || !state.configured || state.installerPresent) throw new Error('Open a completed Joomla installation before applying deployment changes.');
   if (state.marker.joomlaVersion !== options.joomlaVersion) throw new Error('Changing Joomla releases requires a new installation.');
-  await installMissingLanguages(runtime, options.languages, fetchPackage, sourceLoader);
+  await installMissingLanguages(runtime, options.languages, fetchPackage, sourceLoader, progress);
   if (installPackages) {
     for (const extension of options.extensions) {
       progress({ stage: 'extensions', message: 'Installing the selected extension…' });
-      await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader);
+      await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader, progress);
     }
-    if (options.template?.url) await downloadAndInstall(runtime, options.template, fetchPackage, sourceLoader);
+    if (options.template?.url) await downloadAndInstall(runtime, options.template, fetchPackage, sourceLoader, progress);
   }
   progress({ stage: 'configure', message: 'Applying the site settings, menus and template…' });
   const identity = await execute(runtime, 'administrator', { ...location, mode: 'read' }, sourceLoader);
