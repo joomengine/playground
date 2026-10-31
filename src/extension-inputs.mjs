@@ -85,7 +85,7 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
         if (jsonError) return;
         // A digest belongs to the exact configured source. Never carry a stale
         // checksum into a different package when editing its URL.
-        if (input.value.trim() !== entry.url) delete entry.sha256;
+        if (input.value.trim() !== entry.url) { delete entry.sha256; delete entry.sha512; }
         entry.url = input.value.trim();
         writeRows();
       });

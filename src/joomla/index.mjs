@@ -3,6 +3,7 @@ import { parseMenus, parseTemplate, parseLanguageTags } from '../site-configurat
 import { createMcpClient } from '../mcp.mjs';
 import { installationBudget } from '../php-settings.mjs';
 import { conciseFailure, packageLabel, provisioningError } from '../provisioning-errors.mjs';
+import { prepareSelectedJcbPackage } from './jcb-package.mjs';
 const RESULT_MARKER = '\n__JOOMENGINE_RESULT__';
 const phpSourceCache = new Map();
 const MAX_PACKAGE_BYTES = 128 * 1024 * 1024;
@@ -76,7 +77,7 @@ export function validateCommand(argv) {
 export function validateInstallOptions(config) {
   if (!config || typeof config !== 'object') throw new TypeError('Joomla configuration is required.');
   const version = checkedString(config.joomlaVersion, 'Joomla version', { maximum: 32 });
-  if (!/^[56]\.\d+\.\d+$/.test(version)) throw new TypeError('Select a supported stable Joomla 5 or Joomla 6 release.');
+  if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)) throw new TypeError('Select an exact Joomla release.');
   const admin = config.admin ?? {};
   const result = {
     joomlaVersion: version,
@@ -121,7 +122,10 @@ export function validateInstallOptions(config) {
     if (extension.sha256 !== undefined && !/^[a-f\d]{64}$/i.test(extension.sha256)) {
       throw new TypeError('Extension SHA-256 must contain 64 hexadecimal characters.');
     }
-    return { url, sha256: extension.sha256?.toLowerCase() };
+    if (extension.sha512 !== undefined && !/^[a-f\d]{128}$/i.test(extension.sha512)) {
+      throw new TypeError('Extension SHA-512 must contain 128 hexadecimal characters.');
+    }
+    return { url, sha256: extension.sha256?.toLowerCase(), ...(extension.sha512 ? { sha512: extension.sha512.toLowerCase() } : {}) };
   });
   if (!Array.isArray(result.languages) || result.languages.length > 30) throw new TypeError('At most 30 language packages are supported.');
   result.languages = result.languages.map((entry) => {
@@ -140,8 +144,14 @@ export async function sha256(bytes) {
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (value) => value.toString(16).padStart(2, '0')).join('');
 }
 
-export async function verifyPackage(bytes, expectedDigest) {
-  return verifyArchive(bytes, expectedDigest, MAX_PACKAGE_BYTES);
+export async function verifyPackage(bytes, expectedDigest, expectedSha512) {
+  const data = await verifyArchive(bytes, expectedDigest, MAX_PACKAGE_BYTES);
+  if (expectedSha512 !== undefined) {
+    if (!/^[a-f\d]{128}$/i.test(expectedSha512)) throw new TypeError('A valid SHA-512 digest is required.');
+    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-512', data)), (value) => value.toString(16).padStart(2, '0')).join('');
+    if (digest !== expectedSha512.toLowerCase()) throw new Error('Package SHA-512 verification failed.');
+  }
+  return data;
 }
 
 async function verifyArchive(bytes, expectedDigest, maximum) {
@@ -292,14 +302,14 @@ export async function runStartupCommand(runtime, argv, { sourceLoader, execution
 }
 
 export async function installExtension(runtime, bytes, {
-  sha256: digest, sourceLoader, executionTimeSeconds, timeoutMs, packageUrl, progress = () => {},
+  sha256: digest, sha512: digest512, sourceLoader, executionTimeSeconds, timeoutMs, packageUrl, progress = () => {},
 } = {}) {
   // Reject contradictory limits before writing the archive or invoking PHP.
   const budget = installationBudget({ executionTimeSeconds, timeoutMs });
   const context = { packageUrl: packageUrl ? packageLabel(packageUrl) : undefined, ...budget };
   let phase = 'verification';
   try {
-    const verified = await verifyPackage(bytes, digest);
+    const verified = await verifyPackage(bytes, digest, digest512);
     const archive = `/tmp/playground-extension-${crypto.randomUUID()}.zip`;
     phase = 'installation';
     progress({ stage: 'extensions', phase, message: `Installing ${packageLabel(packageUrl)}…` });
@@ -432,7 +442,7 @@ export async function restoreJoomlaSession(runtime, config, { sourceLoader, rota
   return administrator;
 }
 
-async function downloadAndInstall(runtime, item, fetchPackage, sourceLoader, progress = () => {}) {
+async function downloadAndInstall(runtime, item, fetchPackage, sourceLoader, progress = () => {}, selection, jcbPackageOptions = {}) {
   const label = packageLabel(item.url);
   progress({ stage: 'extensions', phase: 'download', message: `Downloading ${label}…` });
   let bytes;
@@ -451,7 +461,16 @@ async function downloadAndInstall(runtime, item, fetchPackage, sourceLoader, pro
     });
   }
   progress({ stage: 'extensions', phase: 'verification', message: `Verifying ${label}…` });
-  return installExtension(runtime, bytes, { sha256: item.sha256, sourceLoader, packageUrl: item.url, progress });
+  let prepared;
+  try {
+    prepared = await prepareSelectedJcbPackage({ bytes, item, selection, fetcher: fetchPackage, progress, ...jcbPackageOptions });
+  } catch (error) {
+    throw provisioningError(`${label} verification failed: ${conciseFailure(error.message)}`, {
+      phase: 'verification', packageUrl: label, technicalDetails: error.message, incomplete: false,
+    });
+  }
+  if (prepared) return installExtension(runtime, prepared.bytes, { sha256: prepared.sha256, sourceLoader, packageUrl: item.url, progress });
+  return installExtension(runtime, bytes, { sha256: item.sha256, sha512: item.sha512, sourceLoader, packageUrl: item.url, progress });
 }
 
 async function installMissingLanguages(runtime, languages, fetchPackage, sourceLoader, progress = () => {}) {
@@ -480,7 +499,7 @@ export async function requestJoomlaPage(runtime, path = 'index.php') {
 }
 
 export async function installJoomla(runtime, config, {
-  archiveBytes, sha256: digest, progress = () => {}, sourceLoader, fetchPackage = fetch,
+  archiveBytes, sha256: digest, progress = () => {}, sourceLoader, fetchPackage = fetch, jcbPackageOptions,
 } = {}) {
   const options = validateInstallOptions(config);
   const location = paths(runtime);
@@ -521,7 +540,8 @@ export async function installJoomla(runtime, config, {
   }
   for (const [index, extension] of options.extensions.entries()) {
     progress({ stage: 'extensions', message: `Installing extension ${index + 1} of ${options.extensions.length}…` });
-    await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader, progress);
+    await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader, progress,
+      { version: config.jcbVersion, package: config.jcbPackage }, jcbPackageOptions);
   }
   if (options.template?.url) {
     progress({ stage: 'extensions', message: 'Installing the site template…' });
@@ -550,7 +570,7 @@ export async function installJoomla(runtime, config, {
 
 /** Import a verified portable site bundle into an empty playground instance. */
 export async function importJoomlaSnapshot(runtime, config, {
-  archiveBytes, sha256: digest, progress = () => {}, sourceLoader, fetchPackage = fetch,
+  archiveBytes, sha256: digest, progress = () => {}, sourceLoader, fetchPackage = fetch, jcbPackageOptions,
 } = {}) {
   const options = validateInstallOptions(config);
   const location = paths(runtime);
@@ -571,7 +591,8 @@ export async function importJoomlaSnapshot(runtime, config, {
   });
   for (const extension of additions.extensions) {
     progress({ stage: 'extensions', message: 'Installing an additional extension…' });
-    await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader, progress);
+    await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader, progress,
+      { version: config.jcbVersion, package: config.jcbPackage }, jcbPackageOptions);
   }
   if (options.template?.url) await downloadAndInstall(runtime, options.template, fetchPackage, sourceLoader, progress);
   await execute(runtime, 'customize', { ...location, language: options.language, content: null, admin: administrator, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
@@ -619,7 +640,7 @@ export async function discoverJoomlaConfiguration(runtime, { sourceLoader } = {}
 
 /** Apply explicitly selected changes to a running installation after a caller checkpoint. */
 export async function applyJoomlaConfiguration(runtime, config, {
-  sourceLoader, fetchPackage = fetch, progress = () => {}, installPackages = true,
+  sourceLoader, fetchPackage = fetch, progress = () => {}, installPackages = true, jcbPackageOptions,
 } = {}) {
   const options = validateInstallOptions(config);
   const location = paths(runtime);
@@ -630,7 +651,8 @@ export async function applyJoomlaConfiguration(runtime, config, {
   if (installPackages) {
     for (const extension of options.extensions) {
       progress({ stage: 'extensions', message: 'Installing the selected extension…' });
-      await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader, progress);
+      await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader, progress,
+        { version: config.jcbVersion, package: config.jcbPackage }, jcbPackageOptions);
     }
     if (options.template?.url) await downloadAndInstall(runtime, options.template, fetchPackage, sourceLoader, progress);
   }

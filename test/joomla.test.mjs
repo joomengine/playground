@@ -21,7 +21,7 @@ test('installation options preserve command arguments without shell interpretati
 test('invalid credentials, database identifiers, versions and command forms are rejected', () => {
   assert.throws(() => validateInstallOptions({ ...configuration, admin: { password: 'short' } }), /password/i);
   assert.throws(() => validateInstallOptions({ ...configuration, database: 'joomla;drop' }), /Database names/);
-  assert.throws(() => validateInstallOptions({ ...configuration, joomlaVersion: '6.3.0-beta1' }), /stable Joomla/);
+  assert.throws(() => validateInstallOptions({ ...configuration, joomlaVersion: '6.3-beta1' }), /exact Joomla release/);
   assert.throws(() => validateCommand('cache:clean'), /array/);
   assert.throws(() => validateCommand(['php cli/joomla.php cache:clean']), /Joomla command name/);
   assert.throws(() => validateCommand(['cache:clean', '\0']), /NUL/);
