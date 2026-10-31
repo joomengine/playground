@@ -22,3 +22,11 @@ test('unstructured runtime documents are only available as technical details', (
   assert.match(result.details, /DOCTYPE/);
   assert.equal(presentError(new Error('Package download failed.')).summary, 'Package download failed.');
 });
+
+test('diagnostic downloads redact complete authorization and cookie headers', () => {
+  const result = presentError(Object.assign(new Error('Install failed.'), {
+    technicalDetails: 'Authorization: Bearer private-token\nCookie: first=secret; second=other-secret\nSet-Cookie: session=private-session; HttpOnly',
+  }));
+  assert.doesNotMatch(result.details, /Bearer|private-token|first=|second=|private-session/);
+  assert.match(result.details, /Authorization:/);
+});

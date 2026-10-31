@@ -1,6 +1,7 @@
 /** Safe, bounded diagnostics for installer failures. Never insert these as HTML. */
 export function sanitizeDiagnostic(value, maximum = 8192) {
   const clean = String(value ?? '')
+    .replace(/\b(authorization|cookie|set-cookie)(\s*:\s*)[^\r\n]*/gi, '$1$2[redacted]')
     .replace(/\\"/g, '"').replace(/\\[nr]/g, '\n')
     .replace(/https?:\/\/[^\s<>"'\\]+/gi, value => {
       try {
