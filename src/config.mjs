@@ -78,17 +78,17 @@ function parseJSONList(value, name) {
   }
 }
 
-export function parseExtensions(value = [], baseURL = 'https://playground.invalid/') {
+export function parseExtensions(value = [], baseURL = 'https://playground.invalid/', { allowHttp = true } = {}) {
   const entries = parseJSONList(value, 'Extensions');
   if (entries.length > 30) throw new TypeError('Choose at most 30 extension packages.');
   return entries.map((entry, index) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new TypeError(`Extension ${index + 1} must contain a URL.`);
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new TypeError(`Extension ${index + 1} must be an object containing a url, for example {"url":"https://example.org/extension.zip"}.`);
     const raw = requireText(entry.url, `Extension ${index + 1} URL`, 2048);
     let url;
     try { url = new URL(raw, baseURL); } catch { throw new TypeError(`Extension ${index + 1} has an invalid URL.`); }
     const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-    if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) || url.username || url.password || url.hash) {
-      throw new TypeError(`Extension ${index + 1} needs an HTTPS URL without credentials or a fragment.`);
+    if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && (allowHttp || local))) || url.username || url.password || url.hash) {
+      throw new TypeError(`Extension ${index + 1} needs ${allowHttp ? 'an HTTP or HTTPS' : 'an HTTPS'} URL without credentials or a fragment.`);
     }
     if (entry.sha256 !== undefined && (typeof entry.sha256 !== 'string' || !SHA256.test(entry.sha256))) {
       throw new TypeError(`Extension ${index + 1} SHA-256 must contain 64 hexadecimal characters.`);
@@ -186,7 +186,7 @@ export function normalizeConfiguration(input = {}, { catalog, baseURL = 'https:/
   config.extensions = parseExtensions(config.extensions ?? [], baseURL);
   config.startupCommands = parseStartupCommands(config.startupCommands ?? []);
   if (!Array.isArray(config.languages ?? []) || (config.languages ?? []).length > 30) throw new TypeError('Language packages must be an array of at most 30 entries.');
-  config.languages = (config.languages ?? []).map((entry) => ({ ...parseExtensions([entry], baseURL)[0], tag: normalizeLanguage(requireText(entry.tag, 'Language package tag', 20)) }));
+  config.languages = (config.languages ?? []).map((entry) => ({ ...parseExtensions([entry], baseURL, { allowHttp: false })[0], tag: normalizeLanguage(requireText(entry.tag, 'Language package tag', 20)) }));
   return config;
 }
 
@@ -221,7 +221,7 @@ export function readURLConfiguration(url) {
   if (params.has('extension')) config.extensions = parseExtensions([...(config.extensions ?? []), ...params.getAll('extension').map((value) => ({ url: value }))], location.href);
   if (params.has('commands') || params.has('startupCommands')) config.startupCommands = parseStartupCommands(params.get('commands') ?? params.get('startupCommands'));
   const deploymentOptions = ['name', 'deploy', 'php', 'joomla', 'language', 'login', 'fresh', 'extensions', 'extension', 'commands', 'startupCommands'];
-  const document = params.has('config') ? parseExtensions([{ url: params.get('config'), ...(params.has('sha256') ? { sha256: params.get('sha256') } : {}) }], location.href)[0] : null;
+  const document = params.has('config') ? parseExtensions([{ url: params.get('config'), ...(params.has('sha256') ? { sha256: params.get('sha256') } : {}) }], location.href, { allowHttp: false })[0] : null;
   return { config, autostart: params.has('start') ? boolean('start') : !!document || fragment.has('deploy') || deploymentOptions.some((name) => params.has(name)), ...(document ? { document } : {}) };
 }
 
@@ -312,7 +312,7 @@ export function parseDeploymentDocument(input, { baseURL = 'https://playground.j
   if (value.startupCommands !== undefined) result.startupCommands = parseStartupCommands(value.startupCommands);
   if (value.languages !== undefined) {
     if (!Array.isArray(value.languages) || value.languages.length > 30) throw new TypeError('Language packages must be an array of at most 30 entries.');
-    result.languages = value.languages.map((entry) => ({ ...parseExtensions([entry], baseURL)[0], tag: normalizeLanguage(entry.tag) }));
+    result.languages = value.languages.map((entry) => ({ ...parseExtensions([entry], baseURL, { allowHttp: false })[0], tag: normalizeLanguage(entry.tag) }));
   }
   if (value.menus !== undefined) result.menus = parseMenus(value.menus);
   if (value.template !== undefined) result.template = parseTemplate(value.template, baseURL);
@@ -343,7 +343,7 @@ function decodeDocument(encoded) {
 
 /** Fetch public setup JSON when it is too large to place directly in a link. */
 export async function loadDeploymentDocument(url, { sha256, fetcher = fetch, baseURL = 'https://playground.joomengine.org/' } = {}) {
-  const source = parseExtensions([{ url, ...(sha256 ? { sha256 } : {}) }], baseURL)[0];
+  const source = parseExtensions([{ url, ...(sha256 ? { sha256 } : {}) }], baseURL, { allowHttp: false })[0];
   const response = await fetcher(source.url, { credentials: 'omit', redirect: 'follow', signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`Deployment configuration download failed: HTTP ${response.status}.`);
   if (Number(response.headers.get('Content-Length')) > MAX_DEPLOYMENT_BYTES) throw new RangeError('Deployment JSON exceeds 1 MiB.');
@@ -356,7 +356,7 @@ export async function loadDeploymentDocument(url, { sha256, fetcher = fetch, bas
 }
 
 export function createDeploymentSourceURL(location, source) {
-  const url = new URL(location); const item = parseExtensions([source], url.href)[0];
+  const url = new URL(location); const item = parseExtensions([source], url.href, { allowHttp: false })[0];
   assertPublic(item);
   url.search = ''; url.hash = ''; url.searchParams.set('config', item.url);
   if (item.sha256) url.searchParams.set('sha256', item.sha256);

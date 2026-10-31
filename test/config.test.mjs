@@ -43,7 +43,8 @@ test('extension packages normalize URLs and validate checksums', () => {
   const digest = 'AB'.repeat(32);
   assert.deepEqual(parseExtensions(JSON.stringify([{ url: './extension.zip', sha256: digest }]), 'https://example.test/play/'), [{ url: 'https://example.test/play/extension.zip', sha256: digest.toLowerCase() }]);
   assert.equal(parseExtensions([{ url: 'http://localhost:8080/extension.zip' }])[0].url, 'http://localhost:8080/extension.zip');
-  for (const url of ['javascript:alert(1)', 'data:application/zip,test', 'http://example.com/a.zip', 'https://user:password@example.com/a.zip', 'https://example.com/a.zip#fragment']) {
+  assert.equal(parseExtensions([{ url: 'http://example.com/a.zip' }])[0].url, 'http://example.com/a.zip');
+  for (const url of ['javascript:alert(1)', 'data:application/zip,test', 'https://user:password@example.com/a.zip', 'https://example.com/a.zip#fragment']) {
     assert.throws(() => parseExtensions([{ url }]), undefined, url);
   }
   assert.throws(() => parseExtensions([{ url: 'https://example.com/a.zip', sha256: 'abc' }]), /64 hexadecimal/);
@@ -155,4 +156,19 @@ test('menu and template inputs reject ambiguous homes and executable navigation 
   assert.throws(() => parseTemplate({ element: '../../escape' }), /Template element/);
   assert.throws(() => parseTemplate({ element: 'cassiopeia', url: 'javascript:alert(1)' }), /HTTPS/);
   assert.throws(() => parseMenus(JSON.parse('[{"title":"Bad","component":"com_content","view":"featured","params":{"__proto__":{}}}]')), /invalid/);
+});
+
+test('HTTP extension URLs round-trip without changing language or configuration-source policies', async () => {
+  const { createDeploymentDocument, parseDeploymentDocument, createDeploymentSourceURL, loadDeploymentDocument } = await import('../src/config.mjs');
+  const extensions = [{ url: 'http://example.test/package.zip' }];
+  assert.deepEqual(normalizeConfiguration({ admin, extensions }).extensions, extensions);
+  assert.deepEqual(readURLConfiguration(createShareURL('https://playground.test/', { extensions })).config.extensions, extensions);
+  assert.deepEqual(parseDeploymentDocument(createDeploymentDocument({ extensions })).extensions, extensions);
+  const languages = [{ tag: 'af-ZA', url: 'http://example.test/af.zip', sha256: 'a'.repeat(64) }];
+  assert.throws(() => normalizeConfiguration({ admin, languages }), /HTTPS/);
+  assert.throws(() => parseDeploymentDocument({ schemaVersion: 1, configuration: { languages } }), /HTTPS/);
+  assert.throws(() => readURLConfiguration('https://playground.test/?config=http%3A%2F%2Fexample.test%2Fdeploy.json'), /HTTPS/);
+  assert.throws(() => createDeploymentSourceURL('https://playground.test/', { url: 'http://example.test/deploy.json' }), /HTTPS/);
+  await assert.rejects(loadDeploymentDocument('http://example.test/deploy.json'), /HTTPS/);
+  assert.throws(() => parseExtensions('["https://example.test/package.zip"]'), /object containing a url/);
 });

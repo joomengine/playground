@@ -12,6 +12,7 @@ import { DEFAULT_PHP_SETTINGS, normalizePhpSettings } from './php-settings.mjs';
 import { UI_LANGUAGES, getLocale, initializeLocale, setLocale, t } from './i18n.mjs';
 import { createLaunchCountdown, deploymentNeedsReview } from './launch-countdown.mjs';
 import { presentError } from './error-presentation.mjs';
+import { createExtensionInputs } from './extension-inputs.mjs';
 
 const $ = (id) => document.getElementById(id);
 const deploymentURL = new URL('../', import.meta.url).href;
@@ -52,6 +53,7 @@ let automaticLaunchPaused = false;
 let approvedCustomSetup;
 let codeHost;
 let openingCode;
+let extensionInputs;
 const launchCountdown = createLaunchCountdown({
   onTick(seconds) {
     $('launch-countdown').hidden = $('dashboard-countdown').hidden = false;
@@ -419,7 +421,7 @@ function formInput(overrides = {}) {
     initialPath: fields.initialPath.value, storageKey: fields.storageKey.value,
     persistence: fields.persistence.checked, autoLogin: fields.autoLogin.checked,
     hideToolbar, fresh: pendingFresh, admin: administrator(),
-    extensions: fields.extensions.value, startupCommands: fields.startupCommands.value,
+    extensions: extensionInputs.read(), startupCommands: fields.startupCommands.value,
     phpSettings, multilingual: $('multilingual').checked, languageTags: $('deploy-languages').value.split(',').map(value => value.trim()).filter(Boolean),
     menus: parseEditorJSON('deploy-menus', []), template: templateInput(), ...overrides,
   }, { catalog, baseURL: deploymentURL });
@@ -458,7 +460,7 @@ function applyConfiguration(config, input = config, deploy) {
   }
   fields.persistence.checked = config.persistence;
   fields.autoLogin.checked = config.autoLogin;
-  fields.extensions.value = JSON.stringify(input.extensions || [], null, 2);
+  extensionInputs.setValue(input.extensions || []);
   phpSettings = normalizePhpSettings(input.phpSettings || config.phpSettings || DEFAULT_PHP_SETTINGS);
   $('deploy-languages').value = (input.languageTags || config.languageTags || []).join(', ');
   $('deploy-menus').value = JSON.stringify(input.menus || config.menus || [], null, 2);
@@ -914,7 +916,6 @@ function templateInput() {
 }
 function renderEditorLists() {
   for (const [field, target, label] of [
-    ['extensions', 'package-list', item => item.url],
     ['deploy-menus', 'menu-list', item => `${item.title} · ${item.component || ''}${item.view ? ` / ${item.view}` : ''}${item.home ? ' ★' : ''}`],
   ]) {
     let items;
@@ -1078,6 +1079,20 @@ function setupInterface() {
   $('theme-toggle').addEventListener('click', () => setTheme(getThemeState().resolved === 'dark' ? 'light' : 'dark'));
   languageSelector = createLanguageSelector(fields.language, { t, getLocale });
   deploymentLanguageSelector = createLanguageSelector($('deploy-languages'), { multiple: true, t, getLocale });
+  extensionInputs = createExtensionInputs({
+    textarea: fields.extensions, rows: $('package-list'), addButton: $('add-package'),
+    advanced: $('extension-advanced'), errorElement: $('extension-error'),
+    baseURL: deploymentURL, t, onChange: pauseAutomaticLaunch,
+  });
+  // Native validation runs before submit. Reveal invalid controls even when
+  // their deployment dialog or advanced editor was closed before Launch.
+  $('launch-form').addEventListener('invalid', event => {
+    if ($('deploy-dialog').contains(event.target)) openDialog('deploy-dialog');
+    else setDrawer(true);
+    for (let parent = event.target.parentElement; parent; parent = parent.parentElement) {
+      if (parent.tagName === 'DETAILS') parent.open = true;
+    }
+  }, true);
   $('interface-language').replaceChildren(...UI_LANGUAGES.map(({ code, label }) => { const option = document.createElement('option'); option.value = code; option.textContent = label; return option; }));
   $('interface-language').value = getLocale();
   $('interface-language').addEventListener('change', async event => { try { await setLocale(event.target.value); } catch (error) { feedback(error, { error: true }); } });
@@ -1091,6 +1106,7 @@ function setupInterface() {
     updateDrawerLabels();
     renderSavedSites(); renderEditorLists();
     languageSelector?.refresh(); deploymentLanguageSelector?.refresh();
+    extensionInputs?.refresh();
   });
   $('settings-toggle').addEventListener('click', () => setDrawer($('settings').hidden));
   for (const [id, hidden, edge] of [
@@ -1116,7 +1132,6 @@ function setupInterface() {
   $('copy-share').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('share-url').value); $('share-feedback').textContent = t('status.copied'); } catch { $('share-url').focus(); $('share-url').select(); $('share-feedback').textContent = t('help.clipboard'); } });
   $('share-export-config').addEventListener('click', () => { try { downloadConfiguration(sharedConfiguration); } catch (error) { $('share-feedback').textContent = messageOf(error); } });
   $('native-share').addEventListener('click', async () => { try { await navigator.share({ title: sharedConfiguration?.siteName || 'JoomEngine Rocket', url: $('share-url').value }); } catch (error) { if (error.name !== 'AbortError') $('share-feedback').textContent = messageOf(error); } });
-  $('add-package').addEventListener('click', () => { try { const url = $('package-url').value.trim(); if (!url) return; const items = parseEditorJSON('extensions', []); items.push({ url }); fields.extensions.value = JSON.stringify(items, null, 2); formInput(); $('package-url').value = ''; renderEditorLists(); } catch (error) { editorError(error); } });
   $('menu-preset').addEventListener('change', event => { if (event.target.value) { const item = JSON.parse(event.target.value); $('menu-component').value = item.component; $('menu-view').value = item.view; } });
   $('add-menu').addEventListener('click', () => { try {
     const title = $('menu-title').value.trim(), component = $('menu-component').value.trim(), view = $('menu-view').value.trim();
@@ -1130,7 +1145,7 @@ function setupInterface() {
     $('deploy-menus').value = JSON.stringify(menus, null, 2); formInput();
     $('menu-title').value = ''; $('menu-component').value = ''; $('menu-view').value = ''; $('menu-preset').value = ''; $('menu-home').checked = false; renderEditorLists();
   } catch (error) { editorError(error); } });
-  for (const id of ['extensions', 'deploy-menus']) $(id).addEventListener('change', renderEditorLists);
+  $('deploy-menus').addEventListener('change', renderEditorLists);
   $('use-deploy').addEventListener('click', () => void useDeployment());
   $('apply-deploy').addEventListener('click', () => void applyDeployment());
   $('export-config').addEventListener('click', () => { try { downloadConfiguration(); } catch (error) { editorError(error); } });
