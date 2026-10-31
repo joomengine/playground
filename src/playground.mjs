@@ -358,7 +358,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   const clientId = await clientIdentity();
   const release = config.persistence ? await acquireSiteLock(identity) : async () => {};
   const instanceId = crypto.randomUUID();
-  let database, session, closePromise, changing = false, databaseError = null;
+  let database, session, closePromise, changing = false, databaseError = null, adminerOpened = false;
   const workspaceListeners = new Set();
   const debugListeners = new Set();
   let debugState = 'idle';
@@ -492,6 +492,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         if (changing || closePromise) throw new Error('Wait for the current site operation before opening Database.');
         if (debugState === 'paused') throw new Error('Continue or stop the paused PHP request before opening Database.');
         await session.send('database.install');
+        adminerOpened = true;
         return { url: new URL('__adminer/', siteUrl).href };
       },
       async clearJoomlaCache() {
@@ -620,6 +621,10 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           session = createSession();
           handle.runtimeInfo = await initializeSession(session, settings);
           await session.send('restoreCheckpoint', { bytes: filesystem }, 600_000);
+          // Tool sources are intentionally excluded from portable checkpoints.
+          // Restore an already-open embedded/detached view before exposing the
+          // replacement worker; its next navigation or POST must stay usable.
+          if (adminerOpened) await session.send('database.install');
           config.phpSettings = settings;
           await session.flushTogether();
           await session.send('enablePersistence');
@@ -635,6 +640,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
               session = createSession();
               handle.runtimeInfo = await initializeSession(session, previous);
               await session.send('restoreCheckpoint', { bytes: filesystem }, 600_000);
+              if (adminerOpened) await session.send('database.install');
               config.phpSettings = previous;
               await session.send('enablePersistence');
               registerSession();
@@ -686,7 +692,9 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       let archiveBytes;
       if (pristine) {
         progress({ phase: 'download', message: `Loading Joomla ${config.joomlaVersion}…` });
-        const archive = await fetchPackage(resolveAsset(joomlaEntry.url));
+        // Package URLs retain their catalog identity and ordinary CORS behavior;
+        // only local runtime modules/workers use the ownership-preserving route.
+        const archive = await fetchPackage(new URL(joomlaEntry.url, manifestUrl).href);
         if (!archive.ok) throw new Error(`Cannot load Joomla: HTTP ${archive.status}.`);
         archiveBytes = await archive.arrayBuffer();
       }

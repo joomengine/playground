@@ -98,7 +98,13 @@ self.addEventListener('fetch', event => {
       const compatibleImage = await publicAssets(event.request, { policy, onDiagnostic: detail => {
         if (isolation.ownerId) void self.clients.get(isolation.ownerId).then(owner => owner?.postMessage(detail));
       } });
-      if (!local && !compatibleImage) return fetch(event.request);
+      if (!local && !compatibleImage) {
+        // A shared SW has no document COEP. Preserve credentialless's actual
+        // no-cors semantics explicitly when forwarding the original image URL;
+        // CORS requests and compatibility-mode requests keep their own rules.
+        return fetch(event.request, policy === 'credentialless' && event.request.mode === 'no-cors'
+          ? { credentials: 'omit' } : {});
+      }
       const resource = local ? runtimeResource(url, scope.href) : null;
       if (resource && !['GET', 'HEAD'].includes(event.request.method)) {
         return new Response('Owned runtime assets support GET and HEAD only.', { status: 405,
@@ -119,6 +125,13 @@ self.addEventListener('fetch', event => {
         }));
       if (response.type === 'opaque' || response.status === 0) return response;
       const headers = isolationResponseHeaders(response.headers, policy);
+      // WebKit evaluates an intercepted external image against its original URL.
+      // Only the registry handler's fully validated public bytes may carry this
+      // embedding permission; documents, workers and errors stay same-origin.
+      if (compatibleImage?.status === 200 && response.headers.get('Cross-Origin-Resource-Policy') === 'cross-origin'
+        && /^image\/(?:png|jpeg|gif|webp)$/.test(response.headers.get('Content-Type') || '')) {
+        headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+      }
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     } catch (error) {
       return new Response(error.message, { status: 503, headers: isolationResponseHeaders({ 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }, policy) });

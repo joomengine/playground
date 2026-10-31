@@ -15,7 +15,11 @@ if (!['none', 'credentialless', 'require-corp'].includes(policy)) throw new Erro
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('PORT must be an integer from 0 to 65535');
 const types = { '.html': 'text/html; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.css': 'text/css; charset=utf-8', '.wasm': 'application/wasm', '.so': 'application/wasm', '.zip': 'application/zip', '.svg': 'image/svg+xml' };
 const server = createServer(async (request, response) => {
-  if (policy !== 'none') {
+  // The shared routing worker does not use shared memory. Giving that worker a
+  // require-corp policy would also restrict its ordinary opaque Fetch forwarding
+  // for credentialless tabs. GitHub Pages likewise serves its script without COEP.
+  const serviceWorkerScript = new URL(request.url, 'http://localhost').pathname === '/service-worker.mjs';
+  if (policy !== 'none' && !serviceWorkerScript) {
     for (const [name, value] of isolationResponseHeaders({}, policy)) response.setHeader(name, value);
   }
   response.setHeader('Service-Worker-Allowed', '/');

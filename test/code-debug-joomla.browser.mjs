@@ -4,7 +4,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, firefox } from 'playwright';
-import { createStaticServer } from './server.mjs';
+import { createStaticServer, prepareBrowserEnvironment } from './server.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const directory = path.resolve(process.env.PLAYGROUND_DIST || path.join(root, 'dist'));
@@ -148,6 +148,7 @@ for (const name of browsers) for (const phpVersion of versions) test(
     page.setDefaultTimeout(120_000);
     try {
       await page.goto(`${server.url}__test__.html`);
+      await prepareBrowserEnvironment(page);
       await page.evaluate(async ({ phpVersion, joomlaVersion }) => {
         const { createPlayground } = await import('./src/playground.mjs');
         window.debugEvents = [];

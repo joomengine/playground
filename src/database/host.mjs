@@ -26,7 +26,9 @@ export async function createDatabaseHost({ runtime, host, preview, refreshSite, 
   const report = error => { if (!disposed) onError(error); };
   const editor = doc.createElement('div');
   editor.style.cssText = 'display:flex;flex:1;min-height:0';
-  const embedded = makeFrame(doc); editor.append(embedded);
+  const loading = doc.createElement('p'); loading.setAttribute('role', 'status');
+  loading.style.cssText = 'padding:16px;overflow-wrap:anywhere'; loading.textContent = t('database.loading');
+  const embedded = makeFrame(doc); embedded.hidden = true; editor.append(loading, embedded);
   function theme() { return doc.documentElement.dataset.theme === 'light' ? 'light' : 'dark'; }
   function syncFrame(frame) { frame.contentWindow?.postMessage({ type: 'joomengine-database-theme', theme: theme() }, win.location.origin); }
   function makeFrame(target) {
@@ -103,13 +105,21 @@ export async function createDatabaseHost({ runtime, host, preview, refreshSite, 
   async function open() {
     if (disposed) throw new Error('This database viewer is closed.');
     layout.show();
+    if (transferSnapshot) return rebindRuntime(runtime);
     return opening ??= (async () => {
+      if (!databaseURL) { loading.hidden = false; loading.textContent = t('database.loading'); }
       const { url } = await runtime.openDatabase();
       if (disposed) return;
       if (databaseURL === url) return;
       databaseURL = url;
       await loadFrame(embedded, url);
-    })().catch(error => { databaseURL = undefined; throw error; }).finally(() => { opening = undefined; });
+      loading.hidden = true; embedded.hidden = false;
+    })().catch(error => {
+      databaseURL = undefined;
+      loading.hidden = false; loading.textContent = error.message;
+      loading.append(' ', action(doc, 'code.retry', open, 'retry'));
+      throw error;
+    }).finally(() => { opening = undefined; });
   }
   function detachDatabase({ onClose }) {
     if (!databaseURL || opening) throw new Error(t('database.loading'));
@@ -138,9 +148,10 @@ export async function createDatabaseHost({ runtime, host, preview, refreshSite, 
             returning = (async () => {
               try { if (!child.closed) last = currentView(frame) || last; } catch (error) { report(error); }
               if (!disposed && last) {
-                const current = embedded.contentWindow?.location.href;
-                if (current === last.url) restoreDatabaseView(embedded.contentDocument, last);
-                else await loadFrame(embedded, last.url, last);
+                // The detached view may have committed rows without changing its
+                // URL. Refresh with GET so old table results are never presented
+                // as current, and restore only the draft (never replay a POST).
+                await loadFrame(embedded, last.url, last);
               }
               win.clearInterval(poll); frames.delete(frame); auxiliary = undefined;
               if (!child.closed) child.close();
@@ -163,13 +174,15 @@ export async function createDatabaseHost({ runtime, host, preview, refreshSite, 
   function beginRuntimeTransfer() { transferSnapshot = currentView(); transferring = true; }
   async function rebindRuntime(nextRuntime) {
     unsubscribe(); runtime = nextRuntime; unsubscribe = subscribe();
-    const { url } = await runtime.openDatabase();
-    const old = databaseURL; databaseURL = url;
-    const snapshot = transferSnapshot;
-    if (snapshot) snapshot.url = snapshot.url.replace(old, url);
-    await loadFrame(embedded, snapshot?.url || url, snapshot);
-    if (auxiliary && !auxiliary.window.closed) await loadFrame(auxiliary.frame, snapshot?.url || url, snapshot);
-    transferSnapshot = undefined; transferring = false;
+    try {
+      const { url } = await runtime.openDatabase();
+      const old = databaseURL; databaseURL = url;
+      const snapshot = transferSnapshot;
+      if (snapshot) snapshot.url = snapshot.url.replace(old, url);
+      await loadFrame(embedded, snapshot?.url || url, snapshot);
+      if (auxiliary && !auxiliary.window.closed) await loadFrame(auxiliary.frame, snapshot?.url || url, snapshot);
+      transferSnapshot = undefined;
+    } finally { transferring = false; }
   }
   function cancelRuntimeTransfer() { transferSnapshot = undefined; transferring = false; }
   async function dispose() {

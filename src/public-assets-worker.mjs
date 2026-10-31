@@ -1,5 +1,5 @@
 import {
-  assetRouteURL, findApprovedAsset, imageBytesMatchMime, loadPublicAssetConfiguration,
+  findApprovedAsset, imageBytesMatchMime, loadPublicAssetConfiguration,
   parsePublicAssetRoute, publicAssetCacheKey, sha256Hex,
   validatePublicAssetConfiguration, validatePublicAssetRegistry,
 } from './public-assets.mjs';
@@ -39,14 +39,14 @@ function removeCached(cache, key) {
   cache.entries.delete(key);
 }
 
-function cacheImage(registry, asset, image, now) {
-  if (!asset.cache.maxAgeSeconds || image.body.byteLength > MAX_CACHE_BYTES) return;
+function cacheImage(registry, asset, image, now, freshness) {
+  if (!freshness || image.body.byteLength > MAX_CACHE_BYTES) return;
   const cache = cacheFor(registry), key = publicAssetCacheKey(registry, asset);
   removeCached(cache, key);
   while (cache.entries.size >= MAX_CACHE_ENTRIES || cache.bytes + image.body.byteLength > MAX_CACHE_BYTES) {
     removeCached(cache, cache.entries.keys().next().value);
   }
-  cache.entries.set(key, { ...image, expires: now + asset.cache.maxAgeSeconds * 1000 });
+  cache.entries.set(key, { ...image, expires: now + freshness * 1000 });
   cache.bytes += image.body.byteLength;
 }
 
@@ -56,7 +56,10 @@ function imageResponse(image, asset, method) {
     // Do not let the browser reuse a synthetic external-URL response across policies.
     // The bounded worker cache stores only validated bytes under version/id/content.
     'Cache-Control': 'no-store', 'ETag': `"sha256-${image.sha256}"`,
-    'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'same-origin',
+    // WebKit applies CORP using the ORIGINAL external request URL even when
+    // respondWith supplies a synthetic validated response. Public approved
+    // raster bytes must explicitly permit that cross-origin embedding.
+    'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'cross-origin',
   } });
 }
 
@@ -138,18 +141,27 @@ export async function handlePublicAssetRequest(request, {
     if (response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase() !== asset.mime) {
       await response.body?.cancel(); throw new Error('relay image type does not match the registry');
     }
+    if (response.headers.get('X-Public-Asset-Id') !== asset.id
+      || response.headers.get('X-Public-Asset-Registry') !== registry.version
+      || !/^[a-f0-9]{64}$/.test(response.headers.get('X-Public-Asset-SHA256') ?? '')) {
+      await response.body?.cancel(); throw new Error('relay image identity does not match the registry');
+    }
     const body = await readBounded(response, asset.maxBytes, controller.signal);
     if (!imageBytesMatchMime(body, asset.mime)) throw new Error('relay returned an invalid image format');
     const sha256 = await sha256Hex(body);
     if (asset.sha256 && sha256 !== asset.sha256) throw new Error('approved image SHA-256 mismatch');
     const relayDigest = response.headers.get('X-Public-Asset-SHA256');
-    if (relayDigest && relayDigest !== sha256) throw new Error('relay image digest mismatch');
+    if (relayDigest !== sha256) throw new Error('relay image digest mismatch');
     const image = { body, sha256 };
-    if (request.cache !== 'no-store') cacheImage(registry, asset, image, now());
+    const advertised = /(?:^|,)\s*max-age=(\d+)(?:\s|,|$)/i.exec(response.headers.get('Cache-Control') ?? '');
+    const age = Number(response.headers.get('Age') ?? 0);
+    const freshness = advertised && Number.isSafeInteger(age) && age >= 0
+      ? Math.max(0, Math.min(asset.cache.maxAgeSeconds, Number(advertised[1]) - age)) : 0;
+    if (request.cache !== 'no-store') cacheImage(registry, asset, image, now(), freshness);
     return imageResponse(image, asset, request.method);
   } catch (error) {
     const reason = controller.signal.aborted ? 'image request cancelled or timed out' :
-      ['relay image type does not match the registry', 'relay response exceeds the approved size', 'relay returned no image bytes',
+      ['relay image type does not match the registry', 'relay image identity does not match the registry', 'relay response exceeds the approved size', 'relay returned no image bytes',
         'relay returned an invalid image format', 'approved image SHA-256 mismatch', 'relay image digest mismatch'].includes(error.message)
         ? error.message : 'image relay could not be reached';
     return failure(controller.signal.aborted ? 504 : 502, reason, asset.id, onDiagnostic);

@@ -39,7 +39,7 @@ test('detachment transfers editable drafts without credentials, tokens, or form 
   source.forms[0].elements[0].value = 'UPDATE example SET value = 2';
   assert.equal(hasDatabaseDraft(source), true);
   const snapshot = captureDatabaseView(source, 'https://example.test/__adminer/?sql=');
-  assert.deepEqual(snapshot.forms[0].map(item => item.name), ['query']);
+  assert.deepEqual(snapshot.forms[0].fields.map(item => item.name), ['query']);
   assert.equal(JSON.stringify(snapshot).includes('private'), false);
   assert.equal(JSON.stringify(snapshot).includes('secret'), false);
   const target = document([field('query', ''), field('password', 'new-private', 'password'), field('token', 'new-token', 'hidden')]);
@@ -47,6 +47,16 @@ test('detachment transfers editable drafts without credentials, tokens, or form 
   assert.equal(target.forms[0].elements[0].value, 'UPDATE example SET value = 2');
   assert.equal(target.forms[0].elements[1].value, 'new-private');
   assert.equal(target.forms[0].elements[2].value, 'new-token');
+});
+
+test('SQL draft follows its stable form and field names when POST result forms disappear', () => {
+  const source = document([field('format', 'csv')]);
+  source.forms.push({ id: 'form', elements: [field('token', 'old', 'hidden'), field('query', 'INSERT INTO example VALUES (99)')] });
+  const target = document([field('query', ''), field('token', 'new', 'hidden')]);
+  target.forms[0].id = 'form';
+  restoreDatabaseView(target, captureDatabaseView(source, 'https://example.test/__adminer/?sql='));
+  assert.equal(target.forms[0].elements[0].value, 'INSERT INTO example VALUES (99)');
+  assert.equal(target.forms[0].elements[1].value, 'new');
 });
 
 test('selected import files and oversized drafts stop a lossy window transfer', () => {

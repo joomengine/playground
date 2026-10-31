@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { chromium, firefox } from 'playwright';
 import { pinnedJcbPackages } from '../src/jcb-selection.mjs';
-import { createStaticServer } from './server.mjs';
+import { createStaticServer, prepareBrowserEnvironment } from './server.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const directory = path.resolve(process.env.PLAYGROUND_DIST || path.join(root, 'dist'));
@@ -151,6 +151,7 @@ for (const name of browserNames) {
         });
         try {
           await page.goto(new URL('__test__.html', server.url).href);
+          await prepareBrowserEnvironment(page);
           assert.equal(await page.evaluate(() => crossOriginIsolated), true);
           const installation = await install(page, scenario);
           Object.assign(receipt, installation);

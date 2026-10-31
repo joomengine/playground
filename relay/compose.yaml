@@ -1,0 +1,19 @@
+services:
+  public-image-relay:
+    build:
+      context: ..
+      dockerfile: relay/Dockerfile
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - ./config.container.json:/app/relay/config.container.json:ro
+      - ../config/public-assets.json:/app/config/public-assets.json:ro
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1.0
+    restart: unless-stopped

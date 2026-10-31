@@ -23,8 +23,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 107903
+      },
+      "sha256": "f7ef3ec3b44e1f28926cb2d9520427dd5568910fdf5790ee3acb3c9d3d4b5958"
     },
     {
       "id": "jcb-banner-jcm-2010-120x600",
@@ -47,8 +50,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 28182
+      },
+      "sha256": "06296161b3e46f05774d64f94646abf29dfbc56f0bf701cd0466dcabdc458291"
     },
     {
       "id": "jcb-banner-tlwebdesign-jcb-sponsor-728-90",
@@ -71,8 +77,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 24031
+      },
+      "sha256": "162f5071b6d7a5f6222262c51b7a3666dee486e76ee0da93db78d5cf7e27c287"
     },
     {
       "id": "jcb-banner-vdm-jcb-sponsor-728-90",
@@ -95,8 +104,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 22596
+      },
+      "sha256": "95de16ab3ef04292426985f36d16fe522ba7f4cb4eb6e98cf7f67146cd8e2804"
     },
     {
       "id": "jcb-banner-agerix-loves-jcb-728-90",
@@ -119,8 +131,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 57753
+      },
+      "sha256": "d12780f0c43af4a346c90cf7183cbef9dbe4d9e41aa18e1df608af4f709bc89c"
     },
     {
       "id": "jcb-banner-joomla-heart-tall",
@@ -143,8 +158,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 79535
+      },
+      "sha256": "f79e843a1313361c266d0000849aacd5943a747276e8af637d5578d5dc30015b"
     },
     {
       "id": "jcb-builder-original",
@@ -167,8 +185,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 222297
+      },
+      "sha256": "07e54faaaa50abfb3390efdc43ee7fc019158fb272e71942866822d0c475114f"
     },
     {
       "id": "jcb-builder-1",
@@ -191,8 +212,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 351931
+      },
+      "sha256": "972b57fa30cd20979be84ab1438e00c1da807dba0be3ed16ecdb3d31334dcdba"
     },
     {
       "id": "jcb-builder-2",
@@ -215,8 +239,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 350383
+      },
+      "sha256": "e9a0fde2418a6063f3abb7d2b614cd3890ed668d33bceeb325cf41bc11ac9fbb"
     },
     {
       "id": "jcb-builder-3",
@@ -239,8 +266,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 1291108
+      },
+      "sha256": "0fb7017c015913ab81ddf04b314dcfd98b9dd25d5f774f8e756e0683f6143380"
     },
     {
       "id": "jcb-builder-4",
@@ -263,8 +293,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 349903
+      },
+      "sha256": "e5dd6be8c3029c3de1f24650596eecde33c0dcfb5c4886c5b4f1cebed84324f0"
     },
     {
       "id": "jcb-builder-5",
@@ -287,8 +320,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 2121893
+      },
+      "sha256": "915dd1ff4c9e1872ec2c1d56d099ea63917647582bd4363207ba6ae3b214ced7"
     },
     {
       "id": "jcb-builder-6",
@@ -311,8 +347,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 886864
+      },
+      "sha256": "02e64c02f55173f0f47f56cc43208975633a2569bdaf2fc5c6433b8a01a080b1"
     },
     {
       "id": "jcb-builder-7",
@@ -335,8 +374,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 1521062
+      },
+      "sha256": "e5a2b290be7a9d20e09efc684e6ae6a394b63175e2f2f7fe08850d46f2cdb327"
     },
     {
       "id": "jcb-builder-8",
@@ -359,8 +401,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 2157446
+      },
+      "sha256": "b2e812a2b9fedb75e999f6fe95fd51cc40ed78cff44f155d0a7803c958824912"
     },
     {
       "id": "jcb-builder-9",
@@ -383,8 +428,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 875668
+      },
+      "sha256": "e86f747ad727291644ed04419009694d3dd5ce03140401604a95aaec2690653f"
     },
     {
       "id": "jcb-builder-10",
@@ -407,8 +455,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 727195
+      },
+      "sha256": "dd61e89ccf6ddea0d26ced3845e2b0e17b5b63ec1c55040f91a9b30779d0848c"
     },
     {
       "id": "jcb-builder-11",
@@ -431,8 +482,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 635588
+      },
+      "sha256": "46b03b5b3283da2e52d45bb04d6d33177f246f9ea2c5837727314ed6968937ab"
     },
     {
       "id": "jcb-builder-12",
@@ -455,8 +509,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 1035696
+      },
+      "sha256": "2f8177469c30bd5b46bd8624c4c42b4dfb10dc6abed3f4cdca8f79d9364947a8"
     },
     {
       "id": "jcb-builder-13",
@@ -479,8 +536,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 2282809
+      },
+      "sha256": "0367b81808fc4fb1bdd72d8beaae412527896bd50b2827223912c30cd9e2c23b"
     },
     {
       "id": "jcb-builder-14",
@@ -503,8 +563,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 1722407
+      },
+      "sha256": "7726865516af27d53fd7bc5ce01faff3170bca9966678376b36d7337b526ac76"
     },
     {
       "id": "jcb-builder-15",
@@ -527,8 +590,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 2915893
+      },
+      "sha256": "409928ed1d8682522f676912065bbc0e24386780c56bb130d5ffc5ff47ca81f3"
     },
     {
       "id": "jcb-builder-16",
@@ -551,8 +617,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 1522596
+      },
+      "sha256": "5e7343ef94f70b89fb080d3922b0b3e400d48f595b8ff0c0824c836f4aa17b14"
     },
     {
       "id": "jcb-builder-17",
@@ -575,8 +644,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 1457961
+      },
+      "sha256": "8642e14133df53eaf373a7eaa0be7cf24ec130c821467de2d4e95516c24958ca"
     },
     {
       "id": "jcb-builder-18",
@@ -599,8 +671,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 2940954
+      },
+      "sha256": "ced548b1e0829045428b6e1cb857474e8deef15e51403525e5ca58eeac6eaf75"
     },
     {
       "id": "jcb-builder-19",
@@ -623,8 +698,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 2782353
+      },
+      "sha256": "50a5d308cd7d35ff7b8f04f4644987076c6f6fd668e1a0cbba1cccb6b6a16ca8"
     },
     {
       "id": "jcb-builder-20",
@@ -647,8 +725,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 2478724
+      },
+      "sha256": "524d585e58887f4e319d7fbbf7a5d310889f6185ad990221523eab34993b4475"
     },
     {
       "id": "jcb-builder-21",
@@ -671,8 +752,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 2898373
+      },
+      "sha256": "3b30a43839bf54dbf5025db0aecb7ed2d25cc689f3b2083af1954fe374d5df3a"
     },
     {
       "id": "jcb-builder-22",
@@ -695,8 +779,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 2478724
+      },
+      "sha256": "0013bf931f6ac48f9c1a6e72e80c7f71d2deddb87eae0d5e86914f0fbcfb47bd"
     },
     {
       "id": "jcb-builder-23",
@@ -719,8 +806,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 2754684
+      },
+      "sha256": "1a4c490f1d66588a342a32b5959b79fbb1544700d0626961bb97cd2fbb69e2ca"
     },
     {
       "id": "jcb-builder-24",
@@ -743,8 +833,11 @@
         ],
         "path": "administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php",
         "member": "dynamicContent",
-        "verification": "Original package metadata MD5; JCB independently verifies downloaded bytes."
-      }
+        "verification": "Downloaded original bytes on 2026-10-31 without redirects; source MD5 and MIME match package metadata. JCB independently verifies downloaded bytes.",
+        "verifiedAt": "2026-10-31",
+        "verifiedBytes": 1410054
+      },
+      "sha256": "2e95f5f9690c2789a27df8df94891e0305485d6a5d3f931a8b53427c90aae24d"
     }
   ]
 }

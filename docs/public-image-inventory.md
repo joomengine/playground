@@ -30,12 +30,21 @@ package archive pins are retained in `deploys/jcb.json`.
 | Original compiler animation | 1 | GIF | Exact `joomlacomponentbuilder.com` metadata URL in registry |
 
 All entries reject redirects and extra query parameters. Each has an 8 MiB
-response ceiling, the original JCB MD5, and a 15-minute revalidation policy.
-The ceiling is a resource limit, not a statement that every upstream download
-has been measured. These URLs are mutable upstream paths. They are **not**
-advertised as immutable, and an upstream change that no longer matches the
-recorded JCB checksum fails until a reviewed registry/package update is made.
-JCB's existing checksum verification remains active after the relay check.
+response ceiling, the original JCB MD5, a SHA-256 of the verified original
+bytes, and a 15-minute revalidation policy. On 2026-10-31, all 31 canonical URLs
+returned HTTP 200 without redirects, with the expected raster MIME and exactly
+the MD5 recorded in both installed JCB packages. Actual sizes ranged from
+22,596 to 2,940,954 bytes; each entry records its measured size and verification
+date. These URLs are mutable upstream paths. They are **not** advertised as
+immutable, and an upstream change that no longer matches the recorded hashes
+fails until a reviewed registry/package update is made. JCB's existing checksum
+verification remains active after the relay check.
+
+The source-byte downloads used this environment's standard HTTP transport.
+The real relay's direct DNS/pinned-HTTPS path separately returned `EAI_AGAIN`
+before connection here. Deployments must verify that outbound path against all
+approved IDs before enabling the compatibility release; successful downloads
+through an environment proxy do not establish relay reachability.
 
 The inventory also found references that are deliberately **not approved**:
 
@@ -61,8 +70,11 @@ handling against a fixture HTTPS image host with neither CORS nor CORP. It first
 proves that `require-corp` blocks the original image, then exercises approved
 `src`, `srcset`, `picture`, CSS backgrounds and dynamic images through the service
 worker. It also checks the PHP Fetch adapter's exact response bytes, normal-mode
-zero-relay behavior and bounded relay failure. This transport test does not by
-itself certify every Joomla/JCB screen or a physical iOS device.
+zero-relay behavior and bounded relay failure. Set `PUBLIC_ASSET_RUNTIME_DIST=dist`
+to additionally start real PHP 8.4/MariaDB/Joomla under `require-corp` and verify
+the original bytes through native PHP streams and cURL. These native checks
+passed in Linux WebKit 27.2 and Chromium 156.0.8078.4. They do not by themselves
+certify every Joomla/JCB screen or a physical iOS device.
 
 The integration does not rewrite Joomla HTML, stylesheets, metadata or saved
 database records. Approved image requests are intercepted before the original

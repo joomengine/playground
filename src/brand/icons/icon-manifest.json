@@ -9,7 +9,7 @@
     "Selections are deliberately coherent line icons rather than a mix of line and fill variants.",
     "Some icons serve several actions with the same meaning. The aliases are explicit in the manifest; tooltips and accessible names still identify the individual actions.",
     "The old standalone main-menu More button is removed by the requested dashboard consolidation. The ellipsis here is only for responsive editor action overflow.",
-    "No dedicated PHP logo, git-fork or debugger step glyphs were found; closest supplied icons are marked."
+    "No dedicated PHP logo, git-fork or debugger step glyphs were found; closest original icons are marked."
   ],
   "icons": [
     {
@@ -1485,7 +1485,6 @@
       }
     }
   ],
-  "source_archive_sha256": "d43881529b5e9c618faeaeec097af18ec62588be99989f920963c29308df05f6",
   "unique_source_count": 80,
   "monochrome_unique_sources": 79,
   "monochrome_action_count": 101,

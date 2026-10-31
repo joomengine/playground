@@ -5,8 +5,11 @@ image transport. **GitHub Pages cannot execute this server.** It must run on an
 operator-controlled host with Node.js 26.12.1 (the repository's pinned runtime),
 an HTTPS reverse proxy, and outbound HTTPS/DNS access. No hosting account,
 hostname, TLS certificate or production deployment is implied by this source.
-The committed client configuration remains disabled until a real relay has been
-deployed and the browser/device release checks have passed.
+Relay-dependent fallback remains disabled until a real HTTPS relay is operational
+and its production contract has been verified. The Adminer and compatibility code
+can be reviewed, merged and deployed with that fallback disabled. Maintainers
+perform real iPhone/iPad and Android checks after deployment; lack of physical
+device access does not block merging the implementation.
 
 ## Start and deploy
 
@@ -27,6 +30,25 @@ from `https://playground.joomengine.org`. Its schema is
 configuration fields. Run the process as an unprivileged service account under
 the host's process supervisor. Termination closes active connections and clears
 the public in-memory cache; restarting has no effect on saved Joomla data.
+
+Alternatively, the supplied container provides the pinned Node runtime and runs
+as the unprivileged `node` user, with no npm dependencies or installation step:
+
+```sh
+docker compose -f relay/compose.yaml up -d --build
+curl --fail --silent http://127.0.0.1:8787/healthz
+docker compose -f relay/compose.yaml logs --tail=50 public-image-relay
+```
+
+[`Dockerfile`](Dockerfile) uses Node.js 26.12.1 and a restricted build context.
+[`compose.yaml`](compose.yaml) publishes the port **only on the host's
+127.0.0.1**, drops Linux capabilities, disables privilege escalation, uses a
+read-only container filesystem and applies process/memory/CPU limits. Its
+[`config.container.json`](config.container.json) listens on the container's
+interface so that the loopback-only host mapping can reach it. The configuration
+and current reviewed registry are mounted read-only. The health check verifies
+the local server; it does not verify the external HTTPS edge or image origins.
+Stop this deployment with `docker compose -f relay/compose.yaml down`.
 
 Configure the chosen HTTPS edge to forward only `/v1/assets/` and `/healthz` to
 this loopback listener. Preserve the path, `Origin`, `If-None-Match` and HTTP
@@ -142,12 +164,39 @@ HTTPS URL and compare returned SHA-256/MD5 to the approved original bytes. Also
 probe unknown IDs, a disallowed Origin and a non-GET/HEAD method. Verify headers,
 limits and no transformations at the HTTPS edge, not just the local listener.
 
-Only then enable compatibility delivery and perform the candidate's top-level
-WebKit, real iPhone/iPad Safari and representative Android checks. Record actual
+The operator verification command checks every registered ID through the deployed
+HTTPS endpoint with the configured Playground Origin. Set
+`PUBLIC_IMAGE_RELAY_URL` to the actual deployed base URL, including its trailing
+slash, then run:
+
+```sh
+: "${PUBLIC_IMAGE_RELAY_URL:?Set the actual deployed HTTPS relay base URL}"
+node relay/verify.mjs \
+  --base-url "$PUBLIC_IMAGE_RELAY_URL" \
+  --config relay/config.example.json \
+  --registry config/public-assets.json \
+  --report .cache/relay-production-verification.json
+```
+
+The command has no live URL default. It allows at most four concurrent requests,
+uses a bounded per-image timeout, rejects endpoint redirects, and verifies exact
+image bytes against the shared raster parser and all registry checksums. It also
+checks CORS, exposed identity/digest headers, response sizes and integrity. Each
+asset's status, type, byte count, hashes or failure code is recorded in the JSON
+report; any failure produces a nonzero exit code. For configurations with more
+than one allowed origin, select one using `--origin`. Run this command successfully
+against the deployed relay before enabling relay-dependent fallback.
+
+Only after the relay is operational and its HTTPS contract is verified should
+relay-dependent compatibility delivery be enabled. Missing relay hosting blocks
+that enablement, not a code or Adminer release with fallback disabled. Run the
+focused automated browser checks for the candidate. After deployment, maintainers
+perform the real iPhone/iPad Safari and representative Android checks and record
 browser/device versions, startup/shared-memory results, Joomla/JCB image bytes,
 save/reload/export behaviour, service-worker restart, and two tabs with differing
-policies. Node fixture tests alone are not evidence of iPhone or production
-support. Missing hosting or device access remains a release blocker.
+policies. Those physical-device checks are follow-up validation, not a merge or
+release gate. Node fixtures or desktop WebKit alone do not establish verified
+iPhone support; report device results and remaining limitations when available.
 
 Rollback disables the client's compatibility/fallback switches while leaving
 normal credentialless operation and saved-site storage untouched. Keep the
@@ -166,3 +215,16 @@ pinned lookup, raster validation, truncation, timeouts, response limits,
 concurrency and rate limits. Tests substitute only the HTTPS socket transport to
 reach the local fixture; production always uses verified HTTPS and checked DNS.
 The fixture does not certify the chosen production network or browser/device.
+
+The initial development-host check attempted all 31 approved upstream URLs using
+the relay's actual DNS/HTTPS controls (four concurrent requests, ten-second
+deadlines). It verified zero images: all failed before connection with
+`upstream-dns-failed`, and direct DNS diagnostics returned `EAI_AGAIN` for all
+three source hosts and an unrelated baseline host. That direct-transport check
+established no live upstream status, redirect, MIME or checksum result. A separate
+source-inventory download through the environment's standard HTTPS proxy verified
+all 31 canonical URLs with HTTP 200, expected MIME types and exact JCB metadata
+MD5 values, and recorded their SHA-256 values without following redirects. That
+source-byte evidence does not exercise the relay's pinned direct DNS/HTTPS path.
+The deployed-endpoint verification above remains necessary; the direct DNS
+failures are not evidence that an approved image itself is invalid or unavailable.

@@ -22,6 +22,19 @@ const contentTypes = {
   '.zip': 'application/zip',
 };
 
+/** Follow the same bounded controlled navigations as the real application shell. */
+export async function prepareBrowserEnvironment(page) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const environment = await page.evaluate(async () => {
+      const { prepareEnvironment } = await import('./src/playground.mjs');
+      return prepareEnvironment();
+    });
+    if (!environment.reloadRequired) return environment;
+    if (attempt === 2) throw new Error('Browser environment startup exceeded its two controlled navigations.');
+    await page.goto(environment.reloadURL);
+  }
+}
+
 /** Serve the built artifact exactly as static hosting would, beneath a project path. */
 export async function createStaticServer({ directory, prefix = '/playground/', isolation = true, fixtures = {}, corsOrigin, corsPaths } = {}) {
   if (!prefix.startsWith('/') || !prefix.endsWith('/') || prefix.includes('..')) {

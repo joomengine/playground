@@ -8,9 +8,9 @@ import { createStaticServer } from './server.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 
 test('database and code panels share one embedded slot and retain drafts through a detached window', { timeout: 90000 }, async () => {
-  let posts = 0;
+  let posts = 0, reads = 0;
   const server = await createStaticServer({ directory: root, fixtures: {
-    'database.html': request => { if (request.method === 'POST') posts++; return '<!doctype html><html><title>Database fixture</title><form method="post"><textarea name="query"></textarea><input name="token" type="hidden" value="csrf"><button>Run</button></form></html>'; },
+    'database.html': request => { if (request.method === 'POST') posts++; return `<!doctype html><html><title>Database fixture</title><p id=revision>${++reads}</p><form method="post"><textarea name="query"></textarea><input name="token" type="hidden" value="csrf"><button>Run</button></form></html>`; },
   } });
   const executablePath = process.env.PLAYGROUND_CHROMIUM_EXECUTABLE;
   const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
@@ -50,6 +50,7 @@ test('database and code panels share one embedded slot and retain drafts through
     assert.equal(await page.evaluate(() => window.codeLayout.state.visible), false);
     const frame = page.frameLocator('iframe[title="Database"]');
     await frame.locator('textarea').fill('UPDATE items SET value = 5');
+    const initialRevision = Number(await frame.locator('#revision').textContent());
     await page.evaluate(() => window.codeLayout.show());
     assert.equal(await page.evaluate(() => window.databaseHost.visible), false);
     await page.evaluate(() => window.databaseHost.open());
@@ -74,6 +75,7 @@ test('database and code panels share one embedded slot and retain drafts through
     await page.waitForFunction(() => !window.databaseHost.detached && window.databaseHost.visible);
     assert.equal(await page.evaluate(() => window.codeLayout.state.visible), false);
     assert.equal(await frame.locator('textarea').inputValue(), 'SELECT * FROM items WHERE id = 10');
+    assert.ok(Number(await frame.locator('#revision').textContent()) > initialRevision, 'redock fetches fresh table data even when its URL is unchanged');
     assert.equal(await page.evaluate(() => document.querySelector('.preview-panel iframe') === window.siteFrame), true);
     assert.equal(posts, 0, 'detaching/redocking must never replay submitted SQL');
     assert.deepEqual(await page.evaluate(() => window.uiErrors), []);

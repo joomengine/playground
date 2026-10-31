@@ -3,13 +3,17 @@ import { resolvePublicAssetURL } from './public-assets.mjs';
 export const NESTED_PHP_REQUEST_ERROR = 'Nested HTTP requests to the same running PHP site are not supported by this runtime.';
 
 const publicHeaders = new Set(['accept', 'accept-language']);
+// JCB's fallback cURL helper sets a legacy User-Agent. It is neither an image
+// credential nor a permission source, and is discarded before relay delivery.
+const ignoredPublicHeaders = new Set(['user-agent']);
 
 /** Only anonymous image reads use the relay. Unrelated/authenticated HTTP retains its exact path. */
 export function publicImageFetchOptions(input, init, url, options) {
   const method = String(init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
   if (!['GET', 'HEAD'].includes(method) || init?.body != null) return null;
   const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-  if ([...headers.keys()].some(name => !publicHeaders.has(name))) return null;
+  if ([...headers.keys()].some(name => !publicHeaders.has(name) && !ignoredPublicHeaders.has(name))) return null;
+  for (const name of ignoredPublicHeaders) headers.delete(name);
   const credentials = init?.credentials ?? (input instanceof Request ? input.credentials : undefined);
   if (credentials === 'include' || url.username || url.password) return null;
   const mapped = resolvePublicAssetURL(url.href, options);

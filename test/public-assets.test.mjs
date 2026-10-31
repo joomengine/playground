@@ -19,6 +19,8 @@ const config = validatePublicAssetConfiguration({ schemaVersion: 1, enabled: tru
   relayBaseURL: 'https://relay.example/', registryVersions: ['test-v1'], timeoutMs: 1000 });
 const options = { policy: 'require-corp', registry, config, baseURL };
 const route = assetRouteURL(asset, registry, baseURL);
+const relayHeaders = { 'Content-Type': asset.mime, 'X-Public-Asset-Id': asset.id,
+  'X-Public-Asset-Registry': registry.version, 'X-Public-Asset-SHA256': asset.sha256, 'Cache-Control': 'public, max-age=60' };
 
 test('reviewed package registry is valid, exact and remains separate from saved deployments', async () => {
   const actual = validatePublicAssetRegistry(JSON.parse(await readFile(new URL('../config/public-assets.json', import.meta.url), 'utf8')));
@@ -64,11 +66,12 @@ test('PHP image downloads preserve method, cancellation and original bytes throu
   const calls = [], controller = new AbortController();
   const fetcher = createPhpFetch(async (input, init) => { calls.push({ input, init }); return new Response(bytes, { status: 200 }); },
     `${baseURL}__site/owner/instance/`, () => true, options);
-  const response = await fetcher(original, { signal: controller.signal, method: 'HEAD', headers: { Accept: 'image/png' } });
+  const response = await fetcher(original, { signal: controller.signal, method: 'HEAD', headers: { Accept: 'image/png', 'User-Agent': 'JCB legacy public image helper' } });
   assert.equal(calls[0].input, route);
   assert.equal(calls[0].init.signal, controller.signal);
   assert.equal(calls[0].init.method, 'HEAD');
   assert.equal(calls[0].init.credentials, 'omit');
+  assert.equal(calls[0].init.headers.has('User-Agent'), false);
   assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes);
   await assert.rejects(fetcher(`${baseURL}__site/owner/instance/image.php`), new RegExp(NESTED_PHP_REQUEST_ERROR));
 });
@@ -94,7 +97,7 @@ test('PHP normal, authenticated, non-image, POST and custom-header requests are 
 
 test('asset route validates exact bytes before caching and never forwards caller credentials', async () => {
   const calls = [];
-  const fetcher = async (url, init) => { calls.push({ url, init }); return new Response(bytes, { headers: { 'Content-Type': 'image/png' } }); };
+  const fetcher = async (url, init) => { calls.push({ url, init }); return new Response(bytes, { headers: relayHeaders }); };
   const response = await handlePublicAssetRequest(new Request(route), { ...options, fetcher });
   assert.equal(response.status, 200);
   assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes);
@@ -114,10 +117,12 @@ test('unknown IDs/versions, HTML, wrong digest, oversized data and relay outages
     assert.equal(response.status, status);
   }
   for (const response of [
-    () => new Response('<html>error</html>', { headers: { 'Content-Type': 'text/html' } }),
-    () => new Response('<html>error</html>', { headers: { 'Content-Type': 'image/png' } }),
-    () => new Response(bytes, { headers: { 'Content-Type': 'image/png', 'Content-Length': '9000000' } }),
-    () => new Response(bytes, { headers: { 'Content-Type': 'image/png', 'X-Public-Asset-SHA256': 'bad' } }),
+    () => new Response('<html>error</html>', { headers: { ...relayHeaders, 'Content-Type': 'text/html' } }),
+    () => new Response('<html>error</html>', { headers: relayHeaders }),
+    () => new Response(bytes, { headers: { ...relayHeaders, 'Content-Length': '9000000' } }),
+    () => new Response(bytes, { headers: { ...relayHeaders, 'X-Public-Asset-SHA256': 'bad' } }),
+    () => new Response(bytes, { headers: { ...relayHeaders, 'X-Public-Asset-SHA256': '0'.repeat(64) } }),
+    () => new Response(bytes, { headers: { ...relayHeaders, 'X-Public-Asset-Id': 'other' } }),
     () => new Response('unavailable', { status: 503 }),
     () => { throw new TypeError('https://secret:password@host unavailable'); },
   ]) {

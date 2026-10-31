@@ -52,10 +52,12 @@ export function nextIsolationAttempt({ url, state, verified, failure, fallbackEn
   }
   if (!next.attempted.includes(current)) next.attempted.push(current);
   if (verified) return { reloadRequired: false, policy: current, mode: current === 'require-corp' ? 'compatibility' : 'normal', state: { ...next, phase: 'ready' } };
-  if (next.phase === 'failed') return fail(`Browser isolation remains unavailable: ${failure} No automatic reload was repeated; no saved site was changed.`);
   if (current === 'credentialless' && fallbackEnabled && !next.attempted.includes('require-corp')) {
+    // Enabling the deployment fallback later must allow a tab that previously
+    // stopped in normal-only mode to make its still-untried compatibility attempt.
     return navigate('require-corp', 'Normal isolation was unavailable; trying the require-corp compatibility policy.');
   }
+  if (next.phase === 'failed') return fail(`Browser isolation remains unavailable: ${failure} No automatic reload was repeated; no saved site was changed.`);
   const context = embedded
     ? ' Open Playground directly in a top-level tab. An embedded Playground also requires compatible isolation on its parent page.'
     : ' Check HTTPS, service-worker permissions, response headers and browser shared-memory support.';
@@ -139,11 +141,14 @@ export async function prepareBrowserIsolation({ baseURL, global = globalThis, fe
   if (!navigator.locks?.request || !global.indexedDB) throw new Error('This browser does not provide IndexedDB and Web Locks required by the playground. No saved site was changed.');
   const identity = await establishServiceWorker(baseURL, navigator.serviceWorker);
   let configuration = { schemaVersion: 1, fallbackEnabled: false }, configurationFailure;
+  const controller = new AbortController();
+  const configurationTimer = setTimeout(() => controller.abort(), 5000);
   try {
-    const response = await fetcher(new URL('config/browser-compatibility.json', baseURL), { cache: 'no-store' });
+    const response = await fetcher(new URL('config/browser-compatibility.json', baseURL), { cache: 'no-store', signal: controller.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     configuration = validateCompatibilityConfiguration(await response.json());
-  } catch (error) { configurationFailure = `Compatibility configuration is unavailable (${error.message}); fallback is disabled.`; }
+  } catch (error) { configurationFailure = `Compatibility configuration is unavailable (${controller.signal.aborted ? 'request timed out' : error.message}); fallback is disabled.`; }
+  finally { clearTimeout(configurationTimer); }
   const state = readBootstrapState(global.sessionStorage, baseURL);
   const verified = await verifySharedMemoryEnvironment({ baseURL, ownerId: identity.clientId, global });
   const result = nextIsolationAttempt({ url: global.location.href, state, verified: verified.ok,

@@ -15,7 +15,7 @@ export function canonicalPublicAssetURL(value) {
     || /%(?:0[0-9a-f]|1[0-9a-f]|7f)/i.test(value)) throw new TypeError('Invalid public image URL.');
   const url = new URL(value);
   if (url.protocol !== 'https:' || url.username || url.password || url.hash || url.href !== value
-    || !url.hostname || (url.port && url.port !== '443')) throw new TypeError('Public image URLs must be canonical HTTPS URLs without credentials.');
+    || !url.hostname) throw new TypeError('Public image URLs must be canonical HTTPS URLs without credentials.');
   return url.href;
 }
 

@@ -9,6 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { inflateSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { chromium, firefox, webkit } from 'playwright';
+import { isolationNavigationURL } from '../src/isolation.mjs';
 
 const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64');
 const root = new URL('../', import.meta.url);
@@ -33,7 +34,7 @@ function firstPixel(png) {
   return [...decoded.subarray(1, 4)];
 }
 
-test('real browser COEP blocks restricted images; approved SW delivery renders src/srcset/picture/CSS/dynamic with exact PHP-fetch bytes', { timeout: 120_000 }, async t => {
+test('real browser COEP blocks restricted images; approved SW delivery renders src/srcset/picture/CSS/dynamic with exact PHP-fetch bytes', { timeout: 300_000 }, async t => {
   const temporary = await mkdtemp(path.join(tmpdir(), 'public-images-'));
   const keyFile = path.join(temporary, 'key.pem'), certFile = path.join(temporary, 'cert.pem');
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyFile, '-out', certFile,
@@ -47,49 +48,54 @@ test('real browser COEP blocks restricted images; approved SW delivery renders s
   });
   const restrictedAddress = (await listen(restricted)).replace('http:', 'https:');
   let appOrigin, relayAvailable = true;
-  const relay = http.createServer((req, res) => {
+  const relay = https.createServer({ key, cert }, (req, res) => {
     relayRequests.push({ url: req.url, headers: req.headers });
     res.setHeader('Access-Control-Allow-Origin', appOrigin);
-    res.setHeader('Access-Control-Expose-Headers', 'X-Public-Asset-SHA256');
+    res.setHeader('Access-Control-Expose-Headers', 'X-Public-Asset-SHA256, X-Public-Asset-Id, X-Public-Asset-Registry');
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'no-store');
     if (!relayAvailable) { res.statusCode = 503; res.end('unavailable'); return; }
     res.setHeader('X-Public-Asset-SHA256', createHash('sha256').update(pixel).digest('hex'));
+    res.setHeader('X-Public-Asset-Id', 'approved'); res.setHeader('X-Public-Asset-Registry', 'fixture-v1');
     res.end(pixel);
   });
-  const relayOrigin = await listen(relay);
+  const relayOrigin = (await listen(relay)).replace('http:', 'https:');
   const assetURL = `${restrictedAddress}/approved.png`;
   const registry = { schemaVersion: 1, version: 'fixture-v1', assets: [{ id: 'approved', url: assetURL, owner: 'browser fixture',
     mime: 'image/png', maxBytes: 1024, redirects: [], sha256: createHash('sha256').update(pixel).digest('hex'),
     compatibilityRequired: true, cache: { maxAgeSeconds: 0, immutable: false }, updatePolicy: 'pinned' }] };
-  const config = { schemaVersion: 1, enabled: true, relayBaseURL: 'https://relay.fixture/', registryVersions: ['fixture-v1'], timeoutMs: 3000 };
+  const config = { schemaVersion: 1, enabled: true, relayBaseURL: `${relayOrigin}/`, registryVersions: ['fixture-v1'], timeoutMs: 3000 };
   const app = http.createServer(async (req, res) => {
     try {
-      const url = new URL(req.url, appOrigin), policy = url.searchParams.get('policy') === 'credentialless' ? 'credentialless' : 'require-corp';
+      const url = new URL(req.url, appOrigin), policy = url.searchParams.get('__je_coep')?.endsWith(':credentialless') ? 'credentialless' : 'require-corp';
       res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
       res.setHeader('Cross-Origin-Embedder-Policy', policy);
       res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
       res.setHeader('Cache-Control', 'no-store');
-      if (url.pathname === '/sw.mjs') {
+      if (url.pathname === '/service-worker.mjs') {
+        // GitHub Pages serves the registration script without isolation headers;
+        // the shared SW has no shared-memory requirement of its own. Giving it
+        // one tab's require-corp policy would break another tab's opaque fetches.
+        res.removeHeader('Cross-Origin-Embedder-Policy');
         res.setHeader('Content-Type', 'application/javascript');
-        res.end(`import { handlePublicAssetRequest } from '/src/public-assets-worker.mjs';
-          const registry=${JSON.stringify(registry)}, config=${JSON.stringify(config)};
-          self.addEventListener('install',e=>e.waitUntil(self.skipWaiting()));
-          self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
-          self.addEventListener('fetch',event=>{
-            if(event.request.destination!=='image'&&!new URL(event.request.url).pathname.startsWith('/__public-assets/')) return;
-            event.respondWith((async()=>{
-              const client=await self.clients.get(event.clientId);
-              const policy=client&&new URL(client.url).searchParams.get('policy')==='credentialless'?'credentialless':'require-corp';
-              const response=await handlePublicAssetRequest(event.request,{policy,baseURL:self.registration.scope,registry,config,
-                fetcher:(url,init)=>fetch(url.replace('https://relay.fixture/',${JSON.stringify(`${relayOrigin}/`)}),init)});
-              return response||fetch(event.request);
-            })());
-          });`);
+        res.end(await readFile(new URL('service-worker.mjs', root)));
+      } else if (url.pathname === '/config/browser-compatibility.json') {
+        res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ schemaVersion: 1, fallbackEnabled: true }));
+      } else if (url.pathname === '/config/public-assets.json' || url.pathname === '/config/public-assets-config.json') {
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify(url.pathname.endsWith('-config.json') ? config : registry));
       } else if (url.pathname.startsWith('/src/')) {
         const name = url.pathname.slice('/src/'.length);
-        if (!['public-assets.mjs', 'public-assets-worker.mjs', 'php-network.mjs'].includes(name)) { res.statusCode = 404; res.end(); return; }
-        res.setHeader('Content-Type', 'application/javascript'); res.end(await readFile(new URL(`src/${name}`, root)));
+        if (!/^[a-zA-Z0-9_./-]+\.(?:mjs|php|json)$/.test(name) || name.includes('..')) { res.statusCode = 404; res.end(); return; }
+        res.setHeader('Content-Type', name.endsWith('.mjs') ? 'application/javascript' : 'text/plain');
+        res.end(await readFile(new URL(`src/${name}`, root)));
+      } else if (process.env.PUBLIC_ASSET_RUNTIME_DIST && (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/deploys/'))) {
+        const candidate = path.resolve(process.env.PUBLIC_ASSET_RUNTIME_DIST), file = path.resolve(candidate, url.pathname.slice(1));
+        if (!file.startsWith(`${candidate}${path.sep}`)) { res.statusCode = 400; res.end(); return; }
+        const data = await readFile(file);
+        res.setHeader('Content-Type', file.endsWith('.wasm') || file.endsWith('.so') ? 'application/wasm'
+          : /\.(?:mjs|js)$/.test(file) ? 'application/javascript' : file.endsWith('.json') ? 'application/json' : 'application/octet-stream');
+        res.setHeader('Content-Length', data.length); res.end(req.method === 'HEAD' ? undefined : data);
       } else {
         res.setHeader('Content-Type', 'text/html');
         res.end('<!doctype html><meta charset="utf-8"><title>Image contract</title><body style="margin:0;background:white"></body>');
@@ -107,14 +113,19 @@ test('real browser COEP blocks restricted images; approved SW delivery renders s
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     const errors = []; page.on('pageerror', error => errors.push(error.message));
-    await page.goto(`${appOrigin}/?policy=require-corp`);
+    if (process.env.PUBLIC_ASSET_BROWSER_DEBUG) {
+      context.on('console', message => console.error('browser console:', message.type(), message.text()));
+      page.on('requestfailed', request => console.error('failed:', request.url(), request.failure()));
+      context.on('serviceworker', worker => worker.on('console', message => console.error('worker:', message.text())));
+    }
+    await page.goto(isolationNavigationURL(`${appOrigin}/`, 'require-corp'));
     assert.equal(await page.evaluate(() => crossOriginIsolated && new SharedArrayBuffer(8).byteLength === 8), true);
     const blocked = await page.evaluate(url => new Promise(resolve => {
       const img = new Image(); img.onload = () => resolve(false); img.onerror = () => resolve(true); img.src = url; document.body.append(img);
     }), assetURL);
     assert.equal(blocked, true, 'Fixture must demonstrate the actual require-corp restriction before any proxy.');
     await page.evaluate(async () => {
-      await navigator.serviceWorker.register('/sw.mjs', { type: 'module' }); await navigator.serviceWorker.ready;
+      await navigator.serviceWorker.register('/service-worker.mjs', { type: 'module' }); await navigator.serviceWorker.ready;
       if (!navigator.serviceWorker.controller) await new Promise(resolve => navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true }));
     });
     await page.reload();
@@ -127,7 +138,7 @@ test('real browser COEP blocks restricted images; approved SW delivery renders s
       });
       const result = [];
       result.push(await image('src', img => { img.src = url; }));
-      result.push(await image('srcset', img => { img.srcset = `${url} 1x, ${url} 2x`; }));
+      result.push(await image('srcset', img => { img.sizes = '1px'; img.srcset = `${url} 1w`; }));
       result.push(await image('picture', img => { const picture = document.createElement('picture'); const source = document.createElement('source'); source.srcset = url; picture.append(source, img); document.body.append(picture); }));
       result.push(await image('dynamic', img => { document.body.append(img); img.setAttribute('src', url); }));
       const css = document.createElement('div'); css.id = 'css'; css.style.cssText = `width:5px;height:5px;background-image:url("${url}");background-size:cover`; document.body.append(css);
@@ -150,16 +161,45 @@ test('real browser COEP blocks restricted images; approved SW delivery renders s
     assert.ok(relayRequests.every(request => request.url === '/v1/assets/fixture-v1/approved'
       && !request.headers.authorization && !request.headers.cookie));
     const count = relayRequests.length;
-    const normal = await context.newPage(); await normal.goto(`${appOrigin}/?policy=credentialless`);
+    const normal = await context.newPage(); await normal.goto(isolationNavigationURL(`${appOrigin}/`, 'credentialless'));
     assert.equal(await normal.evaluate(url => new Promise(resolve => { const image = new Image(); image.onload = () => resolve(true); image.onerror = () => resolve(false); image.src = url; document.body.append(image); }), assetURL), true);
     assert.equal(relayRequests.length, count, 'Normal mode must make zero automatic relay requests.');
+    let nativePhp = null;
+    if (process.env.PUBLIC_ASSET_RUNTIME_DIST) {
+      nativePhp = await page.evaluate(async ({ url, expected }) => {
+        const { createPlayground, prepareEnvironment } = await import('/src/playground.mjs');
+        const environment = await prepareEnvironment();
+        if (environment.reloadRequired) throw new Error(`Fixture environment unexpectedly requested ${environment.reloadURL}`);
+        const site = await createPlayground({ persistence: false, phpVersion: '8.4', initialPath: '/',
+          admin: { name: 'Image Tester', username: 'image-test', password: 'Image-fixture-2026!', email: 'image@example.test' } });
+        try {
+          const result = await site.runPhp(`<?php
+            $url = ${JSON.stringify(url)};
+            $stream = file_get_contents($url);
+            $curl = curl_init($url);
+            curl_setopt_array($curl, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10,
+              CURLOPT_USERAGENT => 'Mozilla/5.0 JCB image fallback']);
+            $curlBytes = curl_exec($curl); $status = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($curl);
+            echo json_encode(['stream' => $stream === false ? false : hash('sha256', $stream),
+              'curl' => $curlBytes === false ? false : hash('sha256', $curlBytes),
+              'streamLength' => strlen($stream ?: ''), 'curlLength' => strlen($curlBytes ?: ''),
+              'status' => $status, 'error' => $curlError]);
+          `);
+          const proof = JSON.parse(result.text);
+          if (proof.stream !== expected || proof.curl !== expected) throw new Error(`Native PHP image proof failed: ${JSON.stringify(proof)}`);
+          return { ...proof, policy: site.isolation.policy };
+        } finally { await site.close(); }
+      }, { url: assetURL, expected: registry.assets[0].sha256 });
+      assert.equal(nativePhp.status, 200); assert.equal(nativePhp.policy, 'require-corp');
+    }
     relayAvailable = false;
     const unavailable = await page.evaluate(async () => ({ status: (await fetch('/__public-assets/fixture-v1/approved', { cache: 'no-store' })).status,
       isolated: crossOriginIsolated, shared: new SharedArrayBuffer(8).byteLength }));
     assert.deepEqual(unavailable, { status: 503, isolated: true, shared: 8 });
     assert.equal(errors.length, 0, errors.join('\n'));
     const evidence = { browser: name, version: browser.version(), isolated: true, blockedWithoutRelay: blocked, results,
-      cssPixel: [255, 0, 0], php, normalModeRelayRequests: 0, relayFailure: unavailable, restrictedRequests: restrictedRequests.length };
+      cssPixel: [255, 0, 0], phpFetchAdapter: php, nativePhp, normalModeRelayRequests: 0, relayFailure: unavailable, restrictedRequests: restrictedRequests.length };
     t.diagnostic(JSON.stringify(evidence));
     if (process.env.PUBLIC_ASSET_BROWSER_EVIDENCE) await writeFile(process.env.PUBLIC_ASSET_BROWSER_EVIDENCE, `${JSON.stringify(evidence, null, 2)}\n`);
   } finally {

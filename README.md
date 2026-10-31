@@ -23,6 +23,18 @@ presets, custom/local endpoints and scoped context are implemented; the
 from outstanding real-service browser checks. Local editing and debugging do not
 require AI credentials.
 
+The **DB** action opens [Adminer](docs/database-user-guide.md) against the same
+running database. Code and DB alternate in the embedded workspace, with separate
+left/right/bottom, floating, full-width and detached layouts. Adminer loads on
+demand and adds about 435 KiB of staged PHP/UI assets (about 246 KiB gzipped),
+without another PHP or database engine.
+
+[Browser compatibility](docs/browser-compatibility.md) verifies isolation before
+starting the runtime and provides a controlled `require-corp` fallback. Its
+restricted [public-image relay](relay/README.md) must be hosted and configured
+before enabling fallback; the checked-in defaults preserve normal mode with no
+relay dependency. Real mobile validation follows deployment.
+
 For an agent-oriented introduction to configuring a site, working with JCB,
 testing extensions and exporting results, see the [Playground agent guide](docs/agent-guide.md).
 

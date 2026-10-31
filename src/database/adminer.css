@@ -5,8 +5,6 @@ body { margin-top: 0; }
 input[name="logout"], button[name="logout"], a[href*="?logout"] { display: none; }
 #version { display: none; }
 @media (max-width: 680px) {
-  #content { margin-left: 0; padding: 0.8rem; }
-  #menu { position: relative; width: auto; padding: 0.8rem; }
   .tabs { white-space: normal; }
   table { max-width: 100%; }
   textarea { max-width: 100%; box-sizing: border-box; }

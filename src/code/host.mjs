@@ -30,7 +30,9 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
   const auxiliaryTools = new Set();
   const auxiliaryDocuments = new Set();
   let currentTheme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
-  const shellStylesheet = new URL('./styles.css', import.meta.url).href;
+  const ownedAsset = value => runtime.isolation?.ownerId
+    ? ownedClientURL(value, { ...runtime.isolation, baseURL: new URL('../../', import.meta.url).href }) : value.href;
+  const shellStylesheet = ownedAsset(new URL('./styles.css', import.meta.url));
   const applyTheme = event => {
     currentTheme = event?.detail?.resolved || event?.detail?.theme || document.documentElement.dataset.theme || 'dark';
     for (const doc of auxiliaryDocuments) syncThemeDocument(doc, { resolved: currentTheme, theme: currentTheme });
@@ -297,7 +299,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
       workbench = await frame.contentWindow.JoomEngineCode.mount({
         workspace, siteId: runtime.workspace.id, storageId: runtime.workspace.storageId,
         phpVersion: runtime.configuration.phpVersion,
-        onError: report, t, theme: currentTheme, shellStylesheet, favicon: new URL('../brand/favicon.svg?v=pearl-20261030', import.meta.url).href,
+        onError: report, t, theme: currentTheme, shellStylesheet, favicon: ownedAsset(new URL('../brand/favicon.svg?v=pearl-20261030', import.meta.url)),
         onDetachedTools: mountDetachedTools,
         debuggerBackend: {
           ...Object.fromEntries(['stop', 'setBreakpoints', 'continue', 'next', 'stepIn', 'stepOut', 'pause',

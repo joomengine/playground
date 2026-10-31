@@ -109,6 +109,22 @@ function activity(message) {
   while (log.childElementCount > 150) log.firstElementChild.remove();
   log.scrollTop = log.scrollHeight;
 }
+const publicImageDiagnostics = new Set();
+navigator.serviceWorker?.addEventListener('message', event => {
+  if (event.source !== navigator.serviceWorker.controller
+    || event.source?.scriptURL !== new URL('service-worker.mjs', deploymentURL).href
+    || event.data?.type !== 'public-asset-failure') return;
+  const { assetId, cause } = event.data;
+  // Only bounded identifiers and the relay handler's sanitized failure reason
+  // enter the activity feed. Never display URLs, response bodies or headers.
+  if (typeof assetId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/.test(assetId)
+    || typeof cause !== 'string' || !cause || cause.length > 180
+    || /[\x00-\x1f\x7f]|https?:|[<>]/i.test(cause)) return;
+  const key = `${assetId}:${cause}`;
+  if (publicImageDiagnostics.has(key) || publicImageDiagnostics.size >= 32) return;
+  publicImageDiagnostics.add(key);
+  activity(`Public image ${assetId}: ${cause}.`);
+});
 function show(view) {
   for (const name of ['welcome', 'loading-view', 'error-view', 'site-mount']) $(name).hidden = name !== view;
   document.querySelector('.preview-panel').classList.toggle('launching', view === 'loading-view');
@@ -1198,12 +1214,15 @@ async function saveSite({ quiet = false } = {}) {
     if (wasTemporary) {
       databaseHost?.beginRuntimeTransfer();
       runtime = codeHost && !codeHost.closed ? await codeHost.keepSite() : await runtime.keep();
-      if (databaseHost && !databaseHost.closed) await databaseHost.rebindRuntime(runtime);
       currentConfig = runtime.configuration;
       currentInput = { ...currentInput, persistence: true, storageKey: currentConfig.storageKey };
       runningSiteId = currentConfig.storageKey;
       if (savingSelected) { fields.storageKey.value = currentConfig.storageKey; fields.persistence.checked = true; selectedSiteId = currentConfig.storageKey; }
       mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
+      if (databaseHost && !databaseHost.closed) {
+        try { await databaseHost.rebindRuntime(runtime); }
+        catch (error) { activity(`Site saved, but the database viewer could not reopen: ${messageOf(error)}. Select DB to retry.`); }
+      }
     } else await runtime.flush();
     lastSavedAt = new Date(); rememberCurrentSite();
     updateRuntimeLocation();

@@ -54,10 +54,27 @@ test('Adminer browses and modifies the active MariaDB with CSRF protection and e
     echo json_encode($pdo->query('SELECT * FROM adminer_contract ORDER BY id')->fetchAll(PDO::FETCH_ASSOC), JSON_UNESCAPED_UNICODE);
   `);
   assert.deepEqual(JSON.parse(proof.text), [{ id: 1, value: 'updated café 🦁' }, { id: 2, value: 'second' }]);
+  const editURL = '/database-test.php?edit=adminer_contract&where[id]=1';
+  const edit = await runtime.request(editURL);
+  const editHtml = await edit.text();
+  assert.match(editHtml, /name=["']fields\[value\]["']/);
+  const edited = await runtime.request(editURL, {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ token, save: 'Save', 'fields[id]': '1', 'fields[value]': 'row-edited café 🦁', 'function[id]': '', 'function[value]': '' }).toString(),
+  });
+  assert.equal(edited.status, 302, await edited.text());
+  const form = new FormData();
+  form.append('token', token);
+  form.append('sql_file[]', new File(["INSERT INTO adminer_contract VALUES (3, 'imported');"], 'proof.sql', { type: 'application/sql' }));
+  const imported = await runtime.request('/database-test.php?import=', { method: 'POST', body: form });
+  const importedHtml = await imported.text();
+  assert.equal(imported.status, 200, importedHtml);
+  assert.doesNotMatch(importedHtml, /class=['"]error['"]/);
   const exported = await post('SELECT * FROM adminer_contract ORDER BY id', token, { export: '1', format: 'csv', output: 'file' });
   const csv = await exported.text();
   assert.equal(exported.status, 200, csv);
-  assert.match(csv, /updated café 🦁/);
+  assert.match(csv, /row-edited café 🦁/);
+  assert.match(csv, /imported/);
   assert.doesNotMatch(csv, /__adminer|__public-assets/);
   const forgedLogin = await runtime.request('/database-test.php', {
     method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },

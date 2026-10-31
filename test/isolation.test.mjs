@@ -38,6 +38,9 @@ test('bootstrap succeeds only after actual verification and disabled fallback le
   const disabled = nextIsolationAttempt({ url, state: initial(), verified: false, fallbackEnabled: false, failure: 'not isolated', embedded: true });
   assert.match(disabled.error, /fallback is disabled/);
   assert.match(disabled.error, /parent page/);
+  const enabledLater = nextIsolationAttempt({ url, state: disabled.state, verified: false, fallbackEnabled: true, failure: 'not isolated' });
+  assert.equal(enabledLater.reloadRequired, true);
+  assert.equal(enabledLater.policy, 'require-corp');
   const fallback = nextIsolationAttempt({ url: isolationNavigationURL(baseURL, 'require-corp'), state: initial(), verified: true, fallbackEnabled: true });
   assert.equal(fallback.mode, 'compatibility');
   assert.equal(fallback.state.phase, 'ready');
@@ -77,8 +80,16 @@ test('invalid owners and runtime traversal cannot become an arbitrary static or 
   assert.throws(() => runtimeResource(`${baseURL}__runtime/normal/__site/x/y/index.php`, baseURL), /Invalid/);
   assert.throws(() => runtimeResource(`${baseURL}__runtime/normal/a%2fb`, baseURL), /Invalid/);
   assert.throws(() => runtimeResource(`${baseURL}__runtime/normal/a%5cb`, baseURL), /Invalid/);
+  const unmarkedEmbed = { ...owner('nested', 'require-corp'), frameType: 'nested', url: baseURL };
+  await assert.rejects(resolveRequestIsolation(request(`${baseURL}__runtime/nested/src/a.mjs`), { baseURL, getClient: async () => unmarkedEmbed }), /owner/);
+});
+
+test('marked embedded Playground retains its own policy but cannot promote a Joomla iframe to owner', async () => {
   const embedded = { ...owner('nested', 'require-corp'), frameType: 'nested' };
-  await assert.rejects(resolveRequestIsolation(request(`${baseURL}__runtime/nested/src/a.mjs`), { baseURL, getClient: async () => embedded }), /owner/);
+  assert.deepEqual(await resolveRequestIsolation(request(`${baseURL}__runtime/nested/src/a.mjs`), { baseURL, getClient: async () => embedded }),
+    { ownerId: 'nested', policy: 'require-corp' });
+  const siteFrame = { ...embedded, url: isolationNavigationURL(`${baseURL}__site/parent/site/`, 'require-corp') };
+  await assert.rejects(resolveRequestIsolation(request(`${baseURL}__runtime/nested/src/a.mjs`), { baseURL, getClient: async () => siteFrame }), /owner/);
 });
 
 test('headers replace cached policy and private bootstrap markers stay out of portable deployment URLs', () => {

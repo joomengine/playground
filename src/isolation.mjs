@@ -34,9 +34,15 @@ function withinScope(url, scope) {
 }
 
 export function isOwnerClient(client, baseURL) {
-  if (!client || client.type !== 'window' || !['top-level', 'none', undefined].includes(client.frameType)) return false;
+  if (!client || client.type !== 'window') return false;
   const scope = new URL(baseURL), url = new URL(client.url);
   if (!withinScope(url, scope)) return false;
+  // Embedded Playground is still supported when its parent supplies compatible
+  // isolation. It needs its own controlled document marker and must pass the
+  // same real shared-memory probe before creating a runtime. Virtual Joomla and
+  // tool frames below are never allowed to become a runtime owner themselves.
+  if (client.frameType === 'nested' && !isolationMarker(url.href)) return false;
+  if (!['top-level', 'nested', 'none', undefined].includes(client.frameType)) return false;
   const path = url.pathname.slice(scope.pathname.length);
   return !['__site/', RUNTIME_ROUTE, '__public-assets/'].some(prefix => path.startsWith(prefix));
 }
