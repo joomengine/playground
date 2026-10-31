@@ -1,4 +1,5 @@
 import { createShareURL } from './config.mjs';
+import { ISOLATION_PARAMETER, isolationMarker } from './isolation.mjs';
 const SITE_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 const PUBLIC_FIELDS = ['deployId', 'joomlaVersion', 'joomlaPackage', 'jcbVersion', 'jcbPackage', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'phpSettings', 'menus', 'template', 'languageTags', 'multilingual', 'content'];
 
@@ -124,6 +125,7 @@ export function rememberSiteRoute(state, storageKey, path) {
 /** Reflect selected controls without newly exposing manually entered setup steps. */
 export function runtimeLocation(currentURL, config) {
   const url = new URL(currentURL);
+  const isolation = isolationMarker(currentURL);
   const inbound = url.hash.startsWith('#deploy=') || url.searchParams.has('config');
   if (inbound) {
     url.hash = '';
@@ -160,6 +162,7 @@ export function runtimeLocation(currentURL, config) {
     if (config.startupCommands?.length) params.set('commands', JSON.stringify(config.startupCommands));
     else params.delete('commands');
   }
+  if (isolation) url.searchParams.set(ISOLATION_PARAMETER, `${isolation.version}:${isolation.policy}`);
   return url.href;
 }
 

@@ -1,0 +1,11 @@
+/* JoomEngine presentation additions; Adminer's upstream styles remain intact. */
+:root { color-scheme: light; }
+:root[data-joomengine-theme="dark"] { color-scheme: dark; }
+body { margin-top: 0; }
+input[name="logout"], button[name="logout"], a[href*="?logout"] { display: none; }
+#version { display: none; }
+@media (max-width: 680px) {
+  .tabs { white-space: normal; }
+  table { max-width: 100%; }
+  textarea { max-width: 100%; box-sizing: border-box; }
+}

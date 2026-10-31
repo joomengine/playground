@@ -26,7 +26,7 @@ const fields = {
   language: $('language'), siteName: $('site-name'), initialPath: $('initial-path'), storageKey: $('storage-key'),
   persistence: $('persistence'), autoLogin: $('auto-login'), extensions: $('extensions'), startupCommands: $('startup-commands'),
 };
-const controls = ['save-button', 'restart-button', 'close-button', 'reset-button', 'share-button', 'export-button', 'export-format', 'code-button', 'code-refresh-button'];
+const controls = ['save-button', 'restart-button', 'close-button', 'reset-button', 'share-button', 'export-button', 'export-format', 'code-button', 'database-button', 'code-refresh-button'];
 const drafts = new Map();
 let catalog, deployCatalog, runtime, currentConfig, currentInput;
 let busy = false;
@@ -56,6 +56,7 @@ let freshKeyPending = false;
 let automaticLaunchPaused = false;
 let approvedCustomSetup;
 let codeHost;
+let databaseHost, openingDatabase;
 let openingCode;
 let extensionInputs;
 let pinnedJcb = new Map();
@@ -108,6 +109,22 @@ function activity(message) {
   while (log.childElementCount > 150) log.firstElementChild.remove();
   log.scrollTop = log.scrollHeight;
 }
+const publicImageDiagnostics = new Set();
+navigator.serviceWorker?.addEventListener('message', event => {
+  if (event.source !== navigator.serviceWorker.controller
+    || event.source?.scriptURL !== new URL('service-worker.mjs', deploymentURL).href
+    || event.data?.type !== 'public-asset-failure') return;
+  const { assetId, cause } = event.data;
+  // Only bounded identifiers and the relay handler's sanitized failure reason
+  // enter the activity feed. Never display URLs, response bodies or headers.
+  if (typeof assetId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/.test(assetId)
+    || typeof cause !== 'string' || !cause || cause.length > 180
+    || /[\x00-\x1f\x7f]|https?:|[<>]/i.test(cause)) return;
+  const key = `${assetId}:${cause}`;
+  if (publicImageDiagnostics.has(key) || publicImageDiagnostics.size >= 32) return;
+  publicImageDiagnostics.add(key);
+  activity(`Public image ${assetId}: ${cause}.`);
+});
 function show(view) {
   for (const name of ['welcome', 'loading-view', 'error-view', 'site-mount']) $(name).hidden = name !== view;
   document.querySelector('.preview-panel').classList.toggle('launching', view === 'loading-view');
@@ -266,7 +283,7 @@ function mountPreview(url) {
   show('site-mount');
 }
 async function openCode() {
-  if (busy || !runtime || openingCode) return;
+  if (busy || !runtime || openingCode || openingDatabase) return;
   const owner = runtime;
   openingCode = (async () => {
     if (!codeHost || codeHost.closed) {
@@ -305,6 +322,38 @@ async function openCode() {
   catch (error) { feedback(error, { error: true, persistent: true }); }
   finally { openingCode = undefined; setBusy(busy); }
 }
+async function openDatabase() {
+  if (busy || !runtime || openingCode || openingDatabase || runtime.recovery?.filesOnly) return;
+  const owner = runtime;
+  openingDatabase = (async () => {
+    if (!databaseHost || databaseHost.closed) {
+      const { createDatabaseHost } = await import('./database/host.mjs');
+      if (runtime !== owner || owner.closed) return;
+      databaseHost = await createDatabaseHost({
+        runtime: owner, host: document.querySelector('.workspace'), preview: document.querySelector('.preview-panel'),
+        t, storage: preferences,
+        refreshSite() {
+          if (!runtime?.healthy) throw new Error('Open the active Joomla site before refreshing.');
+          mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
+        },
+        onError: error => feedback(error, { error: true, persistent: true }),
+        onState(state) {
+          $('database-button').setAttribute('aria-expanded', String(Boolean(state.visible)));
+          const label = state.visible ? 'database.hide' : 'database.open';
+          for (const attribute of ['title', 'aria-label']) {
+            $('database-button').setAttribute(`data-i18n-${attribute}`, label);
+            $('database-button').setAttribute(attribute, t(label));
+          }
+        },
+      });
+      await databaseHost.open();
+    } else await databaseHost.toggle();
+  })();
+  $('database-button').disabled = true;
+  try { await openingDatabase; }
+  catch (error) { feedback(error, { error: true, persistent: true }); }
+  finally { openingDatabase = undefined; setBusy(busy); }
+}
 function updateMcpPreview() {
   $('deploy-mcp-preview').hidden = fields.deployId.value !== 'jcb-mcp';
   $('credentials-mcp-preview').hidden = !runtime || !(runtime.installation?.mcp || runtime.installation?.deployId === 'jcb-mcp');
@@ -337,6 +386,8 @@ function setBusy(value) {
   $('reset-button').disabled = locked || (!runtime && (unavailable || !fields.persistence.checked));
   $('save-button').disabled = locked || !runtime || filesOnly;
   $('restart-button').disabled = locked || !runtime || filesOnly;
+  $('database-button').disabled = locked || !runtime || filesOnly || Boolean(openingCode || openingDatabase);
+  $('code-button').disabled = locked || !runtime || Boolean(openingCode || openingDatabase);
   $('download-dialog-button').disabled = locked || !runtime;
   const recoveryFormat = $('export-format').querySelector('[value="recovery"]');
   recoveryFormat.hidden = !runtime?.recovery;
@@ -799,7 +850,7 @@ async function launch() {
 }
 async function closeSite({ reset = false, save = false } = {}) {
   if (busy || closing || !runtime) return false;
-  if (openingCode) { feedback(t('code.loading')); return false; }
+  if (openingCode || openingDatabase) { feedback(t(openingDatabase ? 'database.loading' : 'code.loading')); return false; }
   const handle = runtime;
   let previewRemoved = false;
   closing = true;
@@ -808,11 +859,13 @@ async function closeSite({ reset = false, save = false } = {}) {
     if (previewDirty && !confirm(t('confirm.unsavedSiteForm'))) return false;
     if (handle.debugger.state !== 'idle') await handle.debugger.stop();
     if (codeHost && !codeHost.closed && !await codeHost.beforeClose()) return false;
+    if (databaseHost && !databaseHost.closed && !await databaseHost.beforeClose()) return false;
     // A failed checkpoint must leave the current iframe and unsaved forms intact.
     if (save && !handle.recovery?.filesOnly) { activity('Saving the current site before closing…'); await handle.flush(); }
     destroyPreview(); previewRemoved = true;
     if (reset) await handle.reset();
     else await handle.close();
+    await databaseHost?.dispose(); databaseHost = undefined;
     await codeHost?.dispose(); codeHost = undefined;
     runtime = undefined;
     runningSiteId = null; runningAdministrator = null; previewDirty = false;
@@ -834,6 +887,7 @@ async function closeSite({ reset = false, save = false } = {}) {
     } else {
       // Failed workers must still release the storage lock before a recovery retry.
       try { await handle.close(); } catch (cleanupError) { activity(cleanupError); }
+      try { await databaseHost?.dispose(); databaseHost = undefined; } catch (cleanupError) { activity(cleanupError); }
       try { await codeHost?.dispose(); } catch (cleanupError) { activity(cleanupError); }
       codeHost = undefined; runningSiteId = null; runningAdministrator = null;
       displayError(error);
@@ -987,6 +1041,7 @@ $('download-error-diagnostics').addEventListener('click', () => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 $('code-button').addEventListener('click', () => { void openCode(); });
+$('database-button').addEventListener('click', () => { void openDatabase(); });
 $('code-refresh-button').addEventListener('click', () => { void codeHost?.refresh().catch(error => feedback(error, { error: true, persistent: true })); });
 $('close-button').addEventListener('click', () => { if (runtime && !currentConfig.persistence && !confirm(t('confirm.temporary'))) return; void closeSite(); });
 $('new-site-button').addEventListener('click', () => void newSite());
@@ -1157,18 +1212,24 @@ async function saveSite({ quiet = false } = {}) {
   if (wasTemporary) { destroyPreview(); show('loading-view'); }
   try {
     if (wasTemporary) {
+      databaseHost?.beginRuntimeTransfer();
       runtime = codeHost && !codeHost.closed ? await codeHost.keepSite() : await runtime.keep();
       currentConfig = runtime.configuration;
       currentInput = { ...currentInput, persistence: true, storageKey: currentConfig.storageKey };
       runningSiteId = currentConfig.storageKey;
       if (savingSelected) { fields.storageKey.value = currentConfig.storageKey; fields.persistence.checked = true; selectedSiteId = currentConfig.storageKey; }
       mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
+      if (databaseHost && !databaseHost.closed) {
+        try { await databaseHost.rebindRuntime(runtime); }
+        catch (error) { activity(`Site saved, but the database viewer could not reopen: ${messageOf(error)}. Select DB to retry.`); }
+      }
     } else await runtime.flush();
     lastSavedAt = new Date(); rememberCurrentSite();
     updateRuntimeLocation();
     if (!quiet) { activity('Files and database saved to browser storage.'); feedback(t('status.savedAt', { time: lastSavedAt.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) })); }
     return true;
   } catch (error) {
+    databaseHost?.cancelRuntimeTransfer();
     fields.persistence.checked = currentConfig.persistence;
     activity(`Save failed: ${messageOf(error)}`);
     if (runtime?.healthy) { if (wasTemporary) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl)); }
@@ -1223,6 +1284,7 @@ async function applyDeployment() {
   try {
     if (previewDirty && !confirm(t('confirm.unsavedSiteForm'))) return;
     if (codeHost && !codeHost.closed && !await codeHost.beforeClose()) return;
+    if (databaseHost && !databaseHost.closed && !await databaseHost.beforeClose()) return;
     const input = formInput({ storageKey: currentConfig.storageKey, persistence: currentConfig.persistence, fresh: false });
     if (!approveCustomSetup(input)) return;
     const resolved = await resolve(input);
@@ -1243,6 +1305,7 @@ async function applyDeployment() {
       try {
         const oldRuntime = runtime;
         runtime = await error.recover();
+        await databaseHost?.dispose(); databaseHost = undefined;
         await codeHost?.dispose(); codeHost = undefined;
         currentConfig = runtime.configuration;
         runningSiteId = currentConfig.storageKey;
@@ -1395,16 +1458,14 @@ async function initialize() {
     $('embedded-launch').hidden = false;
     activity('Preparing browser support for PHP and MariaDB…');
     const environment = await prepareEnvironment();
-    const reloadMarker = `joomengine:environment-reload:${deploymentURL}`;
     if (environment.reloadRequired) {
-      let previousReload;
-      try { previousReload = sessionStorage.getItem(reloadMarker); sessionStorage.setItem(reloadMarker, '1'); }
-      catch { throw new Error('Allow session storage for this page, then reload to enable the browser database runtime.'); }
-      if (previousReload) throw new Error('This browser or host could not enable the credentialless isolation required by MariaDB and external assets. Use a current desktop Firefox or Chromium browser over HTTPS with service workers enabled.');
-      location.reload(); return;
+      activity(environment.reason);
+      location.replace(environment.reloadURL); return;
     }
-    try { sessionStorage.removeItem(reloadMarker); } catch { /* Already-isolated temporary sites need no saved preference. */ }
-    if (!globalThis.crossOriginIsolated) throw new Error('This browser or host does not support the isolation required by MariaDB.');
+    // This document will not navigate again for bootstrap. Keep shell interaction
+    // checks distinct from the later asynchronous catalog/runtime readiness.
+    document.documentElement.dataset.playgroundEnvironment = 'ready';
+    if (environment.diagnostic) activity(environment.diagnostic);
     $('admin-password').value = password();
     const [manifest, recipes] = await Promise.all([
       fetch(new URL('../assets/manifest.json', import.meta.url), { cache: 'no-cache' }).then(async (response) => {

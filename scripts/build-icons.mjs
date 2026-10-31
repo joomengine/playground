@@ -1,4 +1,4 @@
-/** Rebuild the themed registry from the exact supplied, verified SVG originals. */
+/** Rebuild the themed registry from the exact upstream, verified SVG originals. */
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 const directory = new URL('../src/brand/icons/', import.meta.url);
@@ -10,5 +10,5 @@ for (const entry of manifest.icons.filter(item => item.files.currentColor)) {
   icons[entry.id] = svg.replace(/<svg\b([^>]*)>/, '<svg$1 fill="currentColor">').replace(/>\s+</g, '><').trim();
 }
 await writeFile(new URL('../src/icon-data.mjs', import.meta.url),
-  '// Generated from src/brand/icons originals and the supplied action manifest. Do not redraw geometry.\nexport const ACTION_ICONS = Object.freeze(' + JSON.stringify(icons, null, 2) + ');\n');
+  '// Generated from src/brand/icons originals and the action manifest. Do not redraw geometry.\nexport const ACTION_ICONS = Object.freeze(' + JSON.stringify(icons, null, 2) + ');\n');
 console.log(`Generated ${Object.keys(icons).length} action icons; geometry and transparent bounds preserved.`);

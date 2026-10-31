@@ -298,6 +298,50 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  compatibility:
+    name: Isolation and approved images (${{ matrix.browser }})
+    needs: [checks, build]
+    if: needs.checks.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: '.node-version'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: playground-static
+          path: dist
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Verify isolation and original image bytes through real PHP
+        env:
+          PLAYGROUND_ISOLATION_BROWSER: ${{ matrix.browser }}
+          PUBLIC_ASSET_BROWSER: ${{ matrix.browser }}
+          PUBLIC_ASSET_RUNTIME_DIST: dist
+          PUBLIC_ASSET_BROWSER_EVIDENCE: test-results/public-assets-${{ matrix.browser }}.json
+        run: |
+          mkdir -p test-results
+          node --test test/isolation.browser.mjs
+          node --test test/public-assets.browser.mjs
+      - name: Verify Adminer persistence and tool lifecycle
+        if: matrix.browser == 'chromium'
+        run: node --test test/adminer.browser.mjs
+      - name: Retain compatibility diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playground-compatibility-results-${{ matrix.browser }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
   version-catalog:
     name: Version catalog installation (${{ matrix.browser }})
     needs: [checks, build]
@@ -336,7 +380,7 @@ jobs:
 
   validate:
     name: Validate playground
-    needs: [checks, build, browser, interaction, version-catalog]
+    needs: [checks, build, browser, interaction, compatibility, version-catalog]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -348,6 +392,7 @@ jobs:
           BUILD: ${{ needs.build.result }}
           BROWSERS: ${{ needs.browser.result }}
           INTERACTIONS: ${{ needs.interaction.result }}
+          COMPATIBILITY: ${{ needs.compatibility.result }}
           VERSION_CATALOG: ${{ needs.version-catalog.result }}
         run: |
           test "$CHECKS" = success
@@ -355,5 +400,6 @@ jobs:
             test "$BUILD" = success
             test "$BROWSERS" = success
             test "$INTERACTIONS" = success
+            test "$COMPATIBILITY" = success
             test "$VERSION_CATALOG" = success
           fi

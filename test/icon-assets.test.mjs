@@ -11,7 +11,7 @@ const compact = value => value.replace(/>\s+</g, '><').trim();
 
 test('every shipped action preserves its supplied source geometry and transparent bounds', async () => {
   const manifest = JSON.parse(await readFile(new URL('icons/icon-manifest.json', brand), 'utf8'));
-  assert.equal(ICON_IDS.length, 103);
+  assert.equal(ICON_IDS.length, manifest.icons.length);
   for (const entry of manifest.icons.filter(item => item.files.currentColor)) {
     const source = await readFile(new URL(`icons/originals/${entry.source_path}`, brand), 'utf8');
     assert.equal(hash(source), entry.source_sha256, entry.id);

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { chromium, firefox } from 'playwright';
-import { createStaticServer } from './server.mjs';
+import { createStaticServer, prepareBrowserEnvironment } from './server.mjs';
 
 const browsers = { chromium, firefox };
 const directory = path.resolve(process.env.PLAYGROUND_DIST || 'dist');
@@ -19,6 +19,7 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
     page.on('pageerror', error => errors.push(error.message));
     try {
       await page.goto(`${server.url}__test__.html`);
+      await prepareBrowserEnvironment(page);
       const setup = await page.evaluate(async () => {
         const { createPlayground } = await import('./src/playground.mjs');
         window.codeConfiguration = { persistence: true, storageKey: `code-browser-${crypto.randomUUID()}`, initialPath: '/',

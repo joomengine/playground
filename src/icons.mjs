@@ -5,7 +5,7 @@ const branded = new Set(['deployment', 'launch']);
 const iconsURL = new URL('./brand/rocket.svg', import.meta.url).href;
 const idMapping = Object.freeze({
   'deploy-editor-button': 'deployment', 'nav-site': 'site', 'nav-admin': 'admin',
-  'save-button': 'save-site', 'share-button': 'share-site', 'code-button': 'code', 'code-refresh-button': 'refresh-site',
+  'save-button': 'save-site', 'share-button': 'share-site', 'code-button': 'code', 'database-button': 'database', 'code-refresh-button': 'refresh-site',
   'download-dialog-button': 'download-site', 'settings-toggle': 'dashboard-toggle',
   'new-site-button': 'new-site', 'restart-button': 'restart-site', 'close-button': 'close-site',
   'credentials-button': 'login-details', 'php-settings-button': 'php-settings', 'reset-button': 'reset-site',

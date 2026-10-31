@@ -23,6 +23,18 @@ presets, custom/local endpoints and scoped context are implemented; the
 from outstanding real-service browser checks. Local editing and debugging do not
 require AI credentials.
 
+The **DB** action opens [Adminer](docs/database-user-guide.md) against the same
+running database. Code and DB alternate in the embedded workspace, with separate
+left/right/bottom, floating, full-width and detached layouts. Adminer loads on
+demand and adds about 435 KiB of staged PHP/UI assets (about 246 KiB gzipped),
+without another PHP or database engine.
+
+[Browser compatibility](docs/browser-compatibility.md) verifies isolation before
+starting the runtime and provides a controlled `require-corp` fallback. Its
+restricted [public-image relay](relay/README.md) must be hosted and configured
+before enabling fallback; the checked-in defaults preserve normal mode with no
+relay dependency. Real mobile validation follows deployment.
+
 For an agent-oriented introduction to configuring a site, working with JCB,
 testing extensions and exporting results, see the [Playground agent guide](docs/agent-guide.md).
 
@@ -30,39 +42,46 @@ testing extensions and exporting results, see the [Playground agent guide](docs/
 
 This project builds directly on the work of these maintainers and contributors:
 
+- **[Joomla](https://github.com/joomla/joomla-cms)** provides the CMS and its
+  installation, extension management, and console interfaces.
 - **[Joomla Component Builder](https://github.com/joomengine/Joomla-Component-Builder)**
   is JoomEngine’s core development tool and default deployment.
+- **[PHP/phpdbg](https://github.com/php/php-src)** supplies PHP and its debugger;
+  JoomEngine Code uses Sean Morris's pinned `php-dbg-wasm` package with a small,
+  reproducibly compiled HTTP/debugging bridge.
+- **[MariaDB](https://github.com/MariaDB/server)** provides the database engine.
 - **[seanmorris/php-wasm](https://github.com/seanmorris/php-wasm)** — Sean Morris
   and the project’s contributors provide the PHP runtime, CGI implementation,
   filesystem, asynchronous JavaScript integration, and loadable extension
   support. The playground consumes their published runtime and extension
   packages directly.
-- **[emscripten-core/emscripten](https://github.com/emscripten-core/emscripten)** —
-  The Emscripten maintainers and contributors provide the compiler toolchain and
-  runtime facilities that make PHP, native extensions, and MariaDB available in
-  WebAssembly.
 - **[JoomEngine MariaDB WASM Bridge](https://github.com/joomengine/mariadb-wasm-bridge)**
   provides the database worker, persistence, host protocol, native PDO driver,
   and adapter for the upstream PHP runtime.
-- **[shyim/lite4mariadb](https://github.com/shyim/lite4mariadb)** and
-  **[MariaDB](https://github.com/MariaDB/server)** provide the actual database
-  engine used by the bridge.
-- **[Joomla](https://github.com/joomla/joomla-cms)** provides the CMS and its
-  installation, extension management, and console interfaces.
+- **[shyim/lite4mariadb](https://github.com/shyim/lite4mariadb)** makes the MariaDB
+  engine available to the bridge as WebAssembly.
 - **Microsoft [VS Code](https://github.com/microsoft/vscode) and
   [Monaco](https://github.com/microsoft/monaco-editor)** provide the editor and
   workbench foundations. **[CodinGame](https://github.com/CodinGame/monaco-vscode-api)**
   provides their browser integration. JoomEngine Code retains the exact shipped
   licenses, source notices and dependency inventory.
-- **[PHP/phpdbg](https://github.com/php/php-src)** supplies the PHP debugger;
-  JoomEngine Code uses Sean Morris's pinned `php-dbg-wasm` package with a small,
-  reproducibly compiled HTTP/debugging bridge.
+- **[Adminer](https://github.com/vrana/adminer)** provides the database interface
+  for browsing tables, inspecting schemas and running SQL through the active
+  site's existing PHP and MariaDB runtimes.
+- **[emscripten-core/emscripten](https://github.com/emscripten-core/emscripten)** —
+  The Emscripten maintainers and contributors provide the compiler toolchain and
+  runtime facilities that make PHP, native extensions, and MariaDB available in
+  WebAssembly.
 
 Thank you to these communities for the engineering and maintenance this project
 relies on. Their licenses and notices remain with the distributed assets; see
 [NOTICE](NOTICE).
 
-Reference: [Official Joomla playground](https://github.com/joomla-projects/joomla-playground/).
+Joomla also maintains an [official Joomla Playground](https://joomla-projects.github.io/joomla-playground/)
+([source](https://github.com/joomla-projects/joomla-playground/)).
+JoomEngine Playground was developed independently and is not based on that
+project's codebase. It uses a different PHP runtime and database architecture,
+with its upstream foundations credited separately above.
 
 ## What is assembled
 

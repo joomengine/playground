@@ -3,6 +3,7 @@ import { createRefreshController } from './refresh.mjs';
 import { mountFileActions } from './file-actions.mjs';
 import { decorateAction, decorateIcons, createIcon } from '../icons.mjs';
 import { syncThemeDocument } from '../theme.mjs';
+import { ownedClientURL } from '../isolation.mjs';
 
 const mutations = new Set(['write', 'batch', 'mkdir', 'copy', 'rename', 'delete', 'recover']);
 let stylesheet;
@@ -29,7 +30,9 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
   const auxiliaryTools = new Set();
   const auxiliaryDocuments = new Set();
   let currentTheme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
-  const shellStylesheet = new URL('./styles.css', import.meta.url).href;
+  const ownedAsset = value => runtime.isolation?.ownerId
+    ? ownedClientURL(value, { ...runtime.isolation, baseURL: new URL('../../', import.meta.url).href }) : value.href;
+  const shellStylesheet = ownedAsset(new URL('./styles.css', import.meta.url));
   const applyTheme = event => {
     currentTheme = event?.detail?.resolved || event?.detail?.theme || document.documentElement.dataset.theme || 'dark';
     for (const doc of auxiliaryDocuments) syncThemeDocument(doc, { resolved: currentTheme, theme: currentTheme });
@@ -285,7 +288,10 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
         cancelFrameLoad = () => { cleanup(); resolve(); };
         frame.onload = () => { cleanup(); resolve(); };
         frame.onerror = () => { cleanup(); reject(new Error('JoomEngine Code assets could not load. Retry opening the editor.')); };
-        frame.src = new URL('../../assets/code/editor.html', import.meta.url).href;
+        const editorURL = new URL('../../assets/code/editor.html', import.meta.url);
+        frame.src = runtime.isolation?.ownerId
+          ? ownedClientURL(editorURL, { ...runtime.isolation, baseURL: new URL('../../', import.meta.url).href })
+          : editorURL.href;
         editor.replaceChildren(frame);
       });
       if (disposed) return;
@@ -293,7 +299,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
       workbench = await frame.contentWindow.JoomEngineCode.mount({
         workspace, siteId: runtime.workspace.id, storageId: runtime.workspace.storageId,
         phpVersion: runtime.configuration.phpVersion,
-        onError: report, t, theme: currentTheme, shellStylesheet, favicon: new URL('../brand/favicon.svg?v=pearl-20261030', import.meta.url).href,
+        onError: report, t, theme: currentTheme, shellStylesheet, favicon: ownedAsset(new URL('../brand/favicon.svg?v=pearl-20261030', import.meta.url)),
         onDetachedTools: mountDetachedTools,
         debuggerBackend: {
           ...Object.fromEntries(['stop', 'setBreakpoints', 'continue', 'next', 'stepIn', 'stepOut', 'pause',
@@ -403,6 +409,7 @@ export async function createCodeHost({ runtime, host, preview, refreshSite, getP
     },
     hide: () => layout.hide(),
     get visible() { return layout.state.visible; },
+    get detached() { return layout.state.detached; },
     refresh: () => refresh.refresh(),
     get closed() { return disposed; },
     async beforeClose() {

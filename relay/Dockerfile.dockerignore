@@ -1,0 +1,11 @@
+**
+!relay/
+!relay/Dockerfile
+!relay/server.mjs
+!relay/public-network.mjs
+!relay/image-validation.mjs
+!relay/config.container.json
+!src/
+!src/public-assets.mjs
+!config/
+!config/public-assets.json

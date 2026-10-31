@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { chromium, firefox } from 'playwright';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
-import { createStaticServer } from './server.mjs';
+import { createStaticServer, prepareBrowserEnvironment } from './server.mjs';
 import { withPinnedCatalog } from './dynamic-catalog-fixture.mjs';
 import { assertBrowserRequestBodies } from './browser-request-contract.mjs';
 import { assertExternalAssets } from './external-assets-contract.mjs';
@@ -270,6 +270,7 @@ async function setPersistence(page, enabled) {
 }
 
 async function showQuickSettings(page) {
+  await page.locator('html[data-playground-environment="ready"]').waitFor();
   if (!(await page.locator('#settings').isVisible())) await page.locator('#settings-toggle').click();
 }
 
@@ -311,12 +312,8 @@ async function openHarness(context, url, { isolation = true } = {}) {
   await page.goto(new URL('__test__.html', url).href);
   if (!isolation) {
     assert.equal(await page.evaluate(() => crossOriginIsolated), false, 'The static host fixture must not supply isolation headers.');
-    const preparation = await page.evaluate(async () => {
-      const { prepareEnvironment } = await import('./src/playground.mjs');
-      return prepareEnvironment();
-    });
-    if (preparation.reloadRequired) await page.reload();
   }
+  await prepareBrowserEnvironment(page);
   assert.equal(await page.evaluate(() => crossOriginIsolated), true, 'The fixture must enable shared memory.');
   return page;
 }
@@ -604,7 +601,8 @@ async function assertAbnormalShutdown(page, config) {
     const fatal = ending.startsWith('throw');
     const step = fatal ? 'intentional PHP fatal request cleanup' : 'intentional PHP exit request cleanup';
     page.testStep = step;
-    const source = new URL('assets/php-cgi-wasm/PhpCgiBase.mjs', page.url()).href;
+    const ownerId = await page.evaluate(() => window.playground.isolation.ownerId);
+    const source = new URL(`__runtime/${encodeURIComponent(ownerId)}/assets/php-cgi-wasm/PhpCgiBase.mjs`, page.url()).href;
     const expectedMessage = fatal
       ? new RegExp(`^\\[[^\\]\\r\\n]+\\] PHP Fatal error:  Uncaught RuntimeException: ${failure} in (/internal/operation-[a-f0-9-]+\\.php):1\\nStack trace:\\n#0 \\{main\\}\\n  thrown in \\1 on line 1\\n$`)
       : /^$/;
@@ -807,6 +805,19 @@ for (const name of browserNames) {
     });
     if (scenarios.includes('deploys')) await runScenario('repository and URL recipes install actual components, languages and prepared content', { timeout: 900_000 }, async () => {
       const context = await withPinnedCatalog(browser);
+      // JCB's optional news feed is not part of the compiler/runtime contract.
+      // Keep its two reviewed requests deterministic instead of depending on a
+      // live social service finishing before the compiler form navigates away.
+      const newsFeeds = new Map([5, 7].map(limit => [
+        `https://joomla.social/api/v1/accounts/112766899254600077/statuses?limit=${limit}`, 0,
+      ]));
+      for (const url of newsFeeds.keys()) await context.route(url, async route => {
+        if (route.request().method() !== 'GET') return route.fallback();
+        newsFeeds.set(url, newsFeeds.get(url) + 1);
+        await route.fulfill({ status: 200, json: [], headers: {
+          'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store',
+        } });
+      });
       const page = await openHarness(context, server.url);
       const proof = [];
       let mcpHttpVerified = false;
@@ -1009,6 +1020,8 @@ for (const name of browserNames) {
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         proof.push({ id: 'jcb', defaultDomainCountdown: true, preparedLaunchMs });
+        for (const [url, requests] of newsFeeds) assert.ok(requests > 0, `The installed JCB must exercise its news feed fixture: ${url}`);
+        proof.push({ id: 'jcb-news-feed-fixture', requests: Object.fromEntries(newsFeeds) });
         await assertCleanConsole(page, { contentImages: true });
         records.push({ ...defaultPair, deploys: proof, knownBrowserDiagnostics: page.knownBrowserDiagnostics, contentDiagnostics: page.contentDiagnostics });
       } catch (error) { await saveBrowserDiagnostics(page, `deploys-${name}`, error); throw error; }

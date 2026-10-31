@@ -1,7 +1,41 @@
+import { resolvePublicAssetURL } from './public-assets.mjs';
+
 export const NESTED_PHP_REQUEST_ERROR = 'Nested HTTP requests to the same running PHP site are not supported by this runtime.';
 
+const publicHeaders = new Set(['accept', 'accept-language']);
+// JCB's fallback cURL helper sets a legacy User-Agent. It is neither an image
+// credential nor a permission source, and is discarded before relay delivery.
+const ignoredPublicHeaders = new Set(['user-agent']);
+
+/** Only anonymous image reads use the relay. Unrelated/authenticated HTTP retains its exact path. */
+export function publicImageFetchOptions(input, init, url, options) {
+  const method = String(init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+  if (!['GET', 'HEAD'].includes(method) || init?.body != null) return null;
+  const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+  if ([...headers.keys()].some(name => !publicHeaders.has(name) && !ignoredPublicHeaders.has(name))) return null;
+  for (const name of ignoredPublicHeaders) headers.delete(name);
+  const credentials = init?.credentials ?? (input instanceof Request ? input.credentials : undefined);
+  if (credentials === 'include' || url.username || url.password) return null;
+  const mapped = resolvePublicAssetURL(url.href, options);
+  if (mapped === url.href) return null;
+  const request = input instanceof Request ? input : undefined;
+  return {
+    url: mapped,
+    init: {
+      ...init,
+      method, headers,
+      ...(request ? { signal: request.signal, cache: request.cache, integrity: request.integrity } : {}),
+      ...(init?.signal ? { signal: init.signal } : {}),
+      ...(init?.cache ? { cache: init.cache } : {}),
+      ...(init?.integrity ? { integrity: init.integrity } : {}),
+      // The SW route performs its own credential-free CORS fetch to the relay.
+      mode: 'same-origin', credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer',
+    },
+  };
+}
+
 /** A recursive request cannot complete while its sole PHP/database session is busy. */
-export function createPhpFetch(fetcher, siteURL, isRequestActive) {
+export function createPhpFetch(fetcher, siteURL, isRequestActive, publicAssets = {}) {
   const site = new URL(siteURL);
   const prefix = `${site.pathname.replace(/\/+$/, '')}/`;
   return async (input, init) => {
@@ -11,6 +45,7 @@ export function createPhpFetch(fetcher, siteURL, isRequestActive) {
       // Reject through native cURL's normal error path, keeping PHP alive.
       throw new TypeError(NESTED_PHP_REQUEST_ERROR);
     }
-    return fetcher(input, init);
+    const mapped = publicImageFetchOptions(input, init, url, publicAssets);
+    return mapped ? fetcher(mapped.url, mapped.init) : fetcher(input, init);
   };
 }

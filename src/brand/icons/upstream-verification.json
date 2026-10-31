@@ -3,7 +3,7 @@
   "release": "v2.5.0",
   "commit": "755818100db4687fd907ecaef9f57cc9ea77d0d8",
   "license": "Apache-2.0",
-  "verification": "All 79 exact supplied originals match the upstream release byte-for-byte.",
+  "verification": "All monochrome originals match the upstream release byte-for-byte.",
   "files": [
     {
       "path": "Business/archive-drawer-line.svg",
@@ -84,6 +84,10 @@
     {
       "path": "Device/cpu-line.svg",
       "sha256": "805bc8a99ac5b34f529730138893eba4537779331c5c9dd56e1e634ffe177bad"
+    },
+    {
+      "path": "Device/database-2-line.svg",
+      "sha256": "2993e013dc0d38a4978b5d7b76f3df593096d5831b2ee0f8408159de8f1c49bf"
     },
     {
       "path": "Device/device-recover-line.svg",

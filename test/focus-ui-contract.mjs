@@ -272,6 +272,10 @@ export async function assertInitialFocusMode(page, url) {
   target.searchParams.set('toolbar', '0');
   target.searchParams.set('start', '0');
   await page.goto(target.href);
+  // Initial controls can render before the service worker's controlled reload.
+  // Exercise one confirmed document, while catalog initialization is still free
+  // to finish after the explicit restore below.
+  await page.locator('html[data-playground-environment="ready"]').waitFor();
   await page.locator('#focus-restore-top').waitFor({ state: 'visible' });
   await assertHiddenControls(page);
   await page.locator('#focus-restore-top').focus();

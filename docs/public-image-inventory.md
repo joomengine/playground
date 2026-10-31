@@ -1,0 +1,94 @@
+# Approved public images
+
+The relay permission list is `config/public-assets.json`, version
+`jcb-2026-10-31-v1`. It contains **31 exact raster-image URLs**, taken from the
+`dynamicContent` metadata in the installed Joomla Component Builder 5.2.0 and
+6.2.0 packages. Both installed helpers contain the same URL/MD5 pairs. Component
+metadata, user deployments and extension updates cannot extend this list.
+
+The sources reviewed were the playground's existing built snapshots:
+
+| Installed site | Snapshot SHA-256 |
+| --- | --- |
+| Joomla 5.4.10 / JCB 5.2.0 | `937ef8ae3b929755008b50add14369b5cad7f69f5f47b917d5662565ee43dc74` |
+| Joomla 6.2.0 / JCB 6.2.0 | `bc729fd768d9f8086fdf492b41e6664f1d9289a8615950d11302a51cb9b09bdb` |
+
+The canonical source member is
+`administrator/components/com_componentbuilder/src/Helper/ComponentbuilderHelper.php`.
+The snapshot identifiers above identify the package artifacts; use the inventory
+script's emitted digest to verify the actual ZIP being inspected. The related
+package archive pins are retained in `deploys/jcb.json`.
+
+| Approved use | Entries | Format | Original source |
+| --- | ---: | --- | --- |
+| Joomla heart banners (wide/tall) | 2 | GIF | Exact `vdm-io/jcb-external` URLs in registry |
+| Joomla Community Magazine banner | 1 | PNG | Exact `JCM_2010_120x600.png` URL in registry |
+| TLWebdesign sponsor banner | 1 | PNG | Exact metadata URL in registry |
+| VDM sponsor banner | 1 | GIF | Exact metadata URL in registry |
+| Agerix sponsor banner | 1 | GIF | Exact `cms-experts.org` metadata URL in registry |
+| Compiler particle animations 1–24 | 24 | GIF | 24 separately approved URLs; no numeric wildcard |
+| Original compiler animation | 1 | GIF | Exact `joomlacomponentbuilder.com` metadata URL in registry |
+
+All entries reject redirects and extra query parameters. Each has an 8 MiB
+response ceiling, the original JCB MD5, a SHA-256 of the verified original
+bytes, and a 15-minute revalidation policy. On 2026-10-31, all 31 canonical URLs
+returned HTTP 200 without redirects, with the expected raster MIME and exactly
+the MD5 recorded in both installed JCB packages. Actual sizes ranged from
+22,596 to 2,940,954 bytes; each entry records its measured size and verification
+date. These URLs are mutable upstream paths. They are **not** advertised as
+immutable, and an upstream change that no longer matches the recorded hashes
+fails until a reviewed registry/package update is made. JCB's existing checksum
+verification remains active after the relay check.
+
+All 31 downloaded originals also pass the relay's full raster-container parser.
+One deliberately reviewed exception is `jcb-builder-22`: its original GIF has a
+valid 229-frame stream followed by 310,076 bytes of raster residue. The registry
+pins its exact SHA-256, trailer offset and total length. Only those exact bytes
+receive the allowance; other GIFs still reject trailing data. The relay preserves
+the complete original file so JCB's metadata checksum remains valid. See the
+relay documentation for the recorded container review.
+
+The source-byte downloads used this environment's standard HTTP transport.
+The real relay's direct DNS/pinned-HTTPS path separately returned `EAI_AGAIN`
+before connection here. Deployments must verify that outbound path against all
+approved IDs before enabling the compatibility release; successful downloads
+through an environment proxy do not establish relay reachability.
+
+The inventory also found references that are deliberately **not approved**:
+
+| Reference | Reason |
+| --- | --- |
+| Four SVG support badges from shields.io/OpenCollective | Runtime SVG relay is excluded. They remain subject to ordinary browser policy; no replacement artwork is supplied. |
+| `are-we-online.gif` heartbeat with a generated query | Connectivity telemetry, not an approved public-content image. |
+| Vue developer-tools favicon string | Development tooling reference; not a supported Joomla/JCB content image. |
+| New images in installed/imported extensions | Require a deliberate registry review; package metadata is not a permission source. |
+
+Reproduce the source inventory with:
+
+```bash
+node scripts/inventory-public-assets.mjs dist/assets/snapshots/jcb-*.zip
+```
+
+This command produces review candidates only. It does not write the permission
+registry. Static references are not proof that every conditional JCB screen has
+requested them; browser evidence must identify the paths actually exercised.
+
+`test/public-assets.browser.mjs` checks actual WebKit/Chromium/Firefox resource
+handling against a fixture HTTPS image host with neither CORS nor CORP. It first
+proves that `require-corp` blocks the original image, then exercises approved
+`src`, `srcset`, `picture`, CSS backgrounds and dynamic images through the service
+worker. It also checks the PHP Fetch adapter's exact response bytes, normal-mode
+zero-relay behavior and bounded relay failure. Set `PUBLIC_ASSET_RUNTIME_DIST=dist`
+to additionally start real PHP 8.4/MariaDB/Joomla under `require-corp` and verify
+the original bytes through native PHP streams and cURL. These native checks
+passed in Linux WebKit 27.2 and Chromium 156.0.8078.4. They do not by themselves
+certify every Joomla/JCB screen or a physical iOS device.
+
+The integration does not rewrite Joomla HTML, stylesheets, metadata or saved
+database records. Approved image requests are intercepted before the original
+network request. The PHP Fetch adapter resolves only anonymous GET/HEAD reads
+of exact approved URLs, outside the virtual PHP route; API calls, credentials,
+unapproved headers and other URLs retain the existing transport. The existing
+JCB fallback still emits its original remote URL, which follows that same
+approved browser path under the confirmed compatibility policy. Cache filenames,
+image-format guards and verified-cache logic are unchanged.

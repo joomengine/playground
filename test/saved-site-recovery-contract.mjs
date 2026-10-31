@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { prepareBrowserEnvironment } from './server.mjs';
 import { randomUUID } from 'node:crypto';
 
 /** Fingerprint actual IDBFS records without retaining a second complete site in memory. */
@@ -168,6 +169,7 @@ echo 'seeded';`);
     competitor = await page.context().newPage();
     competitor.on('pageerror', error => extraPageErrors.push(error.message));
     await competitor.goto(new URL('__test__.html', serverURL).href);
+    await prepareBrowserEnvironment(competitor);
     const collision = await competitor.evaluate(async configuration => {
       const { createPlayground } = await import('./src/playground.mjs');
       try { window.playground = await createPlayground(configuration, { recovery: true }); return 'unexpected success'; }
