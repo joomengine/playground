@@ -340,7 +340,10 @@ function setBusy(value) {
 }
 function progress(event) {
   const details = typeof event === 'string' ? { message: event } : event;
-  const message = details?.message || details?.phase || 'Preparing the playground…';
+  const rawMessage = details?.message || details?.phase || 'Preparing the playground…';
+  const message = details?.phase === 'warning' ? presentError(new Error(rawMessage), {
+    secrets: [$('admin-password').value, runningAdministrator?.password], fallback: 'PHP reported diagnostic output. Check the browser console for details.',
+  }).summary : rawMessage;
   if (details?.phase === 'failed' && runtime && !closing && !busy) {
     destroyPreview();
     displayError(new Error(message));

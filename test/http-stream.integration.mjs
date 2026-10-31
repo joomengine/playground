@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { createNodeRuntime } from '../scripts/node-runtime.mjs';
-import { createPhpFetch } from '../src/php-network.mjs';
+import { NESTED_PHP_REQUEST_ERROR } from '../src/php-network.mjs';
 
 for (const phpVersion of (process.env.PLAYGROUND_PHP_VERSIONS?.split(',') || ['8.3', '8.4', '8.5'])) {
 test(`PHP ${phpVersion}: native HTTP streams preserve bytes, contexts, response headers and timeouts`, { timeout: 60_000 }, async t => {
@@ -25,9 +25,6 @@ test(`PHP ${phpVersion}: native HTTP streams preserve bytes, contexts, response 
   const runtime = await createNodeRuntime({ directory: process.env.PLAYGROUND_DIST, phpVersion });
   t.after(() => runtime.close());
   const base = `http://127.0.0.1:${server.address().port}`;
-  const fetcher = globalThis.fetch;
-  globalThis.fetch = createPhpFetch(fetcher, `${base}/same-site/`, () => true);
-  t.after(() => { globalThis.fetch = fetcher; });
   const result = await runtime.runPhp(`<?php
     $base = '${base}';
     $read = base64_encode(file_get_contents($base . '/binary'));
@@ -63,10 +60,15 @@ test(`PHP ${phpVersion}: native HTTP streams preserve bytes, contexts, response 
     $largeHeaders = get_headers($base . '/headers-only');
     $headerElapsed = microtime(true) - $headerStart;
     $overLimit = @file_get_contents($base . '/headers-only');
-    $recursive = @file_get_contents($base . '/same-site/callback');
+    $recursive = @file_get_contents('${runtime.baseUrl}callback');
+    $recursiveCurl = curl_init('${runtime.baseUrl}callback');
+    curl_setopt($recursiveCurl, CURLOPT_RETURNTRANSFER, true);
+    $recursiveCurlResult = curl_exec($recursiveCurl);
+    $recursiveError = curl_error($recursiveCurl);
+    curl_close($recursiveCurl);
     $remoteFileExists = file_exists($base . '/binary');
     echo json_encode(compact('read', 'post', 'redirect', 'missing', 'errorBody', 'timeout', 'elapsed', 'first', 'again', 'stat', 'customTrust')
-      + compact('localHeaders', 'errorHeaders', 'headerFunction', 'headFunction', 'largeHeaders', 'headerElapsed', 'remoteFileExists', 'retainedContext', 'overLimit', 'recursive')
+      + compact('localHeaders', 'errorHeaders', 'headerFunction', 'headFunction', 'largeHeaders', 'headerElapsed', 'remoteFileExists', 'retainedContext', 'overLimit', 'recursive', 'recursiveCurlResult', 'recursiveError')
       + ['headers' => $meta['wrapper_data'],
       'afterTimeout' => base64_encode(file_get_contents($base . '/binary'))], JSON_THROW_ON_ERROR);
   `);
@@ -93,7 +95,8 @@ test(`PHP ${phpVersion}: native HTTP streams preserve bytes, contexts, response 
   assert.deepEqual(proof.retainedContext, { http: { header: ['X-Proof: retained-context'] } });
   assert.equal(proof.overLimit, false, 'The response must be rejected before exceeding the PHP memory budget.');
   assert.equal(proof.recursive, false);
-  assert.equal(requests.some(request => request.path === '/same-site/callback'), false);
+  assert.equal(proof.recursiveCurlResult, false);
+  assert.ok(proof.recursiveError.includes(NESTED_PHP_REQUEST_ERROR), proof.recursiveError);
   assert.ok(requests.some(request => request.method === 'HEAD'));
   const received = requests.find(request => request.path === '/echo');
   assert.equal(received.method, 'PATCH');

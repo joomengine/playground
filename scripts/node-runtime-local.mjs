@@ -6,6 +6,7 @@ import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeHealthSource,
 import { configurePhpRouting } from '../src/php-routing.mjs';
 import { installPhpRecovery } from '../src/php-recovery.mjs';
 import { applyJcbRuntimeCompatibility } from '../src/jcb-compatibility.mjs';
+import { createPhpFetch } from '../src/php-network.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -31,6 +32,8 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
   let closing = false;
   let failed;
   let closePromise;
+  let requestActive = false;
+  const originalFetch = globalThis.fetch;
   const headersSet = new Set();
   const prefix = `/__site/build/${randomUUID()}/`;
   const baseUrl = `http://localhost${prefix}`;
@@ -87,6 +90,7 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
     php.error = [];
     const original = php.binary;
     applyJcbRuntimeCompatibility(binary, php.docroot);
+    requestActive = true;
     try {
       let response = await php.request({ url: `${url.pathname}${url.search}`, method: input.method, headers, body: inputBody ? new Blob([inputBody]).stream() : null });
       if (php.binary !== original) {
@@ -103,6 +107,7 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
       if (diagnostics) console.warn(`[PHP ${entry.version}] ${diagnostics.slice(0, 8000)}`);
       return response;
     } finally {
+      requestActive = false;
       await databaseRuntime.reset();
     }
   };
@@ -161,11 +166,17 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
       return closePromise ??= (async () => {
         await queue;
         closed = true;
-        try { await databaseRuntime.close(); } finally { php = null; binary = null; }
+        try { await databaseRuntime.close(); } finally {
+          php = null; binary = null;
+          globalThis.fetch = originalFetch;
+        }
       })();
     },
   };
   try {
+    // This runtime owns its worker's fetch function. Install the same recursive
+    // request guard as the browser here, where native cURL actually runs.
+    globalThis.fetch = createPhpFetch(originalFetch.bind(globalThis), baseUrl, () => requestActive);
     const adapter = createPhpWasmAdapter(databaseRuntime.hostCalls, { shimUrl: new URL('./php-wasm.php', assetURL(manifest.bridge.adapterUrl)) });
     php = new PhpCgiNode({
       ...adapter, phpArgs: { ...adapter.phpArgs, getRandomValue: runtimeRandomValue }, version: entry.version, prefix, docroot: raw.documentRoot, persist: [], staticFS: true, autoTransaction: false,

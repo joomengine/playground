@@ -79,11 +79,12 @@ test('manual Service Directory package keeps normal PHP settings and installs ev
     const manifestURL = new URL('assets/manifest.json', runtime.assetBaseUrl);
     const deployCatalog = await loadDeployCatalog({ url: new URL(runtime.manifest.deploys.url, manifestURL), fetcher: runtime.fetchAsset });
     const shared = { catalog, deployCatalog, baseURL: runtime.assetBaseUrl, fetcher: runtime.fetchAsset };
+    const administrator = { name: 'Manual Package Administrator', username: 'admin', email: 'admin@example.test', password: `Manual-${crypto.randomUUID()}!` };
     const { configuration: preset } = await resolveDeployConfiguration({ deployId: 'servicedirectory',
-      joomlaVersion: release.version, phpVersion: '8.4' }, shared);
+      joomlaVersion: release.version, phpVersion: '8.4', admin: administrator }, shared);
     const { configuration } = await resolveDeployConfiguration({ deployId: 'blank', joomlaVersion: release.version,
       phpVersion: '8.4', persistence: false, fresh: true, extensions: preset.extensions,
-      admin: { name: 'Manual Package Administrator', username: 'admin', email: 'admin@example.test', password: `Manual-${crypto.randomUUID()}!` },
+      admin: administrator,
     }, shared);
     assert.equal(configuration.phpSettings.max_execution_time, 60, 'Entering a package URL must not import the preset PHP settings.');
     assert.equal(configuration.menus.length, 0, 'This exercises manual package entry, not the Service Directory preset.');
