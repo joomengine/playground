@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "The operation could not finish. Open Technical details for more information.",
+  "title.technicalDetails": "Technical details",
+  "help.temporaryRetry": "This temporary deployment is incomplete. Try again creates a new temporary site. Saved-site recovery and reset are available only when saving is enabled.",
+  "help.savedRetry": "This saved deployment may be incomplete. Recover the saved site to inspect it, or use a new site key for a fresh deployment. Reset and launch deletes this site after confirmation.",
+  "action.downloadDiagnostics": "Download diagnostic log",
   "help.codeCredits": "JoomEngine Code includes Microsoft VS Code/Monaco, CodinGame, PHP/phpdbg, Sean Morris’s PHP-WASM and Emscripten.",
   "license.codeInventory": "Language, grammar, theme and icon contributors are credited in the bundled dependency inventory.",
   "help.codeEncoding": "jschardet 3.1.4 is © Netscape Communications Corporation and contributors, ported by António Afonso, under LGPL-2.1-or-later.",

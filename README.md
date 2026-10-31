@@ -332,6 +332,24 @@ is verified before installation; repository packages always have pinned digests.
 When a host blocks downloads, provide a permitted URL or stage the package on the
 playground origin. There is no public download proxy.
 
+Each extension, template or language ZIP installed by the deployment helper gets
+180 seconds of PHP execution time and a 210-second host deadline. The allowance
+is applied only to that installer request: ordinary page requests and Joomla's
+administrator upload interface retain the selected PHP settings (60 seconds by
+default). Preset and manually supplied packages use the same installation policy.
+A timeout stops setup without replaying the installer or marking the site ready;
+the partially installed site requires recovery or a fresh deployment.
+
+JavaScript callers of `installExtension(runtime, bytes, options)` can set
+`executionTimeSeconds` to an integer from 5 to 300. Its default is independent of
+`phpSettings.max_execution_time`, so an explicit smaller installation allowance
+is respected. Optional `timeoutMs` must allow at least 30 seconds beyond that PHP
+allowance and cannot exceed 600,000 milliseconds. Invalid or contradictory
+budgets are rejected before the package is written. Host deadlines start when
+the operation leaves the runtime queue, and a host timeout terminates the PHP
+worker in both browser and Node build runtimes. Raising only `timeoutMs` does not
+raise PHP's execution allowance.
+
 Shared configurations with custom packages, commands or site content pause for
 review before launching. Installed code shares the playground origin and can access
 other sites saved on that origin; separate site keys are an organizational feature.

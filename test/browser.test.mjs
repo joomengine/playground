@@ -208,7 +208,19 @@ function observePage(page) {
 }
 
 async function saveBrowserDiagnostics(page, name, error) {
-  const state = await page.evaluate(() => {
+  const destination = path.join(root, 'test-results');
+  const filename = path.join(destination, `${name}-failure.json`);
+  const diagnostics = {
+    message: error.stack || error.message, step: page.testStep,
+    state: { unavailable: 'Browser state probe pending.' },
+    frames: page.frames().map(frame => ({ url: frame.url(), state: { unavailable: 'Frame probe pending.' } })),
+    errors: page.errors, logs: page.logs?.slice(-30), consoleErrors: page.consoleErrors, knownBrowserDiagnostics: page.knownBrowserDiagnostics, contentDiagnostics: page.contentDiagnostics, failedSiteRequests: page.failedSiteRequests, failedRequests: page.failedRequests,
+    responseErrors: page.responseErrors, frameNavigations: page.frameNavigations, pendingSiteRequests: [...(page.pendingSiteRequests?.values() || [])],
+  };
+  // Host-side evidence must survive even when a browser evaluation never settles.
+  await mkdir(destination, { recursive: true });
+  await writeFile(filename, `${JSON.stringify(diagnostics, null, 2)}\n`);
+  diagnostics.state = await bounded(page.evaluate(() => {
     const text = (id) => document.getElementById(id)?.textContent;
     const frame = document.getElementById('site-frame') || document.getElementById('site');
     return {
@@ -222,20 +234,15 @@ async function saveBrowserDiagnostics(page, name, error) {
       iframe: frame ? { src: frame.getAttribute('src'), hidden: frame.hidden, connected: frame.isConnected } : null,
       progress: window.validationProgress,
     };
-  }).catch((failure) => ({ unavailable: failure.message }));
-  const frames = await Promise.all(page.frames().map(async (frame) => ({
-    url: frame.url(), state: await frame.evaluate(() => ({ readyState: document.readyState,
+  }), 'Diagnostic page probe', 3000).catch((failure) => ({ unavailable: failure.message }));
+  diagnostics.frames = await Promise.all(page.frames().map(async (frame) => ({
+    url: frame.url(), state: await bounded(frame.evaluate(() => ({ readyState: document.readyState,
       body: document.body?.innerText.slice(0, 2000), title: document.title,
-    })).catch((failure) => ({ unavailable: failure.message })),
+    })), 'Diagnostic frame probe', 3000).catch((failure) => ({ unavailable: failure.message })),
   })));
-  const diagnostics = {
-    message: error.stack || error.message, step: page.testStep, state, frames,
-    errors: page.errors, logs: page.logs?.slice(-30), consoleErrors: page.consoleErrors, knownBrowserDiagnostics: page.knownBrowserDiagnostics, contentDiagnostics: page.contentDiagnostics, failedSiteRequests: page.failedSiteRequests, failedRequests: page.failedRequests,
-    responseErrors: page.responseErrors, frameNavigations: page.frameNavigations, pendingSiteRequests: [...(page.pendingSiteRequests?.values() || [])],
-  };
-  await mkdir(path.join(root, 'test-results'), { recursive: true });
-  await writeFile(path.join(root, 'test-results', `${name}-failure.json`), `${JSON.stringify(diagnostics, null, 2)}\n`);
-  await page.screenshot({ path: path.join(root, 'test-results', `${name}-failure.png`), fullPage: true }).catch(() => {});
+  await writeFile(filename, `${JSON.stringify(diagnostics, null, 2)}\n`);
+  await bounded(page.screenshot({ path: path.join(destination, `${name}-failure.png`), fullPage: true, timeout: 5000 }),
+    'Diagnostic screenshot', 5500).catch(() => {});
   console.error(JSON.stringify({ diagnostic: name, ...diagnostics }));
 }
 
@@ -633,10 +640,31 @@ for (const name of browserNames) {
   test(`${name}: real Joomla, upstream PHP and native MariaDB PDO`, { timeout: 1_800_000 }, async (t) => {
     const runScenario = async (title, options, execute) => {
       let failure;
+      let completed = false;
+      let abortCleanup;
+      const existingContexts = new Set(browser.contexts());
       await t.test(title, options, async context => {
-        try { await execute(context); } catch (error) { failure = error; throw error; }
+        const onAbort = () => {
+          if (completed || failure) return;
+          failure = new Error(`Browser scenario did not complete: ${title}`, { cause: context.signal.reason });
+          // A node:test timeout does not cancel a pending Playwright operation.
+          // Capture bounded evidence, then close this scenario's contexts to stop it.
+          abortCleanup = Promise.allSettled(browser.contexts().filter(value => !existingContexts.has(value)).map(async (value, index) => {
+            try {
+              await Promise.allSettled(value.pages().map((page, pageIndex) =>
+                saveBrowserDiagnostics(page, `timeout-${name}-${index}-${pageIndex}`, failure)));
+            } finally { await bounded(value.close(), 'Timed-out browser context cleanup', 10_000).catch(() => {}); }
+          }));
+        };
+        context.signal.addEventListener('abort', onAbort, { once: true });
+        try { await execute(context); completed = true; }
+        catch (error) { failure ??= error; throw error; }
+        finally { context.signal.removeEventListener('abort', onAbort); }
       });
+      await abortCleanup;
       if (failure) throw failure;
+      // t.test reports child cancellation without rejecting its returned promise.
+      if (!completed) throw new Error(`Browser scenario did not complete: ${title}`);
     };
     const executablePath = process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`];
     const browser = await browsers[name].launch({ headless: true, ...(executablePath ? { executablePath } : {}),
@@ -863,6 +891,37 @@ for (const name of browserNames) {
           proof.push({ ...item, administrator: true });
           await close(page);
         }
+        page.testStep = 'manual Service Directory URL installs all city data with default PHP settings';
+        const servicePackage = await page.evaluate(async () => {
+          const { parseCatalog } = await import('./src/config.mjs');
+          const { loadDeployCatalog, resolveDeployConfiguration } = await import('./src/deploys.mjs');
+          const catalog = parseCatalog(await (await fetch('./assets/manifest.json')).json());
+          const deployCatalog = await loadDeployCatalog();
+          const release = catalog.joomla.find(item => item.version.startsWith('6.'));
+          const { configuration } = await resolveDeployConfiguration({ deployId: 'servicedirectory',
+            joomlaVersion: release.version, phpVersion: '8.4',
+            admin: { password: `Manual-${crypto.randomUUID()}!` },
+          }, { catalog, deployCatalog, baseURL: location.href });
+          return { extensions: configuration.extensions, joomlaVersion: release.version };
+        });
+        const manualService = await startDeploy(page, new URLSearchParams({ deploy: 'blank',
+          joomla: servicePackage.joomlaVersion, php: '8.4', fresh: '1',
+        }).toString(), { ...setup(), extensions: servicePackage.extensions });
+        assert.equal(manualService.configuration.phpSettings.max_execution_time, 60,
+          'A manually supplied package must install without inheriting preset PHP settings.');
+        assert.equal(manualService.configuration.menus.length, 0);
+        const serviceData = await phpJSON(page, `${PDO}
+          echo json_encode(['cities' => (int) $db->query('SELECT COUNT(*) FROM jml_servicedirectory_city')->fetchColumn(),
+            'states' => (int) $db->query('SELECT COUNT(*) FROM jml_servicedirectory_state')->fetchColumn(),
+            'executionTime' => (int) ini_get('max_execution_time'),
+            'state' => json_decode(file_get_contents('/persist/meta/joomla-install.json'), true)['state']], JSON_THROW_ON_ERROR);`);
+        assert.deepEqual(serviceData, { cities: 151233, states: 5073, executionTime: 60, state: 'complete' });
+        const servicePage = await request(page, '/administrator/index.php?option=com_servicedirectory&view=cities');
+        assert.equal(servicePage.status, 200, servicePage.text.slice(0, 1000));
+        assert.match(servicePage.text, /com_servicedirectory/);
+        assert.doesNotMatch(servicePage.text, /name=["']passwd["']|Fatal error|Uncaught (?:Error|Exception)|Call to undefined function/i);
+        proof.push({ id: 'manual-servicedirectory', ...serviceData, administrator: true });
+        await close(page);
         page.testStep = 'Dutch URL recipe with explicit logged-out session and extension command';
         const dutch = await startDeploy(page, new URLSearchParams({
           deploy: 'blank', joomla: '5.4', php: defaultPair.phpVersion, language: 'nl-NL', login: 'no',

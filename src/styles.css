@@ -193,3 +193,5 @@ html,body{background:var(--canvas);color:var(--ink)}
   .je-icon{fill:currentColor}
   button:disabled .je-icon{fill:GrayText}
 }
+
+#error-technical-details{margin-block:18px;max-width:100%;font-size:12px}#error-technical-details summary{cursor:pointer;color:var(--muted)}#error-diagnostics{max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--control);padding:12px;border:1px solid var(--line);border-radius:6px;font-size:11px;line-height:1.5}

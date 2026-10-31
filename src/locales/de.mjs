@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "Der Vorgang konnte nicht abgeschlossen werden. Weitere Informationen finden Sie unter Technische Details.",
+  "title.technicalDetails": "Technische Details",
+  "help.temporaryRetry": "Diese temporäre Bereitstellung ist unvollständig. Erneut versuchen erstellt eine neue temporäre Website. Wiederherstellung und Zurücksetzen gespeicherter Websites sind nur bei aktiviertem Speichern verfügbar.",
+  "help.savedRetry": "Diese gespeicherte Bereitstellung ist möglicherweise unvollständig. Stellen Sie die gespeicherte Website zur Prüfung wieder her oder verwenden Sie für eine neue Bereitstellung einen neuen Website-Schlüssel. Zurücksetzen und starten löscht diese Website nach Bestätigung.",
+  "action.downloadDiagnostics": "Diagnoseprotokoll herunterladen",
   "code.aiPanel.omittedScope": "Außerhalb des ausgewählten Umfangs oder durch deine Einstellungen ausgeschlossen.",
   "code.aiPanel.omittedFile": "Diese Datei konnte nicht einbezogen werden. Wähle eine unterstützte Textdatei an ihrem ursprünglichen Pfad im Arbeitsbereich.",
   "code.aiPanel.connections": "Gespeicherte benutzerdefinierte Verbindungen",

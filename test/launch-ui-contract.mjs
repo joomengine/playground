@@ -62,8 +62,14 @@ export async function assertFailedDeploymentRecovery(page, url) {
   await (await accepted).accept();
   await acceptedClick;
   await page.locator('#error-view:not([hidden])').waitFor({ timeout: 120_000 });
-  assert.match(await page.locator('#error-message').innerText(), /Extension download failed: HTTP 404/);
-  assert.equal(await page.locator('#header-feedback').isVisible(), true);
+  const failure = await page.locator('#error-message').innerText();
+  assert.ok(failure.includes(new URL('missing-recovery-contract.zip', url).href), 'Download errors identify the failed package.');
+  assert.match(failure, /download failed\. HTTP 404\./);
+  assert.doesNotMatch(failure, /<!DOCTYPE|<html|<style|__JOOMENGINE_RESULT__/i);
+  assert.equal(await page.locator('#header-feedback').isVisible(), false, 'The error summary must not be repeated in a persistent banner.');
+  assert.equal(await page.locator('#error-technical-details').isVisible(), true);
+  assert.equal(await page.locator('#error-technical-details').getAttribute('open'), null, 'Diagnostics are collapsed initially.');
+  assert.match(await page.locator('#error-diagnostics').textContent(), /HTTP 404/);
 
   await page.locator('#recover-button').click();
   await page.locator('#repair-button:not([hidden]):enabled').waitFor({ timeout: 60_000 });

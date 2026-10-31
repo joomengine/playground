@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "No se pudo completar la operación. Abre los detalles técnicos para obtener más información.",
+  "title.technicalDetails": "Detalles técnicos",
+  "help.temporaryRetry": "Este despliegue temporal está incompleto. Volver a intentar crea un nuevo sitio temporal. La recuperación y el restablecimiento de sitios guardados solo están disponibles cuando se activa el guardado.",
+  "help.savedRetry": "Este despliegue guardado puede estar incompleto. Recupera el sitio guardado para revisarlo o usa una nueva clave de sitio para un nuevo despliegue. Restablecer e iniciar elimina este sitio tras la confirmación.",
+  "action.downloadDiagnostics": "Descargar registro de diagnóstico",
   "code.aiPanel.omittedScope": "Fuera del ámbito seleccionado o excluido por tus ajustes.",
   "code.aiPanel.omittedFile": "No se pudo incluir este archivo. Elige un archivo de texto compatible en su ruta original del espacio de trabajo.",
   "code.aiPanel.connections": "Conexiones personalizadas guardadas",

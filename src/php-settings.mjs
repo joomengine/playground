@@ -21,6 +21,23 @@ export const DEFAULT_PHP_SETTINGS = Object.freeze({
 
 export const MAX_HTTP_BODY_BYTES = 320 * 1024 * 1024;
 
+/** Package installation has its own allowance; ordinary page requests keep theirs.
+ * An explicit operation allowance wins over the default, including values below
+ * 180 seconds. Queue waiting is excluded from the host deadline. The extra 30
+ * seconds lets PHP finish shutdown/error reporting before the host stops it.
+ */
+export function installationBudget({ executionTimeSeconds = 180, timeoutMs } = {}) {
+  if (!Number.isInteger(executionTimeSeconds) || executionTimeSeconds < 5 || executionTimeSeconds > 300) {
+    throw new RangeError('Installation execution time must be between 5 and 300 seconds.');
+  }
+  const minimumTimeout = (executionTimeSeconds + 30) * 1000;
+  const deadline = timeoutMs ?? minimumTimeout;
+  if (!Number.isInteger(deadline) || deadline < minimumTimeout || deadline > 600_000) {
+    throw new RangeError(`Installation timeout must be between ${minimumTimeout} and 600000 milliseconds, including 30 seconds for cleanup.`);
+  }
+  return { executionTimeSeconds, timeoutMs: deadline };
+}
+
 export function normalizePhpSettings(input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('PHP settings must be an object.');
   const allowed = new Set(PHP_SETTING_FIELDS.map(field => field.name));

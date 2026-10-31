@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "작업을 완료하지 못했습니다. 자세한 내용은 기술 정보를 열어 확인하세요.",
+  "title.technicalDetails": "기술 정보",
+  "help.temporaryRetry": "이 임시 배포는 완료되지 않았습니다. 다시 시도하면 새 임시 사이트가 만들어집니다. 저장된 사이트의 복구와 초기화는 저장이 활성화된 경우에만 사용할 수 있습니다.",
+  "help.savedRetry": "이 저장된 배포는 완료되지 않았을 수 있습니다. 저장된 사이트를 복구하여 확인하거나 새 사이트 키로 새로 배포하세요. 초기화 후 시작은 확인 후 이 사이트를 삭제합니다.",
+  "action.downloadDiagnostics": "진단 로그 다운로드",
   "help.codeCredits": "JoomEngine Code에는 Microsoft VS Code/Monaco, CodinGame, PHP/phpdbg, Sean Morris의 PHP-WASM, Emscripten이 포함되어 있습니다.",
   "license.codeInventory": "언어, 문법, 테마, 아이콘 기여자는 함께 제공되는 의존성 목록에 명시되어 있습니다.",
   "help.codeEncoding": "jschardet 3.1.4의 저작권은 © Netscape Communications Corporation 및 기여자에게 있으며, António Afonso가 이식했고 LGPL-2.1-or-later에 따라 제공됩니다.",

@@ -11,6 +11,7 @@ import { connectFrame } from './frame-view.mjs';
 import { DEFAULT_PHP_SETTINGS, normalizePhpSettings } from './php-settings.mjs';
 import { UI_LANGUAGES, getLocale, initializeLocale, setLocale, t } from './i18n.mjs';
 import { createLaunchCountdown, deploymentNeedsReview } from './launch-countdown.mjs';
+import { presentError } from './error-presentation.mjs';
 
 const $ = (id) => document.getElementById(id);
 const deploymentURL = new URL('../', import.meta.url).href;
@@ -339,7 +340,10 @@ function setBusy(value) {
 }
 function progress(event) {
   const details = typeof event === 'string' ? { message: event } : event;
-  const message = details?.message || details?.phase || 'Preparing the playground…';
+  const rawMessage = details?.message || details?.phase || 'Preparing the playground…';
+  const message = details?.phase === 'warning' ? presentError(new Error(rawMessage), {
+    secrets: [$('admin-password').value, runningAdministrator?.password], fallback: 'PHP reported diagnostic output. Check the browser console for details.',
+  }).summary : rawMessage;
   if (details?.phase === 'failed' && runtime && !closing && !busy) {
     destroyPreview();
     displayError(new Error(message));
@@ -355,12 +359,20 @@ function progress(event) {
   activity(message);
 }
 function displayError(error, title = t('title.error')) {
+  const presentation = presentError(error, {
+    secrets: [$('admin-password').value, runningAdministrator?.password], fallback: t('error.operationFailed'),
+  });
   $('error-title').textContent = title;
-  $('error-message').textContent = messageOf(error);
+  $('error-message').textContent = presentation.summary;
+  $('error-technical-details').hidden = !presentation.details;
+  $('error-technical-details').open = false;
+  $('error-diagnostics').textContent = presentation.details;
+  $('error-recovery-help').textContent = t(fields.persistence.checked ? 'help.savedRetry' : 'help.temporaryRetry');
+  $('error-recovery-help').hidden = !error?.phase;
   $('preview-dot').className = 'status-dot failed';
-  feedback(error, { error: true, persistent: true });
+  clearFeedback();
   show('error-view');
-  activity(error);
+  activity(presentation.summary);
   $('error-view').focus();
 }
 async function recoverSite() {
@@ -766,6 +778,13 @@ async function changeProfile() {
 $('launch-form').addEventListener('submit', (event) => { event.preventDefault(); void launch(); });
 $('embedded-launch').addEventListener('click', () => void launch());
 $('retry-button').addEventListener('click', async () => { if (runtime && !await closeSite()) return; await launch(); });
+$('download-error-diagnostics').addEventListener('click', () => {
+  const contents = [$('error-message').textContent, $('error-diagnostics').textContent].join('\n\n');
+  const url = URL.createObjectURL(new Blob([contents], { type: 'text/plain;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url; link.download = 'joomengine-installation-diagnostics.txt'; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
 $('code-button').addEventListener('click', () => { void openCode(); });
 $('code-refresh-button').addEventListener('click', () => { void codeHost?.refresh().catch(error => feedback(error, { error: true, persistent: true })); });
 $('close-button').addEventListener('click', () => { if (runtime && !currentConfig.persistence && !confirm(t('confirm.temporary'))) return; void closeSite(); });

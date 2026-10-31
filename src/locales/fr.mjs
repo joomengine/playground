@@ -1,4 +1,9 @@
 export default Object.freeze({
+  "error.operationFailed": "L’opération n’a pas pu se terminer. Ouvrez les détails techniques pour en savoir plus.",
+  "title.technicalDetails": "Détails techniques",
+  "help.temporaryRetry": "Ce déploiement temporaire est incomplet. Réessayer crée un nouveau site temporaire. La récupération et la réinitialisation des sites enregistrés ne sont disponibles que si l’enregistrement est activé.",
+  "help.savedRetry": "Ce déploiement enregistré est peut-être incomplet. Récupérez le site enregistré pour l’examiner, ou utilisez une nouvelle clé de site pour un nouveau déploiement. Réinitialiser et lancer supprime ce site après confirmation.",
+  "action.downloadDiagnostics": "Télécharger le journal de diagnostic",
   "code.aiPanel.omittedScope": "Hors du périmètre sélectionné ou exclu par vos paramètres.",
   "code.aiPanel.omittedFile": "Ce fichier n’a pas pu être inclus. Choisissez un fichier texte pris en charge à son emplacement d’origine dans l’espace de travail.",
   "code.aiPanel.connections": "Connexions personnalisées enregistrées",

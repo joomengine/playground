@@ -1,5 +1,6 @@
 <?php
 try {
+    playgroundInstallationAllowance($playground);
     $root = playgroundRoot($playground);
     if (!is_file($root . '/configuration.php')) {
         throw new RuntimeException('Install Joomla before running a command.');

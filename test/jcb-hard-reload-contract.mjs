@@ -38,7 +38,10 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
     return result;
   };
   const saveJoomla = async task => {
-    await frame.evaluate(async () => { await document.fonts.ready; });
+    // FontFaceSet.ready has no Playwright deadline and can remain pending when
+    // a browser loses a font request across a hard reload. Keep the readiness
+    // assertion, but fail with a bounded browser wait so diagnostics can run.
+    await frame.waitForFunction(() => document.fonts.status === 'loaded', undefined, { timeout: 30_000 });
     const from = page.consoleErrors?.length ?? 0;
     const traceFrom = await startRedirectTrace(page);
     const [response] = await Promise.all([
@@ -114,9 +117,14 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
   }
   page.testStep = 'restore the prepared JCB site name after hard-reload validation';
   await frame.goto(adminPage('option=com_config'), { waitUntil: 'load', timeout });
+  page.testStep = 'restore JCB site name: edit the global configuration form';
   await frame.locator('#jform_sitename').fill(originalSiteName);
+  page.testStep = 'restore JCB site name: save the global configuration form';
   await saveJoomla('application.apply');
+  assert.equal(await frame.locator('#jform_sitename').inputValue(), originalSiteName);
+  page.testStep = 'restore JCB site name: reopen the component dashboard';
   await frame.goto(new URL(`.${initialPath}`, siteBase()).href, { waitUntil: 'load', timeout });
+  page.testStep = 'restore JCB site name: wait for dashboard responses';
   await waitForDashboard();
   return { preparedJcb: true, hardReloadsWithoutClose: 2, committedRecord: true, savedConfigurationFile: true, administrator: true };
 }

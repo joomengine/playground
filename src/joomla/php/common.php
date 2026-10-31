@@ -38,6 +38,21 @@ function playgroundRoot(array $options): string
     return $root;
 }
 
+/** Change only this CGI request, before Joomla or package installer hooks run. */
+function playgroundInstallationAllowance(array $options): void
+{
+    if (!array_key_exists('installationExecutionTimeSeconds', $options)) {
+        return;
+    }
+    $seconds = $options['installationExecutionTimeSeconds'];
+    if (!is_int($seconds) || $seconds < 5 || $seconds > 300) {
+        throw new InvalidArgumentException('Installation execution time must be between 5 and 300 seconds.');
+    }
+    if (!set_time_limit($seconds) || (int) ini_get('max_execution_time') !== $seconds) {
+        throw new RuntimeException('PHP could not apply the installation execution allowance.');
+    }
+}
+
 function playgroundValidateArchive(string $path, int $maximumEntries = 50000): ZipArchive
 {
     if ($maximumEntries < 1 || $maximumEntries > 100000) throw new InvalidArgumentException('Invalid ZIP entry limit.');
