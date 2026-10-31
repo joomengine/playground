@@ -805,6 +805,19 @@ for (const name of browserNames) {
     });
     if (scenarios.includes('deploys')) await runScenario('repository and URL recipes install actual components, languages and prepared content', { timeout: 900_000 }, async () => {
       const context = await withPinnedCatalog(browser);
+      // JCB's optional news feed is not part of the compiler/runtime contract.
+      // Keep its two reviewed requests deterministic instead of depending on a
+      // live social service finishing before the compiler form navigates away.
+      const newsFeeds = new Map([5, 7].map(limit => [
+        `https://joomla.social/api/v1/accounts/112766899254600077/statuses?limit=${limit}`, 0,
+      ]));
+      for (const url of newsFeeds.keys()) await context.route(url, async route => {
+        if (route.request().method() !== 'GET') return route.fallback();
+        newsFeeds.set(url, newsFeeds.get(url) + 1);
+        await route.fulfill({ status: 200, json: [], headers: {
+          'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store',
+        } });
+      });
       const page = await openHarness(context, server.url);
       const proof = [];
       let mcpHttpVerified = false;
@@ -1007,6 +1020,8 @@ for (const name of browserNames) {
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         proof.push({ id: 'jcb', defaultDomainCountdown: true, preparedLaunchMs });
+        for (const [url, requests] of newsFeeds) assert.ok(requests > 0, `The installed JCB must exercise its news feed fixture: ${url}`);
+        proof.push({ id: 'jcb-news-feed-fixture', requests: Object.fromEntries(newsFeeds) });
         await assertCleanConsole(page, { contentImages: true });
         records.push({ ...defaultPair, deploys: proof, knownBrowserDiagnostics: page.knownBrowserDiagnostics, contentDiagnostics: page.contentDiagnostics });
       } catch (error) { await saveBrowserDiagnostics(page, `deploys-${name}`, error); throw error; }
