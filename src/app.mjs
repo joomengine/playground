@@ -1462,6 +1462,9 @@ async function initialize() {
       activity(environment.reason);
       location.replace(environment.reloadURL); return;
     }
+    // This document will not navigate again for bootstrap. Keep shell interaction
+    // checks distinct from the later asynchronous catalog/runtime readiness.
+    document.documentElement.dataset.playgroundEnvironment = 'ready';
     if (environment.diagnostic) activity(environment.diagnostic);
     $('admin-password').value = password();
     const [manifest, recipes] = await Promise.all([

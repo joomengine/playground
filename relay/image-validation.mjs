@@ -64,7 +64,7 @@ function validJPEG(bytes) {
   return false;
 }
 
-function validGIF(bytes) {
+function validGIF(bytes, reviewedTail) {
   if (bytes.length < 14 || !['GIF87a', 'GIF89a'].includes(bytes.toString('ascii', 0, 6)) || !validDimensions(bytes.readUInt16LE(6), bytes.readUInt16LE(8))) return false;
   let offset = 13 + (bytes[10] & 128 ? 3 * (1 << ((bytes[10] & 7) + 1)) : 0), image = false;
   const skipBlocks = () => {
@@ -78,7 +78,8 @@ function validGIF(bytes) {
   };
   while (offset < bytes.length) {
     const tag = bytes[offset++];
-    if (tag === 59) return image && offset === bytes.length;
+    if (tag === 59) return image && (offset === bytes.length || reviewedTail
+      && reviewedTail.trailerOffset === offset - 1 && reviewedTail.byteLength === bytes.length);
     if (tag === 33) { offset++; if (!skipBlocks()) return false; continue; }
     if (tag !== 44 || offset + 9 > bytes.length) return false;
     if (!validDimensions(bytes.readUInt16LE(offset + 4), bytes.readUInt16LE(offset + 6))) return false;
@@ -132,8 +133,17 @@ function matchesHash(bytes, algorithm, expected) {
 /** Validates containers and metadata without decoding/recompressing image pixels. */
 export function validateImageBytes(bytes, asset, mime = asset.mime) {
   if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > asset.maxBytes) throw new RelayError('image-too-large', 413);
+  let reviewedTail;
+  if (asset.validation?.gifTrailingData && asset.mime === 'image/gif' && /^[a-f0-9]{64}$/.test(asset.sha256 ?? '')) {
+    // A reviewed upstream GIF has a valid terminated animation followed by
+    // raster residue. Permit only the exact approved bytes, trailer and length;
+    // this never enables generic trailing data or changes the returned bytes.
+    if (!matchesHash(bytes, 'sha256', asset.sha256)) throw new RelayError('image-checksum-mismatch', 422);
+    reviewedTail = asset.validation.gifTrailingData;
+  }
   const validators = { 'image/png': validPNG, 'image/jpeg': validJPEG, 'image/gif': validGIF, 'image/webp': validWEBP };
-  if (mime !== asset.mime || !validators[mime]?.(bytes)) throw new RelayError('invalid-image', 422);
+  const valid = mime === 'image/gif' ? validGIF(bytes, reviewedTail) : validators[mime]?.(bytes);
+  if (mime !== asset.mime || !valid) throw new RelayError('invalid-image', 422);
   if (!matchesHash(bytes, 'sha256', asset.sha256) || !matchesHash(bytes, 'md5', asset.md5)) throw new RelayError('image-checksum-mismatch', 422);
   return createHash('sha256').update(bytes).digest('hex');
 }

@@ -47,6 +47,16 @@ export function validatePublicAssetRegistry(input) {
     asset.redirects.forEach(canonicalPublicAssetURL);
     if (asset.sha256 !== undefined && !/^[a-f0-9]{64}$/.test(asset.sha256)) throw new TypeError(`Invalid SHA-256: ${asset.id}.`);
     if (asset.md5 !== undefined && !/^[a-f0-9]{32}$/.test(asset.md5)) throw new TypeError(`Invalid source MD5: ${asset.id}.`);
+    if (asset.validation !== undefined) {
+      record(asset.validation, 'Reviewed image validation');
+      const tail = record(asset.validation.gifTrailingData, 'Reviewed GIF trailing data');
+      if (Object.keys(asset.validation).length !== 1 || Object.keys(tail).some(key => !['trailerOffset', 'byteLength'].includes(key))
+        || asset.mime !== 'image/gif' || !asset.sha256 || !Number.isSafeInteger(tail.trailerOffset)
+        || !Number.isSafeInteger(tail.byteLength) || tail.trailerOffset < 13
+        || tail.byteLength <= tail.trailerOffset + 1 || tail.byteLength > asset.maxBytes) {
+        throw new TypeError(`Invalid reviewed GIF trailing-data allowance: ${asset.id}.`);
+      }
+    }
     record(asset.cache, 'Public image cache');
     if (!['pinned', 'revalidate'].includes(asset.updatePolicy)
       || typeof asset.cache.immutable !== 'boolean' || !Number.isSafeInteger(asset.cache.maxAgeSeconds)

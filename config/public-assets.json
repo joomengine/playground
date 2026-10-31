@@ -783,7 +783,13 @@
         "verifiedAt": "2026-10-31",
         "verifiedBytes": 2478724
       },
-      "sha256": "0013bf931f6ac48f9c1a6e72e80c7f71d2deddb87eae0d5e86914f0fbcfb47bd"
+      "sha256": "0013bf931f6ac48f9c1a6e72e80c7f71d2deddb87eae0d5e86914f0fbcfb47bd",
+      "validation": {
+        "gifTrailingData": {
+          "trailerOffset": 2168647,
+          "byteLength": 2478724
+        }
+      }
     },
     {
       "id": "jcb-builder-23",

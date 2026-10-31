@@ -270,6 +270,7 @@ async function setPersistence(page, enabled) {
 }
 
 async function showQuickSettings(page) {
+  await page.locator('html[data-playground-environment="ready"]').waitFor();
   if (!(await page.locator('#settings').isVisible())) await page.locator('#settings-toggle').click();
 }
 
@@ -600,7 +601,8 @@ async function assertAbnormalShutdown(page, config) {
     const fatal = ending.startsWith('throw');
     const step = fatal ? 'intentional PHP fatal request cleanup' : 'intentional PHP exit request cleanup';
     page.testStep = step;
-    const source = new URL('assets/php-cgi-wasm/PhpCgiBase.mjs', page.url()).href;
+    const ownerId = await page.evaluate(() => window.playground.isolation.ownerId);
+    const source = new URL(`__runtime/${encodeURIComponent(ownerId)}/assets/php-cgi-wasm/PhpCgiBase.mjs`, page.url()).href;
     const expectedMessage = fatal
       ? new RegExp(`^\\[[^\\]\\r\\n]+\\] PHP Fatal error:  Uncaught RuntimeException: ${failure} in (/internal/operation-[a-f0-9-]+\\.php):1\\nStack trace:\\n#0 \\{main\\}\\n  thrown in \\1 on line 1\\n$`)
       : /^$/;

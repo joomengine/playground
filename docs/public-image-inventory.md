@@ -40,6 +40,14 @@ immutable, and an upstream change that no longer matches the recorded hashes
 fails until a reviewed registry/package update is made. JCB's existing checksum
 verification remains active after the relay check.
 
+All 31 downloaded originals also pass the relay's full raster-container parser.
+One deliberately reviewed exception is `jcb-builder-22`: its original GIF has a
+valid 229-frame stream followed by 310,076 bytes of raster residue. The registry
+pins its exact SHA-256, trailer offset and total length. Only those exact bytes
+receive the allowance; other GIFs still reject trailing data. The relay preserves
+the complete original file so JCB's metadata checksum remains valid. See the
+relay documentation for the recorded container review.
+
 The source-byte downloads used this environment's standard HTTP transport.
 The real relay's direct DNS/pinned-HTTPS path separately returned `EAI_AGAIN`
 before connection here. Deployments must verify that outbound path against all

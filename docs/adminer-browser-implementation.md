@@ -74,7 +74,8 @@ It loads only when DB is opened and reuses the existing PHP/MariaDB runtimes.
 
 Validation recorded on 31 October 2026:
 
-- Source syntax and the repository source suite: **386 passed**.
+- Source syntax and the repository source suite pass; the latest totals and
+  candidate CI status are recorded in the pull request.
 - Real Adminer on PHP 8.3, 8.4 and 8.5 with MariaDB: table/schema browsing,
   Unicode SQL and exports, local session/CSRF protection; PHP 8.4 additionally
   exercises row editing and SQL file import.

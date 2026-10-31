@@ -114,6 +114,22 @@ existing integrity contract; it is not used to claim cryptographic collision
 resistance. No resizing, recompression, metadata stripping or format conversion
 occurs. JCB independently retains its own checksum verification.
 
+One reviewed upstream quirk is explicitly recorded for `jcb-builder-22`. Its
+original GIF contains 229 decodable 480×540 frames and a trailer at zero-based
+byte offset 2,168,647, followed by 310,076 bytes of raster residue (353 bytes of
+compressed-looking data and 30 further GIF frame blocks). The entire original
+file is 2,478,724 bytes, with SHA-256
+`0013bf931f6ac48f9c1a6e72e80c7f71d2deddb87eae0d5e86914f0fbcfb47bd`.
+The retained bytes match JCB's source MD5; the trailing region has no additional
+GIF header, HTML/script/SVG/XML or ZIP signature. The registry's optional
+`validation.gifTrailingData` records the exact parsed trailer offset and total
+length. This allowance requires a GIF and SHA-256 pin: the relay checks the full
+hash **before** accepting the explicitly reviewed remainder, and still parses
+the preceding GIF frames normally. Every other GIF requires an exact terminal
+trailer. No bytes are removed or rewritten; `image/gif`, `nosniff` and the
+restrictive CSP continue to apply. Changing this image or allowance requires a
+new source review, not a generic trailing-data exception.
+
 HTTPS requests use only a fixed Accept header for the expected MIME type,
 `Accept-Encoding: identity`, and the relay User-Agent. Credentials, fragments,
 non-HTTPS URLs and nonstandard ports are rejected. Redirects are disabled unless

@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { createImageRelay, validateRelayConfig } from '../relay/server.mjs';
 import { isPublicAddress, validateUpstreamURL, resolvePublicDestination, downloadApprovedAsset } from '../relay/public-network.mjs';
 import { validateImageBytes } from '../relay/image-validation.mjs';
+import { validatePublicAssetRegistry } from '../src/public-assets.mjs';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNQaPjwHwAE5AKQBYzgxgAAAABJRU5ErkJggg==', 'base64');
 const SHA = createHash('sha256').update(PNG).digest('hex');
@@ -175,4 +176,31 @@ test('container validation accepts actual raster formats and rejects truncation,
   const damaged = Buffer.from(PNG); damaged[damaged.length - 1] ^= 1;
   assert.throws(() => validateImageBytes(damaged, asset()), /invalid-image/);
   assert.throws(() => validateImageBytes(Buffer.concat([PNG, Buffer.from('<html>')]), asset()), /invalid-image/);
+});
+
+test('reviewed GIF residue requires the exact SHA256, parsed trailer and byte length', () => {
+  const gif = Buffer.from('R0lGODdhAQABAIEAABSA8AAAAAAAAAAAACwAAAAAAQABAAAIBAABBAQAOw==', 'base64');
+  const original = Buffer.concat([gif, Buffer.from([172, 110, 171, 183])]);
+  const before = Buffer.from(original);
+  const sha256 = createHash('sha256').update(original).digest('hex');
+  const reviewed = asset({ mime: 'image/gif', sha256, md5: undefined,
+    validation: { gifTrailingData: { trailerOffset: gif.length - 1, byteLength: original.length } } });
+  assert.equal(validatePublicAssetRegistry(registry([reviewed])).assets[0].sha256, sha256);
+  assert.equal(validateImageBytes(original, reviewed), sha256);
+  assert.deepEqual(original, before, 'approved bytes are not stripped or changed');
+  assert.throws(() => validateImageBytes(original, { ...reviewed, validation: undefined }), /invalid-image/);
+  assert.throws(() => validateImageBytes(original, { ...reviewed, sha256: undefined }), /invalid-image/);
+  assert.throws(() => validateImageBytes(original, { ...reviewed, sha256: '0'.repeat(64) }), /image-checksum-mismatch/);
+  for (const tail of [
+    { trailerOffset: gif.length - 2, byteLength: original.length },
+    { trailerOffset: gif.length - 1, byteLength: original.length - 1 },
+  ]) assert.throws(() => validateImageBytes(original, { ...reviewed, validation: { gifTrailingData: tail } }), /invalid-image/);
+  const changed = Buffer.from(original); changed[changed.length - 1] ^= 1;
+  assert.throws(() => validateImageBytes(changed, reviewed), /image-checksum-mismatch/);
+  for (const change of [
+    { sha256: undefined }, { mime: 'image/png' },
+    { validation: { gifTrailingData: { trailerOffset: -1, byteLength: original.length } } },
+    { validation: { gifTrailingData: { trailerOffset: gif.length - 1, byteLength: 100000 } } },
+    { validation: { gifTrailingData: { trailerOffset: gif.length - 1, byteLength: original.length, allowAnyTail: true } } },
+  ]) assert.throws(() => validatePublicAssetRegistry(registry([{ ...reviewed, ...change }])));
 });
