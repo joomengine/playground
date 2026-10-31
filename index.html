@@ -60,6 +60,18 @@
         <fieldset id="installation-fields" disabled>
             <legend class="sr-only" data-i18n="label.installationSettings">Installation settings</legend>
             <div class="site-settings-row"><div class="field"><label for="site-name" data-i18n="label.siteName">Site name</label><input id="site-name" name="siteName" value="Joomla Playground" maxlength="100" required autocomplete="off"></div><p class="storage-note" id="storage-note" data-i18n="help.storage">Files and database stay in this browser. Download a backup to keep a separate copy.</p></div>
+            <section class="extension-packages" aria-labelledby="extensions-title">
+              <h3 id="extensions-title" class="settings-divider" data-i18n="label.extensions">Extension packages</h3>
+              <p class="field-help" id="extensions-help" data-i18n="help.extensions">Paste an HTTP or HTTPS link to an extension ZIP package. Add another URL to install more packages.</p>
+              <div id="package-list" class="extension-url-list"></div>
+              <button class="button button-secondary" id="add-package" type="button" data-i18n="action.addExtensionUrl">Add another URL</button>
+              <p class="field-help" data-i18n="help.extensionDownloads">The package host must allow browser downloads. HTTPS pages may block HTTP downloads.</p>
+              <details id="extension-advanced" class="extension-advanced">
+                <summary data-i18n="title.extensionAdvanced">Advanced options</summary>
+                <div class="field"><label for="extensions" data-i18n="label.extensionJson">Extension packages JSON</label><textarea id="extensions" rows="5" spellcheck="false" aria-describedby="extensions-json-help extension-error">[]</textarea><p class="field-help" id="extensions-json-help" data-i18n="help.extensionJson">Advanced: enter an array of objects with a url and optional sha256 checksum. Changes here update the URL fields.</p></div>
+              </details>
+              <p id="extension-error" class="dialog-error" role="alert" hidden></p>
+            </section>
             <details id="advanced-settings" class="advanced-settings">
               <summary><span data-i18n="title.advanced">Advanced configuration</span><span aria-hidden="true">+</span></summary>
               <div class="advanced-content">
@@ -80,12 +92,11 @@
                 <div class="settings-column">
                   <div class="settings-divider" data-i18n="label.setupSteps">Additional setup steps</div>
                   <p class="field-help account-help" data-i18n="help.setupSteps">These steps run after the selected deploy on a new installation. You can also install extensions through Joomla once it opens.</p>
-                  <div class="field"><label for="extensions" data-i18n="label.extensions">Additional extension packages</label><textarea id="extensions" rows="5" spellcheck="false" aria-describedby="extensions-help">[]</textarea><p class="field-help" id="extensions-help" data-i18n="help.extensions">A JSON array of objects with a ZIP url and an optional sha256 checksum. External hosts must allow browser downloads.</p></div>
                   <div class="field"><label for="startup-commands" data-i18n="label.commands">Additional Joomla console commands</label><textarea id="startup-commands" rows="4" spellcheck="false" aria-describedby="commands-help">[]</textarea><p class="field-help" id="commands-help" data-i18n="help.commands">Argument arrays, for example [["cache:clean"]]. These run through Joomla’s console.</p></div>
                 </div>
 
 <div class="settings-column deployment-extras"><div class="settings-divider" data-i18n="label.template">Template</div>
-<div class="field"><label for="package-url" data-i18n="label.packageUrl">Extension ZIP URL</label><div class="inline-input"><input id="package-url" type="url" placeholder="https://example.org/component.zip" autocomplete="off"><button class="button button-secondary" id="add-package" type="button" data-i18n="action.add">Add</button></div></div><div id="package-list" class="package-list"></div>
+
 <div class="field"><label for="template-url" data-i18n="label.templateUrl">Template ZIP URL</label><input id="template-url" type="url" placeholder="https://example.org/template.zip" autocomplete="off"></div><div class="field"><label for="template-name" data-i18n="label.templateElement">Template name</label><input id="template-name" placeholder="cassiopeia" autocomplete="off" spellcheck="false" list="template-options"><datalist id="template-options"></datalist></div><div class="field"><label for="template-params" data-i18n="label.templateParams">Template parameters</label><textarea id="template-params" rows="3" spellcheck="false">{}</textarea></div>
 <div class="settings-divider" data-i18n="label.menus">Menus and home pages</div><div class="field"><label for="menu-preset" data-i18n="label.menus">Menus and home pages</label><select id="menu-preset"><option value="">—</option></select></div><div class="field"><label for="menu-title" data-i18n="label.menuTitle">Menu title</label><input id="menu-title" maxlength="255" autocomplete="off"></div><div class="field"><label for="menu-component" data-i18n="label.component">Component</label><input id="menu-component" placeholder="com_servicedirectory" autocomplete="off" spellcheck="false" list="component-options"><datalist id="component-options"></datalist></div><div class="field"><label for="menu-view" data-i18n="label.componentView">View</label><input id="menu-view" placeholder="services" autocomplete="off" spellcheck="false"></div><label class="check-row"><input id="menu-home" type="checkbox"><span data-i18n="label.homePage">Make this the home page</span></label><button class="button button-secondary" id="add-menu" type="button" data-i18n="action.addMenu">Add menu item</button><div id="menu-list" class="package-list"></div>
 <label class="check-row"><input id="multilingual" type="checkbox"><span data-i18n="label.multilingual">Multilingual site</span></label><div class="field"><label for="deploy-languages" data-i18n="label.languages">Site languages</label><input id="deploy-languages" placeholder="en-GB" spellcheck="false"><p class="field-help" data-i18n="help.multilingual">Comma-separated tags. Multilingual deployments start in Afrikaans; other deployments start in English.</p></div>

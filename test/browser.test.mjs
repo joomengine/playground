@@ -17,6 +17,7 @@ import { assertLaunchCountdown, assertFailedDeploymentRecovery } from './launch-
 import { assertLiveFocusMode, assertInitialFocusMode } from './focus-ui-contract.mjs';
 import { assertJcbHardReload } from './jcb-hard-reload-contract.mjs';
 import { assertSavedSiteRecovery } from './saved-site-recovery-contract.mjs';
+import { assertExtensionFormValidation } from './extension-form-contract.mjs';
 import { classifyAssetDiagnostics, classifyNavigationAbortDiagnostics } from './asset-diagnostics.mjs';
 import { assertMcpHttp } from './mcp-http.mjs';
 import { probeSyntheticRedirect, startRedirectTrace, recordVerifiedRedirectDiagnostic } from './firefox-redirect-probe.mjs';
@@ -1102,10 +1103,16 @@ for (const name of browserNames) {
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         await showDeployEditor(page, { advanced: true });
+        await assertExtensionFormValidation(page);
         await page.locator('#site-name').fill('Interface installation');
         await page.locator('#storage-key').fill(`ui-${randomUUID()}`);
         await page.locator('#initial-path').fill('/administrator/');
-        await page.locator('#extensions').fill(JSON.stringify([{ url: new URL('__test_extension.zip', server.url).href, sha256: extensionSha256 }]));
+        assert.equal(await page.locator('#extensions').isVisible(), false, 'Package JSON stays optional when entering an ordinary URL.');
+        await page.locator('#package-url').fill(new URL('__test_extension.zip', server.url).href);
+        await page.locator('#add-package').click();
+        await page.locator('#extension-url-2').fill('https://example.org/remove-this-package.zip');
+        await page.getByRole('button', { name: 'Remove extension URL 2', exact: true }).click();
+        assert.deepEqual(JSON.parse(await page.locator('#extensions').inputValue()), [{ url: new URL('__test_extension.zip', server.url).href }]);
         await page.locator('#startup-commands').fill(JSON.stringify([['list']]));
         await closeDeployEditor(page);
         await showQuickSettings(page);
@@ -1231,9 +1238,12 @@ for (const name of browserNames) {
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         const freshURL = new URL(server.url);
-        for (const [key, value] of Object.entries({ deploy: 'blank', joomla: defaultPair.joomlaVersion, php: changedPHP, key: savedKey, fresh: '1', extension: new URL('__test_extension.zip', server.url).href })) freshURL.searchParams.set(key, value);
+        // A distinct source still needs review even after the original URL was
+        // approved through the simple fields without an optional checksum.
+        const freshSource = new URL('__test_extension.zip?fresh=1', server.url).href;
+        for (const [key, value] of Object.entries({ deploy: 'blank', joomla: defaultPair.joomlaVersion, php: changedPHP, key: savedKey, fresh: '1', extension: freshSource })) freshURL.searchParams.set(key, value);
         await page.goto(freshURL.href);
-        await reviewFixtureLink(page, new URL('__test_extension.zip', server.url).href);
+        await reviewFixtureLink(page, freshSource);
         await renderedSiteFrame(page);
         await dismissAutomaticTour(page);
         const freshKey = await page.locator('#storage-key').inputValue();

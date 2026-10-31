@@ -25,12 +25,12 @@ function properties(value, allowed, name) {
   for (const key of Object.keys(value)) if (!allowed.includes(key)) throw new TypeError(`${name} contains unsupported property ${key}.`);
 }
 
-function packageEntry(value, baseURL, requireIntegrity) {
+function packageEntry(value, baseURL, requireIntegrity, allowHttp = true) {
   object(value, 'Package');
   properties(value, ['url', 'sha256', 'sourceUrl', 'tag'], 'Package');
-  const result = parseExtensions([value], baseURL)[0];
+  const result = parseExtensions([value], baseURL, { allowHttp })[0];
   if (requireIntegrity && !PACKAGE_DIGEST.test(result.sha256 ?? '')) throw new TypeError('Repository deploy packages require a SHA-256 digest.');
-  if (value.sourceUrl !== undefined) result.sourceUrl = parseExtensions([{ url: value.sourceUrl }], baseURL)[0].url;
+  if (value.sourceUrl !== undefined) result.sourceUrl = parseExtensions([{ url: value.sourceUrl }], baseURL, { allowHttp })[0].url;
   return result;
 }
 
@@ -41,7 +41,7 @@ function languagePackages(value, baseURL, requireIntegrity) {
     const tag = normalizeLanguage(text(entry?.tag, 'Language package tag', 20));
     if (seen.has(tag)) throw new TypeError(`Duplicate language package: ${tag}.`);
     seen.add(tag);
-    return { ...packageEntry(entry, baseURL, requireIntegrity), tag };
+    return { ...packageEntry(entry, baseURL, requireIntegrity, false), tag };
   });
 }
 
@@ -52,7 +52,7 @@ function normalizeSnapshot(value, baseURL) {
     throw new TypeError('A snapshot must declare export format, schema version 1 and an exact Joomla version.');
   }
   const { url, sha256, sourceUrl } = value;
-  return { ...packageEntry({ url, sha256, ...(sourceUrl ? { sourceUrl } : {}) }, baseURL, true),
+  return { ...packageEntry({ url, sha256, ...(sourceUrl ? { sourceUrl } : {}) }, baseURL, true, false),
     format: value.format, schemaVersion: value.schemaVersion, joomlaVersion: value.joomlaVersion };
 }
 

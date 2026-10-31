@@ -444,7 +444,7 @@ async function downloadAndInstall(runtime, item, fetchPackage, sourceLoader, pro
     bytes = await response.arrayBuffer();
   } catch (error) {
     const reason = error instanceof TypeError
-      ? 'The browser could not read this download. Check the URL, your connection, and whether the host permits cross-origin downloads.'
+      ? 'The browser could not read this download. Check the URL, your connection, and whether the host permits cross-origin downloads. HTTPS pages may block HTTP downloads.'
       : conciseFailure(error.message);
     throw provisioningError(`${label} download failed. ${reason}`, {
       phase: 'download', packageUrl: label, technicalDetails: error.message,

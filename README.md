@@ -258,6 +258,15 @@ and set its parameters. Installed components, menu layouts and template styles
 can be discovered from the running site. See the [deploy guide](deploys/README.md)
 for the complete document format and advanced parameters.
 
+Under **Extension packages**, paste a complete HTTP or HTTPS ZIP URL. Use
+**Add another URL** for more packages, or remove an unwanted row. The separate
+**Advanced options** control exposes the same packages as editable JSON objects
+with `url` and an optional `sha256`. Both representations stay synchronized;
+invalid JSON remains visible until corrected. Changing a package URL clears its
+previous checksum. Joomla console commands remain available under the general
+advanced configuration. External hosts must allow browser downloads, and an
+HTTPS playground may block HTTP package downloads.
+
 - **Use** starts an independent deployment from the editor's configuration and
   prepares a reusable share link.
 - **Apply to this site** checkpoints the running site before installing new
