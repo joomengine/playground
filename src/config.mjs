@@ -241,8 +241,13 @@ export function catalogWithSelectedJoomlaPackage(catalog, input, baseURL = 'http
   }
   const selected = normalizeJoomlaPackage(input.joomlaPackage, baseURL);
   const current = catalog.joomla.find(entry => entry.version === input.joomlaVersion);
+  // A nightly can publish different bytes and PHP requirements under the same
+  // dev version. An older saved archive retains its own compatibility; stable
+  // releases and the exact currently published bytes retain the catalog limits.
+  const replacedNightly = /-dev$/i.test(input.joomlaVersion)
+    && /^[a-f0-9]{64}$/i.test(current?.sha256 || '') && current.sha256.toLowerCase() !== selected.sha256;
   for (const version of selected.php) {
-    if (!catalog.php.some(entry => entry.version === version) || (current && !current.php.includes(version))) {
+    if (!catalog.php.some(entry => entry.version === version) || (current && !replacedNightly && !current.php.includes(version))) {
       throw new TypeError(`PHP ${version} is not available for the selected Joomla release in this runtime catalog.`);
     }
   }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createShareURL, normalizeConfiguration, normalizeInitialPath, resolveSiteURL, parseCatalog, parseExtensions, parseStartupCommands, readURLConfiguration } from '../src/config.mjs';
+import { catalogWithSelectedJoomlaPackage, createShareURL, normalizeConfiguration, normalizeInitialPath, resolveSiteURL, parseCatalog, parseExtensions, parseStartupCommands, readURLConfiguration } from '../src/config.mjs';
 
 const manifest = {
   php: [{ version: '8.3' }, { version: '8.4' }, { version: '8.5' }],
@@ -16,6 +16,33 @@ test('catalog limits configuration to a tested version combination', () => {
   assert.throws(() => normalizeConfiguration({ admin, phpVersion: '8.3' }, { catalog }), /not available/);
   assert.throws(() => parseCatalog({ ...manifest, defaults: { phpVersion: '8.2', joomlaVersion: '6.2.0' } }), /incompatible/);
   assert.throws(() => parseCatalog({ php: [], joomla: [] }), /No tested/);
+});
+
+test('saved nightly compatibility follows its exact archive after the published dev build changes', () => {
+  const version = '7.0.0-alpha1-dev';
+  const currentHash = 'a'.repeat(64);
+  const stable = manifest.joomla.map(entry => entry.version === '6.2.0'
+    ? { ...entry, url: 'https://example.test/stable.zip', sha256: currentHash } : entry);
+  const catalog = parseCatalog({ ...manifest, joomla: [...stable,
+    { version, url: 'https://example.test/current.zip', sha256: currentHash, php: ['8.4'], phpMinimum: '8.4.0' }] });
+  const saved = { admin, joomlaVersion: version, phpVersion: '8.4', storageKey: 'saved-nightly',
+    joomlaPackage: { url: 'https://example.test/older.zip', sha256: 'b'.repeat(64), php: ['8.3', '8.4'] } };
+  const restoredCatalog = catalogWithSelectedJoomlaPackage(catalog, saved);
+  const restored = normalizeConfiguration(saved, { catalog: restoredCatalog });
+  assert.deepEqual(restored.joomlaPackage, saved.joomlaPackage);
+  assert.equal(restored.phpVersion, '8.4');
+  assert.equal(restored.storageKey, 'saved-nightly');
+  assert.deepEqual(catalog.joomla.find(entry => entry.version === version).php, ['8.4'], 'The published catalog stays unchanged.');
+
+  assert.throws(() => catalogWithSelectedJoomlaPackage(catalog,
+    { ...saved, joomlaPackage: { ...saved.joomlaPackage, sha256: currentHash } }), /PHP 8\.3 is not available/,
+  'The same archive cannot broaden published compatibility, even through another URL.');
+  assert.throws(() => catalogWithSelectedJoomlaPackage(catalog,
+    { ...saved, joomlaPackage: { ...saved.joomlaPackage, php: ['8.4', '8.2'] } }), /PHP 8\.2 is not available/,
+  'A saved archive cannot add a runtime that this host does not ship.');
+  assert.throws(() => catalogWithSelectedJoomlaPackage(catalog,
+    { ...saved, joomlaVersion: '6.2.0' }), /PHP 8\.3 is not available/,
+  'A changed hash does not relax immutable stable-release compatibility.');
 });
 
 test('initial pages remain within the playground route', () => {
