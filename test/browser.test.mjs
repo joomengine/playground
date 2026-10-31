@@ -208,7 +208,19 @@ function observePage(page) {
 }
 
 async function saveBrowserDiagnostics(page, name, error) {
-  const state = await page.evaluate(() => {
+  const destination = path.join(root, 'test-results');
+  const filename = path.join(destination, `${name}-failure.json`);
+  const diagnostics = {
+    message: error.stack || error.message, step: page.testStep,
+    state: { unavailable: 'Browser state probe pending.' },
+    frames: page.frames().map(frame => ({ url: frame.url(), state: { unavailable: 'Frame probe pending.' } })),
+    errors: page.errors, logs: page.logs?.slice(-30), consoleErrors: page.consoleErrors, knownBrowserDiagnostics: page.knownBrowserDiagnostics, contentDiagnostics: page.contentDiagnostics, failedSiteRequests: page.failedSiteRequests, failedRequests: page.failedRequests,
+    responseErrors: page.responseErrors, frameNavigations: page.frameNavigations, pendingSiteRequests: [...(page.pendingSiteRequests?.values() || [])],
+  };
+  // Host-side evidence must survive even when a browser evaluation never settles.
+  await mkdir(destination, { recursive: true });
+  await writeFile(filename, `${JSON.stringify(diagnostics, null, 2)}\n`);
+  diagnostics.state = await bounded(page.evaluate(() => {
     const text = (id) => document.getElementById(id)?.textContent;
     const frame = document.getElementById('site-frame') || document.getElementById('site');
     return {
@@ -222,20 +234,15 @@ async function saveBrowserDiagnostics(page, name, error) {
       iframe: frame ? { src: frame.getAttribute('src'), hidden: frame.hidden, connected: frame.isConnected } : null,
       progress: window.validationProgress,
     };
-  }).catch((failure) => ({ unavailable: failure.message }));
-  const frames = await Promise.all(page.frames().map(async (frame) => ({
-    url: frame.url(), state: await frame.evaluate(() => ({ readyState: document.readyState,
+  }), 'Diagnostic page probe', 3000).catch((failure) => ({ unavailable: failure.message }));
+  diagnostics.frames = await Promise.all(page.frames().map(async (frame) => ({
+    url: frame.url(), state: await bounded(frame.evaluate(() => ({ readyState: document.readyState,
       body: document.body?.innerText.slice(0, 2000), title: document.title,
-    })).catch((failure) => ({ unavailable: failure.message })),
+    })), 'Diagnostic frame probe', 3000).catch((failure) => ({ unavailable: failure.message })),
   })));
-  const diagnostics = {
-    message: error.stack || error.message, step: page.testStep, state, frames,
-    errors: page.errors, logs: page.logs?.slice(-30), consoleErrors: page.consoleErrors, knownBrowserDiagnostics: page.knownBrowserDiagnostics, contentDiagnostics: page.contentDiagnostics, failedSiteRequests: page.failedSiteRequests, failedRequests: page.failedRequests,
-    responseErrors: page.responseErrors, frameNavigations: page.frameNavigations, pendingSiteRequests: [...(page.pendingSiteRequests?.values() || [])],
-  };
-  await mkdir(path.join(root, 'test-results'), { recursive: true });
-  await writeFile(path.join(root, 'test-results', `${name}-failure.json`), `${JSON.stringify(diagnostics, null, 2)}\n`);
-  await page.screenshot({ path: path.join(root, 'test-results', `${name}-failure.png`), fullPage: true }).catch(() => {});
+  await writeFile(filename, `${JSON.stringify(diagnostics, null, 2)}\n`);
+  await bounded(page.screenshot({ path: path.join(destination, `${name}-failure.png`), fullPage: true, timeout: 5000 }),
+    'Diagnostic screenshot', 5500).catch(() => {});
   console.error(JSON.stringify({ diagnostic: name, ...diagnostics }));
 }
 
@@ -633,10 +640,31 @@ for (const name of browserNames) {
   test(`${name}: real Joomla, upstream PHP and native MariaDB PDO`, { timeout: 1_800_000 }, async (t) => {
     const runScenario = async (title, options, execute) => {
       let failure;
+      let completed = false;
+      let abortCleanup;
+      const existingContexts = new Set(browser.contexts());
       await t.test(title, options, async context => {
-        try { await execute(context); } catch (error) { failure = error; throw error; }
+        const onAbort = () => {
+          if (completed || failure) return;
+          failure = new Error(`Browser scenario did not complete: ${title}`, { cause: context.signal.reason });
+          // A node:test timeout does not cancel a pending Playwright operation.
+          // Capture bounded evidence, then close this scenario's contexts to stop it.
+          abortCleanup = Promise.allSettled(browser.contexts().filter(value => !existingContexts.has(value)).map(async (value, index) => {
+            try {
+              await Promise.allSettled(value.pages().map((page, pageIndex) =>
+                saveBrowserDiagnostics(page, `timeout-${name}-${index}-${pageIndex}`, failure)));
+            } finally { await bounded(value.close(), 'Timed-out browser context cleanup', 10_000).catch(() => {}); }
+          }));
+        };
+        context.signal.addEventListener('abort', onAbort, { once: true });
+        try { await execute(context); completed = true; }
+        catch (error) { failure ??= error; throw error; }
+        finally { context.signal.removeEventListener('abort', onAbort); }
       });
+      await abortCleanup;
       if (failure) throw failure;
+      // t.test reports child cancellation without rejecting its returned promise.
+      if (!completed) throw new Error(`Browser scenario did not complete: ${title}`);
     };
     const executablePath = process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`];
     const browser = await browsers[name].launch({ headless: true, ...(executablePath ? { executablePath } : {}),
