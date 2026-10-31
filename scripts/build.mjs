@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { downloadVerified, extractTarGzip, hashFile, inventory, verifyBridgeBundle } from './assets.mjs';
 import { stageDeployCatalog } from './deploys.mjs';
+import { stageVersionCatalog } from './version-catalog.mjs';
 import { stageFileinfo } from './fileinfo.mjs';
 import { stageCurl } from './curl.mjs';
 import { stageSodium } from './sodium.mjs';
@@ -181,6 +182,9 @@ try {
     joomla.push({ ...release, sourceUrl: release.url, url: `joomla/${filename}` });
   }
   const deploys = await stageDeployCatalog({ root, staging, assets, cache, canonicalUrl });
+  console.log('Staging current and forward Joomla/JCB packages…');
+  const versionCatalog = await stageVersionCatalog({ assets, cache, pinnedJoomla: versions.joomla,
+    stagedJoomla: joomla, deployPackages: deploys.packages });
   for (const name of ['index.html', 'src', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
     await cp(path.join(root, name), path.join(staging, name), { recursive: true });
   }
@@ -191,7 +195,7 @@ try {
   const manifest = {
     schemaVersion: 1, projectVersion: pkg.version, sourceCommit, code,
     deployment: { canonicalUrl, domain },
-    upstream: { ...versions.upstream, cgiRequestOverlay, debuggerWorkerOverlay }, nativeDriver: versions.nativeDriver, packages, php, joomla, deploys,
+    upstream: { ...versions.upstream, cgiRequestOverlay, debuggerWorkerOverlay }, nativeDriver: versions.nativeDriver, packages, php, joomla, deploys, versionCatalog,
     bridge: {
       protocolVersion: versions.bridge.protocolVersion,
       sourceCommit: versions.nativeDriver.sourceCommit,

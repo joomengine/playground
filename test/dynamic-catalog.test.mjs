@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { discoverDynamicCatalog, parseJoomlaReleases, parseJoomlaNightlies, parseJoomlaNightlyList, parseJoomlaNightlyUpdates, parseJcbUpdates, parseJcbTags } from '../src/dynamic-catalog.mjs';
+import { discoverDynamicCatalog, parseJoomlaReleases, parseJoomlaNightlies, parseJoomlaNightlyList, parseJoomlaNightlyUpdates, parseJcbUpdates, parseJcbTags, selectCurrentForwardVersions } from '../src/dynamic-catalog.mjs';
 
 const sha256 = 'a'.repeat(64);
 const sha512 = 'b'.repeat(128);
@@ -65,121 +65,107 @@ test('JCB tags expose a source commit, never a fabricated archive hash', () => {
   assert.equal(parsed[0].sha512, null);
 });
 
-test('discovery handles multiple sources independently and reports unavailable feeds', async () => {
-  const fetchImpl = async (input) => {
-    const url = String(input);
-    if (url.startsWith('https://test.invalid/releases?')) return { ok: true, json: async () => [joomlaRelease('6.2.0-rc2')] };
-    if (url === 'https://test.invalid/nightly') return { ok: true, text: async () => nightlyXML('7.0.0-alpha1-dev') };
-    if (url === 'https://test.invalid/down') throw new Error('offline');
-    if (url.startsWith('https://test.invalid/branches?')) return { ok: true, json: async () => [{ name: '6.x' }, { name: '../../evil' }] };
-    if (url.startsWith('https://test.invalid/tags?')) return { ok: true, json: async () => [{ name: 'v6.2.1-alpha1', commit: { sha: 'c'.repeat(40) } }, { name: 'v5.1.9', commit: { sha: 'd'.repeat(40) } }] };
-    if (url === 'https://test.invalid/raw/6.x/componentbuilder_update_server.xml') return { ok: true, text: async () => jcbXML('6.2.1-alpha1') };
-    throw new Error(`Unexpected fetch: ${url}`);
-  };
-  const pages = [];
-  const result = await discoverDynamicCatalog({ fetchImpl, sources: { releases: 'https://test.invalid/releases', nightlyURLs: ['https://test.invalid/nightly', 'https://test.invalid/down'], branches: 'https://test.invalid/branches', jcbRawBase: 'https://test.invalid/raw', jcbTags: 'https://test.invalid/tags' }, onJoomlaPage: (_entries, page) => pages.push(page) });
-  assert.deepEqual(pages, [1]);
-  assert.deepEqual(result.joomla.map((entry) => entry.version), ['7.0.0-alpha1-dev', '6.2.0-rc2']);
-  assert.equal(result.jcb[0].version, '6.2.1-alpha1');
-  assert.equal(result.jcb[0].sha512, sha512);
-  assert.equal(result.jcb[0].gitCommit, 'c'.repeat(40));
-  assert.equal(result.jcb[1].sha512, null);
-  assert.deepEqual(result.errors, [{ source: 'joomla-nightlies-2', message: 'offline' }]);
+test('current and forward policy excludes history and superseded previews, with stable first', () => {
+  const versions = ['4.4.14', '5.4.9', '5.4.10', '5.4.10-rc1', '5.4.11-dev',
+    '6.1.6', '6.2.0', '6.2.0-rc2', '6.2.1-dev', '6.2.2-dev', '6.3.0-alpha1-dev',
+    '6.3.0-alpha1', '6.3.0-beta1', '6.3.0-rc2', '6.4.0-alpha1', '7.0.0-alpha1-dev', '7.0.0-alpha1', '8.0.0-alpha1'];
+  const entries = versions.map(version => ({ version, url: `https://test.invalid/${version}.zip` }));
+  const result = selectCurrentForwardVersions(entries);
+  assert.deepEqual(result.map(entry => [entry.version, entry.channel]), [
+    ['6.2.0', 'stable'], ['5.4.10', 'stable'],
+    ['7.0.0-alpha1-dev', 'nightly'], ['6.3.0-alpha1-dev', 'nightly'], ['6.2.2-dev', 'nightly'], ['5.4.11-dev', 'nightly'],
+    ['7.0.0-alpha1', 'preview'], ['6.4.0-alpha1', 'preview'], ['6.3.0-rc2', 'preview'],
+  ]);
+  assert.equal(result[0].url, 'https://test.invalid/6.2.0.zip');
+  assert.equal(entries[0].channel, undefined, 'Policy must not mutate source metadata.');
+  assert.deepEqual(selectCurrentForwardVersions([{ version: '6.2.0' }, { version: '6.2.1' }, { version: '6.2.1-rc1' }])
+    .map(entry => entry.version), ['6.2.1'], 'A new stable replaces its older stable and preview.');
 });
 
-test('catalog cache avoids repeated requests and reports stale metadata after a refresh fails', async () => {
-  const data = new Map();
-  const storage = { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) };
-  let time = 100_000;
-  let offline = false;
-  let calls = 0;
-  const fetchImpl = async (url) => {
-    calls++;
-    if (offline) throw new Error('offline');
-    if (url.startsWith('https://test.invalid/releases?')) return { ok: true, json: async () => [joomlaRelease('6.2.0')] };
-    if (url.startsWith('https://test.invalid/branches?')) return { ok: true, json: async () => [{ name: '6.x' }] };
-    if (url.startsWith('https://test.invalid/tags?')) return { ok: true, json: async () => [] };
-    if (url === 'https://test.invalid/raw/6.x/componentbuilder_update_server.xml') return { ok: true, text: async () => jcbXML('6.2.1-alpha1') };
-    throw new Error('Unexpected request');
+test('discovery uses the supplied channels once and never traverses historical APIs', async () => {
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    requests.push(url);
+    assert.equal(options.credentials, 'omit');
+    assert.equal(options.cache, 'no-store');
+    assert.ok(options.signal instanceof AbortSignal);
+    if (url === 'https://api.github.com/repos/joomla/joomla-cms/releases?per_page=100&page=1') {
+      return { ok: true, json: async () => [joomlaRelease('6.2.0'), joomlaRelease('5.4.10'),
+        ...Array.from({ length: 98 }, () => joomlaRelease('4.4.14'))] };
+    }
+    if (url.endsWith('_list.xml')) return { ok: true, text: async () => nightlyList() };
+    if (url === 'https://update.joomla.org/core/nightlies/next_patch_extension.xml') {
+      return { ok: true, text: async () => nightlyXML('7.0.0-alpha1-dev') + nightlyXML('6.2.1-dev') };
+    }
+    if (url === 'https://raw.githubusercontent.com/joomengine/Joomla-Component-Builder/refs/heads/5.x/componentbuilder_update_server.xml') {
+      return { ok: true, text: async () => jcbXML('5.2.0') + jcbXML('5.2.1-alpha1') + jcbXML('6.2.0') + jcbXML('4.2.0') };
+    }
+    if (url === 'https://raw.githubusercontent.com/joomengine/Joomla-Component-Builder/refs/heads/6.x/componentbuilder_update_server.xml') {
+      return { ok: true, text: async () => jcbXML('6.2.0') + jcbXML('6.2.1-alpha1') + jcbXML('5.2.0') + jcbXML('6.1.2', sha512, '6.1.3') };
+    }
+    throw new Error(`Unexpected request: ${url}`);
   };
-  const options = { fetchImpl, cacheStorage: storage, cacheTtlMs: 1000, now: () => time,
-    sources: { releases: 'https://test.invalid/releases', nightlyURLs: [], branches: 'https://test.invalid/branches', jcbRawBase: 'https://test.invalid/raw', jcbTags: 'https://test.invalid/tags' } };
-  const first = await discoverDynamicCatalog(options);
-  assert.equal(first.joomla.length, 1);
-  assert.equal(first.errors.length, 0);
-  const firstCount = calls;
+  const result = await discoverDynamicCatalog({ fetchImpl, cacheStorage: null });
+  assert.deepEqual(result.errors, []);
+  assert.equal(requests.length, 7, 'One release list, three nightly lists, one deduplicated details feed, two JCB feeds.');
+  assert.deepEqual(result.joomla.map(entry => entry.version), ['6.2.0', '5.4.10', '7.0.0-alpha1-dev', '6.2.1-dev']);
+  assert.deepEqual(result.jcb.map(entry => entry.version), ['6.2.0', '5.2.0', '6.2.1-alpha1', '5.2.1-alpha1']);
+  assert.ok(result.jcb.every(entry => entry.sha512 === sha512));
+  assert.equal(result.joomla.find(entry => entry.version.startsWith('7.')).phpMinimum, '8.3.0');
+});
+
+test('independent feed failures retain pinned baselines without admitting obsolete metadata', async () => {
+  const result = await discoverDynamicCatalog({ cacheStorage: null,
+    pinnedJoomla: [{ version: '5.4.10', url: '/pinned-5.zip' }, { version: '6.2.0', url: '/pinned-6.zip' }],
+    pinnedJcb: [{ version: '5.2.0', url: '/pinned-jcb.zip' }],
+    sources: { releases: 'https://test.invalid/releases', nightlyURLs: ['https://test.invalid/nightly'], jcbURLs: ['https://test.invalid/jcb'] },
+    fetchImpl: async url => {
+      if (url === 'https://test.invalid/nightly') return { ok: true, text: async () => nightlyXML('7.0.0-alpha1-dev') };
+      if (url === 'https://test.invalid/jcb') return { ok: true, text: async () => jcbXML('5.1.9') + jcbXML('5.2.1-alpha1') };
+      throw new Error('offline');
+    } });
+  assert.deepEqual(result.joomla.map(entry => entry.version), ['6.2.0', '5.4.10', '7.0.0-alpha1-dev']);
+  assert.deepEqual(result.jcb.map(entry => entry.version), ['5.2.0', '5.2.1-alpha1']);
+  assert.deepEqual(result.errors, [{ source: 'joomla-releases', message: 'offline' }]);
+});
+
+test('overlapping JCB feeds deduplicate identical packages but reject conflicting published checksums', async () => {
+  const result = await discoverDynamicCatalog({ cacheStorage: null,
+    sources: { nightlyURLs: [], jcbURLs: ['https://test.invalid/jcb5', 'https://test.invalid/jcb6'] },
+    fetchImpl: async url => {
+      if (url.includes('/releases?')) return { ok: true, json: async () => [] };
+      return { ok: true, text: async () => jcbXML('5.2.0') + jcbXML('6.2.0', url.endsWith('6') ? 'c'.repeat(128) : sha512) };
+    } });
+  assert.deepEqual(result.jcb.map(entry => entry.version), ['5.2.0']);
+});
+
+test('catalog cache avoids repeated requests and expires stale metadata after a failed refresh', async () => {
+  const data = new Map();
+  const cacheStorage = { getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) };
+  let time = 100_000, calls = 0, offline = false;
+  const options = { cacheStorage, cacheTtlMs: 1000, now: () => time,
+    sources: { nightlyURLs: [], jcbURLs: [] },
+    fetchImpl: async () => {
+      calls++;
+      if (offline) throw new Error('offline');
+      return { ok: true, json: async () => [joomlaRelease('6.2.0')] };
+    } };
+  assert.equal((await discoverDynamicCatalog(options)).joomla.length, 1);
   time += 999;
   assert.equal((await discoverDynamicCatalog(options)).joomla.length, 1);
-  assert.equal(calls, firstCount);
+  assert.equal(calls, 1);
   offline = true;
   const stale = await discoverDynamicCatalog({ ...options, forceRefresh: true });
   assert.equal(stale.joomla.length, 1);
-  assert.equal(stale.jcb.length, 1);
-  assert.equal(stale.errors.length, 4);
-  assert.ok(stale.errors.every((error) => error.message.includes('cached copy')));
+  assert.ok(stale.errors[0].message.includes('cached copy'));
   time += 24 * 60 * 60_000;
   const expired = await discoverDynamicCatalog(options);
   assert.equal(expired.joomla.length, 0);
-  assert.ok(expired.errors.every((error) => error.message === 'offline'));
-});
-
-test('bounded pagination announces partial catalogs and reports both types of page progress', async () => {
-  const fetchImpl = async (url) => {
-    if (url.startsWith('https://test.invalid/releases?')) return { ok: true, json: async () => Array.from({ length: 100 }, () => joomlaRelease('6.2.0')) };
-    if (url.startsWith('https://test.invalid/branches?')) return { ok: true, json: async () => [{ name: '6.x' }] };
-    if (url.startsWith('https://test.invalid/tags?')) return { ok: true, json: async () => Array.from({ length: 100 }, () => ({ name: 'v6.2.0', commit: { sha: 'c'.repeat(40) } })) };
-    if (url === 'https://test.invalid/raw/6.x/componentbuilder_update_server.xml') return { ok: true, text: async () => jcbXML('6.2.0') };
-    throw new Error('Unexpected request');
-  };
-  const pages = [];
-  const result = await discoverDynamicCatalog({ fetchImpl, maxPages: 1, cacheStorage: null,
-    sources: { releases: 'https://test.invalid/releases', nightlyURLs: [], branches: 'https://test.invalid/branches', jcbRawBase: 'https://test.invalid/raw', jcbTags: 'https://test.invalid/tags' },
-    onJoomlaPage: (_entries, page) => pages.push(`joomla-${page}`), onJcbPage: (_entries, page) => pages.push(`jcb-${page}`) });
-  assert.deepEqual(pages.sort(), ['jcb-1', 'joomla-1']);
-  assert.equal(result.errors.filter((entry) => entry.message.includes('partial')).length, 2);
+  assert.equal(expired.errors[0].message, 'offline');
 });
 
 test('an aborted refresh never falls back to cached metadata', async () => {
   const controller = new AbortController();
   controller.abort();
   await assert.rejects(discoverDynamicCatalog({ signal: controller.signal, fetchImpl: async () => { throw new Error('Unexpected fetch'); } }), { name: 'AbortError' });
-});
-
-test('official list feeds discover new nightly versions and direct JCB manifests survive unavailable GitHub metadata', async () => {
-  let version = '7.0.0-alpha1-dev';
-  const requests = [];
-  const data = new Map();
-  const cacheStorage = { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) };
-  const fetchImpl = async (url, options) => {
-    requests.push(url);
-    assert.equal(options.credentials, 'omit');
-    assert.equal(options.cache, 'no-store');
-    assert.ok(options.signal instanceof AbortSignal);
-    if (url.startsWith('https://api.github.com/')) return { ok: false, status: 403 };
-    if (url.startsWith('https://raw.githubusercontent.com/joomengine/Joomla-Component-Builder/refs/heads/')) return { ok: true, text: async () => jcbXML('6.2.1-alpha1') };
-    if (url.endsWith('_list.xml')) return { ok: true, text: async () => nightlyList() };
-    if (url === 'https://update.joomla.org/core/nightlies/next_patch_extension.xml') return { ok: true, text: async () => nightlyXML(version) };
-    throw new Error(`Unexpected request ${url}`);
-  };
-  const result = await discoverDynamicCatalog({ fetchImpl, cacheStorage });
-  assert.deepEqual(result.joomla.map((entry) => entry.version), ['7.0.0-alpha1-dev']);
-  assert.deepEqual(result.jcb.map((entry) => entry.version), ['6.2.1-alpha1']);
-  assert.equal(requests.filter((url) => url.endsWith('next_patch_extension.xml')).length, 1, 'Shared details feed is fetched once.');
-  assert.equal(requests.filter((url) => url.endsWith('_list.xml')).length, 3);
-  assert.equal(result.errors.length, 3, 'GitHub errors do not hide direct-feed results.');
-  version = '7.0.0-beta1-dev';
-  assert.equal((await discoverDynamicCatalog({ fetchImpl, cacheStorage, forceRefresh: true })).joomla[0].version, version);
-});
-
-test('catalog ordering places final releases above their release candidates, then beta and alpha', async () => {
-  const versions = ['6.2.0-rc2', '6.2.0-beta2', '6.2.0', '6.2.0-alpha1', '6.2.0-rc10', '6.2.0-rc10-dev'];
-  const result = await discoverDynamicCatalog({ cacheStorage: null, sources: { nightlyURLs: [], branches: 'https://test.invalid/branches' },
-    fetchImpl: async (url) => {
-      if (url.includes('/releases?')) return { ok: true, json: async () => versions.map((version) => joomlaRelease(version)) };
-      if (url.includes('/tags?')) return { ok: true, json: async () => versions.map((version) => ({ name: `v${version}`, commit: { sha: 'c'.repeat(40) } })) };
-      return { ok: true, json: async () => [] };
-    } });
-  const expected = ['6.2.0', '6.2.0-rc10', '6.2.0-rc10-dev', '6.2.0-rc2', '6.2.0-beta2', '6.2.0-alpha1'];
-  assert.deepEqual(result.joomla.map((entry) => entry.version), expected);
-  assert.deepEqual(result.jcb.map((entry) => entry.version), expected);
 });

@@ -1,4 +1,8 @@
 export default Object.freeze({
+  "version.stable": "Versão estável atual",
+  "version.nightly": "Compilações noturnas",
+  "version.preview": "Próximas versões",
+  "version.saved": "Versão salva",
   "title.packageDownload": "Carregar {package}",
   "help.packageDownload": "Baixe este ZIP e escolha o arquivo baixado para continuar.",
   "label.packageFile": "ZIP baixado",

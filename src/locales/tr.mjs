@@ -1,4 +1,8 @@
 export default Object.freeze({
+  "version.stable": "Güncel kararlı sürüm",
+  "version.nightly": "Gecelik derlemeler",
+  "version.preview": "Yaklaşan sürümler",
+  "version.saved": "Kaydedilmiş sürüm",
   "title.packageDownload": "{package} yükle",
   "help.packageDownload": "Bu ZIP dosyasını indirin, ardından devam etmek için indirilen dosyayı seçin.",
   "label.packageFile": "İndirilen ZIP",

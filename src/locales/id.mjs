@@ -1,4 +1,8 @@
 export default Object.freeze({
+  "version.stable": "Versi stabil saat ini",
+  "version.nightly": "Build malam",
+  "version.preview": "Rilis mendatang",
+  "version.saved": "Versi tersimpan",
   "title.packageDownload": "Muat {package}",
   "help.packageDownload": "Unduh ZIP ini, lalu pilih file yang telah diunduh untuk melanjutkan.",
   "label.packageFile": "ZIP yang diunduh",

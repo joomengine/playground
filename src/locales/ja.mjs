@@ -1,4 +1,8 @@
 export default Object.freeze({
+  "version.stable": "現在の安定版",
+  "version.nightly": "ナイトリービルド",
+  "version.preview": "今後のリリース",
+  "version.saved": "保存済みのバージョン",
   "title.packageDownload": "{package} を読み込む",
   "help.packageDownload": "この ZIP をダウンロードし、ダウンロードしたファイルを選択して続行してください。",
   "label.packageFile": "ダウンロードした ZIP",

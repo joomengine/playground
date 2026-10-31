@@ -1,4 +1,8 @@
 export default Object.freeze({
+  "version.stable": "현재 안정 버전",
+  "version.nightly": "나이틀리 빌드",
+  "version.preview": "출시 예정 버전",
+  "version.saved": "저장된 버전",
   "title.packageDownload": "{package} 불러오기",
   "help.packageDownload": "이 ZIP을 다운로드한 다음 다운로드한 파일을 선택하여 계속하세요.",
   "label.packageFile": "다운로드한 ZIP",

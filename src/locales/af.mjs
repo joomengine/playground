@@ -1,4 +1,8 @@
 export default Object.freeze({
+  "version.stable": "Huidige stabiele weergawe",
+  "version.nightly": "Naglikse bouweergawes",
+  "version.preview": "Komende vrystellings",
+  "version.saved": "Gestoorde weergawe",
   "title.packageDownload": "Laai {package}",
   "help.packageDownload": "Laai hierdie ZIP af en kies dan die afgelaaide lêer om voort te gaan.",
   "label.packageFile": "Afgelaaide ZIP",

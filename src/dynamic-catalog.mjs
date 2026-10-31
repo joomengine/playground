@@ -1,15 +1,13 @@
-/** Read upstream package metadata without changing the pinned default catalog. */
+/** Discover the current and forward official packages for build-time staging. */
 
 const VERSION = /^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\d*(?:-dev)?|-dev)?$/i;
 const SHA256 = /^[a-f0-9]{64}$/i;
 const SHA512 = /^[a-f0-9]{128}$/i;
-const BRANCH = /^\d+\.x$/;
-const REPOSITORY = 'https://api.github.com/repos/joomengine/Joomla-Component-Builder';
-const PACKAGE_TAGS = 'https://api.github.com/repos/joomengine/pkg-component-builder/tags';
 const RELEASES = 'https://api.github.com/repos/joomla/joomla-cms/releases';
 const NIGHTLY_FEEDS = ['next_patch', 'next_minor', 'next_major']
   .map((name) => `https://update.joomla.org/core/nightlies/${name}_list.xml`);
 const JCB_RAW = 'https://raw.githubusercontent.com/joomengine/Joomla-Component-Builder/refs/heads';
+const JCB_FEEDS = ['5.x', '6.x'].map(branch => `${JCB_RAW}/${branch}/componentbuilder_update_server.xml`);
 
 function safeURL(value, origin, path) {
   try {
@@ -40,6 +38,43 @@ function newestVersionFirst(a, b) {
     if (left[index] !== right[index]) return right[index] - left[index];
   }
   return 0;
+}
+
+/** One current stable per major, one nightly per active minor, and the newest
+ * preview of each future release. Historical releases are never menu options.
+ * Package metadata stays intact so staging and the UI share the same policy. */
+export function selectCurrentForwardVersions(entries, { allowedMajors = ['5', '6', '7'], minimumMajor = 5, defaultMajor = '6' } = {}) {
+  const allowed = allowedMajors === null ? null : new Set(allowedMajors.map(String));
+  const candidates = entries.filter(entry => VERSION.test(entry?.version || '')
+    && Number(entry.version.split('.')[0]) >= minimumMajor
+    && (!allowed || allowed.has(entry.version.split('.')[0]))).map(entry => ({ ...entry,
+    channel: entry.source === 'nightly' || entry.version.endsWith('-dev') ? 'nightly'
+      : entry.prerelease === true || prerelease(entry.version) ? 'preview' : 'stable',
+  })).sort(newestVersionFirst);
+  const stable = new Map();
+  for (const entry of candidates) {
+    const major = entry.version.split('.')[0];
+    if (entry.channel === 'stable' && !stable.has(major)) stable.set(major, entry);
+  }
+  const forward = new Map();
+  for (const entry of candidates) {
+    if (entry.channel === 'stable') continue;
+    const floor = stable.get(entry.version.split('.')[0]);
+    if (floor && newestVersionFirst(entry, floor) >= 0) continue;
+    const target = entry.channel === 'nightly' ? entry.version.split('.').slice(0, 2).join('.') : entry.version.split('-')[0];
+    const key = `${entry.channel}:${target}`;
+    if (!forward.has(key)) forward.set(key, entry);
+  }
+  const channelOrder = { stable: 0, nightly: 1, preview: 2 };
+  return [...stable.values(), ...forward.values()].sort((a, b) => {
+    const channelDifference = channelOrder[a.channel] - channelOrder[b.channel];
+    if (channelDifference) return channelDifference;
+    if (a.channel === 'stable') {
+      const preferred = Number(b.version.split('.')[0] === String(defaultMajor)) - Number(a.version.split('.')[0] === String(defaultMajor));
+      if (preferred) return preferred;
+    }
+    return newestVersionFirst(a, b);
+  });
 }
 
 /** Parse GitHub releases, using built full installer assets, never source ZIPs. */
@@ -129,7 +164,9 @@ export function parseJcbUpdates(xml) {
     if (!VERSION.test(version) || !SHA512.test(checksum) || firstTag(item, 'element') !== 'pkg_component_builder') continue;
     const url = safeURL(rawURL, 'https://github.com', /^\/joomengine\/pkg-component-builder\/archive\/refs\/tags\/v[\w.-]+\.zip$/);
     if (!url || new URL(url).pathname !== `/joomengine/pkg-component-builder/archive/refs/tags/v${version}.zip`) continue;
-    result.push({ version, label: label(version, 'JCB'), url, sha512: checksum.toLowerCase(), source: 'jcb-update', prerelease: prerelease(version) });
+    const platform = item.match(/<targetplatform\b[^>]*\bversion\s*=\s*(["'])(.*?)\1/i)?.[2];
+    result.push({ version, label: label(version, 'JCB'), url, sha512: checksum.toLowerCase(), source: 'jcb-update', prerelease: prerelease(version),
+      ...(platform ? { targetPlatform: xmlText(platform) } : {}) });
   }
   return result;
 }
@@ -150,32 +187,12 @@ export function parseJcbTags(tags) {
   return result;
 }
 
-function mergeJcb(entries) {
-  const grouped = new Map();
-  for (const item of entries) {
-    const group = grouped.get(item.version) || [];
-    group.push(item);
-    grouped.set(item.version, group);
-  }
-  const result = [];
-  for (const group of grouped.values()) {
-    const trusted = group.filter((entry) => entry.source === 'jcb-update');
-    const uniqueTrusted = unique(trusted);
-    // A disagreement between update manifests must not silently downgrade to a tag.
-    if (trusted.length && uniqueTrusted.length !== 1) continue;
-    const tags = unique(group.filter((entry) => entry.source === 'jcb-tag'));
-    if (trusted.length) result.push({ ...uniqueTrusted[0], ...(tags[0]?.gitCommit ? { gitCommit: tags[0].gitCommit } : {}) });
-    else if (tags.length === 1) result.push(tags[0]);
-  }
-  return result.sort(newestVersionFirst);
-}
-
 function unique(entries) {
   const versions = new Map();
   for (const entry of entries) {
     const key = `${entry.source}:${entry.version}`;
     const previous = versions.get(key);
-    if (previous && (previous.url !== entry.url || previous.sha256 !== entry.sha256 || previous.sha512 !== entry.sha512 || previous.gitCommit !== entry.gitCommit || previous.phpMinimum !== entry.phpMinimum)) {
+    if (previous && (previous.url !== entry.url || previous.sha256 !== entry.sha256 || previous.sha512 !== entry.sha512 || previous.gitCommit !== entry.gitCommit || previous.phpMinimum !== entry.phpMinimum || previous.targetPlatform !== entry.targetPlatform)) {
       // Conflicting upstream records cannot be treated as a verified package.
       versions.set(key, null);
     } else if (!versions.has(key)) versions.set(key, entry);
@@ -183,7 +200,7 @@ function unique(entries) {
   return [...versions.values()].filter(Boolean).sort(newestVersionFirst);
 }
 
-const CACHE_PREFIX = 'joomengine.dynamic-catalog.v1:';
+const CACHE_PREFIX = 'joomengine.dynamic-catalog.v2:';
 const DEFAULT_TTL = 5 * 60_000;
 const MAX_STALE_AGE = 24 * 60 * 60_000;
 
@@ -198,8 +215,6 @@ function compactMetadata(value, kind) {
     assets: Array.isArray(entry?.assets) ? entry.assets.filter((asset) => typeof asset?.name === 'string' && asset.name.endsWith('-Full_Package.zip'))
       .map((asset) => ({ name: asset.name, browser_download_url: asset.browser_download_url, digest: asset.digest })) : [],
   }));
-  if (kind === 'branches') return value.map((entry) => ({ name: entry?.name }));
-  if (kind === 'tags') return value.map((entry) => ({ name: entry?.name, commit: { sha: entry?.commit?.sha } }));
   throw new TypeError('Unknown catalog response type.');
 }
 
@@ -237,14 +252,15 @@ async function requestData(fetchImpl, url, signal, { storage, kind, ttl, now, fo
 }
 
 /**
- * Discover official changing sources, keeping pinned defaults separately. Source
- * overrides and fetch injection support testing. Errors are returned per source,
- * not substituted with invented package checksums.
+ * Read the three official Joomla nightly channels and the two JCB manifests.
+ * One bounded recent Joomla release request supplies stable/published previews;
+ * it never walks release history, branch lists, or the package tag archive.
+ * Pinned inputs remain a safe baseline when an upstream feed is unavailable.
  */
-export async function discoverDynamicCatalog({ fetchImpl = globalThis.fetch, signal, sources = {}, onJoomlaPage, onJcbPage,
-  maxPages = 3, cacheStorage, cacheTtlMs = DEFAULT_TTL, forceRefresh = false, now = Date.now } = {}) {
+export async function discoverDynamicCatalog({ fetchImpl = globalThis.fetch, signal, sources = {},
+  pinnedJoomla = [], pinnedJcb = [], cacheStorage, cacheTtlMs = DEFAULT_TTL,
+  forceRefresh = false, now = Date.now } = {}) {
   if (typeof fetchImpl !== 'function') throw new TypeError('A fetch implementation is required.');
-  if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 50) throw new TypeError('Invalid page limit.');
   if (!Number.isFinite(cacheTtlMs) || cacheTtlMs < 0 || cacheTtlMs > MAX_STALE_AGE || typeof now !== 'function') throw new TypeError('Invalid catalog cache settings.');
   let storage = cacheStorage;
   if (storage === undefined) {
@@ -262,14 +278,6 @@ export async function discoverDynamicCatalog({ fetchImpl = globalThis.fetch, sig
   };
   const read = (name, url, kind) => requestData(fetchImpl, url, signal, { storage, kind, ttl: cacheTtlMs, now, forceRefresh,
     onStale: () => errors.push({ source: name, message: 'Live metadata is unavailable; using a cached copy.' }) });
-  const jcbBranchReads = new Map();
-  const readJcbBranch = (name) => {
-    if (!jcbBranchReads.has(name)) jcbBranchReads.set(name, collect(`jcb-${name}`, async () => {
-      const xml = await read(`jcb-${name}`, `${sources.jcbRawBase || JCB_RAW}/${name}/componentbuilder_update_server.xml`, 'xml');
-      jcb.push(...parseJcbUpdates(xml));
-    }));
-    return jcbBranchReads.get(name);
-  };
   const nightlyReads = new Map();
   const readNightly = (name, url) => {
     if (!nightlyReads.has(url)) nightlyReads.set(url, collect(name, async () => {
@@ -279,46 +287,32 @@ export async function discoverDynamicCatalog({ fetchImpl = globalThis.fetch, sig
   };
   await Promise.all([
     collect('joomla-releases', async () => {
-      for (let page = 1; page <= maxPages; page++) {
-        const json = await read('joomla-releases', `${sources.releases || RELEASES}?per_page=100&page=${page}`, 'releases');
-        if (!Array.isArray(json)) throw new TypeError('Invalid Joomla releases response.');
-        const parsed = parseJoomlaReleases(json);
-        joomla.push(...parsed);
-        if (onJoomlaPage) onJoomlaPage(parsed, page);
-        if (json.length < 100) return;
-        if (page === maxPages) errors.push({ source: 'joomla-releases', message: 'The release catalog is partial; load more pages for older releases.' });
-      }
+      const url = new URL(sources.releases || RELEASES);
+      url.searchParams.set('per_page', '100');
+      url.searchParams.set('page', '1');
+      joomla.push(...parseJoomlaReleases(await read('joomla-releases', url.href, 'releases')));
     }),
-    ...((sources.nightlyURLs || NIGHTLY_FEEDS).map((url, index) => collect(`joomla-nightlies-${index + 1}`, async () => {
+    ...[...new Set(sources.nightlyURLs || NIGHTLY_FEEDS)].map((url, index) => collect(`joomla-nightlies-${index + 1}`, async () => {
       const name = `joomla-nightlies-${index + 1}`;
       const xml = await read(name, url, 'xml');
       if (/<extensionset\b/i.test(xml)) {
         const details = parseJoomlaNightlyList(xml);
         if (!details.length) throw new Error('No Joomla nightly update feeds were found.');
-        await Promise.all(details.map((detailsURL) => readNightly(name, detailsURL)));
+        await Promise.all(details.map(detailsURL => readNightly(name, detailsURL)));
       } else joomla.push(...parseJoomlaNightlyUpdates(xml));
-    }))),
-    // These publisher feeds remain usable if the optional GitHub branch listing
-    // is rate limited. Branch discovery adds future major-version feeds.
-    ...(!sources.branches && !sources.jcbRawBase ? ['6.x', '5.x'].map(readJcbBranch) : []),
-    collect('jcb-updates', async () => {
-      const branches = await read('jcb-updates', `${sources.branches || `${REPOSITORY}/branches`}?per_page=100`, 'branches');
-      if (!Array.isArray(branches)) throw new TypeError('Invalid JCB branch response.');
-      const names = [...new Set(branches.map((branch) => branch?.name).filter((name) => typeof name === 'string' && BRANCH.test(name)))];
-      if (!names.length) throw new Error('No versioned JCB branches were found.');
-      await Promise.all(names.map(readJcbBranch));
-    }),
-    collect('jcb-tags', async () => {
-      for (let page = 1; page <= maxPages; page++) {
-        const json = await read('jcb-tags', `${sources.jcbTags || PACKAGE_TAGS}?per_page=100&page=${page}`, 'tags');
-        if (!Array.isArray(json)) throw new TypeError('Invalid JCB tags response.');
-        const parsed = parseJcbTags(json);
-        jcb.push(...parsed);
-        if (onJcbPage) onJcbPage(parsed, page);
-        if (json.length < 100) return;
-        if (page === maxPages) errors.push({ source: 'jcb-tags', message: 'The JCB tag catalog is partial; load more pages for older releases.' });
-      }
-    }),
+    })),
+    ...[...new Set(sources.jcbURLs || JCB_FEEDS)].map((url, index) => collect(`jcb-updates-${index + 1}`, async () => {
+      jcb.push(...parseJcbUpdates(await read(`jcb-updates-${index + 1}`, url, 'xml')));
+    })),
   ]);
-  return { joomla: unique(joomla), jcb: mergeJcb(jcb), errors };
+  const withPinned = (entries, pinned) => {
+    const result = new Map(unique(entries).map(entry => [entry.version, entry]));
+    for (const entry of pinned) result.set(entry.version, { ...result.get(entry.version), ...entry });
+    return [...result.values()];
+  };
+  return {
+    joomla: selectCurrentForwardVersions(withPinned(joomla, pinnedJoomla)),
+    jcb: selectCurrentForwardVersions(withPinned(jcb, pinnedJcb), { allowedMajors: null }),
+    errors,
+  };
 }
