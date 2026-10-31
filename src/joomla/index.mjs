@@ -308,10 +308,10 @@ export async function installExtension(runtime, bytes, {
       argv: ['extension:install', `--path=${archive}`], installationExecutionTimeSeconds: budget.executionTimeSeconds,
     }, sourceLoader, { timeoutMs: budget.timeoutMs });
   } catch (error) {
-    const phpTimeout = /Maximum execution time of \d+ seconds exceeded/i.test(error.message);
+    const phpTimeout = /Maximum execution time of (\d+) seconds exceeded/i.exec(error.message);
     const hostTimeout = error.code === 'TIMEOUT';
     const summary = phpTimeout
-      ? `${packageLabel(packageUrl)} installation exceeded PHP's ${budget.executionTimeSeconds}-second limit.`
+      ? `${packageLabel(packageUrl)} installation exceeded PHP's ${phpTimeout[1]}-second limit.`
       : hostTimeout ? `${packageLabel(packageUrl)} installation exceeded the ${budget.timeoutMs / 1000}-second runtime deadline.`
         : `${packageLabel(packageUrl)} ${phase} failed: ${conciseFailure(error.message)}`;
     throw provisioningError(summary, { ...context, phase, code: error.code,
