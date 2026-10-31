@@ -104,6 +104,17 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
     await waitForDashboard();
     await frame.goto(adminPage('option=com_config'), { waitUntil: 'load', timeout });
     assert.equal(await frame.locator('#jform_sitename').inputValue(), siteName, 'The saved configuration.php marker must survive reload.');
+    if (saved === 2) {
+      // Both reloads have proved the saved file. Restore it while this real
+      // configuration form is already open, before the final record check.
+      // A redundant dashboard -> configuration round trip after that check can
+      // leave Firefox's automation frame context stale despite a rendered page.
+      page.testStep = 'restore JCB site name in the verified configuration form after the second reload';
+      await frame.locator('#jform_sitename').fill(originalSiteName);
+      await saveJoomla('application.apply');
+      assert.equal(await frame.locator('#jform_sitename').inputValue(), originalSiteName);
+      page.testStep = 'verify the committed JCB record after the second reload and configuration restore';
+    }
     await frame.goto(adminPage('option=com_content&view=articles'), { waitUntil: 'load', timeout });
     await frame.locator('#filter_search').fill(articleTitle);
     await Promise.all([
@@ -115,16 +126,5 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
     await frame.goto(new URL(`.${initialPath}`, siteBase()).href, { waitUntil: 'load', timeout });
     await waitForDashboard();
   }
-  page.testStep = 'restore the prepared JCB site name after hard-reload validation';
-  await frame.goto(adminPage('option=com_config'), { waitUntil: 'load', timeout });
-  page.testStep = 'restore JCB site name: edit the global configuration form';
-  await frame.locator('#jform_sitename').fill(originalSiteName);
-  page.testStep = 'restore JCB site name: save the global configuration form';
-  await saveJoomla('application.apply');
-  assert.equal(await frame.locator('#jform_sitename').inputValue(), originalSiteName);
-  page.testStep = 'restore JCB site name: reopen the component dashboard';
-  await frame.goto(new URL(`.${initialPath}`, siteBase()).href, { waitUntil: 'load', timeout });
-  page.testStep = 'restore JCB site name: wait for dashboard responses';
-  await waitForDashboard();
   return { preparedJcb: true, hardReloadsWithoutClose: 2, committedRecord: true, savedConfigurationFile: true, administrator: true };
 }
