@@ -871,7 +871,9 @@ for (const name of browserNames) {
           const deployCatalog = await loadDeployCatalog();
           const release = catalog.joomla.find(item => item.version.startsWith('6.'));
           const { configuration } = await resolveDeployConfiguration({ deployId: 'servicedirectory',
-            joomlaVersion: release.version, phpVersion: '8.4' }, { catalog, deployCatalog, baseURL: location.href });
+            joomlaVersion: release.version, phpVersion: '8.4',
+            admin: { password: `Manual-${crypto.randomUUID()}!` },
+          }, { catalog, deployCatalog, baseURL: location.href });
           return { extensions: configuration.extensions, joomlaVersion: release.version };
         });
         const manualService = await startDeploy(page, new URLSearchParams({ deploy: 'blank',

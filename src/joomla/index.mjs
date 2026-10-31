@@ -201,7 +201,7 @@ export async function parseProvisioningResult(response) {
     : typeof response.text === 'string' ? response.text
       : typeof response.body === 'string' ? response.body : new TextDecoder().decode(response.body ?? new Uint8Array());
   const start = text.indexOf(RESULT_MARKER);
-  const diagnostic = { technicalDetails: text, phase: 'installation' };
+  const diagnostic = { technicalDetails: [response.diagnostic, text].filter(Boolean).join('\n\n'), phase: 'installation' };
   if (start === -1) throw provisioningError(`PHP did not complete the Joomla operation (HTTP ${response.status ?? 'unknown'}).`, diagnostic);
   const bodyStart = start + RESULT_MARKER.length;
   const end = resultFrameEnd(text, bodyStart);
