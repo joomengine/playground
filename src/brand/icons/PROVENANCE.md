@@ -1,19 +1,9 @@
-# Supplied icon provenance
+# Icon provenance
 
-Source: user-provided `black-svg-icons.zip`.
+The monochrome action icons are [Remix Icon](https://github.com/Remix-Design/RemixIcon), copyright Remix Design, from the Apache-2.0-licensed [v2.5.0 release](https://github.com/Remix-Design/RemixIcon/tree/755818100db4687fd907ecaef9f57cc9ea77d0d8).
 
-SHA-256: `d43881529b5e9c618faeaeec097af18ec62588be99989f920963c29308df05f6`.
+Selected originals are preserved byte-for-byte under `originals/`. Exact source paths and hashes are recorded in `upstream-verification.json` and the action mapping in `icon-manifest.json`. The verified release's license is retained verbatim in `LICENSE.remixicon.txt`.
 
-The archive contains 2,785 unique SVG files, 18 directories and no other files. Selected originals are preserved byte-for-byte under `originals/`. Exact paths and hashes are in `icon-manifest.json`. All 79 selected monochrome sources use a 24×24 viewBox. The package assigns 103 application actions; aliases intentionally reuse original symbols.
+The monochrome sources use a 24×24 viewBox. Aliases intentionally reuse original symbols. Theme variants add only root SVG paint and accessibility metadata: path geometry, groups, winding rules, viewBox and `fill="none"` remain unchanged.
 
-Only a root SVG fill is added for black, white or currentColor output. Path geometry, groups, winding rules, viewBox and fill=none remain unchanged. No custom replacement icon artwork has been created.
-
-No source license or release identifier was supplied. This package does not assert a license. Confirm the applicable original release and retain its attribution/notices before distributing the application.
-
-The brand rocket is a second user-supplied source: `JoomEngine_Pearl_Logo.svg` (218,076 bytes). Its exact original and SHA-256 are preserved under `brand/`. It is not part of the monochrome archive. Its derivatives preserve paths, gradients, colors and transparency, changing only root dimensions/framing.
-
-## Implementation source verification — 30 October 2026
-
-All 79 supplied monochrome originals were compared byte-for-byte with the official Remix Icon v2.5.0 release, commit `755818100db4687fd907ecaef9f57cc9ea77d0d8`. Every file matches. See `upstream-verification.json` for paths and hashes. That release uses Apache License 2.0, preserved verbatim in `LICENSE.remixicon.txt`. This is a verified release match, not a license inferred from filenames. Later upstream license changes do not alter which source release was verified here.
-
-Source: https://github.com/Remix-Design/RemixIcon/tree/v2.5.0
+The JoomEngine pearl rocket is separate project brand artwork. Its exact master and SHA-256 are preserved under `src/brand/`. Its derivatives preserve paths, gradients, colors and transparency, changing only root dimensions/framing and safe whitespace.

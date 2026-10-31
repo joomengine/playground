@@ -1,31 +1,5 @@
-JoomEngine Playground
+Third-party notices
 Copyright 2026 JoomEngine contributors
-
-The full-color JoomEngine pearl rocket is user-supplied project brand artwork.
-The exact original is preserved in src/brand/JoomEngine_Pearl_Logo.original.svg;
-its checksum and framing are recorded in src/brand/brand-manifest.json.
-The SVG favicon and control/decorative uses are generated without changing paths,
-gradients or colors by scripts/build-brand.mjs.
-
-The monochrome action icons are Remix Icon, copyright Remix Design.
-All 79 supplied source SVGs match the official v2.5.0 release byte-for-byte:
-https://github.com/Remix-Design/RemixIcon/tree/755818100db4687fd907ecaef9f57cc9ea77d0d8
-That release is licensed under Apache License 2.0, preserved verbatim at
-src/brand/icons/LICENSE.remixicon.txt. Exact originals, the action mapping and
-file checksums are preserved in src/brand/icons/. The themed derivatives only
-add root currentColor paint and accessibility metadata; geometry is unchanged.
-
-PHP execution is provided by Sean Morris and the contributors to
-https://github.com/seanmorris/php-wasm . This project consumes their published
-runtime and extension packages. Their copyright, licenses and notices are
-preserved with the distributed assets.
-
-The PHP and MariaDB WebAssembly builds rely on Emscripten, maintained by the
-contributors to https://github.com/emscripten-core/emscripten .
-
-MariaDB integration is provided by https://github.com/joomengine/mariadb-wasm-bridge
-and its separately maintained database dependency https://github.com/shyim/lite4mariadb .
-MariaDB and lite4mariadb retain their upstream licenses and source provenance.
 
 Joomla is provided by https://github.com/joomla/joomla-cms and retains its GNU
 General Public License and all notices included in its release packages. The
@@ -41,6 +15,46 @@ Its GPL-2.0-or-later license and copyright notices remain in the derived browser
 packages. The reviewed reader-interface adjustment preserves its source header.
 The upstream fixture license is included at test/fixtures/LICENSE.jcb.txt.
 
+PHP and phpdbg are provided by the contributors to https://github.com/php/php-src
+under the PHP License 3.01 and Zend Engine License 2.00. Their upstream licenses,
+copyright notices, selected source revisions and compiled-build provenance remain
+with the distributed runtime assets.
+
+MariaDB is provided by the contributors to https://github.com/MariaDB/server
+under GNU GPL version 2. Its upstream licenses and source provenance remain with
+the distributed database assets.
+
+PHP execution is provided by Sean Morris and the contributors to
+https://github.com/seanmorris/php-wasm . This project consumes their published
+runtime and extension packages. Their copyright, licenses and notices are
+preserved with the distributed assets.
+
+JoomEngine MariaDB WASM Bridge is provided by the contributors to
+https://github.com/joomengine/mariadb-wasm-bridge under Apache License 2.0.
+Its database worker, persistence layer, host protocol and native PDO driver retain
+their licenses and source provenance.
+
+lite4mariadb is provided by the contributors to https://github.com/shyim/lite4mariadb
+under GNU GPL version 2. The embedded MariaDB engine and its source provenance
+retain their upstream licenses and notices.
+
+JoomEngine Code uses Microsoft's Visual Studio Code 1.142.0 and Monaco Editor
+0.57.0 through CodinGame's Monaco VS Code API, services and default extensions
+38.1.3. Their MIT licences and the matching Microsoft third-party notices are
+preserved in dependencies/joomengine-code and distributed with the editor.
+The upstream revisions, source locations and notice digests are recorded there
+in provenance.json. The project is independent of Microsoft and CodinGame.
+
+Adminer is provided by Jakub Vrána and contributors through
+https://github.com/vrana/adminer. This distribution uses its Apache License 2.0
+option; upstream also offers GNU GPL version 2. Its license and the pinned source
+and browser-adapter provenance are retained in dependencies/adminer and
+distributed with the database interface.
+
+The PHP and MariaDB WebAssembly builds rely on Emscripten, maintained by the
+contributors to https://github.com/emscripten-core/emscripten . The compilation
+toolchain retains its upstream MIT/NCSA terms.
+
 JCB spreadsheet support builds on PHPOffice/PhpSpreadsheet and ZipStream-PHP,
 with Composer PCRE, Mark Baker's Complex and Matrix libraries, MyCLabs PHP Enum,
 and PHP-FIG HTTP Message and Simple Cache interfaces. Their MIT licenses are
@@ -54,9 +68,6 @@ checksums and license declarations are recorded in
 dependencies/jcb-spreadsheet/packages.json and each derived package's provenance.
 Composer is provided by https://github.com/composer/composer under the MIT
 license; its version and verified binary checksum are recorded in that provenance.
-
-The playground source license does not replace the licenses of these bundled
-dependencies. The static distribution includes their notices and source links.
 
 The loadable fileinfo extensions are compiled from the pinned official PHP
 sources and include libmagic. Their PHP and libmagic licenses and compiled-source
@@ -110,13 +121,6 @@ placeholders and builds any declared child archives. The pinned source revision,
 archive checksum and resulting file provenance are recorded in
 dependencies/joomla-languages/packages.json and the generated package inventories.
 
-JoomEngine Code uses Microsoft's Visual Studio Code 1.142.0 and Monaco Editor
-0.57.0 through CodinGame's Monaco VS Code API, services and default extensions
-38.1.3. Their MIT licences and the matching Microsoft third-party notices are
-preserved in dependencies/joomengine-code and distributed with the editor.
-The upstream revisions, source locations and notice digests are recorded there
-in provenance.json. The project is independent of Microsoft and CodinGame.
-
 The editor includes Microsoft and community language grammars, default colour
 themes, Jesse Weed's Seti file icons, Codicons, vscode-textmate and the
 vscode-oniguruma WebAssembly regular-expression engine. Their original notices
@@ -148,10 +152,25 @@ engineering to debug such modifications.
 PHP debugging builds on PHP's phpdbg SAPI and Sean Morris's PHP-WASM browser
 debugger, using php-dbg-wasm 0.2.0. PHP/phpdbg retain their PHP licence and the
 PHP-WASM adapters retain their Apache-2.0 or GPL-2.0-only notices; the runtime
-asset manifests record the selected PHP sources and compiled builds. Emscripten
-provides the browser compilation toolchain under its upstream MIT/NCSA terms.
-The existing PHP, extension and database recognition above continues to apply.
+asset manifests record the selected PHP sources and compiled builds.
+
+The playground source license does not replace the licenses of these bundled
+dependencies. The static distribution includes their notices and source links.
+
+The full-color JoomEngine pearl rocket is project brand artwork.
+The exact original is preserved in src/brand/JoomEngine_Pearl_Logo.original.svg;
+its checksum and framing are recorded in src/brand/brand-manifest.json.
+The SVG favicon and control/decorative uses are generated without changing paths,
+gradients or colors by scripts/build-brand.mjs.
 
 The JOOMENGINE CODE vector wordmarks in src/brand are geometric artwork by the
 JoomEngine contributors, extending the existing JoomEngine identity. They use
 editable SVG paths without a bundled third-party font.
+
+The monochrome action icons are Remix Icon, copyright Remix Design:
+https://github.com/Remix-Design/RemixIcon/tree/755818100db4687fd907ecaef9f57cc9ea77d0d8
+The selected originals match the official v2.5.0 release byte-for-byte. That
+release is licensed under Apache License 2.0, preserved verbatim at
+src/brand/icons/LICENSE.remixicon.txt. Exact originals, the action mapping and
+file checksums are preserved in src/brand/icons/. The themed derivatives only
+add root currentColor paint and accessibility metadata; geometry is unchanged.
