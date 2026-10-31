@@ -142,16 +142,17 @@ html,body{background:var(--canvas);color:var(--ink)}
 .site-switcher>.saved-site-management>.field{min-width:0;width:auto}
 .site-switcher>.running-site-note{grid-column:1;margin:0;max-width:none}
 .site-switcher>p:not(.running-site-note){grid-column:2;margin:0;max-width:none}
-.runtime-controls{align-items:start;margin-block-start:18px;grid-template-columns:minmax(180px,1.5fr) repeat(3,minmax(120px,1fr)) minmax(130px,1.1fr) minmax(125px,1fr) minmax(130px,1fr)}
+.runtime-controls{align-items:start;margin-block-start:18px;grid-template-columns:minmax(180px,1.5fr) repeat(3,minmax(120px,1fr)) minmax(130px,1.1fr) minmax(125px,max-content) max-content}
 .runtime-controls .toggle-row{display:block}
-.runtime-controls .toggle-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:42px}
+.runtime-controls .toggle-heading{display:flex;align-items:center;gap:10px;min-height:42px}
 .runtime-controls .toggle-switch{display:inline-flex;position:relative;flex:none}
 .runtime-controls .toggle-row input{top:0}
-.runtime-controls .toggle-row small{text-align:end}
+.runtime-controls .toggle-row small{text-align:start}
 @media(max-width:1450px){.runtime-controls{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:1100px){.runtime-controls{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:760px){.runtime-controls{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .runtime-controls>.toggle-row,.runtime-controls>.launch-button{margin-block-start:25px}
+.runtime-controls>.launch-button{white-space:normal}
 @media(max-width:1450px){.header-actions .je-action:not(.je-icon-only)>.je-action-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.header-actions .je-action{min-width:36px;min-height:38px}.flight-status{min-width:120px}}
 @media(max-width:900px){.site-switcher{grid-template-columns:1fr}.site-switcher>.running-site-note,.site-switcher>p:not(.running-site-note){grid-column:1}.site-switcher>.saved-site-management{grid-template-columns:minmax(160px,1fr) auto auto}}
 @media(max-width:540px){.site-switcher>.saved-site-management{grid-template-columns:1fr 1fr}.site-switcher>.saved-site-management>.field{grid-column:1/-1}.site-switcher>.saved-site-management>.button{padding-inline:10px}.runtime-controls>.toggle-row,.runtime-controls>.launch-button{margin-block-start:8px}.flight-status{min-width:0}}
