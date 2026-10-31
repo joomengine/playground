@@ -1,4 +1,7 @@
 export default Object.freeze({
+  "title.packageDownload": "{package} 불러오기",
+  "help.packageDownload": "이 ZIP을 다운로드한 다음 다운로드한 파일을 선택하여 계속하세요.",
+  "label.packageFile": "다운로드한 ZIP",
   "error.extensionUrl": "확장 기능 {number}의 전체 HTTP 또는 HTTPS URL을 입력하세요.",
   "action.addExtensionUrl": "다른 URL 추가",
   "title.extensionAdvanced": "고급 옵션",

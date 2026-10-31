@@ -1,4 +1,7 @@
 export default Object.freeze({
+  "title.packageDownload": "Laai {package}",
+  "help.packageDownload": "Laai hierdie ZIP af en kies dan die afgelaaide lêer om voort te gaan.",
+  "label.packageFile": "Afgelaaide ZIP",
   "error.extensionUrl": "Voer ’n volledige HTTP- of HTTPS-URL vir uitbreiding {number} in.",
   "action.addExtensionUrl": "Voeg nog ’n URL by",
   "title.extensionAdvanced": "Gevorderde opsies",

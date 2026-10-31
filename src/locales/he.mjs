@@ -1,4 +1,7 @@
 export default Object.freeze({
+  "title.packageDownload": "טעינת {package}",
+  "help.packageDownload": "הורידו את קובץ ה-ZIP הזה, ואז בחרו את הקובץ שהורדתם כדי להמשיך.",
+  "label.packageFile": "קובץ ZIP שהורד",
   "error.extensionUrl": "הזינו כתובת HTTP או HTTPS מלאה עבור הרחבה {number}.",
   "action.addExtensionUrl": "הוספת כתובת URL נוספת",
   "title.extensionAdvanced": "אפשרויות מתקדמות",

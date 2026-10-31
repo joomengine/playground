@@ -1,4 +1,7 @@
 export default Object.freeze({
+  "title.packageDownload": "Muat {package}",
+  "help.packageDownload": "Unduh ZIP ini, lalu pilih file yang telah diunduh untuk melanjutkan.",
+  "label.packageFile": "ZIP yang diunduh",
   "error.extensionUrl": "Masukkan URL HTTP atau HTTPS lengkap untuk ekstensi {number}.",
   "action.addExtensionUrl": "Tambahkan URL lain",
   "title.extensionAdvanced": "Opsi lanjutan",

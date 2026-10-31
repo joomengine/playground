@@ -1,4 +1,7 @@
 export default Object.freeze({
+  "title.packageDownload": "Load {package}",
+  "help.packageDownload": "Download this ZIP, then choose the downloaded file to continue.",
+  "label.packageFile": "Downloaded ZIP",
   "error.extensionUrl": "Enter a complete HTTP or HTTPS URL for extension {number}.",
   "action.addExtensionUrl": "Add another URL",
   "title.extensionAdvanced": "Advanced options",

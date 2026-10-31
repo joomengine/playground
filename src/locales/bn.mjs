@@ -1,4 +1,7 @@
 export default Object.freeze({
+  "title.packageDownload": "{package} লোড করুন",
+  "help.packageDownload": "এই ZIP ডাউনলোড করুন, তারপর চালিয়ে যেতে ডাউনলোড করা ফাইলটি বেছে নিন।",
+  "label.packageFile": "ডাউনলোড করা ZIP",
   "error.extensionUrl": "এক্সটেনশন {number}-এর জন্য সম্পূর্ণ HTTP বা HTTPS URL লিখুন।",
   "action.addExtensionUrl": "আরেকটি URL যোগ করুন",
   "title.extensionAdvanced": "উন্নত বিকল্প",

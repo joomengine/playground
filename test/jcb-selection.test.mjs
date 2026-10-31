@@ -41,3 +41,11 @@ test('Joomla 7 uses the requested JCB 6 testing fallback', () => {
   assert.equal(selection.version, '6.2.0');
   assert.equal(jcbSelectionInput({ selection, deploy: serviceRecipe, major: '7', pinned }).jcbPackage.url, jcbEntry.url);
 });
+
+
+test('a future pinned JCB 7 becomes the default for Joomla 7', () => {
+  const nextPinned = new Map([...pinned, ['7', { version: '7.0.0', package: { url: '/jcb-7.zip', sha256: 'b'.repeat(64) } }]]);
+  const selection = initialJcbSelection({ input: { deployId: 'servicedirectory' }, deploy: serviceRecipe, major: '7', pinned: nextPinned, isSaved: false });
+  assert.equal(selection.version, '7.0.0');
+  assert.equal(jcbSelectionInput({ selection, deploy: serviceRecipe, major: '7', pinned: nextPinned }).jcbPackage.url, '/jcb-7.zip');
+});

@@ -8,7 +8,8 @@ const REPOSITORY = 'https://api.github.com/repos/joomengine/Joomla-Component-Bui
 const PACKAGE_TAGS = 'https://api.github.com/repos/joomengine/pkg-component-builder/tags';
 const RELEASES = 'https://api.github.com/repos/joomla/joomla-cms/releases';
 const NIGHTLY_FEEDS = ['next_patch', 'next_minor', 'next_major']
-  .map((name) => `https://update.joomla.org/core/nightlies/${name}_extension.xml`);
+  .map((name) => `https://update.joomla.org/core/nightlies/${name}_list.xml`);
+const JCB_RAW = 'https://raw.githubusercontent.com/joomengine/Joomla-Component-Builder/refs/heads';
 
 function safeURL(value, origin, path) {
   try {
@@ -24,6 +25,21 @@ function xmlText(value) { return value.replace(/&amp;/g, '&').replace(/&lt;/g, '
 function firstTag(xml, tag) {
   const match = xml.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([^<]*)<\\/${tag}\\s*>`, 'i'));
   return match ? xmlText(match[1]) : '';
+}
+
+function newestVersionFirst(a, b) {
+  const parts = (version) => {
+    const [core, stage = '', development = ''] = version.toLowerCase().split('-');
+    const match = /^(alpha|beta|rc)(\d*)$/.exec(stage);
+    return [...core.split('.').map(Number), stage === '' ? 4 : match ? { alpha: 1, beta: 2, rc: 3 }[match[1]] : 0,
+      Number(match?.[2] || 0), development === 'dev' ? 0 : 1];
+  };
+  const left = parts(a.version);
+  const right = parts(b.version);
+  for (let index = 0; index < left.length; index++) {
+    if (left[index] !== right[index]) return right[index] - left[index];
+  }
+  return 0;
 }
 
 /** Parse GitHub releases, using built full installer assets, never source ZIPs. */
@@ -69,6 +85,20 @@ export function parseJoomlaNightlies(html) {
 }
 
 /** The official nightly update feeds identify versions and minimum PHP. */
+export function parseJoomlaNightlyList(xml) {
+  if (typeof xml !== 'string') throw new TypeError('Joomla nightly metadata must be text.');
+  const urls = new Set();
+  for (const match of xml.matchAll(/<extension\b([^>]*)\/?\s*>/gi)) {
+    const attributes = Object.fromEntries([...match[1].matchAll(/([\w-]+)\s*=\s*(["'])([\s\S]*?)\2/g)]
+      .map((attribute) => [attribute[1].toLowerCase(), xmlText(attribute[3])]));
+    if (attributes.element !== 'joomla' || attributes.type !== 'file') continue;
+    const url = safeURL(attributes.detailsurl, 'https://update.joomla.org', /^\/core\/nightlies\/[a-z_]+_extension\.xml$/);
+    if (url) urls.add(url);
+  }
+  return [...urls];
+}
+
+/** Choose fresh-install archives, not the update-only ZIPs in update feeds. */
 export function parseJoomlaNightlyUpdates(xml) {
   if (typeof xml !== 'string') throw new TypeError('Joomla nightly metadata must be text.');
   const result = [];
@@ -80,6 +110,8 @@ export function parseJoomlaNightlyUpdates(xml) {
     const updateURL = safeURL(firstTag(item, 'downloadurl'), 'https://developer.joomla.org', /^\/nightlies\/Joomla_[\w.-]+-Development-Update_Package\.zip$/);
     if (!updateURL || new URL(updateURL).pathname !== `/nightlies/Joomla_${version}-Development-Update_Package.zip`) continue;
     const url = updateURL.replace(/-Update_Package\.zip$/, '-Full_Package.zip');
+    // Any checksum in this update record describes the update ZIP, not the full
+    // installer. Never attach it to the different archive selected here.
     result.push({ version, label: label(version, 'Joomla'), url, sha256: null, phpMinimum, source: 'nightly', prerelease: true });
   }
   return unique(result);
@@ -135,7 +167,7 @@ function mergeJcb(entries) {
     if (trusted.length) result.push({ ...uniqueTrusted[0], ...(tags[0]?.gitCommit ? { gitCommit: tags[0].gitCommit } : {}) });
     else if (tags.length === 1) result.push(tags[0]);
   }
-  return result.sort((a, b) => b.version.localeCompare(a.version, 'en', { numeric: true }));
+  return result.sort(newestVersionFirst);
 }
 
 function unique(entries) {
@@ -148,7 +180,7 @@ function unique(entries) {
       versions.set(key, null);
     } else if (!versions.has(key)) versions.set(key, entry);
   }
-  return [...versions.values()].filter(Boolean).sort((a, b) => b.version.localeCompare(a.version, 'en', { numeric: true }));
+  return [...versions.values()].filter(Boolean).sort(newestVersionFirst);
 }
 
 const CACHE_PREFIX = 'joomengine.dynamic-catalog.v1:';
@@ -157,7 +189,7 @@ const MAX_STALE_AGE = 24 * 60 * 60_000;
 
 function compactMetadata(value, kind) {
   if (kind === 'xml') {
-    if (typeof value !== 'string' || !/<updates(?:\s[^>]*)?>[\s\S]*<\/updates\s*>/i.test(value)) throw new TypeError('Invalid XML metadata response.');
+    if (typeof value !== 'string' || !/<(updates|extensionset)(?:\s[^>]*)?>[\s\S]*<\/\1\s*>/i.test(value)) throw new TypeError('Invalid XML metadata response.');
     return value;
   }
   if (!Array.isArray(value)) throw new TypeError('Invalid catalog response.');
@@ -184,7 +216,9 @@ async function requestData(fetchImpl, url, signal, { storage, kind, ttl, now, fo
   } catch { /* Storage may be unavailable or contain old/corrupt data. */ }
   if (!forceRefresh && cached && timestamp - cached.savedAt < ttl) return cached.value;
   try {
-    const response = await fetchImpl(url, { signal, credentials: 'omit', cache: 'no-store', redirect: 'follow' });
+    const timeout = AbortSignal.timeout(15_000);
+    const response = await fetchImpl(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      credentials: 'omit', cache: 'no-store', redirect: 'follow' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const value = compactMetadata(await (kind === 'xml' ? response.text() : response.json()), kind);
     try {
@@ -203,9 +237,9 @@ async function requestData(fetchImpl, url, signal, { storage, kind, ttl, now, fo
 }
 
 /**
- * Discover changing sources. Keep pinned defaults separately. Optional source URLs
- * permit a same-origin publisher for CORS-restricted upstream metadata. Errors are
- * returned per source, not substituted with invented package checksums.
+ * Discover official changing sources, keeping pinned defaults separately. Source
+ * overrides and fetch injection support testing. Errors are returned per source,
+ * not substituted with invented package checksums.
  */
 export async function discoverDynamicCatalog({ fetchImpl = globalThis.fetch, signal, sources = {}, onJoomlaPage, onJcbPage,
   maxPages = 3, cacheStorage, cacheTtlMs = DEFAULT_TTL, forceRefresh = false, now = Date.now } = {}) {
@@ -228,6 +262,21 @@ export async function discoverDynamicCatalog({ fetchImpl = globalThis.fetch, sig
   };
   const read = (name, url, kind) => requestData(fetchImpl, url, signal, { storage, kind, ttl: cacheTtlMs, now, forceRefresh,
     onStale: () => errors.push({ source: name, message: 'Live metadata is unavailable; using a cached copy.' }) });
+  const jcbBranchReads = new Map();
+  const readJcbBranch = (name) => {
+    if (!jcbBranchReads.has(name)) jcbBranchReads.set(name, collect(`jcb-${name}`, async () => {
+      const xml = await read(`jcb-${name}`, `${sources.jcbRawBase || JCB_RAW}/${name}/componentbuilder_update_server.xml`, 'xml');
+      jcb.push(...parseJcbUpdates(xml));
+    }));
+    return jcbBranchReads.get(name);
+  };
+  const nightlyReads = new Map();
+  const readNightly = (name, url) => {
+    if (!nightlyReads.has(url)) nightlyReads.set(url, collect(name, async () => {
+      joomla.push(...parseJoomlaNightlyUpdates(await read(name, url, 'xml')));
+    }));
+    return nightlyReads.get(url);
+  };
   await Promise.all([
     collect('joomla-releases', async () => {
       for (let page = 1; page <= maxPages; page++) {
@@ -241,18 +290,23 @@ export async function discoverDynamicCatalog({ fetchImpl = globalThis.fetch, sig
       }
     }),
     ...((sources.nightlyURLs || NIGHTLY_FEEDS).map((url, index) => collect(`joomla-nightlies-${index + 1}`, async () => {
-      joomla.push(...parseJoomlaNightlyUpdates(await read(`joomla-nightlies-${index + 1}`, url, 'xml')));
+      const name = `joomla-nightlies-${index + 1}`;
+      const xml = await read(name, url, 'xml');
+      if (/<extensionset\b/i.test(xml)) {
+        const details = parseJoomlaNightlyList(xml);
+        if (!details.length) throw new Error('No Joomla nightly update feeds were found.');
+        await Promise.all(details.map((detailsURL) => readNightly(name, detailsURL)));
+      } else joomla.push(...parseJoomlaNightlyUpdates(xml));
     }))),
+    // These publisher feeds remain usable if the optional GitHub branch listing
+    // is rate limited. Branch discovery adds future major-version feeds.
+    ...(!sources.branches && !sources.jcbRawBase ? ['6.x', '5.x'].map(readJcbBranch) : []),
     collect('jcb-updates', async () => {
       const branches = await read('jcb-updates', `${sources.branches || `${REPOSITORY}/branches`}?per_page=100`, 'branches');
       if (!Array.isArray(branches)) throw new TypeError('Invalid JCB branch response.');
       const names = [...new Set(branches.map((branch) => branch?.name).filter((name) => typeof name === 'string' && BRANCH.test(name)))];
       if (!names.length) throw new Error('No versioned JCB branches were found.');
-      await Promise.all(names.map((name) => collect(`jcb-${name}`, async () => {
-        const base = sources.jcbRawBase || 'https://raw.githubusercontent.com/joomengine/Joomla-Component-Builder';
-        const xml = await read(`jcb-${name}`, `${base}/${name}/componentbuilder_update_server.xml`, 'xml');
-        jcb.push(...parseJcbUpdates(xml));
-      })));
+      await Promise.all(names.map(readJcbBranch));
     }),
     collect('jcb-tags', async () => {
       for (let page = 1; page <= maxPages; page++) {

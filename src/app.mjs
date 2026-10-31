@@ -1,4 +1,4 @@
-import { resolveSiteURL, createShareURL, createDeploymentDocument, parseDeploymentDocument, loadDeploymentDocument, normalizeConfiguration, parseCatalog, readURLConfiguration, catalogWithSelectedJoomlaPackage } from './config.mjs';
+import { resolveSiteURL, createShareURL, createDeploymentDocument, parseDeploymentDocument, loadDeploymentDocument, normalizeConfiguration, parseCatalog, readURLConfiguration, catalogWithSelectedJoomlaPackage, resolveJoomlaVersion } from './config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from './deploys.mjs';
 import { createPlayground, prepareEnvironment, resetPlayground } from './playground.mjs';
 import { customSetupDetails, defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, rememberSiteRoute, renameSavedSite, safeSavedRoute, resolveResumePath, runtimeLocation, savedStateKey } from './ui-state.mjs';
@@ -14,6 +14,9 @@ import { createLaunchCountdown, deploymentNeedsReview } from './launch-countdown
 import { presentError } from './error-presentation.mjs';
 import { createExtensionInputs } from './extension-inputs.mjs';
 import { initialJcbSelection, jcbSelectionInput, pinnedJcbPackages } from './jcb-selection.mjs';
+import { discoverDynamicCatalog } from './dynamic-catalog.mjs';
+import { dynamicJoomlaChoices, matchingJcbChoices } from './dynamic-selection.mjs';
+import { resolvePackageSelection } from './dynamic-package-dialog.mjs';
 
 const $ = (id) => document.getElementById(id);
 const deploymentURL = new URL('../', import.meta.url).href;
@@ -57,6 +60,13 @@ let openingCode;
 let extensionInputs;
 let pinnedJcb = new Map();
 const selectedJoomlaPackages = new Map();
+let refreshNightlyOnNextLaunch = false;
+let pinnedCatalog;
+let dynamicMetadata = { joomla: [], jcb: [], errors: [] };
+let dynamicCatalogRequest;
+let dynamicCatalogUpdatedAt = 0;
+let dynamicChoicesPending = false;
+const catalogRefreshInterval = 5 * 60_000;
 let currentDeployRecipe;
 let jcbSelection = { version: 'none', omit: true };
 const launchCountdown = createLaunchCountdown({
@@ -140,7 +150,7 @@ function openDialog(id) {
   if (!dialog.open) dialog.showModal();
 }
 function setDrawer(open) {
-  if (open) pauseAutomaticLaunch();
+  if (open) { pauseAutomaticLaunch(); void refreshDynamicCatalog(); }
   $('settings').hidden = !open;
   $('settings-toggle').setAttribute('aria-expanded', String(open));
   updateDrawerLabels();
@@ -297,6 +307,7 @@ function setBusy(value) {
   busy = value;
   const locked = busy || launching;
   const unavailable = !initialized || !catalog || !deployCatalog;
+  if (!locked && !unavailable && dynamicChoicesPending) renderDynamicChoices();
   const filesOnly = Boolean(runtime?.recovery?.filesOnly);
   $('configuration-fields').disabled = locked || unavailable;
   $('installation-fields').disabled = locked || unavailable;
@@ -395,7 +406,7 @@ async function recoverSite() {
     const resolved = await resolve(input);
     currentInput = input;
     currentConfig = resolved.configuration;
-    runtime = await createPlayground(currentConfig, { recovery: true, onProgress: progress });
+    runtime = await createPlayground(currentConfig, { recovery: true, onProgress: progress, resolvePackage: resolvePackageSelection });
     runningSiteId = currentConfig.storageKey;
     runningAdministrator = runtime.installation?.administrator || currentInput.admin;
     clearFeedback();
@@ -436,13 +447,14 @@ function formInput(overrides = {}) {
   }, { catalog, baseURL: deploymentURL });
 }
 async function resolve(input) {
+  await prepareDynamicInput(input);
   const selectedCatalog = catalogWithSelectedJoomlaPackage(catalog, input, deploymentURL);
   const resolved = await resolveDeployConfiguration(input, { catalog: selectedCatalog, deployCatalog, baseURL: deploymentURL });
   if (selectedCatalog !== catalog) {
     selectedJoomlaPackages.set(resolved.configuration.joomlaVersion, structuredClone(resolved.configuration.joomlaPackage));
     const previous = fields.joomlaVersion.value;
     catalog = selectedCatalog;
-    fillOptions(fields.joomlaVersion, catalog.joomla);
+    fillJoomlaOptions();
     fields.joomlaVersion.value = previous;
   }
   return resolved;
@@ -452,6 +464,7 @@ function fillOptions(select, items) {
     const option = document.createElement('option');
     option.value = item.version ?? item.id;
     option.textContent = item.label ?? item.title ?? item.version;
+    option.disabled = item.disabled === true;
     return option;
   }));
 }
@@ -470,20 +483,99 @@ function updateCompatibility({ preserve = false } = {}) {
   languageSelector?.setCatalog(tags);
   deploymentLanguageSelector?.setCatalog(tags);
 }
+function fillJoomlaOptions() {
+  const choices = pinnedCatalog ? dynamicJoomlaChoices(pinnedCatalog, dynamicMetadata.joomla, selectedJoomlaPackages) : catalog.joomla;
+  fillOptions(fields.joomlaVersion, choices.map(entry => ({ ...entry, disabled: !entry.php.length })));
+}
+function renderDynamicChoices() {
+  dynamicChoicesPending = false;
+  if (!fields.joomlaVersion.value) return;
+  const version = fields.joomlaVersion.value;
+  fillJoomlaOptions();
+  fields.joomlaVersion.value = version;
+  renderJcbOptions(version.split('.')[0]);
+  updateCompatibility({ preserve: true });
+}
+async function refreshDynamicCatalog({ required = false } = {}) {
+  if (!pinnedCatalog || (document.hidden && !required)) return;
+  if (dynamicCatalogRequest) return dynamicCatalogRequest;
+  if (Date.now() - dynamicCatalogUpdatedAt < catalogRefreshInterval) return;
+  dynamicCatalogRequest = (async () => {
+    try {
+      const result = await discoverDynamicCatalog({ maxPages: 50 });
+      dynamicMetadata = result;
+      dynamicCatalogUpdatedAt = Date.now();
+      const joomlaChoices = dynamicJoomlaChoices(pinnedCatalog, result.joomla, selectedJoomlaPackages);
+      catalog = { ...pinnedCatalog, joomla: joomlaChoices.filter(entry => entry.php.length) };
+      if (initialized && !busy && !launching) renderDynamicChoices();
+      else dynamicChoicesPending = true;
+      if (initialized && result.errors.length) activity(`Some release lists could not refresh: ${result.errors.map(error => error.message).join(' ')}`);
+    } catch (error) {
+      if (initialized) activity(`Release list refresh failed: ${messageOf(error)}`);
+      // Keep the current catalog and exact selected archives if discovery fails.
+    } finally { dynamicCatalogRequest = undefined; }
+  })();
+  return dynamicCatalogRequest;
+}
+function pinnedJoomlaVersion(version) {
+  try { return resolveJoomlaVersion(version, pinnedCatalog); }
+  catch { return undefined; }
+}
+async function prepareDynamicInput(input) {
+  if (input.joomlaVersion && !input.joomlaPackage) {
+    input.joomlaVersion = pinnedJoomlaVersion(input.joomlaVersion) || resolveJoomlaVersion(input.joomlaVersion, catalog);
+  }
+  const version = input.joomlaVersion;
+  if (version && !input.joomlaPackage && !pinnedCatalog?.joomla.some(entry => entry.version === version)) {
+    const entry = dynamicMetadata.joomla.find(item => item.version === version);
+    const available = catalog.joomla.find(item => item.version === version);
+    if (entry && available) {
+      const selected = selectedJoomlaPackages.get(version);
+      input.joomlaPackage = selected ? structuredClone(selected) : await resolvePackageSelection(entry, { php: available.php });
+      selectedJoomlaPackages.set(version, structuredClone(input.joomlaPackage));
+    }
+  }
+  if (input.jcbVersion && input.jcbVersion !== 'none' && !input.jcbPackage
+      && ![...pinnedJcb.values()].some(entry => entry.version === input.jcbVersion)) {
+    const entry = dynamicMetadata.jcb.find(item => item.version === input.jcbVersion);
+    if (entry) input.jcbPackage = await resolvePackageSelection(entry);
+  }
+}
 function renderJcbOptions(major, selection = jcbSelection) {
-  const pinned = pinnedJcb.get(major === '7' ? '6' : major);
-  const versions = new Set([...(pinned ? [pinned.version] : []),
-    ...(selection.package && selection.version !== 'none' ? [selection.version] : [])]);
-  fields.jcbVersion.replaceChildren(...[{ version: 'none', label: t('label.jcbNone') },
-    ...[...versions].map(version => ({ version, label: `JCB ${version}` }))].map(item => {
-    const option = document.createElement('option'); option.value = item.version; option.textContent = item.label; return option;
-  }));
+  const choices = matchingJcbChoices(major, dynamicMetadata.jcb, pinnedJcb);
+  if (selection.version !== 'none' && !choices.some(entry => entry.version === selection.version)) {
+    const pinned = [...pinnedJcb.values()].find(entry => entry.version === selection.version);
+    if (selection.package || pinned) choices.push({ version: selection.version, label: `JCB ${selection.version}` });
+  }
+  fillOptions(fields.jcbVersion, [{ version: 'none', label: t('label.jcbNone') }, ...choices]);
   if (![...fields.jcbVersion.options].some(option => option.value === selection.version)) {
     throw new TypeError(`The selected JCB ${selection.version} package is unavailable.`);
   }
   fields.jcbVersion.value = selection.version;
 }
+async function changeJcbSelection() {
+  if (busy || launching) return;
+  const version = fields.jcbVersion.value;
+  const previous = jcbSelection;
+  pauseAutomaticLaunch();
+  setBusy(true);
+  try {
+    const input = { jcbVersion: version };
+    if (previous.version === version && previous.package) input.jcbPackage = previous.package;
+    await prepareDynamicInput(input);
+    const next = { version, omit: false, ...(input.jcbPackage ? { package: input.jcbPackage } : {}) };
+    // Validate before changing either the configured value or the visible selection.
+    jcbSelectionInput({ selection: next, major: fields.joomlaVersion.value.split('.')[0], deploy: currentDeployRecipe, pinned: pinnedJcb });
+    jcbSelection = next;
+  } catch (error) {
+    jcbSelection = previous;
+    fields.jcbVersion.value = previous.version;
+    feedback(error, { error: true, persistent: true });
+  } finally { setBusy(false); }
+}
+
 function applyConfiguration(config, input = config, deploy) {
+  refreshNightlyOnNextLaunch = false;
   if (deploy) currentDeployRecipe = deploy;
   extraDeploymentFields = Object.fromEntries(['content', 'languages', 'joomlaPackage'].filter(key => input[key] !== undefined).map(key => [key, structuredClone(input[key])]));
   templateOptions = structuredClone(input.template || config.template || {});
@@ -574,6 +666,15 @@ async function launch() {
   try {
     if (!$('launch-form').checkValidity()) { setDrawer(true); openDialog('deploy-dialog'); $('advanced-settings').open = true; $('launch-form').reportValidity(); return; }
     let input = formInput();
+    const nightly = dynamicMetadata.joomla.find(entry => entry.version === input.joomlaVersion && entry.source === 'nightly');
+    if (nightly && input.joomlaPackage && refreshNightlyOnNextLaunch) {
+      setBusy(true);
+      const selected = await resolvePackageSelection(nightly, { php: input.joomlaPackage.php });
+      input.joomlaPackage = selected;
+      extraDeploymentFields.joomlaPackage = structuredClone(selected);
+      selectedJoomlaPackages.set(input.joomlaVersion, structuredClone(selected));
+      refreshNightlyOnNextLaunch = false;
+    }
     if (!approveCustomSetup(input)) return;
     clearFeedback();
     setBusy(true);
@@ -605,7 +706,7 @@ async function launch() {
     $('preview-label').textContent = currentConfig.siteName;
     activity(`Starting ${resolved.deploy?.title || currentConfig.deployId} with Joomla ${currentConfig.joomlaVersion} and PHP ${currentConfig.phpVersion}.`);
     const resumePath = resumeLastRoute && !input.fresh && currentConfig.persistence && savedState.sites[currentConfig.storageKey]?.lastPath;
-    runtime = await createPlayground({ ...currentConfig, ...(resumePath ? { initialPath: safeSavedRoute(resumePath, currentConfig.initialPath) } : {}) }, { onProgress: progress });
+    runtime = await createPlayground({ ...currentConfig, ...(resumePath ? { initialPath: safeSavedRoute(resumePath, currentConfig.initialPath) } : {}) }, { onProgress: progress, resolvePackage: resolvePackageSelection });
     runningSiteId = currentConfig.storageKey;
     selectedSiteId = currentConfig.persistence ? currentConfig.storageKey : null;
     const restoredPath = resumePath ? await resolveResumePath((path, init) => runtime.request(path, init), resumePath, currentConfig.initialPath) : null;
@@ -711,6 +812,7 @@ async function newSite() {
   fields.storageKey.value = `${defaultSiteKey(fields.deployId.value, fields.joomlaVersion.value).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`;
   fields.siteName.value = `${label.slice(0, 88)} ${Object.keys(savedState.sites).length + 1}`;
   $('admin-password').value = password();
+  refreshNightlyOnNextLaunch = dynamicMetadata.joomla.some(entry => entry.version === fields.joomlaVersion.value && entry.source === 'nightly');
   pendingFresh = false;
   freshKeyPending = false;
   selectedSiteId = null; resumeLastRoute = false;
@@ -779,7 +881,7 @@ function renameSelectedSite() {
       { error: !metadataSaved, persistent: !metadataSaved });
   } catch (error) { feedback(error, { error: true, persistent: true }); }
 }
-async function changeProfile() {
+async function changeProfile({ refreshNightly = false } = {}) {
   if (busy || launching || !catalog) return;
   const major = fields.joomlaVersion.value.split('.')[0];
   const descriptor = deployCatalog.deploys.find(item => item.id === fields.deployId.value);
@@ -802,12 +904,16 @@ async function changeProfile() {
         ? { joomlaPackage: structuredClone(selectedJoomlaPackages.get(target.joomlaVersion)) } : {}),
       admin: { ...administrator(), ...(!stored ? { password: password() } : {}) },
     };
-    applyAdministrator(input.admin);
-    fields.storageKey.value = input.storageKey;
     const selectedCatalog = catalogWithSelectedJoomlaPackage(catalog, input, deploymentURL);
     const compatible = selectedCatalog.joomla.find((item) => item.version === target.joomlaVersion)?.php;
     if (!compatible?.includes(input.phpVersion)) input.phpVersion = compatible?.includes(catalog.defaults.phpVersion) ? catalog.defaults.phpVersion : compatible?.[0];
+    const nightly = refreshNightly && dynamicMetadata.joomla.find(entry => entry.version === target.joomlaVersion && entry.source === 'nightly');
+    if (nightly && !savedState.sites[input.storageKey]) {
+      input.joomlaPackage = await resolvePackageSelection(nightly, { php: compatible });
+      selectedJoomlaPackages.set(target.joomlaVersion, structuredClone(input.joomlaPackage));
+    }
     const resolved = await resolve(input);
+    applyAdministrator(input.admin);
     freshKeyPending = false;
     applyConfiguration(resolved.configuration, input, resolved.deploy);
     selectedSiteId = savedState.sites[input.storageKey] ? input.storageKey : null;
@@ -816,8 +922,14 @@ async function changeProfile() {
     if (!runtime) show('welcome');
     $('retry-button').hidden = false;
     activity(`Selected ${resolved.deploy?.title || target.deployId}. Saved site key: ${resolved.configuration.storageKey}.`);
-  } catch (error) { feedback(error, { error: true, persistent: true }); }
-  finally { setBusy(false); }
+  } catch (error) {
+    if (previous) {
+      fields.deployId.value = previous.deployId;
+      fields.joomlaVersion.value = previous.joomlaVersion;
+      updateCompatibility();
+    }
+    feedback(error, { error: true, persistent: true });
+  } finally { setBusy(false); }
 }
 
 $('launch-form').addEventListener('submit', (event) => { event.preventDefault(); void launch(); });
@@ -932,12 +1044,12 @@ $('log-toggle').addEventListener('click', () => {
   $('log-toggle').setAttribute('aria-expanded', String(expanded));
 });
 fields.deployId.addEventListener('change', () => void changeProfile());
-fields.joomlaVersion.addEventListener('change', () => void changeProfile());
-fields.jcbVersion.addEventListener('change', () => {
-  const version = fields.jcbVersion.value;
-  jcbSelection = { version, omit: false, ...(jcbSelection.version === version && jcbSelection.package ? { package: jcbSelection.package } : {}) };
-  pauseAutomaticLaunch(); setBusy(busy);
-});
+fields.joomlaVersion.addEventListener('change', () => void changeProfile({ refreshNightly: true }));
+fields.jcbVersion.addEventListener('change', () => void changeJcbSelection());
+for (const select of [fields.joomlaVersion, fields.jcbVersion]) {
+  select.addEventListener('focus', () => void refreshDynamicCatalog());
+}
+
 fields.initialPath.addEventListener('input', () => { resumeLastRoute = false; });
 fields.phpVersion.addEventListener('change', () => { pauseAutomaticLaunch(); setBusy(busy); });
 fields.persistence.addEventListener('change', () => { pauseAutomaticLaunch(); setBusy(busy); });
@@ -1256,7 +1368,7 @@ async function initialize() {
         return response.json();
       }), loadDeployCatalog(),
     ]);
-    catalog = parseCatalog(manifest);
+    catalog = pinnedCatalog = parseCatalog(manifest);
     deployCatalog = recipes;
     const jcbRecipe = await resolveDeployConfiguration({ deployId: 'jcb', joomlaVersion: catalog.defaults.joomlaVersion, admin: administrator() },
       { catalog, deployCatalog, baseURL: deploymentURL });
@@ -1270,6 +1382,13 @@ async function initialize() {
       ? savedState.sites[parsed.config.storageKey] : null;
     const previous = keyed || (!hasOptions && savedState.active ? savedState.sites[savedState.active] : null);
     let input = { ...(previous || {}), ...(previous?.deployId ? { deployId: previous.deployId } : {}), ...parsed.config, admin: administrator() };
+    // Shared exact package configurations work offline; plain version links need
+    // live metadata before resolving versions outside the pinned default catalog.
+    if ((input.joomlaVersion && !input.joomlaPackage && !pinnedJoomlaVersion(input.joomlaVersion))
+      || (input.jcbVersion && input.jcbVersion !== 'none' && !input.jcbPackage && ![...pinnedJcb.values()].some(entry => entry.version === input.jcbVersion))) {
+      await refreshDynamicCatalog({ required: true });
+      fillJoomlaOptions();
+    }
     let resolved = await resolve(input);
     input.storageKey ||= defaultSiteKey(resolved.configuration.deployId, resolved.configuration.joomlaVersion);
     if (!hasOptions && !previous && !parsed.config.storageKey && !parsed.config.fresh) {
@@ -1283,6 +1402,8 @@ async function initialize() {
     freshKeyPending = Boolean(parsed.config.fresh);
     initialized = true;
     setBusy(false);
+    void refreshDynamicCatalog();
+    setInterval(() => { if (!$('settings').hidden && !busy && !launching) void refreshDynamicCatalog(); }, catalogRefreshInterval);
     const shouldResume = Boolean(previous) && (!params.has('start') || parsed.autostart);
     // A saved installation already ran this exact reviewed setup. A shared link
     // that changes any executable source or custom content still needs consent.
