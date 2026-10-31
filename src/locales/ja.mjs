@@ -1,4 +1,7 @@
 export default Object.freeze({
+  "title.packageDownload": "{package} を読み込む",
+  "help.packageDownload": "この ZIP をダウンロードし、ダウンロードしたファイルを選択して続行してください。",
+  "label.packageFile": "ダウンロードした ZIP",
   "error.extensionUrl": "拡張機能 {number} の完全な HTTP または HTTPS URL を入力してください。",
   "action.addExtensionUrl": "別の URL を追加",
   "title.extensionAdvanced": "詳細オプション",

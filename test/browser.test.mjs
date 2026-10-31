@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { chromium, firefox } from 'playwright';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { createStaticServer } from './server.mjs';
+import { withPinnedCatalog } from './dynamic-catalog-fixture.mjs';
 import { assertBrowserRequestBodies } from './browser-request-contract.mjs';
 import { assertExternalAssets } from './external-assets-contract.mjs';
 import { assertStaticAssetValidation } from './static-assets-contract.mjs';
@@ -683,7 +684,7 @@ for (const name of browserNames) {
     t.after(async () => { await browser.close(); await server.close(); await corsServer.close(); });
     for (const pair of scenarios.includes('matrix') ? combinations : []) {
       await runScenario(`Joomla ${pair.joomlaVersion}, PHP ${pair.phpVersion}: install, PDO and persisted reload`, { timeout: 900_000 }, async () => {
-        const context = await browser.newContext();
+        const context = await withPinnedCatalog(browser);
         const page = await openHarness(context, server.url);
         const config = configuration(pair, {
           initialPath: '/administrator/',
@@ -725,7 +726,7 @@ for (const name of browserNames) {
     }
     const defaultPair = combinations.find((pair) => pair.phpVersion === manifest.defaults.phpVersion && pair.joomlaVersion === manifest.defaults.joomlaVersion) || combinations[0];
     if (scenarios.includes('memory')) await runScenario('memory-only installation closes and does not persist data', { timeout: 900_000 }, async () => {
-      const context = await browser.newContext();
+      const context = await withPinnedCatalog(browser);
       const page = await openHarness(context, server.url);
       const config = configuration(defaultPair, { persistence: false });
       try {
@@ -759,7 +760,7 @@ for (const name of browserNames) {
       } finally { await close(page).catch(() => {}); await context.close(); }
     });
     if (scenarios.includes('timeout')) await runScenario('a timed-out PHP worker fails closed and a persisted site can reopen', { timeout: 900_000 }, async () => {
-      const context = await browser.newContext();
+      const context = await withPinnedCatalog(browser);
       const page = await openHarness(context, server.url);
       const config = configuration(defaultPair);
       try {
@@ -790,7 +791,7 @@ for (const name of browserNames) {
     });
     if (scenarios.includes('static')) await runScenario('plain static hosting gains isolation through the service worker', { timeout: 900_000 }, async () => {
       const plainServer = await createStaticServer({ directory, prefix: '/pages/project/', isolation: false });
-      const context = await browser.newContext();
+      const context = await withPinnedCatalog(browser);
       let page;
       try {
         page = await openHarness(context, plainServer.url, { isolation: false });
@@ -805,7 +806,7 @@ for (const name of browserNames) {
       } finally { if (page) await close(page).catch(() => {}); await context.close(); await plainServer.close(); }
     });
     if (scenarios.includes('deploys')) await runScenario('repository and URL recipes install actual components, languages and prepared content', { timeout: 900_000 }, async () => {
-      const context = await browser.newContext();
+      const context = await withPinnedCatalog(browser);
       const page = await openHarness(context, server.url);
       const proof = [];
       let mcpHttpVerified = false;
@@ -1014,7 +1015,7 @@ for (const name of browserNames) {
       finally { await close(page).catch(() => {}); await context.close(); }
     });
     if (scenarios.includes('rocket')) await runScenario('failed installations and database startup retain recovery access', { timeout: 600_000 }, async () => {
-      const context = await browser.newContext({ acceptDownloads: true });
+      const context = await withPinnedCatalog(browser, { acceptDownloads: true });
       const page = await context.newPage();
       try {
         const errors = [];
@@ -1035,7 +1036,7 @@ for (const name of browserNames) {
       } finally { await context.close(); }
     });
     if (scenarios.includes('export')) await runScenario('portable export restores exact files, SQL values, views and triggers in a new database', { timeout: 900_000 }, async () => {
-      const context = await browser.newContext({ acceptDownloads: true });
+      const context = await withPinnedCatalog(browser, { acceptDownloads: true });
       const page = await openHarness(context, server.url);
       const config = configuration(defaultPair, { persistence: false });
       try {
@@ -1090,7 +1091,7 @@ for (const name of browserNames) {
       finally { delete fixtures['__test_snapshot.zip']; await close(page).catch(() => {}); await context.close(); }
     });
     if (scenarios.includes('ui')) await runScenario('the interface preserves files and SQL across PHP changes and reloads, exports and resets', { timeout: 900_000 }, async () => {
-      const context = await browser.newContext();
+      const context = await withPinnedCatalog(browser);
       const page = observePage(await context.newPage());
       page.setDefaultTimeout(30_000);
       try {
@@ -1355,7 +1356,7 @@ for (const name of browserNames) {
       } finally { await context.close(); }
     });
     if (scenarios.includes('rocket')) await runScenario('Rocket shares, translates, saves temporary sites, changes PHP and preserves its live site while hiding controls', { timeout: 600_000 }, async () => {
-      const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+      const context = await withPinnedCatalog(browser, { viewport: { width: 1440, height: 1000 } });
       const page = observePage(await context.newPage());
       page.setDefaultTimeout(30_000);
       try {

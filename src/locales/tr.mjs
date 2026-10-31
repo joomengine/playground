@@ -1,4 +1,7 @@
 export default Object.freeze({
+  "title.packageDownload": "{package} yükle",
+  "help.packageDownload": "Bu ZIP dosyasını indirin, ardından devam etmek için indirilen dosyayı seçin.",
+  "label.packageFile": "İndirilen ZIP",
   "error.extensionUrl": "Eklenti {number} için eksiksiz bir HTTP veya HTTPS URL’si girin.",
   "action.addExtensionUrl": "Başka bir URL ekle",
   "title.extensionAdvanced": "Gelişmiş seçenekler",

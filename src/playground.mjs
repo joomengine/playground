@@ -4,6 +4,7 @@ import { exportSite } from './export.mjs';
 import { serializeRequest, restoreResponse } from './http.mjs';
 import { normalizePhpSettings, phpRequestTimeoutMs } from './php-settings.mjs';
 import { openSiteDatabase } from './saved-site-recovery.mjs';
+import { createPackageFetcher } from './dynamic-packages.mjs';
 
 const base = new URL('../', import.meta.url);
 const manifestUrl = new URL('assets/manifest.json', base);
@@ -343,7 +344,7 @@ export async function resetPlayground({ storageKey = 'default' } = {}) {
 }
 
 /** Create a real Joomla installation backed by upstream PHP and MariaDB WASM. */
-export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, recovery = false } = {}) {
+export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, recovery = false, resolvePackage } = {}) {
   const environment = await prepareEnvironment();
   if (environment.reloadRequired) throw new Error('Reload this page once to activate browser isolation, then start the playground.');
   const progress = value => onProgress({ ...value, phase: value.phase ?? value.stage });
@@ -358,6 +359,8 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     manifest.joomla.push(selected);
   }
   const config = normalizeConfiguration(input, { catalog: selectedCatalog, baseURL: base.href });
+  const fetchPackage = createPackageFetcher([config.joomlaPackage, config.jcbPackage]
+    .filter(entry => entry && new URL(entry.url).origin !== base.origin), fetch, { resolvePackage });
   let phpEntry = manifest.php.find(entry => entry.version === config.phpVersion);
   const joomlaEntry = manifest.joomla.find(entry => entry.version === config.joomlaVersion);
   const resolveAsset = value => new URL(value, manifestUrl).href;
@@ -585,7 +588,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           const commands = next.startupCommands.filter(argv => !config.startupCommands.some(previous => signature(previous) === signature(argv)));
           const template = next.template ? { ...next.template } : null;
           if (template?.url && template.url === config.template?.url && template.sha256 === config.template?.sha256) { delete template.url; delete template.sha256; }
-          const result = await applyJoomlaConfiguration(handle, { ...next, extensions: additions, startupCommands: commands, template }, { progress });
+          const result = await applyJoomlaConfiguration(handle, { ...next, extensions: additions, startupCommands: commands, template }, { progress, fetchPackage });
           Object.assign(config, next);
           handle.url = resolveSiteURL(config.initialPath, siteUrl);
           handle.installation = { ...handle.installation, ...result, administrator: handle.installation.administrator };
@@ -680,17 +683,17 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       const archive = await fetch(config.snapshot.url);
       if (!archive.ok) throw new Error(`Cannot load the prepared deploy: HTTP ${archive.status}.`);
       installed = await importJoomlaSnapshot(handle, config, {
-        archiveBytes: await archive.arrayBuffer(), sha256: config.snapshot.sha256, progress,
+        archiveBytes: await archive.arrayBuffer(), sha256: config.snapshot.sha256, progress, fetchPackage,
       });
     } else {
       let archiveBytes;
       if (pristine) {
         progress({ phase: 'download', message: `Loading Joomla ${config.joomlaVersion}…` });
-        const archive = await fetch(resolveAsset(joomlaEntry.url));
+        const archive = await fetchPackage(resolveAsset(joomlaEntry.url));
         if (!archive.ok) throw new Error(`Cannot load Joomla: HTTP ${archive.status}.`);
         archiveBytes = await archive.arrayBuffer();
       }
-      installed = await installJoomla(handle, config, { archiveBytes, sha256: joomlaEntry.sha256, progress });
+      installed = await installJoomla(handle, config, { archiveBytes, sha256: joomlaEntry.sha256, progress, fetchPackage });
     }
     await handle.flush();
     await session.send('enablePersistence');

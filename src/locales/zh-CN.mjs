@@ -1,4 +1,7 @@
 export default Object.freeze({
+  "title.packageDownload": "加载 {package}",
+  "help.packageDownload": "下载此 ZIP，然后选择已下载的文件以继续。",
+  "label.packageFile": "已下载的 ZIP",
   "error.extensionUrl": "请输入扩展 {number} 的完整 HTTP 或 HTTPS URL。",
   "action.addExtensionUrl": "添加另一个 URL",
   "title.extensionAdvanced": "高级选项",

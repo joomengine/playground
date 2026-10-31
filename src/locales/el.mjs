@@ -1,4 +1,7 @@
 export default Object.freeze({
+  "title.packageDownload": "Φόρτωση {package}",
+  "help.packageDownload": "Κατεβάστε αυτό το ZIP και επιλέξτε το ληφθέν αρχείο για να συνεχίσετε.",
+  "label.packageFile": "Ληφθέν ZIP",
   "error.extensionUrl": "Εισαγάγετε ένα πλήρες URL HTTP ή HTTPS για την επέκταση {number}.",
   "action.addExtensionUrl": "Προσθήκη άλλου URL",
   "title.extensionAdvanced": "Προηγμένες επιλογές",
