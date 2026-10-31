@@ -346,6 +346,7 @@ export default Object.freeze({
   "a11y.site": "稼働中のJoomlaサイト",
   "noscript": "Rocketでブラウザー内のPHPとMariaDBを実行するには、JavaScriptとWebAssemblyが必要です。",
   "action.about": "このアプリについて",
+  "action.agentGuide": "エージェントガイド",
   "action.add": "追加",
   "action.addMenu": "メニュー項目を追加",
   "action.administrator": "管理画面を開く",

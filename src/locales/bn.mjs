@@ -346,6 +346,7 @@ export default Object.freeze({
   "a11y.site": "চলমান Joomla সাইট",
   "noscript": "ব্রাউজারে PHP ও MariaDB চালাতে Rocket-এর JavaScript ও WebAssembly প্রয়োজন।",
   "action.about": "সম্পর্কে",
+  "action.agentGuide": "এজেন্ট নির্দেশিকা",
   "action.add": "যোগ করুন",
   "action.addMenu": "মেনু আইটেম যোগ করুন",
   "action.administrator": "প্রশাসন খুলুন",

@@ -362,6 +362,7 @@ export default Object.freeze({
   "a11y.site": "אתר Joomla פועל",
   "noscript": "Rocket זקוק ל־JavaScript ול־WebAssembly כדי להפעיל PHP ו־MariaDB בדפדפן שלך.",
   "action.about": "אודות",
+  "action.agentGuide": "מדריך לסוכנים",
   "action.add": "הוספה",
   "action.addMenu": "הוספת פריט תפריט",
   "action.administrator": "פתיחת הניהול",
