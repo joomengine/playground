@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "Escolha no máximo 30 pacotes de extensões.",
   "label.extensionUrlNumber": "URL ZIP da extensão {number}",
   "action.removeExtensionUrl": "Remover URL da extensão {number}",
-  "help.extensionDownloads": "O servidor do pacote deve permitir downloads pelo navegador. Páginas HTTPS podem bloquear downloads HTTP.",
+  "help.extensionDownloads": "Os pacotes ZIP públicos são baixados automaticamente ao iniciar ou aplicar esta configuração.",
   "error.operationFailed": "Não foi possível concluir a operação. Abra os detalhes técnicos para mais informações.",
   "title.technicalDetails": "Detalhes técnicos",
   "help.temporaryRetry": "Esta implantação temporária está incompleta. Tentar novamente cria um novo site temporário. A recuperação e a redefinição de sites salvos só estão disponíveis quando o salvamento está ativado.",

@@ -35,41 +35,26 @@ export async function assertLaunchCountdown(page, url) {
   } finally { page.off('request', observe); }
 }
 
-/** Exercise real install failure, independent recovery and reset with a missing local ZIP. */
+/** A required setup command failure still supports independent recovery and reset. */
 export async function assertFailedDeploymentRecovery(page, url) {
   const location = new URL(url);
   location.searchParams.set('deploy', 'blank');
   location.searchParams.set('key', 'launch-recovery-contract');
   location.searchParams.set('persist', '1');
-  location.searchParams.set('extension', new URL('missing-recovery-contract.zip', url).href);
+  location.searchParams.set('commands', JSON.stringify([['joomengine:missing-recovery-command']]));
+  location.searchParams.set('start', '0');
   await page.goto(location.href);
-  await page.locator('#deploy-dialog[open]').waitFor();
-  assert.match(await page.locator('#header-feedback').innerText(), /custom code or commands/);
-  assert.equal(await page.locator('#launch-countdown').isVisible(), false);
-  await page.locator('#deploy-dialog [data-close-dialog]').click();
-  const denied = page.waitForEvent('dialog');
-  const deniedClick = page.locator('#embedded-launch').click();
-  const review = await denied;
-  assert.equal(review.type(), 'confirm');
-  assert.ok(review.message().includes(new URL('missing-recovery-contract.zip', url).href));
-  await review.dismiss();
-  await deniedClick;
-  assert.equal(await page.locator('#site-frame').count(), 0);
-  assert.equal(await page.locator('#loading-view').isVisible(), false);
-
-  const accepted = page.waitForEvent('dialog');
-  const acceptedClick = page.locator('#embedded-launch').click();
-  await (await accepted).accept();
-  await acceptedClick;
+  await page.locator('#embedded-launch:enabled').waitFor();
+  assert.equal(await page.locator('#deploy-dialog').evaluate(dialog => dialog.open), false);
+  await page.locator('#embedded-launch').click();
   await page.locator('#error-view:not([hidden])').waitFor({ timeout: 120_000 });
   const failure = await page.locator('#error-message').innerText();
-  assert.ok(failure.includes(new URL('missing-recovery-contract.zip', url).href), 'Download errors identify the failed package.');
-  assert.match(failure, /download failed\. HTTP 404\./);
+  assert.ok(failure.trim(), 'The failed required command must retain its error.');
   assert.doesNotMatch(failure, /<!DOCTYPE|<html|<style|__JOOMENGINE_RESULT__/i);
   assert.equal(await page.locator('#header-feedback').isVisible(), false, 'The error summary must not be repeated in a persistent banner.');
   assert.equal(await page.locator('#error-technical-details').isVisible(), true);
   assert.equal(await page.locator('#error-technical-details').getAttribute('open'), null, 'Diagnostics are collapsed initially.');
-  assert.match(await page.locator('#error-diagnostics').textContent(), /HTTP 404/);
+  assert.match(await page.locator('#error-diagnostics').textContent(), /joomengine|command/i);
 
   await page.locator('#recover-button').click();
   await page.locator('#repair-button:not([hidden]):enabled').waitFor({ timeout: 60_000 });
@@ -89,5 +74,5 @@ export async function assertFailedDeploymentRecovery(page, url) {
     'A successful reset must remove the previous failure banner.');
   assert.equal(await page.locator('#header-feedback').innerText(), '');
   assert.equal(await page.locator('#embedded-launch').isEnabled(), true);
-  return { customSourceReview: true, rejectedLaunch: true, failedInstallationRecovered: true, resetClearsError: true };
+  return { noCustomApprovalPrompt: true, failedInstallationRecovered: true, resetClearsError: true };
 }

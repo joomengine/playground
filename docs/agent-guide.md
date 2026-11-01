@@ -19,16 +19,17 @@ JoomEngine Playground is a browser-based workspace for creating, testing and imp
 
 ## Choose and configure a site
 
-Rocket's Deployment editor offers the supported Joomla and PHP combinations, deployment presets, site name, login behavior, packages, language, menus, template and advanced settings. Use the **Site** and **Admin** controls to navigate the already-running preview. Admin follows Joomla's authentication flow; **Credentials** displays the generated administrator details when required. A fresh site receives new credentials.
+Choose Joomla, JCB and PHP on the main dashboard. Rocket's Deployment editor offers the same deployment list, plus the site name, administrator, login behavior, packages, languages, menus, template and content. Basic fields and advanced JSON edit the same values. Use the **Site** and **Admin** controls to navigate the already-running preview. **Credentials** displays the site's administrator details.
 
-- **JCB** prepares an authoring site. **Joomla only** defaults the JCB selector to **None**; select a JCB version to add it. Other deployment presets include JCB alongside their own setup so their extensions can be explored and developed. Set JCB to **None** when a clean consumer site is wanted. Review the live selector and [deployment guide](https://github.com/joomengine/playground/blob/main/deploys/README.md).
+- **JCB** and **JCB + MCP** require a compatible JCB version. Other deployments allow **None** or an additional compatible JCB package. Deployment requirements disable unsupported Joomla and PHP choices. See the [deployment guide](https://github.com/joomengine/playground/blob/main/deploys/README.md).
+- Selecting a deployment fills its setup fields. **Save** keeps a named custom recipe in this browser and adds it to both deployment lists. Changes to a built-in save as a **Custom** copy. **Save as copy** creates another recipe; **Delete** removes custom recipes without deleting existing sites.
 - Changes are staged and validated at launch. Changing the Joomla release or deployment selects a separate profile; it does **not** upgrade the Joomla installation in an existing site. Supported PHP changes preserve its files and database, but still record the effective PHP version and settings.
 - `?start=0` suppresses the startup countdown so configuration can be reviewed. Other supported URL parameters include `deploy`, `joomla`, `jcb`, `php`, `path`, `persist`, `fresh`, `language`, `login`, `extensions`, `commands`, and `config`. Values are validated against available catalog entries. The [URL reference](https://github.com/joomengine/playground#embedding-and-url-configuration) explains syntax and precedence.
 - A Joomla path and its query string must be encoded as one `path` value. For example, `/administrator/index.php?option=com_componentbuilder&view=compiler` becomes `path=%2Fadministrator%2Findex.php%3Foption%3Dcom_componentbuilder%26view%3Dcompiler`. The path chooses a screen, not a repository branch or a tested candidate.
 - **Use** starts an independent deployment using the edited configuration. **Apply to this site** checkpoints and applies supported changes to the running site; review packages and commands first. Removing a package from configuration does not uninstall it. Failed application offers recovery from its checkpoint as a separate site.
 - Startup commands are arrays of Joomla CLI arguments, for example `[["cache:clean"]]`; they are not host shell commands. They run after package installation, and a completed site's original commands are not replayed on reopen.
 
-For reproducibility, retain an exported deployment JSON or Share link plus actual versions and checksums. Share contains public configuration, not saved Joomla files, database content, site credentials or evidence that a test ran. The generated link has size limits; larger public configurations can be exported/imported as JSON or hosted where the browser can fetch them. Avoid putting secrets in URLs, command arguments or shared configuration. See the [deployment document schema and guide](https://github.com/joomengine/playground/blob/main/deploys/README.md#compose-a-deployment-without-a-repository-change).
+**Export configuration** downloads the complete version 2 recipe, including its name, requirements and administrator details. **Import configuration** adds it as a named custom deployment. **Share** creates a password-free version 1 link for an independent installation. Neither carries the site's files or database. Links are limited to 16 KiB and JSON documents to 1 MiB. See the [deployment document guide](https://github.com/joomengine/playground/blob/main/deploys/README.md#compose-a-deployment-without-a-repository-change).
 
 ### Choose releases, prereleases and nightly builds
 
@@ -44,9 +45,9 @@ A saved selection can remain visible under **Saved version** after it drops from
 
 ## Install another Joomla extension
 
-In **Deployment → Extension packages**, add a trusted ZIP URL and optionally its SHA-256; add further rows for other packages. Use the deployment as a new site or apply it to the current site. The separate advanced JSON editor accepts objects with `url` and optional `sha256`. Alternatively use Joomla's normal supported extension installer in the running administrator interface when your browser can supply the package. Wait for the result and inspect the installed extension; choosing a ZIP is not proof of successful installation.
+In **Deployment → Extension packages**, paste the package ZIP URL and add rows for further packages. The advanced JSON editor accepts objects with a `url`; user-supplied checksum fields are ignored. Choose **Use** for a new site or **Apply to this site** for the current site. Rocket passes each custom URL to Joomla's `extension:install --url=URL` command for download and installation. The running Joomla administrator also provides its normal extension installer.
 
-Use a trusted HTTPS ZIP that permits browser access through CORS; localhost HTTP is allowed for development. The deployment package limit is currently 128 MiB, and a supplied checksum is verified. If a package cannot be fetched or installed, capture the displayed error and check the URL, CORS access, compatibility and installer result.
+Extension URLs support HTTP and HTTPS; template URLs require HTTPS except for localhost development. If a custom package fails, its installer error remains available while the site opens, and it can be retried in Joomla. Core deployment packages remain required. PHP's HTTP transport follows the browser's CORS and mixed-content rules; the error details identify the failed operation.
 
 ## Understand JCB's sources and results
 
@@ -93,7 +94,10 @@ The optional in-product AI Assistant can propose file changes using bounded cont
 | --- | --- |
 | Editor Save | Writes a file to the active virtual site. Unsaved editor buffers are not portable exports. |
 | Playground Save | Flushes site files and database to browser storage. Wait for success; browser storage can be cleared or evicted and is not a backup. |
-| Share / deployment JSON | Recreates public configuration for an independent installation; it does not carry the edited site files or database. |
+| Deployment editor Save | Stores a named custom recipe in this browser; built-in deployments remain unchanged. |
+| Export / Import configuration | Transfers the complete version 2 recipe, including administrator details; it does not transfer site files or the database. |
+| Share | Recreates an independent installation from password-free public configuration. |
+| Deployment images | Lists reusable browser images and removes selected images without deleting saved sites. |
 | Download complete site | Produces a site archive with `site/`, `database.sql`, `database.ndjson`, `export.json`, and `DEPLOYMENT.md` for supported exports. |
 | Files-only / SQL-only Download | Exports only that part; neither alone is a complete movable site. |
 | JCB Download Component | Downloads the compiled Joomla extension; it is distinct from the site archive and editable blueprint source. |

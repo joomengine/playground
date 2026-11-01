@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "拡張機能パッケージは最大 30 個まで選択できます。",
   "label.extensionUrlNumber": "拡張機能 ZIP の URL {number}",
   "action.removeExtensionUrl": "拡張機能の URL {number} を削除",
-  "help.extensionDownloads": "パッケージの配信元はブラウザーからのダウンロードを許可する必要があります。HTTPS ページでは HTTP ダウンロードがブロックされる場合があります。",
+  "help.extensionDownloads": "この構成を起動または適用すると、公開 ZIP パッケージが自動的にダウンロードされます。",
   "error.operationFailed": "処理を完了できませんでした。詳細は「技術情報」を開いて確認してください。",
   "title.technicalDetails": "技術情報",
   "help.temporaryRetry": "この一時的なデプロイは未完了です。再試行すると新しい一時サイトが作成されます。保存済みサイトの復旧とリセットは、保存が有効な場合にのみ利用できます。",

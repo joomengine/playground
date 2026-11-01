@@ -23,7 +23,8 @@ Each resulting archive has a pinned SHA-256 and a generated provenance document
 listing every packaged file, its digest, and every placeholder completion. The
 archive timestamp and entry ordering are deterministic. These files are served
 on the playground origin because browser CORS rules can prevent direct downloads
-from the Joomla package host; no public download proxy is used.
+from the Joomla package host. These staged language packages are installed from
+the Playground origin at runtime.
 
 The sources are maintained by the Joomla translation teams and licensed under
 GNU GPL version 2 or later, as declared by their package manifests. The source

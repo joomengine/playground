@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "En fazla 30 eklenti paketi seçin.",
   "label.extensionUrlNumber": "Eklenti ZIP URL’si {number}",
   "action.removeExtensionUrl": "Eklenti URL’si {number} kaldır",
-  "help.extensionDownloads": "Paket sunucusu tarayıcıdan indirmeye izin vermelidir. HTTPS sayfaları HTTP indirmelerini engelleyebilir.",
+  "help.extensionDownloads": "Bu yapılandırmayı başlattığınızda veya uyguladığınızda herkese açık ZIP paketleri otomatik olarak indirilir.",
   "error.operationFailed": "İşlem tamamlanamadı. Daha fazla bilgi için teknik ayrıntıları açın.",
   "title.technicalDetails": "Teknik ayrıntılar",
   "help.temporaryRetry": "Bu geçici dağıtım tamamlanmadı. Yeniden denemek yeni bir geçici site oluşturur. Kayıtlı siteyi kurtarma ve sıfırlama yalnızca kaydetme etkinleştirildiğinde kullanılabilir.",

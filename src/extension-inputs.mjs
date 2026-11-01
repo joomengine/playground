@@ -1,4 +1,4 @@
-import { parseExtensions } from './config.mjs';
+import { parseExtensions, parseUserExtensions } from './config.mjs';
 
 const MAX_EXTENSIONS = 30;
 
@@ -8,10 +8,13 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
 }) {
   const document = textarea.ownerDocument;
   let entries = [];
+  let managedEntries = new Map();
   let controls = [];
   let source = 'rows';
   let jsonError;
   let visibleError;
+  const parse = value => parseUserExtensions(value, baseURL).map(entry => managedEntries.has(entry.url)
+    ? structuredClone(managedEntries.get(entry.url)) : entry);
 
   const showError = error => {
     visibleError = error;
@@ -34,7 +37,7 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
       let error;
       try {
         if (value && !/^https?:\/\//i.test(value)) throw new TypeError(t('error.extensionUrl', { number: index + 1 }));
-        if (value) parseExtensions([{ ...entry, url: value }], baseURL);
+        if (value) parse([{ ...entry, url: value }]);
       } catch (failure) { error = failure; }
       const control = controls[index];
       control?.input.setAttribute('aria-invalid', String(Boolean(error)));
@@ -114,7 +117,7 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
       }
     }
     try {
-      const result = parseExtensions(textarea.value, baseURL);
+      const result = parse(textarea.value);
       markJson(null); showError(null);
       return result;
     } catch (error) {
@@ -123,9 +126,11 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
       throw error;
     }
   };
-  const setValue = value => {
+  const setValue = (value, { managed = [] } = {}) => {
     // Validate before replacing either representation, including import errors.
-    const parsed = parseExtensions(value, baseURL);
+    const nextManaged = new Map(parseExtensions(managed, baseURL).map(entry => [entry.url, entry]));
+    const parsed = parseUserExtensions(value, baseURL).map(entry => nextManaged.has(entry.url) ? structuredClone(nextManaged.get(entry.url)) : entry);
+    managedEntries = nextManaged;
     entries = parsed.length ? parsed : [{ url: '' }];
     textarea.value = JSON.stringify(parsed, null, 2);
     source = 'rows'; jsonError = undefined; showError(null);
@@ -141,7 +146,7 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
   textarea.addEventListener('input', () => {
     source = 'json';
     try {
-      const parsed = parseExtensions(textarea.value, baseURL);
+      const parsed = parse(textarea.value);
       entries = parsed.length ? parsed : [{ url: '' }];
       markJson(null); showError(null); renderRows();
     } catch (error) {
@@ -154,6 +159,6 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
   advanced.addEventListener('toggle', () => {
     if (!advanced.open && jsonError) { advanced.open = true; showError(jsonError); }
   });
-  setValue(parseExtensions(textarea.value || '[]', baseURL));
+  setValue(parseUserExtensions(textarea.value || '[]', baseURL));
   return { setValue, read, refresh };
 }

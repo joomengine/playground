@@ -7,7 +7,7 @@ const jcbEntry = {
   sourceUrl: 'https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v6.2.0.zip',
   sha256: 'a'.repeat(64),
 };
-const jcbRecipe = { configuration: { extensions: [] }, variants: { 6: { extensions: [jcbEntry] } } };
+const jcbRecipe = { requirements: { jcb: 'required' }, configuration: { extensions: [] }, variants: { 6: { extensions: [jcbEntry] } } };
 const serviceRecipe = { configuration: { extensions: [] }, variants: { 6: { extensions: [{ url: 'https://playground.example/service.zip' }] } } };
 const pinned = pinnedJcbPackages(jcbRecipe);
 
@@ -26,9 +26,10 @@ test('existing saved deployments with no selector preserve their original setup'
   }
 });
 
-test('new nonblank sites receive pinned JCB and blank sites start without it', () => {
+test('non-JCB recipes start without JCB but accept an explicit shared pinned package', () => {
   const selection = initialJcbSelection({ input: { deployId: 'servicedirectory' }, deploy: serviceRecipe, major: '6', pinned, isSaved: false });
-  assert.deepEqual(jcbSelectionInput({ selection, deploy: serviceRecipe, major: '6', pinned }), {
+  assert.deepEqual(jcbSelectionInput({ selection, deploy: serviceRecipe, major: '6', pinned }), { jcbVersion: 'none' });
+  assert.deepEqual(jcbSelectionInput({ selection: { version: '6.2.0', omit: false }, deploy: serviceRecipe, major: '6', pinned }), {
     jcbVersion: '6.2.0', jcbPackage: { url: jcbEntry.url, sha256: jcbEntry.sha256 },
   });
   const blank = initialJcbSelection({ input: { deployId: 'blank' }, deploy: serviceRecipe, major: '6', pinned, isSaved: false });
@@ -37,7 +38,7 @@ test('new nonblank sites receive pinned JCB and blank sites start without it', (
 });
 
 test('Joomla 7 uses the requested JCB 6 testing fallback', () => {
-  const selection = initialJcbSelection({ input: { deployId: 'servicedirectory' }, deploy: serviceRecipe, major: '7', pinned, isSaved: false });
+  const selection = initialJcbSelection({ input: { deployId: 'jcb' }, deploy: jcbRecipe, major: '7', pinned, isSaved: false });
   assert.equal(selection.version, '6.2.0');
   assert.equal(jcbSelectionInput({ selection, deploy: serviceRecipe, major: '7', pinned }).jcbPackage.url, jcbEntry.url);
 });
@@ -45,7 +46,12 @@ test('Joomla 7 uses the requested JCB 6 testing fallback', () => {
 
 test('a future pinned JCB 7 becomes the default for Joomla 7', () => {
   const nextPinned = new Map([...pinned, ['7', { version: '7.0.0', package: { url: '/jcb-7.zip', sha256: 'b'.repeat(64) } }]]);
-  const selection = initialJcbSelection({ input: { deployId: 'servicedirectory' }, deploy: serviceRecipe, major: '7', pinned: nextPinned, isSaved: false });
+  const selection = initialJcbSelection({ input: { deployId: 'jcb' }, deploy: jcbRecipe, major: '7', pinned: nextPinned, isSaved: false });
   assert.equal(selection.version, '7.0.0');
   assert.equal(jcbSelectionInput({ selection, deploy: serviceRecipe, major: '7', pinned: nextPinned }).jcbPackage.url, '/jcb-7.zip');
+});
+
+test('JCB-required recipes reject None and incompatible JCB majors', () => {
+  assert.throws(() => jcbSelectionInput({ selection: { version: 'none' }, deploy: jcbRecipe, major: '6', pinned }), /requires Joomla Component Builder/);
+  assert.throws(() => jcbSelectionInput({ selection: { version: '6.2.0' }, deploy: jcbRecipe, major: '5', pinned }), /not a selectable package/);
 });

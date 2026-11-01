@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "সর্বাধিক ৩০টি এক্সটেনশন প্যাকেজ বেছে নিন।",
   "label.extensionUrlNumber": "এক্সটেনশন ZIP URL {number}",
   "action.removeExtensionUrl": "এক্সটেনশন URL {number} সরান",
-  "help.extensionDownloads": "প্যাকেজের হোস্টকে ব্রাউজার থেকে ডাউনলোডের অনুমতি দিতে হবে। HTTPS পেজ HTTP ডাউনলোড আটকে দিতে পারে।",
+  "help.extensionDownloads": "এই কনফিগারেশন চালু বা প্রয়োগ করলে সর্বজনীন ZIP প্যাকেজগুলো স্বয়ংক্রিয়ভাবে ডাউনলোড হয়।",
   "error.operationFailed": "কাজটি সম্পূর্ণ করা যায়নি। আরও তথ্যের জন্য প্রযুক্তিগত বিবরণ খুলুন।",
   "title.technicalDetails": "প্রযুক্তিগত বিবরণ",
   "help.temporaryRetry": "এই অস্থায়ী স্থাপনা অসম্পূর্ণ। আবার চেষ্টা করলে একটি নতুন অস্থায়ী সাইট তৈরি হয়। সংরক্ষণ চালু থাকলেই সংরক্ষিত সাইট পুনরুদ্ধার ও রিসেট করা যায়।",

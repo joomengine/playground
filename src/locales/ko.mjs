@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "확장 기능 패키지는 최대 30개까지 선택할 수 있습니다.",
   "label.extensionUrlNumber": "확장 기능 ZIP URL {number}",
   "action.removeExtensionUrl": "확장 기능 URL {number} 삭제",
-  "help.extensionDownloads": "패키지 호스트에서 브라우저 다운로드를 허용해야 합니다. HTTPS 페이지에서는 HTTP 다운로드가 차단될 수 있습니다.",
+  "help.extensionDownloads": "이 구성을 실행하거나 적용하면 공개 ZIP 패키지가 자동으로 다운로드됩니다.",
   "error.operationFailed": "작업을 완료하지 못했습니다. 자세한 내용은 기술 정보를 열어 확인하세요.",
   "title.technicalDetails": "기술 정보",
   "help.temporaryRetry": "이 임시 배포는 완료되지 않았습니다. 다시 시도하면 새 임시 사이트가 만들어집니다. 저장된 사이트의 복구와 초기화는 저장이 활성화된 경우에만 사용할 수 있습니다.",

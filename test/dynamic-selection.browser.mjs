@@ -84,7 +84,11 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await page.locator('#launch-button:enabled').waitFor();
       const selected = await selectedConfiguration(page);
       assert.deepEqual(selected.joomlaPackage, { url: packageURL, sha256, php: ['8.4', '8.5'] });
-      assert.equal(await page.locator('#php-version option[value="8.3"]').isDisabled(), true);
+      assert.equal(await page.locator('#php-version option[value="8.3"]').isDisabled(), true, JSON.stringify(await page.evaluate(() => ({
+        joomla: document.getElementById('joomla-version').value, php: document.getElementById('php-version').value,
+        note: document.getElementById('compatibility-note').textContent,
+        feedback: document.getElementById('feedback')?.textContent,
+      }))));
       assert.equal(await page.locator('#package-download-dialog').count(), 0);
       assert.deepEqual(downloads, [], 'Choosing Joomla/JCB only records the published metadata.');
       assert.deepEqual(dialogs, []);

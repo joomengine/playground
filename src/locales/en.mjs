@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "Choose at most 30 extension packages.",
   "label.extensionUrlNumber": "Extension ZIP URL {number}",
   "action.removeExtensionUrl": "Remove extension URL {number}",
-  "help.extensionDownloads": "The package host must allow browser downloads. HTTPS pages may block HTTP downloads.",
+  "help.extensionDownloads": "Public ZIP packages download automatically when you launch or apply this configuration.",
   "error.operationFailed": "The operation could not finish. Open Technical details for more information.",
   "title.technicalDetails": "Technical details",
   "help.temporaryRetry": "This temporary deployment is incomplete. Try again creates a new temporary site. Saved-site recovery and reset are available only when saving is enabled.",

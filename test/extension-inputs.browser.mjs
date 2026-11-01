@@ -84,7 +84,10 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
         assert.equal(await page.locator('#extension-error').isVisible(), true);
       }
 
-      await page.evaluate(checksum => window.extensionInputs.setValue([{ url: 'https://packages.example.test/original.zip', sha256: checksum }]), checksum);
+      await page.evaluate(checksum => {
+        const managed = [{ url: 'https://packages.example.test/original.zip', sha256: checksum }];
+        window.extensionInputs.setValue(managed, { managed });
+      }, checksum);
       await inputs.first().focus();
       await page.evaluate(() => window.extensionInputs.refresh());
       assert.equal(await inputs.first().evaluate(input => document.activeElement === input), true, 'Refreshing labels preserves editing focus.');
@@ -93,7 +96,7 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       assert.deepEqual(JSON.parse(await json.inputValue()), [{ url: 'https://packages.example.test/original.zip', sha256: checksum }]);
       const edited = [{ url: 'https://packages.example.test/json.zip', sha256: checksum }, { url: 'http://packages.example.test/another.zip' }];
       await json.fill(JSON.stringify(edited, null, 2));
-      assert.deepEqual(await read(), edited);
+      assert.deepEqual(await read(), edited.map(({ url }) => ({ url })));
       assert.deepEqual(await inputValues(), edited.map(entry => entry.url));
       await advanced.locator('summary').click();
       assert.equal(await json.isVisible(), false);

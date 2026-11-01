@@ -1,7 +1,7 @@
-import { createShareURL } from './config.mjs';
+import { createShareURL, createFullDeploymentDocument } from './config.mjs';
 import { ISOLATION_PARAMETER, isolationMarker } from './isolation.mjs';
 const SITE_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
-const PUBLIC_FIELDS = ['deployId', 'joomlaVersion', 'joomlaPackage', 'jcbVersion', 'jcbPackage', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'phpSettings', 'menus', 'template', 'languageTags', 'multilingual', 'content'];
+const PUBLIC_FIELDS = ['deployId', 'sourceDeployId', 'joomlaVersion', 'joomlaPackage', 'jcbVersion', 'jcbPackage', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'phpSettings', 'menus', 'template', 'languageTags', 'multilingual', 'content', 'addonExtensions', 'addonStartupCommands', 'addonLanguages', 'addonTemplate'];
 
 /** Approval must preserve command argument boundaries as well as source URLs. */
 export function customSetupDetails(input) {
@@ -34,6 +34,14 @@ export function publicConfiguration(config) {
   result.languages = (config.languages || []).map(({ tag, url, sha256 }) => ({ tag, url, ...(sha256 ? { sha256 } : {}) }));
   result.startupCommands = (config.startupCommands || []).map((argv) => [...argv]);
   result.fresh = false;
+  if (config.deploymentRecipe) {
+    // A saved site must outlive its entry in the editable recipe list. Keep its
+    // materialized instructions locally, but do not duplicate the administrator.
+    const recipe = createFullDeploymentDocument(config);
+    delete recipe.configuration.admin;
+    recipe.configuration.fresh = false;
+    result.deploymentRecipe = recipe;
+  }
   return result;
 }
 

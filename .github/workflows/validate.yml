@@ -216,7 +216,7 @@ jobs:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
         run: |
           result=0
-          for suite in test/code-workbench.browser.mjs test/code-ai-browser.mjs test/code-host-lifecycle.browser.mjs test/language-selector.browser.mjs test/extension-inputs.browser.mjs test/dynamic-selection.browser.mjs; do
+          for suite in test/code-workbench.browser.mjs test/code-ai-browser.mjs test/code-host-lifecycle.browser.mjs test/language-selector.browser.mjs test/extension-inputs.browser.mjs test/dynamic-selection.browser.mjs test/deployment-images.browser.mjs test/deployment-editor.browser.mjs test/structured-inputs.browser.mjs; do
             node --test "$suite" || result=1
           done
           exit "$result"

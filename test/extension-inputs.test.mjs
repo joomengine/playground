@@ -68,9 +68,9 @@ test('URL rows add, edit, remove and ignore unused blank rows without JSON knowl
   assert.ok(editor.changes() >= 5);
 });
 
-test('URL editing retains checksums until a source changes and advanced JSON round-trips', () => {
+test('managed URL checksums are retained while custom checksum metadata is ignored', () => {
   const editor = fixture(), sha256 = 'ab'.repeat(32);
-  editor.setValue([{ url: '/one.zip', sha256 }, { url: 'https://example.test/two.zip' }]);
+  editor.setValue([{ url: '/one.zip', sha256 }, { url: 'https://example.test/two.zip' }], { managed: [{ url: '/one.zip', sha256 }] });
   assert.equal(editor.input(0).value, 'https://playground.test/one.zip');
   editor.type(1, 'https://example.test/changed.zip');
   assert.equal(editor.read()[0].sha256, sha256);
@@ -80,12 +80,14 @@ test('URL editing retains checksums until a source changes and advanced JSON rou
   editor.json(draft);
   assert.equal(editor.textarea.value, draft, 'A valid JSON draft must retain its formatting until edited through rows.');
   assert.equal(editor.input(0).value, 'https://playground.test/path/advanced.zip');
-  assert.equal(editor.read()[0].sha256, sha256);
+  assert.equal(editor.read()[0].sha256, undefined);
+  editor.json('[{"url":"https://example.test/custom.zip","sha256":"not-a-digest"}]');
+  assert.deepEqual(editor.read(), [{ url: 'https://example.test/custom.zip' }]);
 });
 
 test('malformed or unsupported JSON remains intact and cannot be overwritten through stale rows', () => {
   const editor = fixture(); editor.type(0, 'https://example.test/one.zip');
-  for (const malformed of ['[{"url":', '["https://example.test/string.zip"]', '{"url":"https://example.test/object.zip"}', '[{"url":"https://example.test/one.zip","sha256":"bad"}]']) {
+  for (const malformed of ['[{"url":', '["https://example.test/string.zip"]', '{"url":"https://example.test/object.zip"}', '[{"url":"ftp://example.test/one.zip"}]']) {
     editor.json(malformed);
     assert.equal(editor.textarea.value, malformed);
     assert.equal(editor.input(0).value, 'https://example.test/one.zip');

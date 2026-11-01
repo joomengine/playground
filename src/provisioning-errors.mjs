@@ -15,9 +15,16 @@ export function sanitizeDiagnostic(value, maximum = 8192) {
   return clean.length > maximum ? `${clean.slice(0, maximum - 15)}\n[truncated]` : clean;
 }
 
-export function packageLabel(value) {
-  if (!value) return 'Extension package';
-  return sanitizeDiagnostic(value, 240);
+export function packageLabel() {
+  return 'Extension package';
+}
+
+/** Fetch TypeError does not identify the failing host or prove a CORS denial. */
+export function downloadFailure(error) {
+  if (error?.name === 'AbortError') return 'Download cancelled.';
+  if (error?.name === 'TimeoutError') return 'The download timed out. Try again.';
+  if (error instanceof TypeError) return 'The download could not be completed. Check your connection and try again.';
+  return conciseFailure(error?.message, 'The download could not be completed. Try again.');
 }
 
 export function provisioningError(message, { technicalDetails = '', ...context } = {}) {

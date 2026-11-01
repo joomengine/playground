@@ -8,6 +8,7 @@ import { createPackageFetcher } from './dynamic-packages.mjs';
 import { prepareBrowserIsolation } from './isolation-bootstrap.mjs';
 import { ownedClientURL } from './isolation.mjs';
 import { loadPublicAssetConfiguration } from './public-assets.mjs';
+import { deploymentImages, deploymentImageFingerprint, completedDeploymentImageConfiguration } from './deployment-images.mjs';
 
 const base = new URL('../', import.meta.url);
 const manifestUrl = new URL('assets/manifest.json', base);
@@ -336,9 +337,13 @@ export async function resetPlayground({ storageKey = 'default' } = {}) {
 export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, recovery = false } = {}) {
   const environment = await prepareEnvironment();
   if (environment.reloadRequired) throw new Error(environment.reason + ' Complete the controlled page navigation before starting the playground.');
-  const progress = value => onProgress({ ...value, phase: value.phase ?? value.stage });
+  let imagePhase;
+  const progress = value => {
+    const phase = value.phase ?? value.stage;
+    onProgress({ ...value, phase: imagePhase && !['warning', 'failed'].includes(phase) ? imagePhase : phase });
+  };
   progress({ phase: 'assets', message: 'Reading the verified runtime catalog…' });
-  const response = await fetch(manifestUrl);
+  const response = await fetch(manifestUrl, { cache: 'no-cache' });
   if (!response.ok) throw new Error(`Cannot load the runtime catalog: HTTP ${response.status}.`);
   const manifest = await response.json();
   const selectedCatalog = catalogWithSelectedJoomlaPackage(parseCatalog(manifest), input, base.href);
@@ -681,16 +686,46 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       installed = { ...installed, ...await checkJoomla(handle) };
       installed.administrator = await restoreJoomlaSession(handle, config);
       installed.resumed = true;
-    } else if (pristine && config.snapshot && !config.fresh) {
-      progress({ phase: 'download', message: 'Loading the prepared deploy…' });
-      const archive = await fetch(config.snapshot.url);
-      if (!archive.ok) throw new Error(`Cannot load the prepared deploy: HTTP ${archive.status}.`);
-      installed = await importJoomlaSnapshot(handle, config, {
-        archiveBytes: await archive.arrayBuffer(), sha256: config.snapshot.sha256, progress, fetchPackage,
-      });
     } else {
-      let archiveBytes;
+      const imageWarning = message => progress({ phase: 'warning', message });
+      let image, fingerprint, completeImage = false, captureImage = false;
       if (pristine) {
+        // Revalidate the small server catalog before using cached maintained
+        // bytes. A changed image hash is authoritative, including for a base
+        // that has local additions. Storage failure never prevents a launch.
+        await deploymentImages.reconcile(manifest).catch(() => {});
+        const maintained = config.snapshot ? deploymentImages.maintained(config, manifest) : null;
+        captureImage = !maintained || Boolean(config.addonExtensions?.length || config.addonStartupCommands?.length
+          || config.addonLanguages?.length || config.addonTemplate?.url || config.deploymentRecipe);
+        if (captureImage) {
+          fingerprint = await deploymentImageFingerprint(config, manifest);
+          if (!config.fresh) {
+            image = await deploymentImages.getCustom(fingerprint);
+            completeImage = Boolean(image);
+          }
+        }
+        if (!image && maintained && !config.fresh) {
+          try { image = await deploymentImages.getMaintained(maintained, { onProgress: progress, onWarning: imageWarning }); }
+          catch {
+            imageWarning('The prepared image could not be loaded. Building the deployment from its packages…');
+          }
+        }
+      }
+      let archiveBytes;
+      if (image) {
+        imagePhase = 'launch-image';
+        progress({ message: 'Creating a separate site from the prepared image…' });
+        try {
+          installed = await importJoomlaSnapshot(handle, completeImage ? completedDeploymentImageConfiguration(config) : config, {
+            archiveBytes: image.bytes, sha256: image.sha256, progress, fetchPackage,
+          });
+        } catch (error) {
+          if (completeImage) await deploymentImages.remove(`custom:${fingerprint}`).catch(() => {});
+          throw error;
+        }
+      } else if (pristine) {
+        imagePhase = 'build-image';
+        progress({ message: 'Building the deployment image…' });
         progress({ phase: 'download', message: `Loading Joomla ${config.joomlaVersion}…` });
         // Package URLs retain their catalog identity and ordinary CORS behavior;
         // only local runtime modules/workers use the ownership-preserving route.
@@ -698,8 +733,23 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         if (!archive.ok) throw new Error(`Cannot load Joomla: HTTP ${archive.status}.`);
         archiveBytes = await archive.arrayBuffer();
       }
-      installed = await installJoomla(handle, config, { archiveBytes, sha256: joomlaEntry.sha256, progress, fetchPackage });
+      if (!installed) installed = await installJoomla(handle, config, { archiveBytes, sha256: joomlaEntry.sha256, progress, fetchPackage });
+      if (pristine && captureImage && !completeImage && !installed.extensionWarnings?.length) {
+        imagePhase = 'build-image';
+        try {
+          // This runs before registration/UI exposure, so the image contains
+          // the completed recipe, never later edits made to an installed site.
+          progress({ message: 'Preparing the image for reuse in this browser…' });
+          const exported = await exportSite(handle, { format: 'bundle' });
+          await deploymentImages.saveCustom(config, manifest, exported.bytes, {
+            fingerprint, onProgress: progress, onWarning: imageWarning,
+          });
+        } catch { imageWarning('The image could not be saved locally. This site can still launch.'); }
+      }
+      imagePhase = 'launch-image';
+      if (pristine) progress({ message: 'Launching your site…' });
     }
+    imagePhase = undefined;
     await handle.flush();
     await session.send('enablePersistence');
     handle.installation = installed;

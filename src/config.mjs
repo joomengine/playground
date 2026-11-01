@@ -102,6 +102,28 @@ export function parseExtensions(value = [], baseURL = 'https://playground.invali
   });
 }
 
+/** User URLs are installed by Joomla's normal installer; only managed packages
+ * use the reviewed integrity metadata supplied by the deployment catalog. */
+export function parseUserExtensions(value = [], baseURL = 'https://playground.invalid/', options = {}) {
+  const entries = parseJSONList(value, 'Extensions').map(entry => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+    const { sha256, sha512, ...packageEntry } = entry;
+    return packageEntry;
+  });
+  return parseExtensions(entries, baseURL, options);
+}
+
+export function parseUserTemplate(value, baseURL = 'https://playground.invalid/') {
+  if (typeof value === 'string' && value.trim()) {
+    try { value = JSON.parse(value); } catch { throw new TypeError('Template must be a JSON object.'); }
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const { sha256, sha512, ...template } = value;
+    value = template;
+  }
+  return parseTemplate(value, baseURL);
+}
+
 export function parseStartupCommands(value = []) {
   const commands = parseJSONList(value, 'Startup commands');
   if (commands.length > 30) throw new TypeError('Choose at most 30 startup commands.');
@@ -260,7 +282,7 @@ export function readURLConfiguration(url) {
   if (location.href.length > 65_536) throw new TypeError('The playground configuration link is too long.');
   const params = location.searchParams;
   const fragment = new URLSearchParams(location.hash.slice(1));
-  const config = fragment.has('deploy') ? parseDeploymentDocument(decodeDocument(fragment.get('deploy')), { baseURL: location.href }) : {};
+  const config = fragment.has('deploy') ? parseDeploymentDocument(decodeDocument(fragment.get('deploy')), { baseURL: location.href, publicOnly: true }) : {};
   const boolean = (name) => {
     const value = params.get(name).toLowerCase();
     if (['1', 'true', 'yes'].includes(value)) return true;
@@ -283,8 +305,8 @@ export function readURLConfiguration(url) {
     config.storageKey = params.get('key');
     if (!STORAGE_KEY.test(config.storageKey)) throw new TypeError('The saved-site key contains invalid characters.');
   }
-  if (params.has('extensions')) config.extensions = parseExtensions(params.get('extensions'), location.href);
-  if (params.has('extension')) config.extensions = parseExtensions([...(config.extensions ?? []), ...params.getAll('extension').map((value) => ({ url: value }))], location.href);
+  if (params.has('extensions')) config.extensions = parseUserExtensions(params.get('extensions'), location.href);
+  if (params.has('extension')) config.extensions = parseUserExtensions([...(config.extensions ?? []), ...params.getAll('extension').map((value) => ({ url: value }))], location.href);
   if (params.has('commands') || params.has('startupCommands')) config.startupCommands = parseStartupCommands(params.get('commands') ?? params.get('startupCommands'));
   const deploymentOptions = ['name', 'deploy', 'php', 'joomla', 'jcb', 'language', 'login', 'fresh', 'extensions', 'extension', 'commands', 'startupCommands'];
   const document = params.has('config') ? parseExtensions([{ url: params.get('config'), ...(params.has('sha256') ? { sha256: params.get('sha256') } : {}) }], location.href, { allowHttp: false })[0] : null;
@@ -293,7 +315,8 @@ export function readURLConfiguration(url) {
 
 export function createShareURL(location, config) {
   const url = new URL(location);
-  createDeploymentDocument(config, { baseURL: url.href });
+  const document = createDeploymentDocument(config, { baseURL: url.href });
+  config = document.configuration;
   url.search = '';
   url.hash = '';
   if (config.siteName && config.siteName !== DEFAULTS.siteName) url.searchParams.set('name', requireText(config.siteName, 'Site name', 100));
@@ -309,11 +332,11 @@ export function createShareURL(location, config) {
   if (config.fresh) url.searchParams.set('fresh', '1');
   if (config.extensions?.length) url.searchParams.set('extensions', JSON.stringify(parseExtensions(config.extensions, url.href)));
   if (config.startupCommands?.length) url.searchParams.set('commands', JSON.stringify(parseStartupCommands(config.startupCommands)));
-  const advanced = config.joomlaPackage || config.jcbPackage || config.template || config.menus?.length || config.languageTags?.length || config.multilingual || config.content || config.phpSettings;
+  const advanced = config.deploymentRecipe || config.joomlaPackage || config.jcbPackage || config.template || config.menus?.length || config.languageTags?.length || config.multilingual || config.content || config.phpSettings;
   if (advanced) {
     url.search = '';
     url.searchParams.set('start', '1');
-    url.hash = `deploy=${encodeDocument(createDeploymentDocument(config, { baseURL: url.href }))}`;
+    url.hash = `deploy=${encodeDocument(document)}`;
   } else url.searchParams.set('start', '1');
   if (url.href.length > MAX_SHARE_URL_LENGTH) throw new RangeError('This deployment is too large for a reliable share link. Export the deployment JSON, or host it and share its configuration URL.');
   return url.href;
@@ -322,6 +345,43 @@ export function createShareURL(location, config) {
 export const MAX_DEPLOYMENT_BYTES = 1_048_576;
 export const MAX_SHARE_URL_LENGTH = 16_384;
 const DEPLOYMENT_FIELDS = ['deployId', 'joomlaVersion', 'joomlaPackage', 'jcbVersion', 'jcbPackage', 'phpVersion', 'siteName', 'initialPath', 'language', 'languageTags', 'multilingual', 'autoLogin', 'hideToolbar', 'persistence', 'fresh', 'extensions', 'startupCommands', 'languages', 'menus', 'template', 'phpSettings', 'content'];
+const PROVENANCE_FIELDS = ['sourceDeployId', 'addonExtensions', 'addonStartupCommands', 'addonLanguages', 'addonTemplate'];
+
+function assertDocumentSize(value) {
+  if (new TextEncoder().encode(typeof value === 'string' ? value : JSON.stringify(value)).byteLength > MAX_DEPLOYMENT_BYTES) throw new RangeError('Deployment JSON exceeds 1 MiB.');
+}
+
+function assertSafeData(value, depth = 0) {
+  if (depth > 40) throw new TypeError('Deployment JSON is nested too deeply.');
+  if (!value || typeof value !== 'object') return;
+  for (const [key, item] of Object.entries(value)) {
+    if (['__proto__', 'constructor', 'prototype'].includes(key)) throw new TypeError(`Deployment JSON contains invalid property ${key}.`);
+    assertSafeData(item, depth + 1);
+  }
+}
+
+function readDocument(input) {
+  assertDocumentSize(input);
+  if (typeof input === 'string') {
+    try { input = JSON.parse(input); } catch { throw new TypeError('Deployment JSON is invalid.'); }
+  }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('Use a deployment document with a configuration object.');
+  assertSafeData(input);
+  return input;
+}
+
+export function normalizeDeploymentRequirements(input = {}, { joomlaVersion = DEFAULTS.joomlaVersion } = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('Deployment requirements must be an object.');
+  for (const key of Object.keys(input)) if (!['joomla', 'jcb', 'php', 'joomlaFallbacks'].includes(key)) throw new TypeError(`Deployment requirements contain unsupported property ${key}.`);
+  const joomla = input.joomla ?? [String(joomlaVersion).split('.')[0]];
+  if (!Array.isArray(joomla) || !joomla.length || joomla.length > 30 || joomla.some(major => typeof major !== 'string' || !/^[1-9]\d*$/.test(major) || Number(major) < 5)) throw new TypeError('Deployment Joomla support must list supported major versions.');
+  if (input.jcb !== undefined && !['required', 'optional'].includes(input.jcb)) throw new TypeError('The JCB requirement must be required or optional.');
+  if (input.php !== undefined && (!Array.isArray(input.php) || !input.php.length || input.php.length > 30 || input.php.some(version => typeof version !== 'string' || !/^\d+\.\d+$/.test(version)))) throw new TypeError('Deployment PHP support must list PHP runtime versions.');
+  const fallbacks = input.joomlaFallbacks ?? {};
+  if (!fallbacks || typeof fallbacks !== 'object' || Array.isArray(fallbacks)) throw new TypeError('Deployment Joomla fallbacks must be an object.');
+  for (const [major, target] of Object.entries(fallbacks)) if (!/^[1-9]\d*$/.test(major) || Number(major) < 5 || !joomla.includes(target) || major === target) throw new TypeError('A deployment fallback must name a supported Joomla recipe major.');
+  return { joomla: [...new Set(joomla)], jcb: input.jcb ?? 'optional', ...(input.php ? { php: [...new Set(input.php)] } : {}), ...(Object.keys(fallbacks).length ? { joomlaFallbacks: { ...fallbacks } } : {}) };
+}
 
 function assertPublic(value, path = 'configuration') {
   if (!value || typeof value !== 'object') return;
@@ -331,7 +391,7 @@ function assertPublic(value, path = 'configuration') {
       const url = new URL(item, 'https://playground.invalid/');
       for (const name of url.searchParams.keys()) if (/(?:password|passwd|secret|token|authorization|api[_-]?key|signature)/i.test(name)) throw new TypeError('Shared package URLs must not contain private access credentials.');
     }
-    if (key === 'startupCommands' && Array.isArray(item)) {
+    if (['startupCommands', 'addonStartupCommands'].includes(key) && Array.isArray(item)) {
       for (const argv of item) for (const argument of argv.slice(1)) {
         const option = argument.split('=', 1)[0];
         if ((argument.startsWith('-') || argument.includes('=')) && /(?:password|passwd|secret|token|authorization|api[_-]?key|credentials)/i.test(option)) throw new TypeError('Do not include secrets in shared startup commands.');
@@ -342,34 +402,75 @@ function assertPublic(value, path = 'configuration') {
 }
 
 /** Public deployment instructions never contain a local site key or administrator. */
-export function createDeploymentDocument(config, { baseURL = 'https://playground.joomengine.org/' } = {}) {
+export function createDeploymentDocument(config, { baseURL = 'https://playground.joomengine.org/', includePrivate = false, name, requirements } = {}) {
+  if (includePrivate) return createFullDeploymentDocument(config, { baseURL, name, requirements });
   const selected = Object.fromEntries(DEPLOYMENT_FIELDS.filter((key) => config[key] !== undefined).map((key) => [key, config[key]]));
+  if (config.deploymentRecipe) {
+    const full = createFullDeploymentDocument(config, { baseURL, name, requirements });
+    delete full.configuration.admin;
+    selected.deploymentRecipe = normalizeDeploymentRecipe(full, { baseURL, publicOnly: true });
+    // The materialized recipe carries its complete arrays and provenance.
+    for (const key of ['extensions', 'startupCommands', 'languages', 'template']) delete selected[key];
+  }
   // Resolved packages from a named preset are not user-added instructions.
-  if (config.addonExtensions !== undefined) selected.extensions = config.addonExtensions;
-  if (config.addonStartupCommands !== undefined) selected.startupCommands = config.addonStartupCommands;
-  if (config.addonLanguages !== undefined) selected.languages = config.addonLanguages;
+  if (!config.deploymentRecipe) {
+    if (config.addonExtensions !== undefined) selected.extensions = config.addonExtensions;
+    if (config.addonStartupCommands !== undefined) selected.startupCommands = config.addonStartupCommands;
+    if (config.addonLanguages !== undefined) selected.languages = config.addonLanguages;
+  }
   const configuration = parseDeploymentDocument({ schemaVersion: 1, configuration: selected }, { baseURL });
   assertPublic(configuration);
   const document = { schemaVersion: 1, configuration };
-  if (new TextEncoder().encode(JSON.stringify(document)).byteLength > MAX_DEPLOYMENT_BYTES) throw new RangeError('Deployment JSON exceeds 1 MiB.');
+  assertDocumentSize(document);
   return document;
 }
 
-export function parseDeploymentDocument(input, { baseURL = 'https://playground.joomengine.org/' } = {}) {
-  if (typeof input === 'string') {
-    if (new TextEncoder().encode(input).byteLength > MAX_DEPLOYMENT_BYTES) throw new RangeError('Deployment JSON exceeds 1 MiB.');
-    try { input = JSON.parse(input); } catch { throw new TypeError('Deployment JSON is invalid.'); }
+/** A saved recipe is complete and portable; private downloads may include its administrator. */
+export function createFullDeploymentDocument(config, { name, requirements, baseURL = 'https://playground.joomengine.org/' } = {}) {
+  const existing = config.deploymentRecipe ? normalizeDeploymentRecipe(config.deploymentRecipe, { baseURL }) : undefined;
+  const merged = { ...existing?.configuration, ...config };
+  const configuration = Object.fromEntries([...DEPLOYMENT_FIELDS, ...PROVENANCE_FIELDS, 'admin'].filter(key => merged[key] !== undefined).map(key => [key, merged[key]]));
+  return normalizeDeploymentRecipe({ schemaVersion: 2,
+    name: name ?? existing?.name ?? config.siteName ?? 'Custom deployment',
+    requirements: requirements ?? existing?.requirements ?? { joomla: [String(config.joomlaVersion ?? DEFAULTS.joomlaVersion).split('.')[0]], jcb: 'optional' },
+    configuration }, { baseURL });
+}
+
+export function normalizeDeploymentRecipe(input, { baseURL = 'https://playground.joomengine.org/', publicOnly = false } = {}) {
+  input = readDocument(input);
+  if (input.schemaVersion !== 2) throw new TypeError('A complete deployment recipe must use schemaVersion 2.');
+  for (const key of Object.keys(input)) if (!['$schema', 'schemaVersion', 'name', 'requirements', 'configuration'].includes(key)) throw new TypeError(`Deployment document contains unsupported property ${key}.`);
+  const name = requireText(input.name, 'Deployment name', 160);
+  if (input.requirements === undefined) throw new TypeError('A complete deployment recipe must declare its requirements.');
+  const requirements = normalizeDeploymentRequirements(input.requirements, { joomlaVersion: input.configuration?.joomlaVersion });
+  const configuration = parseDocumentConfiguration(input.configuration, { baseURL, full: true, publicOnly });
+  const result = { schemaVersion: 2, name, requirements, configuration };
+  assertDocumentSize(result);
+  return result;
+}
+
+export function parseDeploymentDocument(input, { baseURL = 'https://playground.joomengine.org/', publicOnly = false } = {}) {
+  input = readDocument(input);
+  if (input.schemaVersion === 2) {
+    const deploymentRecipe = normalizeDeploymentRecipe(input, { baseURL, publicOnly });
+    return { ...deploymentRecipe.configuration, deploymentRecipe };
   }
-  if (!input || typeof input !== 'object' || Array.isArray(input) || input.schemaVersion !== 1 || !input.configuration || typeof input.configuration !== 'object' || Array.isArray(input.configuration)) throw new TypeError('Use a deployment document with schemaVersion 1 and a configuration object.');
+  if (input.schemaVersion !== 1) throw new TypeError('Use a deployment document with schemaVersion 1 or 2 and a configuration object.');
   for (const key of Object.keys(input)) if (!['$schema', 'schemaVersion', 'configuration'].includes(key)) throw new TypeError(`Deployment document contains unsupported property ${key}.`);
-  const value = input.configuration;
-  for (const key of Object.keys(value)) if (!DEPLOYMENT_FIELDS.includes(key)) throw new TypeError(`Deployment configuration contains unsupported property ${key}.`);
+  return parseDocumentConfiguration(input.configuration, { baseURL, full: false, publicOnly: true });
+}
+
+function parseDocumentConfiguration(value, { baseURL, full, publicOnly }) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Deployment configuration must be an object.');
+  const allowed = [...DEPLOYMENT_FIELDS, ...(full ? [...PROVENANCE_FIELDS, ...(!publicOnly ? ['admin'] : [])] : ['deploymentRecipe'])];
+  for (const key of Object.keys(value)) if (!allowed.includes(key)) throw new TypeError(`Deployment configuration contains unsupported property ${key}.`);
   const result = {};
   for (const key of ['joomlaVersion', 'phpVersion']) if (value[key] !== undefined) {
     if (typeof value[key] !== 'string' || !VERSION.test(value[key])) throw new TypeError(`Deployment ${key} is invalid.`);
     result[key] = value[key];
   }
   if (value.deployId !== undefined) result.deployId = normalizeDeployId(value.deployId);
+  if (value.sourceDeployId !== undefined) result.sourceDeployId = normalizeDeployId(value.sourceDeployId);
   if (value.joomlaPackage !== undefined) result.joomlaPackage = normalizeJoomlaPackage(value.joomlaPackage, baseURL);
   if (value.jcbVersion !== undefined) result.jcbVersion = normalizeJcbVersion(value.jcbVersion);
   if (value.jcbPackage !== undefined) result.jcbPackage = normalizeJcbPackage(value.jcbPackage, baseURL);
@@ -380,22 +481,57 @@ export function parseDeploymentDocument(input, { baseURL = 'https://playground.j
   if (value.language !== undefined) result.language = normalizeLanguage(value.language);
   if (value.languageTags !== undefined) result.languageTags = parseLanguageTags(value.languageTags);
   for (const key of ['autoLogin', 'hideToolbar', 'persistence', 'fresh', 'multilingual']) if (value[key] !== undefined) result[key] = requireBoolean(value[key], key);
-  if (value.extensions !== undefined) result.extensions = parseExtensions(value.extensions, baseURL);
+  if (full) {
+    result.addonExtensions = parseUserExtensions(value.addonExtensions ?? value.extensions ?? [], baseURL);
+    const addonURLs = new Set(result.addonExtensions.map(entry => entry.url));
+    result.extensions = parseJSONList(value.extensions ?? [], 'Extensions').map(entry => {
+      const userEntry = parseUserExtensions([entry], baseURL)[0];
+      // Imported provenance is only a claim. The resolver checks it against the
+      // repository before using managed transport; malformed user hashes must
+      // not prevent that classification or the ordinary Joomla installer.
+      return addonURLs.has(userEntry.url) ? userEntry : { ...userEntry,
+        ...(typeof entry.sha256 === 'string' && SHA256.test(entry.sha256) ? { sha256: entry.sha256.toLowerCase() } : {}),
+        ...(typeof entry.sha512 === 'string' && SHA512.test(entry.sha512) ? { sha512: entry.sha512.toLowerCase() } : {}) };
+    });
+    if (result.extensions.length > 30) throw new TypeError('Choose at most 30 extension packages.');
+    result.addonStartupCommands = parseStartupCommands(value.addonStartupCommands ?? value.startupCommands ?? []);
+    if (value.addonTemplate !== undefined) result.addonTemplate = parseUserTemplate(value.addonTemplate, baseURL);
+  } else if (value.extensions !== undefined) result.extensions = parseUserExtensions(value.extensions, baseURL);
   if (value.startupCommands !== undefined) result.startupCommands = parseStartupCommands(value.startupCommands);
   if (value.languages !== undefined) {
     if (!Array.isArray(value.languages) || value.languages.length > 30) throw new TypeError('Language packages must be an array of at most 30 entries.');
     result.languages = value.languages.map((entry) => ({ ...parseExtensions([entry], baseURL, { allowHttp: false })[0], tag: normalizeLanguage(entry.tag) }));
   }
+  if (full) {
+    const languages = value.addonLanguages ?? value.languages ?? [];
+    if (!Array.isArray(languages) || languages.length > 30) throw new TypeError('Language packages must be an array of at most 30 entries.');
+    result.addonLanguages = languages.map(entry => ({ ...parseExtensions([entry], baseURL, { allowHttp: false })[0], tag: normalizeLanguage(entry.tag) }));
+    result.startupCommands ??= [];
+    result.languages ??= [];
+  }
   if (value.menus !== undefined) result.menus = parseMenus(value.menus);
-  if (value.template !== undefined) result.template = parseTemplate(value.template, baseURL);
+  if (value.template !== undefined) {
+    result.template = parseUserTemplate(value.template, baseURL);
+    const template = typeof value.template === 'string' && value.template.trim() ? JSON.parse(value.template) : value.template;
+    if (full && !value.addonTemplate && result.template?.url && typeof template?.sha256 === 'string' && SHA256.test(template.sha256)) result.template.sha256 = template.sha256.toLowerCase();
+  }
   if (value.phpSettings !== undefined) result.phpSettings = normalizePhpSettings(value.phpSettings);
   if (value.content !== undefined) {
     // Detailed category/article validation occurs when resolving the selected deploy.
     if (!value.content || typeof value.content !== 'object' || Array.isArray(value.content)) throw new TypeError('Deployment content must be an object.');
     result.content = JSON.parse(JSON.stringify(value.content));
   }
-  assertPublic(result);
-  if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_DEPLOYMENT_BYTES) throw new RangeError('Deployment JSON exceeds 1 MiB.');
+  if (value.admin !== undefined) {
+    if (!value.admin || typeof value.admin !== 'object' || Array.isArray(value.admin)) throw new TypeError('Deployment administrator must be an object.');
+    for (const key of Object.keys(value.admin)) if (!['name', 'username', 'email', 'password'].includes(key)) throw new TypeError(`Deployment administrator contains unsupported property ${key}.`);
+    result.admin = {};
+    for (const [key, limit] of Object.entries({ name: 100, username: 100, email: 254, password: 128 })) if (value.admin[key] !== undefined) result.admin[key] = requireText(value.admin[key], `Administrator ${key}`, limit);
+    if (result.admin.email !== undefined && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.admin.email)) throw new TypeError('Enter a valid administrator email address.');
+    if (result.admin.password !== undefined && result.admin.password.length < 12) throw new TypeError('Administrator password must contain at least 12 characters.');
+  }
+  if (!full && value.deploymentRecipe !== undefined) result.deploymentRecipe = normalizeDeploymentRecipe(value.deploymentRecipe, { baseURL, publicOnly: true });
+  if (publicOnly) assertPublic(result);
+  assertDocumentSize(result);
   return result;
 }
 
@@ -424,7 +560,7 @@ export async function loadDeploymentDocument(url, { sha256, fetcher = fetch, bas
     const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (byte) => byte.toString(16).padStart(2, '0')).join('');
     if (digest !== source.sha256) throw new Error('Deployment configuration checksum does not match.');
   }
-  return parseDeploymentDocument(new TextDecoder('utf-8', { fatal: true }).decode(bytes), { baseURL: source.url });
+  return parseDeploymentDocument(new TextDecoder('utf-8', { fatal: true }).decode(bytes), { baseURL: source.url, publicOnly: true });
 }
 
 export function createDeploymentSourceURL(location, source) {

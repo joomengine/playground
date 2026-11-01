@@ -57,6 +57,9 @@
                 "6"
               ]
             }
+          },
+          "requirements": {
+            "$ref": "./schema.json#/$defs/requirements"
           }
         }
       }

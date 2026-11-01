@@ -256,7 +256,7 @@ matching native modules, and running the complete validation suite.
 ## PHP HTTP requests
 
 PHP’s `curl_*` functions and HTTP stream wrappers perform real HTTP requests
-through the upstream Fetch integration. cURL supports request methods, headers,
+through the Fetch integration. cURL supports request methods, headers,
 binary bodies, status codes, redirects, timeouts, and streaming response
 callbacks. The native extension is exercised on every supported PHP build,
 including the HTTP patterns used by JCB’s file and API helpers.
@@ -270,21 +270,26 @@ claiming support for decoders absent from the runtime. If JCB cannot cache a pub
 image, its image helper can display the original HTTPS URL directly. A missing
 cache reference can use the existing file verified against its metadata checksum.
 These corrections use the installed component’s own metadata; no artwork copies or host lists are
-maintained, and PHP reads still require CORS permission.
+maintained.
 
-In a browser, remote servers must permit the playground origin through CORS.
-Only HTTP and HTTPS are supported. The browser controls certificate validation,
-cookies, forbidden request headers, and connection behavior; options for disabling
-TLS verification cannot bypass browser security. Redirect responses are hidden
-from browser Fetch: enable following explicitly when a client needs redirects.
-PHP’s cookie-file settings do not create a separate browser cookie store.
+Custom extension URLs entered in Rocket are passed to Joomla's normal console
+installer: `extension:install --url=URL`. Joomla handles the download, unpacking
+and installation. Custom template ZIPs use the same path. Installer errors remain
+visible while the site continues opening; required core packages must install
+successfully. PHP HTTP requests use the browser's Fetch transport.
+
+Only HTTP and HTTPS are supported. Browser requests still follow CORS and
+mixed-content rules. The browser controls certificate validation, cookies,
+forbidden request headers, and connection behavior; options for disabling TLS
+verification cannot bypass browser security. Redirect responses are hidden from
+browser Fetch: enable following explicitly when a client needs redirects.
+PHP's cookie-file settings do not create a separate browser cookie store.
 HTTP proxies and Unix sockets are unsupported. Requests to PHP in the same
 playground instance cannot complete recursively while its worker is already
 executing a request; use a separate server or independent instance for HTTP
-service calls. See
-the [upstream compatibility guide](https://github.com/seanmorris/php-wasm/blob/6e206f8c053f74f209a10d99fab0a7fa74b01ee5/packages/curl/README.md#differences-from-native-curl)
-before relying on server-specific networking behavior. The playground does not
-provide a public CORS proxy.
+service calls. See the
+[upstream compatibility guide](https://github.com/seanmorris/php-wasm/blob/6e206f8c053f74f209a10d99fab0a7fa74b01ee5/packages/curl/README.md#differences-from-native-curl)
+before relying on server-specific networking behavior.
 
 ## Using Rocket
 
@@ -315,8 +320,13 @@ labels collapse at narrower editor widths. **Accounts** opens AI API settings;
 the robot-shaped **AI Assistant** uses the same isolated session connection. See
 the [Code guide](docs/joomengine-code-user-guide.md#optional-ai-editing).
 
-The deployment editor selects Joomla, PHP, packages, languages, the site name,
-login behavior, menus and a template. It can install a component from a public
+The main dashboard selects Joomla, JCB and PHP. Its deployment selector and the
+deployment editor show the same built-in and saved custom setups. Selecting one
+fills its fields; incompatible runtime choices are disabled. Deployments that
+open JCB require a compatible JCB version, while other deployments allow **None**.
+
+The deployment editor configures packages, languages, the site name,
+administrator, login behavior, menus and a template. It can install a component from a public
 ZIP URL, make one of its frontend views the Home menu item, install a template,
 and set its parameters. Installed components, menu layouts and template styles
 can be discovered from the running site. See the [deploy guide](deploys/README.md)
@@ -325,11 +335,18 @@ for the complete document format and advanced parameters.
 Under **Extension packages**, paste a complete HTTP or HTTPS ZIP URL. Use
 **Add another URL** for more packages, or remove an unwanted row. The separate
 **Advanced options** control exposes the same packages as editable JSON objects
-with `url` and an optional `sha256`. Both representations stay synchronized;
-invalid JSON remains visible until corrected. Changing a package URL clears its
-previous checksum. Joomla console commands remain available under the general
-advanced configuration. External hosts must allow browser downloads, and an
-HTTPS playground may block HTTP package downloads.
+with a `url`. User-supplied checksum fields are ignored; managed core packages
+retain their published checksums. Basic fields and advanced JSON stay
+synchronized for packages, console commands, menus, content and template
+parameters. Invalid JSON remains visible until corrected.
+
+- **Save** in the deployment editor keeps a named recipe in this browser and
+  adds it to both deployment selectors. Editing a built-in saves a **Custom**
+  copy; the original remains available.
+- **Save as copy** creates another custom recipe. **Delete** removes only a
+  custom recipe, leaving existing saved sites intact.
+- **Export configuration** downloads the complete version 2 recipe, including
+  administrator details. **Import configuration** adds it as a named custom deployment. Configuration JSON does not contain the site's files or database.
 
 - **Use** starts an independent deployment from the editor's configuration and
   prepares a reusable share link.
@@ -394,16 +411,19 @@ visible save failures; they do not advance the saved-state indicator.
 The credentials dialog shows the generated administrator login details, including
 when automatic login is disabled. Each fresh site receives new credentials;
 saved sites retain theirs. Credentials stay in private runtime metadata outside
-the webroot, exports, share links and browser preferences. Browser storage can be
+the webroot and share links. Saved custom recipes and explicit full configuration
+JSON exports also retain the configured administrator. Browser storage can be
 evicted or cleared and is not a backup. A save reports completion only after both
 stores flush; closing a tab cannot guarantee an unfinished save completes.
 
-External extension and template packages must be ZIP archives served over HTTPS
-(localhost HTTP is allowed for development). Cross-origin hosts must permit
-browser access through CORS. Packages are limited to 128 MiB. An optional SHA-256
-is verified before installation; repository packages always have pinned digests.
-When a host blocks downloads, provide a permitted URL or stage the package on the
-playground origin. There is no public download proxy.
+External packages must be public ZIP archives. Extension URLs accept HTTP or
+HTTPS; template URLs require HTTPS, with localhost HTTP allowed for development.
+Prefer HTTPS for integrity in transit. HTTP package URLs remain subject to the
+browser's mixed-content rules.
+Managed packages are limited to 128 MiB and repository packages have verified
+pinned digests. Custom extension URLs use Joomla's installer directly; the
+wrapper ignores user-supplied checksum fields on that path. The URL must lead
+to a package ZIP.
 
 Each extension, template or language ZIP installed by the deployment helper gets
 180 seconds of PHP execution time and a 210-second host deadline. The allowance
@@ -622,14 +642,16 @@ Share includes the complete public deployment: Joomla/PHP versions, PHP settings
 site name, packages, language selections, menus, template parameters, login choice
 and setup commands. Advanced configurations use an encoded `#deploy=` fragment.
 The Share dialog always exposes the link for manual copying if clipboard access
-is unavailable. It can download/import deployment JSON or generate a link to a
-hosted configuration. Links are limited to 16 KiB; JSON documents to 1 MiB.
+is unavailable. Links are limited to 16 KiB; JSON documents to 1 MiB.
 
-Public deployment documents never contain administrator credentials or local
-site keys and do not transfer saved files or database content. Known credential
-fields and secret-bearing URL parameters are rejected. Review package locations
-and command arguments before sharing. Use a complete site download to transfer
-site content. The [document schema](deploys/document.schema.json) and
+Share URLs use public version 1 documents and exclude administrator credentials
+and local site keys. Custom shares include their complete recipe, so the recipient
+does not need the sender's browser registry. **Export configuration** downloads a
+version 2 document with the deployment name, compatibility requirements, all setup
+fields and administrator details; **Import configuration** adds it to the custom deployment list.
+Public hosted configuration URLs use the same password-free format as shares.
+Neither format transfers saved files or database content; use a complete site
+download for that. The [document schema](deploys/document.schema.json) and
 [deploy guide](deploys/README.md#compose-a-deployment-without-a-repository-change)
 describe the JSON format, menu/template fields and hosted configuration URLs.
 

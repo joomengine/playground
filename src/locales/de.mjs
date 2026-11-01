@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "Wählen Sie höchstens 30 Erweiterungspakete.",
   "label.extensionUrlNumber": "ZIP-URL der Erweiterung {number}",
   "action.removeExtensionUrl": "Erweiterungs-URL {number} entfernen",
-  "help.extensionDownloads": "Der Pakethost muss Downloads im Browser zulassen. HTTPS-Seiten können HTTP-Downloads blockieren.",
+  "help.extensionDownloads": "Öffentliche ZIP-Pakete werden automatisch heruntergeladen, wenn du diese Konfiguration startest oder anwendest.",
   "error.operationFailed": "Der Vorgang konnte nicht abgeschlossen werden. Weitere Informationen finden Sie unter Technische Details.",
   "title.technicalDetails": "Technische Details",
   "help.temporaryRetry": "Diese temporäre Bereitstellung ist unvollständig. Erneut versuchen erstellt eine neue temporäre Website. Wiederherstellung und Zurücksetzen gespeicherter Websites sind nur bei aktiviertem Speichern verfügbar.",
