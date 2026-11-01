@@ -1,9 +1,10 @@
 # JoomEngine Playground
 
 Build Joomla extensions with **Joomla Component Builder (JCB)** in your browser.
-JCB is the development engine at the heart of JoomEngine. Sean Morris’s PHP
-WebAssembly runtime and a real MariaDB WebAssembly database run the site. The
-playground assembles published upstream PHP packages, the MariaDB bridge, and a separately compiled native PDO extension into
+JCB is the development engine at the heart of JoomEngine. JoomEngine's PHP-WASM
+int64 distribution, built on Sean Morris's runtime, and a real MariaDB WebAssembly
+database run the site. The playground assembles released 64-bit PHP builds,
+the MariaDB bridge, and a separately compiled native PDO extension into
 a static site. PHP requests and SQL execute in browser workers.
 
 The deployment address is **https://playground.joomengine.org/**. The default
@@ -51,11 +52,13 @@ This project builds directly on the work of these maintainers and contributors:
   JoomEngine Code uses Sean Morris's pinned `php-dbg-wasm` package with a small,
   reproducibly compiled HTTP/debugging bridge.
 - **[MariaDB](https://github.com/MariaDB/server)** provides the database engine.
+- **[joomengine/php-wasm-int64](https://github.com/joomengine/php-wasm-int64)**
+  provides PHP 8.3–8.5 with native 64-bit PHP integers, matching extensions,
+  and the configured headers used to build Playground's native adapters.
 - **[seanmorris/php-wasm](https://github.com/seanmorris/php-wasm)** — Sean Morris
   and the project’s contributors provide the PHP runtime, CGI implementation,
   filesystem, asynchronous JavaScript integration, and loadable extension
-  support. The playground consumes their published runtime and extension
-  packages directly.
+  support underlying JoomEngine's int64 distribution.
 - **[JoomEngine MariaDB WASM Bridge](https://github.com/joomengine/mariadb-wasm-bridge)**
   provides the database worker, persistence, host protocol, native PDO driver,
   and adapter for the upstream PHP runtime.
