@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "action.login": "התחברות",
   "database.detach": "ניתוק מציג מסד הנתונים",
   "database.redock": "החזרת מציג מסד הנתונים לחלון זה",
   "database.maximize": "הגדלת מסד נתונים",

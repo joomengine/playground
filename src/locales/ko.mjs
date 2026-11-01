@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "action.login": "로그인",
   "database.detach": "데이터베이스 뷰어 분리",
   "database.redock": "데이터베이스 뷰어를 이 창으로 되돌리기",
   "database.maximize": "데이터베이스 최대화",

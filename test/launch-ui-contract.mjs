@@ -12,6 +12,11 @@ export async function assertLaunchCountdown(page, url) {
     assert.ok(seconds > 0 && seconds <= 10, 'The visitor must have a visible ten-second launch window.');
     assert.equal(await page.locator('#deploy').inputValue(), 'jcb');
     assert.equal(await page.locator('#php-version').inputValue(), '8.4');
+    for (const id of ['stop-countdown', 'stop-countdown-button']) {
+      assert.equal(await page.locator(`#${id}`).getAttribute('aria-label'), 'Stop countdown');
+      assert.equal(await page.locator(`#${id}`).evaluate(button => button.classList.contains('je-icon-only')), true);
+      assert.equal(await page.locator(`#${id} .je-icon`).count(), 1);
+    }
     await page.locator('#stop-countdown').click();
     assert.equal(await page.locator('#launch-countdown').isVisible(), false);
     await page.locator('#settings-toggle').click();

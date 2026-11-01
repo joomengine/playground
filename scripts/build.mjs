@@ -23,9 +23,8 @@ const approvedImages = validatePublicAssetRegistry(JSON.parse(await readFile(pat
 const imageDelivery = validatePublicAssetConfiguration(JSON.parse(await readFile(path.join(root, 'config/public-assets-config.json'), 'utf8')));
 const browserCompatibility = validateCompatibilityConfiguration(JSON.parse(await readFile(path.join(root, 'config/browser-compatibility.json'), 'utf8')));
 if (!imageDelivery.registryVersions.includes(approvedImages.version)) throw new Error('The image relay configuration must support the staged registry version.');
-if (browserCompatibility.fallbackEnabled && !imageDelivery.enabled) {
-  throw new Error('Deploy and configure the approved-image relay before enabling the compatibility release.');
-}
+// Runtime isolation is independent of optional external-image delivery. The
+// same-origin PHP and MariaDB assets work with either verified COEP policy.
 const domain = (await readFile(path.join(root, 'CNAME'), 'utf8')).trim();
 if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
   throw new Error('CNAME must contain one valid deployment hostname.');

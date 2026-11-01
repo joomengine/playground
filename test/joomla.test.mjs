@@ -120,6 +120,19 @@ test('private checkpoint import restores without rotating accounts or replaying 
   assert.equal(result.resumed, true);
 });
 
+test('wrapped and coloured Joomla console errors preserve the complete actionable explanation', async () => {
+  const output = 'Joomla Configuration\n====================\n\n'
+    + '\u001b[37;41m [ERROR] Cannot connect to database, verify that you specified the correct database details The \u001b[0m\n'
+    + '\u001b[37;41m         browser manages the database and session settings. Export the site to change them on \u001b[0m\n'
+    + '\u001b[37;41m         another server.                                                                       \u001b[0m\n\n'
+    + 'Unrelated console footer\n';
+  await assert.rejects(parseProvisioningResult({ status: 200, text: '\n__JOOMENGINE_RESULT__' + JSON.stringify({ ok: false, exitCode: 1, output }) }), error => {
+    assert.match(error.message, /The browser manages the database and session settings\. Export the site to change them on another server\./);
+    assert.doesNotMatch(error.message, /Joomla Configuration|Unrelated console footer|\u001b/);
+    return true;
+  });
+});
+
 test('failure envelope survives Joomla fatal HTML while keeping diagnostics bounded and private', async () => {
   const text = '\n__JOOMENGINE_RESULT__' + JSON.stringify({ ok: false, error: 'Maximum execution time of 60 seconds exceeded',
     output: 'https://user:private@example.test/pkg.zip?token=secret\n{"password":"sensitive"}' }) + '<!DOCTYPE html><style>' + 'x'.repeat(12000) + '</style>';
@@ -336,7 +349,8 @@ test('missing addon dependencies and custom command failures stay visible while 
 test('custom installation does not hide engine failures or malformed PHP results', async () => {
   const { applyJoomlaConfiguration } = await import('../src/joomla/index.mjs');
   const extension = { url: 'https://example.test/addon.zip' };
-  for (const failure of [new Error('WebAssembly runtime is unavailable.'), { status: 500, text: 'PHP engine terminated' }]) {
+  for (const failure of [new Error('WebAssembly runtime is unavailable.'), { status: 500, text: 'PHP engine terminated' },
+    { status: 500, text: '\n__JOOMENGINE_RESULT__{"ok":false,"code":"PHP_TERMINATED","error":"PHP terminated before provisioning completed."}<!DOCTYPE html>' }]) {
     let calls = 0;
     const runtime = {
       fs: { writeFile: async () => assert.fail('A failed engine cannot mark this site complete.') },
@@ -350,7 +364,11 @@ test('custom installation does not hide engine failures or malformed PHP results
     };
     await assert.rejects(applyJoomlaConfiguration(runtime, { ...configuration, extensions: [extension], addonExtensions: [extension] }, {
       sourceLoader: async () => '<?php',
-    }), /WebAssembly runtime|PHP did not complete/);
+    }), error => {
+      assert.match(error.message, /WebAssembly runtime|PHP did not complete|PHP terminated/);
+      assert.equal(error.incomplete, true);
+      return true;
+    });
     assert.equal(calls, 2);
   }
 });

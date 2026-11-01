@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "action.login": "Giriş yap",
   "database.detach": "Veritabanı görüntüleyicisini ayır",
   "database.redock": "Veritabanı görüntüleyicisini bu pencereye döndür",
   "database.maximize": "Veritabanı'u büyüt",

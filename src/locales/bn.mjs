@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "action.login": "লগইন",
   "database.detach": "ডেটাবেস ভিউয়ার আলাদা করুন",
   "database.redock": "ডেটাবেস ভিউয়ার এই উইন্ডোতে ফিরিয়ে আনুন",
   "database.maximize": "ডেটাবেস বড় করুন",

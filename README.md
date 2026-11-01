@@ -30,10 +30,11 @@ demand and adds about 435 KiB of staged PHP/UI assets (about 246 KiB gzipped),
 without another PHP or database engine.
 
 [Browser compatibility](docs/browser-compatibility.md) verifies isolation before
-starting the runtime and provides a controlled `require-corp` fallback. Its
-restricted [public-image relay](relay/README.md) must be hosted and configured
-before enabling fallback; the checked-in defaults preserve normal mode with no
-relay dependency. Real mobile validation follows deployment.
+starting the runtime and automatically tries a controlled `require-corp` fallback
+when normal isolation is unavailable. Both modes run without a relay. The
+restricted [public-image relay](relay/README.md) is an optional facility for
+registered external images and remains unconfigured. Real-device mobile
+validation follows deployment.
 
 For an agent-oriented introduction to configuring a site, working with JCB,
 testing extensions and exporting results, see the [Playground agent guide](docs/agent-guide.md).
@@ -371,8 +372,10 @@ parameters. Invalid JSON remains visible until corrected.
   so they can be downloaded without changing either saved store. That recovery
   ZIP contains files and private settings, but no SQL database; it does not repair
   a failed database. **Reset and launch** provides an explicit fresh start from the failure screen.
-- **New site** stages an independent configuration; the current runtime stays
-  open until Launch completes its dirty-work checks.
+- **Configure deployment → Use this deployment** creates an independent site from
+  the editor configuration. **Save** keeps the recipe for reuse; dashboard **Launch**
+  opens the selected saved site. The current runtime stays open until the new
+  launch completes its dirty-work checks.
 - **Rename** changes the selected saved entry's display label, preserving its
   storage key, Joomla title, files and database.
 - **Delete saved site** names and removes the selected saved entry, files,

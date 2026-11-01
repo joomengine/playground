@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { ISOLATION_BOOTSTRAP_VERSION as version, isolationMarker, isolationNavigationURL, isolationResponseHeaders,
   ownedClientURL, runtimeResource, resolveRequestIsolation } from '../src/isolation.mjs';
-import { nextIsolationAttempt, readBootstrapState, validateCompatibilityConfiguration } from '../src/isolation-bootstrap.mjs';
+import { DEFAULT_COMPATIBILITY_CONFIGURATION, nextIsolationAttempt, readBootstrapState, validateCompatibilityConfiguration } from '../src/isolation-bootstrap.mjs';
 import { createShareURL } from '../src/config.mjs';
 import { runtimeLocation } from '../src/ui-state.mjs';
 
@@ -10,6 +11,15 @@ const baseURL = 'https://playground.example/project/';
 const initial = () => ({ version, attempted: [], takeover: false, phase: 'pending' });
 const owner = (id, policy) => ({ id, type: 'window', frameType: 'top-level', url: isolationNavigationURL(baseURL, policy) });
 const request = (url, clientId = '', extra = {}) => ({ request: new Request(url), clientId, ...extra });
+
+test('shipping compatibility fallback is enabled independently of optional image delivery', async () => {
+  const config = validateCompatibilityConfiguration(JSON.parse(await readFile(new URL('../config/browser-compatibility.json', import.meta.url), 'utf8')));
+  assert.deepEqual(config, DEFAULT_COMPATIBILITY_CONFIGURATION);
+  assert.equal(config.fallbackEnabled, true);
+  const images = JSON.parse(await readFile(new URL('../config/public-assets-config.json', import.meta.url), 'utf8'));
+  assert.equal(images.enabled, false);
+  assert.equal(images.relayBaseURL, null);
+});
 
 test('bootstrap distinguishes takeover and one fallback and never reloads failed navigation in a loop', () => {
   const first = nextIsolationAttempt({ url: baseURL, state: initial(), verified: false, fallbackEnabled: true });

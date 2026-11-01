@@ -24,6 +24,7 @@ register_shutdown_function(static function (): void {
         $error = error_get_last();
         playgroundFinish([
             'ok' => false,
+            'code' => 'PHP_TERMINATED',
             'error' => $error['message'] ?? 'PHP terminated before provisioning completed.',
         ]);
     }

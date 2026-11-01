@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "action.login": "Σύνδεση",
   "database.detach": "Αποσύνδεση προβολής βάσης δεδομένων",
   "database.redock": "Επιστροφή προβολής βάσης δεδομένων σε αυτό το παράθυρο",
   "database.maximize": "Μεγιστοποίηση Βάση δεδομένων",

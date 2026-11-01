@@ -222,10 +222,25 @@ export function normalizeConfiguration(input = {}, { catalog, baseURL = 'https:/
   if (config.admin.password.length < 12) throw new TypeError('Administrator password must contain at least 12 characters.');
   config.phpSettings = normalizePhpSettings(config.phpSettings ?? {});
   config.menus = parseMenus(config.menus ?? []);
-  config.template = parseTemplate(config.template, baseURL);
+  const hasTemplateProvenance = config.addonTemplate !== undefined;
+  const addonTemplate = parseUserTemplate(hasTemplateProvenance ? config.addonTemplate : config.template, baseURL);
+  const userTemplate = !hasTemplateProvenance || addonTemplate?.url ? parseUserTemplate(config.template, baseURL) : null;
+  config.template = !hasTemplateProvenance || (addonTemplate?.url && addonTemplate.url === userTemplate?.url)
+    ? userTemplate : parseTemplate(config.template, baseURL);
+  config.addonTemplate = addonTemplate?.url ? addonTemplate : null;
   config.languageTags = parseLanguageTags(config.languageTags ?? []);
   config.multilingual = requireBoolean(config.content?.multilingual === true ? true : (config.multilingual ?? false), 'multilingual');
-  config.extensions = parseExtensions(config.extensions ?? [], baseURL);
+  // Direct callers supply custom URLs unless a resolved recipe explicitly
+  // separates managed packages from additions. Strip custom checksum metadata
+  // before strict managed-package validation at this runtime boundary.
+  config.addonExtensions = parseUserExtensions(config.addonExtensions ?? config.extensions ?? [], baseURL);
+  const addonURLs = new Set(config.addonExtensions.map(entry => entry.url));
+  const extensions = parseJSONList(config.extensions ?? [], 'Extensions').map(entry => {
+    if (!addonURLs.size) return entry;
+    const custom = parseUserExtensions([entry], baseURL)[0];
+    return addonURLs.has(custom.url) ? custom : entry;
+  });
+  config.extensions = parseExtensions(extensions, baseURL);
   config.startupCommands = parseStartupCommands(config.startupCommands ?? []);
   if (!Array.isArray(config.languages ?? []) || (config.languages ?? []).length > 30) throw new TypeError('Language packages must be an array of at most 30 entries.');
   config.languages = (config.languages ?? []).map((entry) => ({ ...parseExtensions([entry], baseURL, { allowHttp: false })[0], tag: normalizeLanguage(requireText(entry.tag, 'Language package tag', 20)) }));

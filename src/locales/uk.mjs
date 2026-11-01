@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "action.login": "Увійти",
   "database.detach": "Відокремити переглядач бази даних",
   "database.redock": "Повернути переглядач бази даних у це вікно",
   "database.maximize": "Розгорнути База даних",

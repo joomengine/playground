@@ -130,7 +130,9 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await current.locator('#embedded-launch:enabled').waitFor();
       assert.equal(await current.locator('#jcb-version').inputValue(), '6.2.1');
       await current.locator('#settings-toggle').click();
-      await current.locator('#new-site-button').click();
+      await current.locator('#deploy-editor-button').click();
+      await current.locator('#editor-deployment').selectOption('jcb');
+      await current.locator('#use-deploy:enabled').waitFor();
       assert.equal(await current.locator('#jcb-version').inputValue(), '6.2.1');
       assert.equal(await current.locator('#jcb-version option[value="6.2.0"]').count(), 0);
       await current.close();

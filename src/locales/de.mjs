@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "action.login": "Anmelden",
   "database.detach": "Datenbankansicht ablösen",
   "database.redock": "Datenbankansicht in dieses Fenster zurückholen",
   "database.maximize": "Datenbank maximieren",

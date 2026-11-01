@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "action.login": "Entrar",
   "database.detach": "Destacar visualizador do banco de dados",
   "database.redock": "Trazer o visualizador do banco de dados para esta janela",
   "database.maximize": "Maximizar Banco de dados",

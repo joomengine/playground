@@ -62,6 +62,15 @@ test('normal mode does not load image configuration or make relay requests', asy
   assert.equal(calls, 0);
 });
 
+test('disabled image delivery leaves original image requests untouched in compatibility mode', async () => {
+  const disabled = { ...config, enabled: false, relayBaseURL: null };
+  const request = new Request(original);
+  Object.defineProperty(request, 'destination', { value: 'image' });
+  const fetcher = () => { throw new Error('A disabled relay must not be contacted.'); };
+  assert.equal(await handlePublicAssetRequest(request, { ...options, config: disabled, fetcher }), null);
+  assert.equal((await handlePublicAssetRequest(new Request(route), { ...options, config: disabled, fetcher })).status, 503);
+});
+
 test('PHP image downloads preserve method, cancellation and original bytes through the external asset route', async () => {
   const calls = [], controller = new AbortController();
   const fetcher = createPhpFetch(async (input, init) => { calls.push({ input, init }); return new Response(bytes, { status: 200 }); },

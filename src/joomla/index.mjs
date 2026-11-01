@@ -209,6 +209,21 @@ function resultFrameEnd(text, start) {
   return -1;
 }
 
+function consoleFailure(output) {
+  if (typeof output !== 'string') return undefined;
+  let message, continuing = false;
+  for (const line of output.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '').split(/\r?\n/)) {
+    const marked = /^\s*\[(?:ERROR|WARNING)\]\s*(.*)$/.exec(line);
+    if (marked) {
+      message = [marked[1].trim()];
+      continuing = true;
+    } else if (continuing && line.trim() && /^\s+/.test(line)) {
+      message.push(line.trim());
+    } else continuing = false;
+  }
+  return message?.join(' ');
+}
+
 export async function parseProvisioningResult(response) {
   const text = typeof response.text === 'function' ? await response.text()
     : typeof response.text === 'string' ? response.text
@@ -234,12 +249,10 @@ export async function parseProvisioningResult(response) {
     throw provisioningError('PHP failed while completing the Joomla operation.', diagnostic);
   }
   if (!result.ok) {
-    const consoleMessage = typeof result.output === 'string'
-      ? [...result.output.matchAll(/^\s*\[(?:ERROR|WARNING)\]\s*(.+)$/gm)].at(-1)?.[1]?.trim()
-      : undefined;
-    throw provisioningError(conciseFailure(result.error || consoleMessage || result.output,
+    throw provisioningError(conciseFailure(result.error || consoleFailure(result.output) || result.output,
       `Joomla command failed with exit status ${result.exitCode ?? 'unknown'}.`), {
-      ...diagnostic, code: 'JOOMLA_OPERATION_FAILED', ...(Number.isInteger(result.exitCode) ? { exitCode: result.exitCode } : {}),
+      ...diagnostic, code: result.code === 'PHP_TERMINATED' ? 'PHP_TERMINATED' : 'JOOMLA_OPERATION_FAILED',
+      ...(Number.isInteger(result.exitCode) ? { exitCode: result.exitCode } : {}),
     });
   }
   if (response.status !== undefined && (response.status < 200 || response.status >= 300)) {
@@ -316,7 +329,16 @@ export async function installExtensionFromURL(runtime, value, { sourceLoader, ex
   if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password) {
     throw new TypeError('Extension URLs must use HTTP or HTTPS without embedded credentials.');
   }
-  return runStartupCommand(runtime, ['extension:install', `--url=${parsed.href}`], { sourceLoader, executionTimeSeconds, timeoutMs });
+  const budget = installationBudget({ executionTimeSeconds, timeoutMs });
+  try {
+    return await runStartupCommand(runtime, ['extension:install', `--url=${parsed.href}`], { sourceLoader, ...budget });
+  } catch (error) {
+    if (error.code !== 'JOOMLA_OPERATION_FAILED') {
+      error.incomplete = true;
+      error.phase ??= 'installation';
+    }
+    throw error;
+  }
 }
 
 function customExtensionIndex(config, extension) {

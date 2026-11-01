@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "action.login": "Inloggen",
   "database.detach": "Databaseviewer loskoppelen",
   "database.redock": "Databaseviewer terugbrengen naar dit venster",
   "database.maximize": "Database maximaliseren",
