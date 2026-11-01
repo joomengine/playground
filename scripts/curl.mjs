@@ -2,6 +2,7 @@ import { cp, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hashFile } from './assets.mjs';
+import { matchesNativeRuntime } from './native-runtime.mjs';
 
 export const curlSource = Object.freeze({
   repository: 'https://github.com/seanmorris/php-wasm-curl',
@@ -16,9 +17,7 @@ export async function stageCurl({ directory, destination, version, upstream }) {
   const provenance = JSON.parse(await readFile(path.join(directory, `${basename}.json`), 'utf8'));
   const sha256 = await hashFile(path.join(directory, file));
   if (provenance.schemaVersion !== 1 || provenance.name !== 'curl'
-    || provenance.phpMinor !== version.version || provenance.phpVersion !== version.patchVersion
-    || provenance.upstream?.commit !== upstream.commit || provenance.upstream?.runtimeVersion !== upstream.version
-    || provenance.emscriptenVersion !== upstream.emscripten || provenance.phpSource?.sha256 !== version.sourceSha256
+    || !await matchesNativeRuntime(provenance, version, upstream)
     || Object.entries(curlSource).some(([key, value]) => provenance.curlSource?.[key] !== value)
     || provenance.extension?.file !== file || provenance.extension?.sha256 !== sha256
     || !Array.isArray(provenance.phpSourceInventory) || !Array.isArray(provenance.curlSourceInventory)

@@ -3,7 +3,6 @@ import { parseMenus, parseTemplate, parseLanguageTags } from '../site-configurat
 import { createMcpClient } from '../mcp.mjs';
 import { installationBudget } from '../php-settings.mjs';
 import { conciseFailure, downloadFailure, packageLabel, provisioningError } from '../provisioning-errors.mjs';
-import { prepareSelectedJcbPackage } from './jcb-package.mjs';
 const RESULT_MARKER = '\n__JOOMENGINE_RESULT__';
 const phpSourceCache = new Map();
 const MAX_PACKAGE_BYTES = 128 * 1024 * 1024;
@@ -553,7 +552,7 @@ async function restoreUploadedSiteSession(runtime, options, sourceLoader, progre
   return { administrator: identity.administrator ?? options.admin, administratorUnavailable: true, loginNotice };
 }
 
-async function downloadAndInstall(runtime, item, fetchPackage, sourceLoader, progress = () => {}, selection, jcbPackageOptions = {}) {
+async function downloadAndInstall(runtime, item, fetchPackage, sourceLoader, progress = () => {}) {
   const label = packageLabel(item.url);
   progress({ stage: 'extensions', phase: 'download', message: `Downloading ${label}…` });
   let bytes;
@@ -571,15 +570,6 @@ async function downloadAndInstall(runtime, item, fetchPackage, sourceLoader, pro
     });
   }
   progress({ stage: 'extensions', phase: 'verification', message: `Verifying ${label}…` });
-  let prepared;
-  try {
-    prepared = await prepareSelectedJcbPackage({ bytes, item, selection, fetcher: fetchPackage, progress, ...jcbPackageOptions });
-  } catch (error) {
-    throw provisioningError(`${label} verification failed: ${conciseFailure(error.message)}`, {
-      phase: 'verification', packageUrl: label, technicalDetails: error.message, incomplete: false,
-    });
-  }
-  if (prepared) return installExtension(runtime, prepared.bytes, { sha256: prepared.sha256, sourceLoader, packageUrl: item.url, progress });
   return installExtension(runtime, bytes, { sha256: item.sha256, sha512: item.sha512, sourceLoader, packageUrl: item.url, progress });
 }
 
@@ -609,7 +599,7 @@ export async function requestJoomlaPage(runtime, path = 'index.php') {
 }
 
 export async function installJoomla(runtime, config, {
-  archiveBytes, sha256: digest, progress = () => {}, sourceLoader, fetchPackage = fetch, jcbPackageOptions,
+  archiveBytes, sha256: digest, progress = () => {}, sourceLoader, fetchPackage = fetch,
 } = {}) {
   const options = validateInstallOptions(config);
   const location = paths(runtime);
@@ -655,8 +645,7 @@ export async function installJoomla(runtime, config, {
     progress({ stage: 'extensions', message: `Installing extension ${index + 1} of ${options.extensions.length}…` });
     const customIndex = customExtensionIndex(config, extension);
     if (customIndex >= 0) await installOptionalExtension(runtime, extension, customIndex, extensionWarnings, sourceLoader, progress);
-    else await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader, progress,
-      { version: config.jcbVersion, package: config.jcbPackage }, jcbPackageOptions);
+    else await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader, progress);
   }
   if (options.template?.url) {
     progress({ stage: 'extensions', message: 'Installing the site template…' });
@@ -687,7 +676,7 @@ export async function installJoomla(runtime, config, {
 
 /** Import a verified portable site bundle into an empty playground instance. */
 export async function importJoomlaSnapshot(runtime, config, {
-  archiveBytes, sha256: digest, progress = () => {}, sourceLoader, fetchPackage = fetch, jcbPackageOptions,
+  archiveBytes, sha256: digest, progress = () => {}, sourceLoader, fetchPackage = fetch,
 } = {}) {
   const options = validateInstallOptions(config);
   const location = paths(runtime);
@@ -784,7 +773,7 @@ export async function discoverJoomlaConfiguration(runtime, { sourceLoader } = {}
 
 /** Apply explicitly selected changes to a running installation after a caller checkpoint. */
 export async function applyJoomlaConfiguration(runtime, config, {
-  sourceLoader, fetchPackage = fetch, progress = () => {}, installPackages = true, jcbPackageOptions, configureLanguage = true,
+  sourceLoader, fetchPackage = fetch, progress = () => {}, installPackages = true, configureLanguage = true,
 } = {}) {
   const options = validateInstallOptions(config);
   const location = paths(runtime);
@@ -800,8 +789,7 @@ export async function applyJoomlaConfiguration(runtime, config, {
       progress({ stage: 'extensions', message: 'Installing the selected extension…' });
       const customIndex = customExtensionIndex(config, extension);
       if (customIndex >= 0) await installOptionalExtension(runtime, extension, customIndex, extensionWarnings, sourceLoader, progress);
-      else await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader, progress,
-        { version: config.jcbVersion, package: config.jcbPackage }, jcbPackageOptions);
+      else await downloadAndInstall(runtime, extension, fetchPackage, sourceLoader, progress);
     }
     if (options.template?.url) {
       if (isCustomTemplate(config)) {

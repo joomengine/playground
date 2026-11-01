@@ -24,9 +24,6 @@ jobs:
       php: ${{ steps.plan.outputs.php }}
       joomla: ${{ steps.plan.outputs.joomla }}
       bridge: ${{ steps.plan.outputs.bridge }}
-      emsdk: ${{ steps.plan.outputs.emsdk }}
-      emscripten: ${{ steps.plan.outputs.emscripten }}
-      native: ${{ steps.plan.outputs.native }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -52,7 +49,7 @@ jobs:
     needs: checks
     if: needs.checks.outputs.build == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -64,17 +61,6 @@ jobs:
           repository: joomengine/mariadb-wasm-bridge
           ref: ${{ needs.checks.outputs.bridge }}
           path: external/bridge
-      - name: Restore source-matched native extensions
-        id: native
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            .cache/native
-            .cache/fileinfo
-            .cache/curl
-            .cache/sodium
-            .cache/phpdbg
-          key: native-v2-${{ runner.os }}-${{ runner.arch }}-${{ needs.checks.outputs.native }}-${{ hashFiles('scripts/build-fileinfo.mjs', 'scripts/build-curl.mjs', 'scripts/build-sodium.mjs', 'scripts/fileinfo.mjs', 'scripts/curl.mjs', 'scripts/sodium.mjs', 'scripts/phpdbg-build.mjs', 'scripts/phpdbg.mjs', 'native/**') }}
       - name: Restore verified download archives
         id: archives
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -82,78 +68,53 @@ jobs:
           path: |
             .cache/*.zip
             .cache/*.tar.gz
+            .cache/php-int64/*.tar.gz
             .cache/packages
-            .cache/jcb-dependency-archives
             .cache/language-sources
             .cache/language-packages
-            .cache/tools
           key: archives-${{ runner.os }}-${{ hashFiles('versions.json', 'deploys/*.json', 'dependencies/**/*.json', 'scripts/language-packages.mjs') }}
           restore-keys: archives-${{ runner.os }}-
-      - name: Install build prerequisites
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y autoconf automake bison re2c libtool pkg-config php8.3-cli php8.3-mbstring php8.3-xml php8.3-gd php8.3-zip php8.3-curl
       - name: Install locked JavaScript dependencies
         run: npm ci --ignore-scripts
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        if: steps.native.outputs.cache-hit != 'true'
-        with:
-          repository: emscripten-core/emsdk
-          ref: ${{ needs.checks.outputs.emsdk }}
-          path: external/emsdk
-      - name: Restore pinned compiler tools
-        id: compiler
-        if: steps.native.outputs.cache-hit != 'true'
+      - name: Resolve and verify one stable PHP int64 release
+        id: runtime
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          npm run prepare:php
+          node scripts/ci-plan.mjs --native
+      - name: Restore source-matched native extensions
+        id: native
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
-            external/emsdk/upstream
-            external/emsdk/node
-          key: emsdk-${{ runner.os }}-${{ runner.arch }}-${{ needs.checks.outputs.emsdk }}-${{ needs.checks.outputs.emscripten }}
-      - name: Configure pinned Emscripten compiler
+            .cache/native
+            .cache/curl
+            .cache/sodium
+            .cache/phpdbg
+          key: native-int64-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.native }}-${{ hashFiles('scripts/build-native.mjs', 'scripts/build-mariadb.mjs', 'scripts/build-curl.mjs', 'scripts/build-sodium.mjs', 'scripts/native-runtime.mjs', 'scripts/php-runtime.mjs', 'scripts/curl.mjs', 'scripts/sodium.mjs', 'scripts/phpdbg-build.mjs', 'scripts/phpdbg.mjs', 'native/**') }}
+      - name: Compile extensions against the selected int64 SDK
         if: steps.native.outputs.cache-hit != 'true'
         env:
-          EMSCRIPTEN_VERSION: ${{ needs.checks.outputs.emscripten }}
+          COMPILER_IMAGE: ${{ steps.runtime.outputs.compiler_image }}
         run: |
-          external/emsdk/emsdk install "$EMSCRIPTEN_VERSION"
-          external/emsdk/emsdk activate "$EMSCRIPTEN_VERSION"
-      - name: Compile version-matched native extensions
-        if: steps.native.outputs.cache-hit != 'true'
-        run: |
-          source external/emsdk/emsdk_env.sh
-          while IFS= read -r minor; do
-            bash external/bridge/native/build-upstream.sh "$minor" "$PWD/.cache/native"
-            BRIDGE_SOURCE_DIR=external/bridge node scripts/build-fileinfo.mjs "$minor"
-            BRIDGE_SOURCE_DIR=external/bridge node scripts/build-curl.mjs "$minor"
-            BRIDGE_SOURCE_DIR=external/bridge node scripts/build-sodium.mjs "$minor"
-            BRIDGE_SOURCE_DIR=external/bridge node scripts/phpdbg-build.mjs "$minor"
-          done < <(node --input-type=module -e "import p from './versions.json' with {type:'json'}; for (const v of p.php) console.log(v.version)")
-      - name: Cache pinned compiler after successful compilation
-        if: steps.native.outputs.cache-hit != 'true' && steps.compiler.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            external/emsdk/upstream
-            external/emsdk/node
-          key: ${{ steps.compiler.outputs.cache-primary-key }}
+          docker run --rm --volume "$PWD:/work" --workdir /work \
+            --env BRIDGE_SOURCE_DIR=external/bridge \
+            "$COMPILER_IMAGE" node scripts/build-native.mjs
       - name: Prepare real MariaDB engine for native validation
         run: |
           npm ci --prefix external/bridge --ignore-scripts
           node scripts/prepare-bridge-engine.mjs external/bridge
           npm run prepare:engine --prefix external/bridge
-      - name: Validate upstream PHP and native MariaDB PDO
+      - name: Validate int64 PHP and native MariaDB PDO
         if: needs.checks.outputs.full == 'true' || steps.native.outputs.cache-hit != 'true'
-        run: |
-          PHP_WASM_MODULE_ROOT="$PWD/node_modules" \
-          PHP_WASM_EXTENSION_DIR="$PWD/.cache/native" \
-          node --test external/bridge/native/tests/upstream.test.mjs
+        run: node --test test/native-pdo.runtime.mjs
       - name: Cache source-matched compiled extensions
         if: steps.native.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             .cache/native
-            .cache/fileinfo
             .cache/curl
             .cache/sodium
             .cache/phpdbg
@@ -161,7 +122,6 @@ jobs:
       - name: Build verified static distribution
         env:
           MARIADB_DRIVER_DIR: .cache/native
-          PHP_BINARY: php8.3
         run: npm run build
       - name: Cache verified download archives
         if: steps.archives.outputs.cache-hit != 'true'
@@ -170,11 +130,10 @@ jobs:
           path: |
             .cache/*.zip
             .cache/*.tar.gz
+            .cache/php-int64/*.tar.gz
             .cache/packages
-            .cache/jcb-dependency-archives
             .cache/language-sources
             .cache/language-packages
-            .cache/tools
           key: ${{ steps.archives.outputs.cache-primary-key }}
       - name: Validate provisioning and runtime capabilities
         if: needs.checks.outputs.full == 'true' || steps.native.outputs.cache-hit != 'true'

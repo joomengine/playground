@@ -2,7 +2,6 @@ import { mkdir, readFile, writeFile, cp } from 'node:fs/promises';
 import path from 'node:path';
 import { downloadVerified } from './assets.mjs';
 import { normalizeDeploy, normalizeDeployCatalog } from '../src/deploys.mjs';
-import { deriveJcbPackage, isReviewedJcbPackage } from './jcb-package.mjs';
 import { prepareLanguagePackage } from './language-packages.mjs';
 
 /** Stage verified repository recipes and their packages on the playground origin. */
@@ -44,20 +43,10 @@ export async function stageDeployCatalog({ root, staging, assets, cache, canonic
     if (!downloaded.has(sha256)) {
       downloaded.set(sha256, (async () => {
         console.log(`Verifying deploy package ${context}…`);
-        let archive = await downloadVerified(url.href, sha256, path.join(cache, 'packages', `${sha256}.zip`));
-        let deployedSha256 = sha256;
-        let provenanceUrl;
-        if (isReviewedJcbPackage(sha256)) {
-          const derived = await deriveJcbPackage({ root, cache, archive, sourceUrl: url.href, sourceSha256: sha256 });
-          archive = derived.archive;
-          deployedSha256 = derived.sha256;
-          provenanceUrl = `packages/${deployedSha256}.provenance.json`;
-          await writeFile(path.join(assets, provenanceUrl), `${JSON.stringify(derived.provenance, null, 2)}\n`);
-        }
-        const filename = `${deployedSha256}.zip`;
+        const archive = await downloadVerified(url.href, sha256, path.join(cache, 'packages', `${sha256}.zip`));
+        const filename = `${sha256}.zip`;
         await cp(archive, path.join(assets, 'packages', filename));
-        return { sourceUrl: url.href, sourceSha256: sha256, sha256: deployedSha256, url: `packages/${filename}`,
-          ...(provenanceUrl ? { provenanceUrl } : {}) };
+        return { sourceUrl: url.href, sourceSha256: sha256, sha256, url: `packages/${filename}` };
       })());
     }
     const deployed = await downloaded.get(sha256);

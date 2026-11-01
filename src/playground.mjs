@@ -349,8 +349,9 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   const response = await fetch(manifestUrl, { cache: 'no-cache' });
   if (!response.ok) throw new Error(`Cannot load the runtime catalog: HTTP ${response.status}.`);
   const manifest = await response.json();
-  const selectedCatalog = input.restoredSite ? catalogForRestoredSite(parseCatalog(manifest), input)
-    : catalogWithSelectedJoomlaPackage(parseCatalog(manifest), input, base.href);
+  const publishedCatalog = parseCatalog(manifest, { baseURL: manifestUrl });
+  const selectedCatalog = input.restoredSite ? catalogForRestoredSite(publishedCatalog, input)
+    : catalogWithSelectedJoomlaPackage(publishedCatalog, input, base.href);
   if (input.joomlaPackage !== undefined) {
     const selected = selectedCatalog.joomla.find(entry => entry.version === input.joomlaVersion);
     manifest.joomla = manifest.joomla.filter(entry => entry.version !== input.joomlaVersion);
@@ -758,8 +759,9 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         progress({ phase: 'download', message: `Loading Joomla ${config.joomlaVersion}…` });
         // Package URLs retain their catalog identity and ordinary CORS behavior;
         // only local runtime modules/workers use the ownership-preserving route.
-        const archive = await fetchPackage(new URL(joomlaEntry.url, manifestUrl).href);
-        if (!archive.ok) throw new Error(`Cannot load Joomla: HTTP ${archive.status}.`);
+        const archiveURL = new URL(joomlaEntry.url, manifestUrl).href;
+        const archive = await fetchPackage(archiveURL);
+        if (!archive.ok) throw new Error(`Cannot download Joomla ${config.joomlaVersion}: HTTP ${archive.status} at ${archiveURL}. Refresh the deployment catalog and try again.`);
         archiveBytes = await archive.arrayBuffer();
       }
       if (!installed) installed = await installJoomla(handle, config, { archiveBytes, sha256: joomlaEntry.sha256, progress, fetchPackage });

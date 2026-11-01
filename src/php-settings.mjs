@@ -99,6 +99,7 @@ export function runtimeRandomValue() {
 }
 
 export function assertRuntimeHealth(info, settings = {}) {
+  if (info?.intSize !== 8) throw new Error('The PHP runtime must support 64-bit integers. Rebuild with the matching int64 release.');
   const requested = normalizePhpSettings(settings);
   const loaded = new Set((info?.extensions || []).map(name => name.toLowerCase()));
   const required = ['pdo_mariadb_wasm', 'curl', 'fileinfo', 'sodium', 'gd', 'intl', 'mbstring', 'openssl',

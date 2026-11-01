@@ -2,6 +2,7 @@ import { cp, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hashFile } from './assets.mjs';
+import { matchesNativeRuntime } from './native-runtime.mjs';
 
 export const sodiumSource = Object.freeze({
   version: '1.0.22',
@@ -15,9 +16,7 @@ export async function stageSodium({ directory, destination, version, upstream })
   const provenance = JSON.parse(await readFile(path.join(directory, `${basename}.json`), 'utf8'));
   const sha256 = await hashFile(path.join(directory, file));
   if (provenance.schemaVersion !== 1 || provenance.name !== 'sodium'
-    || provenance.phpMinor !== version.version || provenance.phpVersion !== version.patchVersion
-    || provenance.upstream?.commit !== upstream.commit || provenance.upstream?.runtimeVersion !== upstream.version
-    || provenance.emscriptenVersion !== upstream.emscripten || provenance.phpSource?.sha256 !== version.sourceSha256
+    || !await matchesNativeRuntime(provenance, version, upstream)
     || provenance.extension?.file !== file || provenance.extension?.sha256 !== sha256
     || JSON.stringify(provenance.sodiumSource) !== JSON.stringify(sodiumSource)
     || provenance.buildScriptSha256 !== await hashFile(fileURLToPath(new URL('./build-sodium.mjs', import.meta.url)))) {

@@ -41,8 +41,8 @@ export function safeArchivePath(name) {
 }
 
 /** Extract only regular files and directories, never archive links or devices. */
-export async function extractTarGzip(archive, destination) {
-  const tar = gunzipSync(await readFile(archive), { maxOutputLength: 256 * 1024 * 1024 });
+export async function extractTarGzip(archive, destination, { maxOutputLength = 256 * 1024 * 1024 } = {}) {
+  const tar = gunzipSync(await readFile(archive), { maxOutputLength });
   const names = new Set();
   let offset = 0;
   while (offset + 512 <= tar.length) {

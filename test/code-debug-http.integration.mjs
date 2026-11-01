@@ -1,10 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { PhpDbgNode } from 'php-dbg-wasm/PhpDbgNode';
+import { builtWrapper, builtManifest, releasedLibraries } from './runtime-artifacts.mjs';
 import { PhpDebugRuntime } from '../src/code/debug-runtime.mjs';
 
-const pins = JSON.parse(await readFile(new URL('../versions.json', import.meta.url), 'utf8'));
+const pins = await builtManifest();
 const versions = process.env.PHPDBG_TEST_VERSION ? [process.env.PHPDBG_TEST_VERSION] : pins.php.map(entry => entry.version);
 const text = new TextEncoder();
 function snapshot(files) {
@@ -17,9 +16,10 @@ function snapshot(files) {
 }
 
 for (const version of versions) test(`phpdbg HTTP SAPI preserves POST, cookies, response and one execution on PHP ${version}`, { timeout: 60_000 }, async () => {
+  const { PhpDbgNode } = await builtWrapper(version, 'debugger');
   const runtime = new PhpDebugRuntime({
     Runtime: PhpDbgNode, phpVersion: version, siteURL: 'https://example.test/__site/owner/site/', cookieHeader: 'joomla_session=active',
-    sharedLibs: [{ name: `php${version}-jec-phpdbg-http.so`, ini: true,
+    sharedLibs: [...await releasedLibraries(version), { name: `php${version}-jec-phpdbg-http.so`, ini: true,
       url: new URL(`../.cache/phpdbg/php${version}-jec-phpdbg-http.so`, import.meta.url) }],
     ini: 'variables_order=EGPCS\nsession.save_path=/persist/sessions\n', prepend: '/internal/prepend.php',
     snapshot: snapshot({

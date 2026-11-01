@@ -1,22 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { PhpCgiNode } from 'php-cgi-wasm/PhpCgiNode.mjs';
-import { stageFileinfo } from '../scripts/fileinfo.mjs';
+import { builtWrapper, builtManifest, releasedLibraries } from './runtime-artifacts.mjs';
 
-const root = fileURLToPath(new URL('../', import.meta.url));
-const pins = JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
-const directory = path.resolve(root, process.env.FILEINFO_EXTENSION_DIR || '.cache/fileinfo');
+const pins = await builtManifest();
 for (const version of pins.php) {
-  test(`PHP ${version.version}: verified fileinfo identifies MIME types with its embedded magic database`, { timeout: 60_000 }, async t => {
-    const destination = await mkdtemp(path.join(tmpdir(), 'playground-fileinfo-'));
-    t.after(() => rm(destination, { recursive: true, force: true }));
-    const record = await stageFileinfo({ directory, destination, version, upstream: pins.upstream });
+  test(`PHP ${version.version}: verified fileinfo identifies MIME types with its embedded magic database`, { timeout: 60_000 }, async () => {
+    const { PhpCgiNode } = await builtWrapper(version.version);
     const php = new PhpCgiNode({ version: version.version, persist: [], docroot: '/www', prefix: '/',
-      sharedLibs: [{ name: record.provenance.extension.file, url: pathToFileURL(path.join(destination, record.provenance.extension.file)).href, ini: true }],
+      sharedLibs: await releasedLibraries(version.version),
       ini: 'display_errors=1\n',
     });
     await php.mkdir('/config');
@@ -33,7 +24,7 @@ for (const version of pins.php) {
     const response = await php.request({ url: '/index.php', method: 'GET', headers: { host: 'localhost' } });
     const body = await response.text();
     assert.equal(response.status, 200, body);
-    assert.deepEqual(JSON.parse(body), { php: version.patchVersion, intSize: 4, loaded: true, version: version.patchVersion,
+    assert.deepEqual(JSON.parse(body), { php: version.patchVersion, intSize: 8, loaded: true, version: version.patchVersion,
       png: 'image/png', file: 'image/png', legacy: 'image/png', text: 'text/plain', pdf: 'application/pdf' });
   });
 }

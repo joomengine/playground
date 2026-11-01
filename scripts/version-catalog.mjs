@@ -3,11 +3,9 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { unzipSync } from 'fflate';
 import { discoverDynamicCatalog } from '../src/dynamic-catalog.mjs';
-import { deriveJcbBrowserPackage } from '../src/joomla/jcb-package.mjs';
 
 const MAX_BYTES = 128 * 1024 * 1024;
 const USER_AGENT = 'Mozilla/5.0 (compatible; JoomEnginePlayground/1.0)';
-const DONOR_SOURCE_SHA256 = '17a2b4c7b352d0ead2592e7e5838ace8255bbcbdc71566d883e8e82ca3dacd8e';
 const hash = (algorithm, bytes) => createHash(algorithm).update(bytes).digest('hex');
 
 /** Read the runtime and installer requirements from the actual full package, without executing its PHP. */
@@ -88,32 +86,10 @@ async function download(entry, fetchImpl, limit) {
   return Buffer.concat(parts, length);
 }
 
-/** Use the same reviewed dependency contract as installation before publishing a new JCB choice. */
-export function createJcbCatalogValidator({ assets, packages, codec }) {
-  let donor;
-  return async (entry, bytes) => {
-    // These exact source archives already passed the build's pinned derivation.
-    if (packages.some(item => item.sourceSha256 === entry.sha256 && item.sourceUrl === entry.url
-      && /^[a-f0-9]{64}$/.test(item.sha256 || '') && item.url === `packages/${item.sha256}.zip`
-      && item.provenanceUrl === `packages/${item.sha256}.provenance.json`)) return;
-    if (!donor) donor = (async () => {
-      const matches = packages.filter(item => item.sourceSha256 === DONOR_SOURCE_SHA256
-        && /^[a-f0-9]{64}$/.test(item.sha256 || '')
-        && item.url === `packages/${item.sha256}.zip`
-        && item.provenanceUrl === `packages/${item.sha256}.provenance.json`);
-      if (matches.length !== 1) throw new Error('The reviewed JCB dependency donor is missing or ambiguous.');
-      return { bytes: await readFile(path.join(assets, matches[0].url)), sha256: matches[0].sha256 };
-    })();
-    const reviewed = await donor;
-    await deriveJcbBrowserPackage({ candidate: bytes, source: entry, donor: reviewed.bytes,
-      donorSha256: reviewed.sha256, codec: codec ?? await import('fflate') });
-  };
-}
-
 /** Publish only verified, automatically downloadable choices; a failed refresh never replaces the catalog. */
 export async function stageVersionCatalog({ assets, cache, pinnedJoomla = [], stagedJoomla = [], deployPackages = [],
   discover = discoverDynamicCatalog, fetchImpl = fetch, now = Date.now,
-  validateJcb = createJcbCatalogValidator({ assets, packages: deployPackages }), maxPackageBytes = MAX_BYTES }) {
+  maxPackageBytes = MAX_BYTES }) {
   if (!Number.isSafeInteger(maxPackageBytes) || maxPackageBytes < 4 || maxPackageBytes > MAX_BYTES) throw new Error('Invalid catalog package limit.');
   const upstreamFetch = (url, init = {}) => {
     const headers = new Headers(init.headers);
@@ -150,7 +126,6 @@ export async function stageVersionCatalog({ assets, cache, pinnedJoomla = [], st
         bytes ??= await download(entry, upstreamFetch, maxPackageBytes);
         const sha256 = verify(bytes, entry, maxPackageBytes);
         if (product === 'joomla') entry.phpMinimum = joomlaPackagePhpMinimum(bytes, entry.phpMinimum);
-        if (product === 'jcb') await validateJcb({ ...entry, sha256 }, bytes);
         const packageURL = pinnedJoomlaURL || `packages/${sha256}.zip`;
         if (!pinnedJoomlaURL) await writeFile(path.join(assets, packageURL), bytes);
         if (cacheFile) {

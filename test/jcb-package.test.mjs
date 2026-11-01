@@ -1,31 +1,60 @@
-import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import test from 'node:test';
-import { unzipSync } from 'fflate';
-import { inventory } from '../scripts/assets.mjs';
-import { deterministicZip, verifyJcbVendor } from '../scripts/jcb-package.mjs';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { gunzipSync } from 'node:zlib';
+import { zipSync } from 'fflate';
+import { applyJoomlaConfiguration } from '../src/joomla/index.mjs';
 
-test('derived package ZIP bytes are independent of input traversal order', () => {
-  const a = new TextEncoder().encode('first');
-  const b = new TextEncoder().encode('second');
-  const forward = deterministicZip({ 'A.php': a, 'b.php': b });
-  const reverse = deterministicZip({ 'b.php': b, 'A.php': a });
-  assert.deepEqual(forward, reverse);
-  assert.deepEqual(unzipSync(forward), { 'A.php': a, 'b.php': b });
+const text = value => new TextEncoder().encode(value);
+const digest = bytes => createHash('sha512').update(bytes).digest('hex');
+const reader = new Uint8Array(gunzipSync(await readFile(new URL('./fixtures/jcb-chunk-read-filter.php.gz', import.meta.url))));
+const installed = new Uint8Array(gunzipSync(await readFile(new URL('./fixtures/jcb-spreadsheet-source-installed.json.gz', import.meta.url))));
+const component = zipSync({
+  'component-builder/libraries/vendor_jcb/VDM.Joomla/src/Import/Spreadsheet/ChunkReadFilter.php': reader,
+  'component-builder/libraries/phpspreadsheet/vendor/composer/installed.json': installed,
+  'component-builder/libraries/phpspreadsheet/vendor/autoload.php': text('<?php // Original vendor tree.'),
+});
+const candidate = zipSync({
+  'pkg-component-builder-6.2.1-alpha1/pkg_component_builder.xml': text('<extension><version>6.2.1-alpha1</version></extension>'),
+  'pkg-component-builder-6.2.1-alpha1/src/joomla__Component-Builder__6.x.zip': component,
+  'pkg-component-builder-6.2.1-alpha1/src/plugin.zip': text('Original companion plugin'),
 });
 
-test('reviewed vendor verification rejects extra and changed package files', async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'jcb-vendor-verification-'));
-  try {
-    await writeFile(path.join(directory, 'allowed.php'), '<?php return true;');
-    const expected = await inventory(directory);
-    await verifyJcbVendor(directory, expected);
-    await writeFile(path.join(directory, 'unexpected.php'), '<?php return false;');
-    await assert.rejects(() => verifyJcbVendor(directory, expected), /reviewed file inventory/);
-    await rm(path.join(directory, 'unexpected.php'));
-    await writeFile(path.join(directory, 'allowed.php'), '<?php return false;');
-    await assert.rejects(() => verifyJcbVendor(directory, expected), /reviewed file inventory/);
-  } finally { await rm(directory, { recursive: true, force: true }); }
+function fixture(sha512 = digest(candidate)) {
+  const sourceURL = 'https://example.test/jcb.zip';
+  const item = { url: sourceURL, sha512 };
+  const requested = [];
+  const writes = [];
+  const runtime = {
+    fs: { writeFile: async (path, bytes) => writes.push({ path, bytes }) },
+    runPhp: async source => {
+      const operation = [...source.matchAll(/operation:([a-z]+)/g)].at(-1)?.[1];
+      return { status: 200, text: '\n__JOOMENGINE_RESULT__' + JSON.stringify(operation === 'status'
+        ? { ok: true, marker: { state: 'complete', joomlaVersion: '6.2.0' }, configured: true, installerPresent: false }
+        : { ok: false, error: 'Stop after observing the package' }) };
+    },
+  };
+  const config = { joomlaVersion: '6.2.0', jcbVersion: '6.2.1-alpha1', jcbPackage: item,
+    admin: { password: 'Local-Demo-Password-123!' }, extensions: [item] };
+  const options = {
+    fetchPackage: async url => { requested.push(String(url)); assert.equal(url, sourceURL); return new Response(candidate); },
+    sourceLoader: async name => `<?php\n// operation:${name}\n`,
+  };
+  return { run: () => applyJoomlaConfiguration(runtime, config, options), requested, writes, sourceURL };
+}
+
+test('selected JCB packages reach the installer byte-for-byte without dependency substitution', async () => {
+  const item = fixture();
+  await assert.rejects(item.run(), /Stop after observing the package/);
+  assert.deepEqual(item.requested, [item.sourceURL], 'Installing JCB must not fetch a replacement dependency donor.');
+  assert.equal(item.writes.length, 1);
+  assert.deepEqual(new Uint8Array(item.writes[0].bytes), candidate);
+});
+
+test('selected JCB package integrity is still enforced before writing the installer archive', async () => {
+  const item = fixture('0'.repeat(128));
+  await assert.rejects(item.run(), /checksum|SHA-512/i);
+  assert.deepEqual(item.requested, [item.sourceURL]);
+  assert.deepEqual(item.writes, []);
 });
