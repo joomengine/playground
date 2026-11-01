@@ -24,10 +24,14 @@ MariaDB is provided by the contributors to https://github.com/MariaDB/server
 under GNU GPL version 2. Its upstream licenses and source provenance remain with
 the distributed database assets.
 
-PHP execution is provided by Sean Morris and the contributors to
-https://github.com/seanmorris/php-wasm . This project consumes their published
-runtime and extension packages. Their copyright, licenses and notices are
-preserved with the distributed assets.
+The PHP runtime and matching extensions are distributed by JoomEngine through
+https://github.com/joomengine/php-wasm-int64 with native 64-bit PHP integers.
+Its patches and build tooling are provided under Apache License 2.0; included
+upstream sources and binaries retain their original licenses and notices.
+
+The runtime builds on PHP-WASM by Sean Morris and the contributors to
+https://github.com/seanmorris/php-wasm . Their copyright, licenses and notices
+are preserved with the distributed assets.
 
 JoomEngine MariaDB WASM Bridge is provided by the contributors to
 https://github.com/joomengine/mariadb-wasm-bridge under Apache License 2.0.
