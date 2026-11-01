@@ -24,7 +24,7 @@ export default Object.freeze({
   "action.addExtensionUrl": "إضافة عنوان URL آخر",
   "title.extensionAdvanced": "خيارات متقدمة",
   "label.extensionJson": "JSON لحزم الإضافات",
-  "help.extensionJson": "متقدم: أدخل مصفوفة كائنات تتضمن url ومجموع تحقق sha256 اختياريًا. تؤدي التغييرات هنا إلى تحديث حقول عناوين URL.",
+  "help.extensionJson": "متقدم: أدخل مصفوفة كائنات تتضمن url. تؤدي التغييرات هنا إلى تحديث حقول عناوين URL.",
   "error.extensionJson": "صحح JSON الإضافات قبل تعديل حقول عناوين URL.",
   "error.extensionLimit": "اختر 30 حزمة إضافات كحد أقصى.",
   "label.extensionUrlNumber": "عنوان ZIP للإضافة {number}",

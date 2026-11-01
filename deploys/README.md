@@ -98,7 +98,7 @@ Share links include the selected deployment, site name, runtime/PHP settings, me
 
 `prebuild: true` requests generation of a portable prepared copy during the build. The JCB and heritage recipes use this option for both supported Joomla releases. Build output adds verified snapshot metadata to each supported Joomla variant; source recipes need no placeholder snapshot URL.
 
-A snapshot contains `site/`, `database.sql` and `export.json`, and declares `format: "joomengine-playground-export"`, `schemaVersion: 1`, an exact `joomlaVersion`, `url` and `sha256`. Snapshot contents are PHP-runtime independent. A snapshot is selected only for its exact Joomla release and when `fresh` is false. Administrator credentials are rotated on import. Selected PHP settings, language, menus and template still apply. Explicit user extension and CLI additions run after import; the prepared recipe's installation steps are not repeated.
+A snapshot contains `site/`, `database.sql` and `export.json`, and declares `format: "joomengine-playground-export"`, `schemaVersion: 1`, an exact `joomlaVersion`, `url` and `sha256`. Snapshot contents are PHP-runtime independent. A snapshot is selected only for its exact Joomla release and when `fresh` is false. Each new site created from it receives its own configured administrator. Selected PHP settings, language, menus and template still apply. Explicit user extension and CLI additions run after import; the prepared recipe's installation steps are not repeated.
 
 To update prepared JCB installations, select a stable release, update its versioned package URL and SHA-256 in `jcb.json` and (for Joomla 6) `jcb-mcp.json`, then rebuild. Package compatibility inputs must also match the selected release. The build installs the pinned package and independently restores the exported site before it publishes the copy. Existing saved sites are not replaced. This deliberately trades a build on stable-release updates for a faster, repeatable visitor launch.
 
@@ -174,6 +174,8 @@ Global Configuration can save normal Joomla settings. Database connection creden
 Managed extension ZIPs are limited to 128 MiB. Custom URL installations use Joomla's downloader and installer. Prepared snapshots and private saved-site transfers accept a verified bundle up to 512 MiB compressed; exported and imported bundles share a limit of 100,000 ZIP entries and 768 MiB expanded. PHP upload limits are separate and adjustable in the runtime settings.
 
 ## Browser deployment images
+
+Complete site **Download** and **Upload** preserve an existing installation, including its known sandbox credentials and opening page. Those downloads carry configuration in `export.json.playground` and a hash of the site files and database. Internal reusable images omit that restore configuration and receive the new site's administrator when launched.
 
 **Deployment images** manages the prepared images available in this browser. Each image is an independent base for creating sites; removing an image does not delete a saved site's files or database. A later launch downloads a maintained image again or rebuilds a custom image when it is no longer stored locally.
 

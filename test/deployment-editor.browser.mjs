@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { mkdir } from 'node:fs/promises';
-import { chromium } from 'playwright';
+import { chromium, firefox } from 'playwright';
 import { createStaticServer } from './server.mjs';
 
-test('deployment editor clones core recipes, saves reloadable customs and imports complete JSON', { timeout: 60_000 }, async () => {
+for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split(',')) {
+test(`deployment editor clones core recipes, saves reloadable customs and imports complete JSON (${browserName})`, { timeout: 60_000 }, async () => {
   const manifest = { php: [{ version: '8.3' }, { version: '8.4' }],
     joomla: [{ version: '5.4.10', php: ['8.3', '8.4'] }, { version: '6.2.0', php: ['8.3', '8.4'] }],
     defaults: { phpVersion: '8.4', joomlaVersion: '6.2.0' } };
@@ -13,12 +14,14 @@ test('deployment editor clones core recipes, saves reloadable customs and import
     'assets/manifest.json': JSON.stringify(manifest),
     'assets/version-catalog.json': JSON.stringify({ schemaVersion: 1, generatedAt: '2026-11-01T00:00:00Z', joomla: [], jcb: [], errors: [] }),
   } });
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
+  let browser;
   try {
+    const executablePath = process.env[`PLAYGROUND_${browserName.toUpperCase()}_EXECUTABLE`];
+    browser = await { chromium, firefox }[browserName].launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
     await page.goto(`${server.url}?start=0`);
     await page.locator('#embedded-launch:enabled').waitFor();
     await page.locator('#settings-toggle').click();
@@ -72,12 +75,12 @@ test('deployment editor clones core recipes, saves reloadable customs and import
     assert.equal(await page.locator('#admin-username').inputValue(), 'directory-admin');
     await mkdir('test-results', { recursive: true });
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.screenshot({ path: 'test-results/deployment-editor-desktop.png' });
+    await page.screenshot({ path: `test-results/deployment-editor-desktop-${browserName}.png` });
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.locator('#deploy-dialog').evaluate(dialog => dialog.scrollWidth <= dialog.clientWidth + 1), 'The editor fits a narrow viewport.');
     assert.equal(await page.locator('#save-deployment').isVisible(), true);
     assert.equal(await page.locator('#delete-deployment').isVisible(), true);
-    await page.screenshot({ path: 'test-results/deployment-editor-mobile.png' });
+    await page.screenshot({ path: `test-results/deployment-editor-mobile-${browserName}.png` });
     await page.setViewportSize({ width: 1440, height: 1000 });
     const downloaded = page.waitForEvent('download');
     await page.locator('#export-config').click();
@@ -90,9 +93,21 @@ test('deployment editor clones core recipes, saves reloadable customs and import
     assert.equal(document.configuration.admin.username, 'directory-admin');
     assert.ok(document.configuration.extensions.length > 0);
     assert.deepEqual(document.configuration.addonExtensions, [{ url: 'https://packages.example.test/custom.zip' }]);
+    await page.evaluate(({ document, baseURL }) => {
+      const key = `joomengine:deployments:${baseURL}`;
+      const registry = JSON.parse(localStorage.getItem(key));
+      registry.deployments.push({ id: 'custom-unavailable-runtime', title: 'Unavailable runtime', document: {
+        ...document, name: 'Unavailable runtime', requirements: { ...document.requirements, php: ['9.9'] },
+      } });
+      localStorage.setItem(key, JSON.stringify(registry));
+    }, { document, baseURL: server.url });
     await page.reload();
     await page.locator('#embedded-launch:enabled').waitFor();
     await page.locator('#deploy-editor-button').click();
+    for (const selector of ['#deploy', '#editor-deployment']) {
+      assert.equal(await page.locator(`${selector} option[value="custom-unavailable-runtime"]`).isDisabled(), true,
+        'Both deployment selectors must disable a saved recipe with no available compatible runtime.');
+    }
     assert.equal(await page.locator(`#editor-deployment option[value="${customId}"]`).count(), 1);
     await page.locator('#import-config').setInputFiles({ name: 'directory.json', mimeType: 'application/json', buffer: Buffer.from(json) });
     await page.waitForFunction(id => document.getElementById('editor-deployment').value.startsWith('custom-') && document.getElementById('editor-deployment').value !== id, customId);
@@ -119,10 +134,12 @@ test('deployment editor clones core recipes, saves reloadable customs and import
     await page.locator('#edit-deployment').click();
     assert.equal(await page.locator('#site-name').inputValue(), 'My saved directory');
     assert.deepEqual(errors, []);
-  } finally { await context.close(); await browser.close(); await server.close(); }
+  } finally {
+    try { await browser?.close(); } finally { await server.close(); }
+  }
 });
 
-test('editor Use creates a new instance while dashboard Launch resumes a closed saved site', { timeout: 30_000 }, async () => {
+test(`editor Use creates a new instance while dashboard Launch resumes a closed saved site (${browserName})`, { timeout: 30_000 }, async () => {
   const manifest = { php: [{ version: '8.4' }], joomla: [{ version: '6.2.0', php: ['8.4'] }],
     defaults: { phpVersion: '8.4', joomlaVersion: '6.2.0' } };
   const server = await createStaticServer({ directory: fileURLToPath(new URL('../', import.meta.url)), fixtures: {
@@ -141,11 +158,13 @@ test('editor Use creates a new instance while dashboard Launch resumes a closed 
           async request() { return new Response('Ready'); }, async flush() {}, async close() {}, async reset() {} };
       }`,
   } });
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-  const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
+  let browser;
   try {
+    const executablePath = process.env[`PLAYGROUND_${browserName.toUpperCase()}_EXECUTABLE`];
+    browser = await { chromium, firefox }[browserName].launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
     await page.goto(`${server.url}?deploy=blank`);
     await page.locator('#launch-countdown:not([hidden])').waitFor();
     for (const id of ['stop-countdown', 'stop-countdown-button']) {
@@ -179,5 +198,8 @@ test('editor Use creates a new instance while dashboard Launch resumes a closed 
     assert.ok(saved.sites[launches[0].storageKey], 'The original saved site remains available.');
     assert.ok(saved.sites[launches[2].storageKey]);
     assert.deepEqual(errors, []);
-  } finally { await browser.close(); await server.close(); }
+  } finally {
+    try { await browser?.close(); } finally { await server.close(); }
+  }
 });
+}

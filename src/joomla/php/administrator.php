@@ -4,11 +4,11 @@ try {
     $directory = dirname($root) . '/meta';
     $path = $directory . '/administrator.json';
     $mode = $playground['mode'] ?? 'read';
-    if (!in_array($mode, ['read', 'write', 'replace'], true)) {
+    if (!in_array($mode, ['read', 'write', 'replace', 'verify'], true)) {
         throw new InvalidArgumentException('Unknown administrator metadata operation.');
     }
     $administrator = null;
-    if ($mode === 'read') {
+    if ($mode === 'read' || $mode === 'verify') {
         if (is_file($path)) {
             $metadata = json_decode(file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
             if (($metadata['schemaVersion'] ?? null) !== 1) {
@@ -51,7 +51,17 @@ try {
             throw new RuntimeException('Cannot configure the restored site administrator: ' . $user->getError());
         }
     }
-    if ($mode !== 'read') {
+    if ($mode === 'verify') {
+        [$application, $container, $database] = playgroundApplication($root);
+        $username = $administrator['username'] ?? '';
+        $id = $database->setQuery('SELECT id FROM #__users WHERE block = 0 AND username = ' . $database->quote($username))->loadResult();
+        $user = $id ? $container->get(\Joomla\CMS\User\UserFactoryInterface::class)->loadUserById((int) $id) : null;
+        $valid = $user && $user->authorise('core.admin')
+            && \Joomla\CMS\User\UserHelper::verifyPassword($administrator['password'], $user->password);
+        playgroundFinish(['ok' => true, 'administrator' => $administrator, 'credentialsValid' => (bool) $valid]);
+        return;
+    }
+    if ($mode !== 'read' && $mode !== 'verify') {
         if (!is_dir($directory) && !mkdir($directory, 0700, true)) {
             throw new RuntimeException('Cannot create private site metadata storage.');
         }

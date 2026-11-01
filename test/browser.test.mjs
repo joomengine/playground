@@ -672,7 +672,7 @@ for (const name of browserNames) {
       ...(name === 'chromium' ? { args: ['--no-sandbox'] } : {}),
       env: { ...process.env } });
     const syntheticRedirectProbe = scenarios.some(value => ['rocket', 'deploys'].includes(value)) ? await probeSyntheticRedirect(browser) : null;
-    const fixtures = { '__test_extension.zip': extensionArchive, '__test_curl.json': JSON.stringify(curlProof) };
+    const fixtures = { '__test_extension.zip': extensionArchive, '__test_fresh_extension.zip': extensionArchive, '__test_curl.json': JSON.stringify(curlProof) };
     const server = await createStaticServer({ directory, prefix: '/nested/playground/', fixtures });
     const corsServer = await createStaticServer({ directory, prefix: '/cors/', corsOrigin: new URL(server.url).origin,
       corsPaths: ['allowed.json'], fixtures: {
@@ -1256,7 +1256,7 @@ for (const name of browserNames) {
         const freshURL = new URL(server.url);
         // A distinct source is installed into a separate fresh site without
         // modifying the existing files or database.
-        const freshSource = new URL('__test_extension.zip?fresh=1', server.url).href;
+        const freshSource = new URL('__test_fresh_extension.zip', server.url).href;
         for (const [key, value] of Object.entries({ deploy: 'blank', joomla: defaultPair.joomlaVersion, php: changedPHP, key: savedKey, fresh: '1', start: '0', extension: freshSource })) freshURL.searchParams.set(key, value);
         await page.goto(freshURL.href);
         await launchFixtureLink(page, freshSource);

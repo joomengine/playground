@@ -39,7 +39,23 @@ export function submitCurrentJoomlaLogin(frame, administrator, baseURL) {
   return false;
 }
 
-export function loginFromCredentialsDialog({ dialog, frame, administrator, baseURL }) {
+/** Do not offer stored passwords that the restored site no longer accepts. */
+export function populateCredentialsDialog({ dialog, administrator, installation }) {
+  const unavailable = installation?.administratorUnavailable === true;
+  const usable = !unavailable && administrator?.username && administrator?.password;
+  dialog.querySelector('#credential-username').value = unavailable ? '' : administrator?.username || '';
+  const password = dialog.querySelector('#credential-password');
+  password.value = unavailable ? '' : administrator?.password || '';
+  password.type = 'password';
+  dialog.querySelector('#credential-login').disabled = !usable;
+  dialog.querySelector('#reveal-credentials').disabled = !usable;
+  const notice = dialog.querySelector('#credentials-login-notice');
+  notice.textContent = unavailable ? installation.loginNotice || 'Sign in with this site’s current administrator password.' : '';
+  notice.hidden = !unavailable;
+}
+
+export function loginFromCredentialsDialog({ dialog, frame, administrator, baseURL, administratorUnavailable = false }) {
   dialog.close();
+  if (administratorUnavailable) return false;
   return submitCurrentJoomlaLogin(frame, administrator, baseURL);
 }

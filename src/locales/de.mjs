@@ -24,7 +24,7 @@ export default Object.freeze({
   "action.addExtensionUrl": "Weitere URL hinzufügen",
   "title.extensionAdvanced": "Erweiterte Optionen",
   "label.extensionJson": "JSON der Erweiterungspakete",
-  "help.extensionJson": "Erweitert: Geben Sie ein Array von Objekten mit url und optionaler sha256-Prüfsumme ein. Änderungen hier aktualisieren die URL-Felder.",
+  "help.extensionJson": "Erweitert: Geben Sie ein Array von Objekten mit url ein. Änderungen hier aktualisieren die URL-Felder.",
   "error.extensionJson": "Korrigieren Sie das Erweiterungs-JSON, bevor Sie die URL-Felder bearbeiten.",
   "error.extensionLimit": "Wählen Sie höchstens 30 Erweiterungspakete.",
   "label.extensionUrlNumber": "ZIP-URL der Erweiterung {number}",

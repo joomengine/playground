@@ -24,7 +24,7 @@ export default Object.freeze({
   "action.addExtensionUrl": "הוספת כתובת URL נוספת",
   "title.extensionAdvanced": "אפשרויות מתקדמות",
   "label.extensionJson": "JSON של חבילות הרחבה",
-  "help.extensionJson": "מתקדם: הזינו מערך של אובייקטים עם url וסכום ביקורת sha256 אופציונלי. שינויים כאן מעדכנים את שדות כתובות ה-URL.",
+  "help.extensionJson": "מתקדם: הזינו מערך של אובייקטים עם url. שינויים כאן מעדכנים את שדות כתובות ה-URL.",
   "error.extensionJson": "תקנו את ה-JSON של ההרחבות לפני עריכת שדות כתובות ה-URL.",
   "error.extensionLimit": "בחרו עד 30 חבילות הרחבה.",
   "label.extensionUrlNumber": "כתובת ZIP של הרחבה {number}",

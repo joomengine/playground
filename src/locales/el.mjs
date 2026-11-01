@@ -24,7 +24,7 @@ export default Object.freeze({
   "action.addExtensionUrl": "Προσθήκη άλλου URL",
   "title.extensionAdvanced": "Προηγμένες επιλογές",
   "label.extensionJson": "JSON πακέτων επεκτάσεων",
-  "help.extensionJson": "Για προχωρημένους: εισαγάγετε έναν πίνακα αντικειμένων με url και προαιρετικό άθροισμα ελέγχου sha256. Οι αλλαγές εδώ ενημερώνουν τα πεδία URL.",
+  "help.extensionJson": "Για προχωρημένους: εισαγάγετε έναν πίνακα αντικειμένων με url. Οι αλλαγές εδώ ενημερώνουν τα πεδία URL.",
   "error.extensionJson": "Διορθώστε το JSON των επεκτάσεων πριν επεξεργαστείτε τα πεδία URL.",
   "error.extensionLimit": "Επιλέξτε έως 30 πακέτα επεκτάσεων.",
   "label.extensionUrlNumber": "URL ZIP επέκτασης {number}",

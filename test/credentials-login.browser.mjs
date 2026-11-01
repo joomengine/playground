@@ -18,13 +18,18 @@ test(`Login details submits the current Joomla form with its CSRF token and leav
     'login-fixture.html': `<!doctype html><html><body><button id="open">Login details</button>${dialog}
       <iframe id="site-frame" src="site/administrator/login.html"></iframe>
       <script type="module">
-        import { loginFromCredentialsDialog } from './src/credentials-login.mjs';
+        import { loginFromCredentialsDialog, populateCredentialsDialog } from './src/credentials-login.mjs';
         const dialog = document.getElementById('credentials-dialog');
-        document.getElementById('open').onclick = () => dialog.showModal();
-        document.getElementById('credential-login').onclick = () => {
+        const administrator = {username:'site-admin', password:'Correct-Passphrase-123!'};
+        window.installation = {};
+        document.getElementById('open').onclick = () => {
+          populateCredentialsDialog({dialog, administrator, installation: window.installation});
+          dialog.showModal();
+        };
+        window.submitLogin = document.getElementById('credential-login').onclick = () => {
           window.didSubmit = loginFromCredentialsDialog({dialog, frame: document.getElementById('site-frame'),
             baseURL: new URL('site/', location.href).href,
-            administrator: {username:'site-admin', password:'Correct-Passphrase-123!'}});
+            administrator, administratorUnavailable: window.installation.administratorUnavailable});
         };
       </script></body></html>`,
     'site/administrator/login.html': `<!doctype html><html><body><form id="form-login" method="post" action="index.html">
@@ -73,7 +78,23 @@ test(`Login details submits the current Joomla form with its CSRF token and leav
     assert.match(await page.locator('#site-frame').evaluate(frame => frame.contentWindow.location.pathname), /\/site\/article\.html$/);
     await page.locator('#site-frame').evaluate(frame => { frame.src = 'site/frontend-login.html'; });
     await page.frameLocator('#site-frame').locator('#login-form').waitFor();
+    await page.evaluate(() => { window.installation = { administratorUnavailable: true, loginNotice: 'Sign in with your updated password.' }; });
     await page.locator('#open').click();
+    assert.equal(await page.locator('#credential-password').inputValue(), '');
+    assert.equal(await page.locator('#credential-username').inputValue(), '');
+    assert.equal(await page.locator('#credential-login').isDisabled(), true);
+    assert.equal(await page.locator('#reveal-credentials').isDisabled(), true);
+    assert.equal(await page.locator('#credentials-login-notice').textContent(), 'Sign in with your updated password.');
+    await page.evaluate(() => window.submitLogin());
+    assert.equal(await page.locator('#credentials-dialog').evaluate(element => element.open), false);
+    assert.equal(await page.evaluate(() => window.didSubmit), false);
+    assert.equal(await page.frameLocator('#site-frame').locator('input[name="username"]').inputValue(), '');
+    assert.equal(await page.frameLocator('#site-frame').locator('input[name="password"]').inputValue(), '');
+    assert.equal(submissions.length, 1);
+    await page.evaluate(() => { window.installation = {}; });
+    await page.locator('#open').click();
+    assert.equal(await page.locator('#credential-login').isEnabled(), true);
+    assert.equal(await page.locator('#credentials-login-notice').isVisible(), false);
     await page.locator('#credential-login').click();
     await page.frameLocator('#site-frame').locator('h1').filter({ hasText: 'Administrator' }).waitFor();
     assert.equal(submissions.length, 2);

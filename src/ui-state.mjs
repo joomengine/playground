@@ -1,9 +1,9 @@
 import { createShareURL, createFullDeploymentDocument } from './config.mjs';
 import { ISOLATION_PARAMETER, isolationMarker } from './isolation.mjs';
 const SITE_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
-const PUBLIC_FIELDS = ['deployId', 'sourceDeployId', 'joomlaVersion', 'joomlaPackage', 'jcbVersion', 'jcbPackage', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'phpSettings', 'menus', 'template', 'languageTags', 'multilingual', 'content', 'addonExtensions', 'addonStartupCommands', 'addonLanguages', 'addonTemplate'];
+const PUBLIC_FIELDS = ['restoredSite', 'deployId', 'sourceDeployId', 'joomlaVersion', 'joomlaPackage', 'jcbVersion', 'jcbPackage', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'phpSettings', 'menus', 'template', 'languageTags', 'multilingual', 'content', 'addonExtensions', 'addonStartupCommands', 'addonLanguages', 'addonTemplate'];
 
-/** Approval must preserve command argument boundaries as well as source URLs. */
+/** Setup identity preserves command argument boundaries as well as source URLs. */
 export function customSetupDetails(input) {
   const sources = [input.joomlaPackage?.url, input.jcbPackage?.url, ...(input.extensions || []).map(item => item.url), input.template?.url,
     ...(input.languages || []).map(item => item.url)].filter(Boolean);

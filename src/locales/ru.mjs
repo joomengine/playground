@@ -24,7 +24,7 @@ export default Object.freeze({
   "action.addExtensionUrl": "Добавить ещё один URL",
   "title.extensionAdvanced": "Дополнительные параметры",
   "label.extensionJson": "JSON пакетов расширений",
-  "help.extensionJson": "Для опытных пользователей: введите массив объектов с полем url и необязательной контрольной суммой sha256. Изменения здесь обновляют поля URL.",
+  "help.extensionJson": "Для опытных пользователей: введите массив объектов с полем url. Изменения здесь обновляют поля URL.",
   "error.extensionJson": "Исправьте JSON расширений перед редактированием полей URL.",
   "error.extensionLimit": "Выберите не более 30 пакетов расширений.",
   "label.extensionUrlNumber": "URL ZIP-пакета расширения {number}",

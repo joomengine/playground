@@ -1,4 +1,5 @@
 import { parseProvisioningResult } from './joomla/index.mjs';
+import { createFullDeploymentDocument } from './config.mjs';
 
 const FORMATS = new Set(['bundle', 'files', 'database']);
 const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;
@@ -15,6 +16,9 @@ async function source() {
 export function normalizeExportOptions(options = {}) {
   const format = options.format ?? 'bundle';
   if (!FORMATS.has(format)) throw new TypeError('Export format must be bundle, files, or database.');
+  if (options.includePlaygroundConfiguration !== undefined && typeof options.includePlaygroundConfiguration !== 'boolean') {
+    throw new TypeError('The playground configuration export option must be a boolean.');
+  }
   const database = {};
   if (options.database !== undefined) {
     if (!options.database || typeof options.database !== 'object' || Array.isArray(options.database)) throw new TypeError('Export database settings must be an object.');
@@ -26,7 +30,19 @@ export function normalizeExportOptions(options = {}) {
       database[name] = value;
     }
   }
-  return { format, database };
+  return { format, database, ...(format === 'bundle' && options.includePlaygroundConfiguration ? { includePlaygroundConfiguration: true } : {}) };
+}
+
+/** User-downloaded complete bundles can reopen the same sandbox configuration. */
+export function exportPlaygroundConfiguration(runtime) {
+  const configuration = runtime.configuration;
+  if (!configuration || typeof configuration !== 'object') throw new Error('The running site configuration is unavailable for a complete export.');
+  const admin = runtime.installation?.administrator ?? configuration.admin;
+  const complete = createFullDeploymentDocument({ ...configuration, admin, fresh: false }, {
+    baseURL: runtime.baseUrl ?? globalThis.location?.href ?? 'https://playground.joomengine.org/',
+  });
+  if (!complete.configuration.admin?.password) throw new Error('The running site administrator is unavailable for a complete export.');
+  return { schemaVersion: 1, configuration: complete.configuration };
 }
 
 function program(php, options) {
@@ -44,6 +60,7 @@ export async function exportSite(runtime, options = {}, { sourceLoader = source 
   const directory = `/tmp/joomengine-export-${id}`;
   const php = await sourceLoader();
   const payload = { ...settings, root: runtime.documentRoot ?? '/persist/www', directory };
+  if (settings.includePlaygroundConfiguration) payload.playground = exportPlaygroundConfiguration(runtime);
   const progress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
   try {
     progress({ phase: 'export', message: settings.format === 'database' ? 'Exporting the database…' : 'Preparing the portable Joomla export…' });

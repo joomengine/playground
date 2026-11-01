@@ -24,7 +24,7 @@ export default Object.freeze({
   "action.addExtensionUrl": "添加另一个 URL",
   "title.extensionAdvanced": "高级选项",
   "label.extensionJson": "扩展安装包 JSON",
-  "help.extensionJson": "高级：输入对象数组，每个对象包含 url 和可选的 sha256 校验和。此处的更改会更新 URL 字段。",
+  "help.extensionJson": "高级：输入对象数组，每个对象包含 url。此处的更改会更新 URL 字段。",
   "error.extensionJson": "请先修正扩展 JSON，再编辑 URL 字段。",
   "error.extensionLimit": "最多选择 30 个扩展安装包。",
   "label.extensionUrlNumber": "扩展 ZIP URL {number}",

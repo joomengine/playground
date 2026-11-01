@@ -292,6 +292,12 @@ jobs:
       - name: Validate custom URL installation and reusable images
         if: ${{ !cancelled() && steps.browser_install.outcome == 'success' && matrix.suite == 'runtime' && matrix.browser == 'chromium' }}
         run: node --test test/custom-extension-url.browser.mjs
+      - name: Validate portable site upload and independent copies
+        if: ${{ !cancelled() && steps.browser_install.outcome == 'success' && matrix.suite == 'runtime' && matrix.browser == 'chromium' }}
+        env:
+          PLAYGROUND_PHP_VERSIONS: ${{ needs.checks.outputs.php }}
+          PLAYGROUND_JOOMLA_VERSIONS: ${{ needs.checks.outputs.joomla }}
+        run: node --test test/site-import.browser.mjs
       - name: Retain browser receipts and diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

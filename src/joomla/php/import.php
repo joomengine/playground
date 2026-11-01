@@ -1,4 +1,53 @@
 <?php
+/** Validate payload bytes before touching the destination site or database. */
+function playgroundValidateContentHash(ZipArchive $zip, array $metadata): bool
+{
+    if (!is_array($metadata['playground'] ?? null) || !array_key_exists('contentHash', $metadata['playground'])) {
+        return false;
+    }
+    $expected = $metadata['playground']['contentHash'];
+    if (!is_array($expected) || ($expected['algorithm'] ?? null) !== 'sha256'
+        || ($expected['format'] ?? null) !== 'joomengine-site-payload-v1'
+        || !is_string($expected['value'] ?? null) || !preg_match('/^[a-f0-9]{64}$/D', $expected['value'])) {
+        throw new RuntimeException('Package validation failed: the content hash is invalid or unsupported.');
+    }
+    $records = [];
+    for ($index = 0; $index < $zip->numFiles; ++$index) {
+        $entry = $zip->statIndex($index);
+        $name = $entry['name'];
+        if (str_ends_with($name, '/') || (!str_starts_with($name, 'site/') && !in_array($name, ['database.sql', 'database.ndjson'], true))) {
+            continue;
+        }
+        if (isset($records[$name])) {
+            throw new RuntimeException('Package validation failed: the payload contains duplicate files.');
+        }
+        $stream = $zip->getStream($name);
+        if ($stream === false) {
+            throw new RuntimeException('Package validation failed: a payload file cannot be read.');
+        }
+        $context = hash_init('sha256');
+        try {
+            $bytes = hash_update_stream($context, $stream);
+        } finally {
+            fclose($stream);
+        }
+        if ($bytes !== $entry['size']) {
+            throw new RuntimeException('Package validation failed: a payload file is incomplete.');
+        }
+        $records[$name] = ['size' => $bytes, 'sha256' => hash_final($context)];
+    }
+    // PHP string ordering compares UTF-8 bytes, matching the exporter framing.
+    uksort($records, 'strcmp');
+    $context = hash_init('sha256');
+    foreach ($records as $name => $entry) {
+        hash_update($context, strlen($name) . ':' . $name . ':' . $entry['size'] . ':' . $entry['sha256'] . "\n");
+    }
+    if (!hash_equals($expected['value'], hash_final($context))) {
+        throw new RuntimeException('Package validation failed: the site files or database do not match the content hash.');
+    }
+    return true;
+}
+
 try {
     $root = playgroundRoot($playground);
     if (is_file($root . '/configuration.php') || (is_dir($root) && count(scandir($root)) > 2)) {
@@ -17,6 +66,7 @@ try {
     if (($metadata['format'] ?? null) !== 'joomengine-playground-export' || ($metadata['schemaVersion'] ?? null) !== 1) {
         throw new RuntimeException('The prebuilt site uses an unsupported export format.');
     }
+    $contentHashValidated = playgroundValidateContentHash($zip, $metadata);
     $manifest = simplexml_load_string($zip->getFromName('site/administrator/manifests/files/joomla.xml'), SimpleXMLElement::class, LIBXML_NONET);
     if (!$manifest || (string) $manifest->version !== $playground['joomlaVersion'] || ($metadata['joomlaVersion'] ?? null) !== $playground['joomlaVersion']) {
         throw new RuntimeException('The prebuilt site does not match the selected Joomla version.');
@@ -129,7 +179,7 @@ try {
     if (file_put_contents($root . '/configuration.php', $data) !== strlen($data)) {
         throw new RuntimeException('Cannot configure the imported browser site.');
     }
-    playgroundFinish(['ok' => true, 'version' => $playground['joomlaVersion'], 'statements' => $count]);
+    playgroundFinish(['ok' => true, 'version' => $playground['joomlaVersion'], 'statements' => $count, 'contentHashValidated' => $contentHashValidated]);
 } catch (Throwable $error) {
     playgroundFinish(['ok' => false, 'error' => $error->getMessage()]);
 }

@@ -137,6 +137,14 @@ with document/worker headers; the registration script remains exempt.
 
 ## Recorded validation
 
+On 1 November 2026, Chromium 156.0.8078.4 and Playwright WebKit 27.2 passed
+automatic fallback using the shipped configuration on headerless static hosting.
+Both also started PHP 8.4, MariaDB and Joomla in a 390×844 touch-enabled browser
+context with image delivery disabled, no relay endpoint and no external requests.
+The checks verified a database query and an HTTP 200 Joomla page. An unreadable
+compatibility configuration still selected the working fallback. The existing
+image-delivery and native-PHP checks below also passed in both engines.
+
 Focused checks on 31 October 2026 passed with **Chromium 156.0.8078.4** and
 **Playwright WebKit 27.2** on Linux:
 
