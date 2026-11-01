@@ -1,0 +1,83 @@
+diff --git a/interface.c b/interface.c
+index 71d316a..515c809 100644
+--- a/interface.c
++++ b/interface.c
+@@ -632,2 +632,4 @@ static size_t curl_write(char *data, size_t size, size_t nmemb, void *ctx)
+-				length = php_curl_get_long(&retval);
++				zend_long returned_length = php_curl_get_long(&retval);
++				length = returned_length < 0 || (zend_ulong) returned_length > SIZE_MAX
++					? CURL_WRITEFUNC_ERROR : (size_t) returned_length;
+ 			}
+@@ -676,2 +678,4 @@ static int curl_fnmatch(void *ctx, const char *pattern, const char *string)
+-		rval = php_curl_get_long(&retval);
++		zend_long returned_value = php_curl_get_long(&retval);
++		rval = returned_value < INT_MIN || returned_value > INT_MAX
++			? CURL_FNMATCHFUNC_FAIL : (int) returned_value;
+ 	}
+@@ -887,3 +891,5 @@ static size_t curl_read(char *data, size_t size, size_t nmemb, void *ctx)
+ 				} else if (Z_TYPE(retval) == IS_LONG) {
+-					length = Z_LVAL_P(&retval);
++					zend_long returned_length = Z_LVAL_P(&retval);
++					length = returned_length < INT_MIN || returned_length > INT_MAX
++						? CURL_READFUNC_ABORT : (int) returned_length;
+ 				}
+@@ -948,2 +954,4 @@ static size_t curl_write_header(char *data, size_t size, size_t nmemb, void *ctx
+-				length = php_curl_get_long(&retval);
++				zend_long returned_length = php_curl_get_long(&retval);
++				length = returned_length < 0 || (zend_ulong) returned_length > SIZE_MAX
++					? CURL_WRITEFUNC_ERROR : (size_t) returned_length;
+ 			}
+@@ -1894,2 +1902,9 @@ static zend_result _php_curl_setopt(php_curl *ch, zend_long option, zval *zvalue
+-			error = curl_easy_setopt(ch->cp, option, lval);
++			/* Bitmask constants may use the high bit of an unsigned C long. */
++			bool bitmask = option == CURLOPT_HTTPAUTH || option == CURLOPT_PROXYAUTH
++				|| option == CURLOPT_SSH_AUTH_TYPES || option == CURLOPT_PROTOCOLS || option == CURLOPT_REDIR_PROTOCOLS;
++			if (lval < LONG_MIN || (bitmask ? lval > ULONG_MAX : lval > LONG_MAX)) {
++				zend_value_error("%s(): cURL option value must fit its C long representation", get_active_function_name());
++				return FAILURE;
++			}
++			error = curl_easy_setopt(ch->cp, option, (long) (unsigned long) lval);
+ 			break;
+@@ -2834,3 +2849,3 @@ PHP_FUNCTION(curl_getinfo)
+ 					{
+-						zend_long code = 0;
++						long code = 0;
+ 
+@@ -2875,3 +2890,3 @@ PHP_FUNCTION(curl_getinfo)
+ 						if (curl_easy_getinfo(ch->cp, option, &c_off) == CURLE_OK) {
+-							RETURN_LONG((long) c_off);
++							RETURN_LONG((zend_long) c_off);
+ 						} else {
+diff --git a/multi.c b/multi.c
+index 09802d7..ffdf56f 100644
+--- a/multi.c
++++ b/multi.c
+@@ -474,3 +474,11 @@ static bool _php_curl_multi_setopt(php_curlm *mh, zend_long option, zval *zvalue
+ 			}
+-			error = curl_multi_setopt(mh->multi, option, lval);
++			if (option == CURLMOPT_CHUNK_LENGTH_PENALTY_SIZE || option == CURLMOPT_CONTENT_LENGTH_PENALTY_SIZE) {
++				error = curl_multi_setopt(mh->multi, option, (curl_off_t) lval);
++			} else {
++				if (lval < LONG_MIN || lval > LONG_MAX) {
++					zend_argument_value_error(3, "must fit a C long for this cURL option");
++					return false;
++				}
++				error = curl_multi_setopt(mh->multi, option, (long) lval);
++			}
+ 			break;
+diff --git a/share.c b/share.c
+index f307902..36ea8ca 100644
+--- a/share.c
++++ b/share.c
+@@ -62,3 +62,10 @@ static bool _php_curl_share_setopt(php_curlsh *sh, zend_long option, zval *zvalu
+ 		case CURLSHOPT_UNSHARE:
+-			error = curl_share_setopt(sh->share, option, zval_get_long(zvalue));
++			{
++				zend_long lval = zval_get_long(zvalue);
++				if (lval < INT_MIN || lval > INT_MAX) {
++					zend_argument_value_error(3, "must fit a C int for this cURL option");
++					return false;
++				}
++				error = curl_share_setopt(sh->share, option, (int) lval);
++			}
+ 			break;

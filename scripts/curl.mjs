@@ -18,6 +18,7 @@ export async function stageCurl({ directory, destination, version, upstream }) {
   const sha256 = await hashFile(path.join(directory, file));
   if (provenance.schemaVersion !== 1 || provenance.name !== 'curl'
     || !await matchesNativeRuntime(provenance, version, upstream)
+    || provenance.nativePatchSha256 !== await hashFile(fileURLToPath(new URL('../native/curl-int64.patch', import.meta.url)))
     || Object.entries(curlSource).some(([key, value]) => provenance.curlSource?.[key] !== value)
     || provenance.extension?.file !== file || provenance.extension?.sha256 !== sha256
     || !Array.isArray(provenance.phpSourceInventory) || !Array.isArray(provenance.curlSourceInventory)

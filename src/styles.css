@@ -62,6 +62,7 @@ html,body{background:var(--canvas);color:var(--ink)}
 .tool-button:hover:not(:disabled):not([aria-disabled=true]),.chrome-toggle:hover{color:var(--ink);background:var(--hover);border-color:var(--line)}
 .tool-button.accent{color:var(--gold);background:var(--hover);border-color:var(--line)}
 .header-feedback{background:var(--paper);color:var(--ink)}
+.build-update{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px clamp(16px,3vw,48px);border-bottom:1px solid var(--line);background:var(--paper);color:var(--ink);font-size:13px}.build-update>span{flex:1;min-width:min(240px,100%)}.build-update>.button{flex-shrink:0}
 .header-feedback[data-error=true],.rocket-dialog .dialog-error{color:var(--danger);background:var(--error-bg)}
 .settings-panel,.action-menu-panel{background:var(--paper)}
 .field input,.field select,.field textarea,dialog>textarea,.interface-language select{color:var(--ink);background:var(--control);border-color:var(--control-border)}
@@ -151,13 +152,13 @@ html,body{background:var(--canvas);color:var(--ink)}
 @media(max-width:1450px){.runtime-controls{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:1100px){.runtime-controls{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:760px){.runtime-controls{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.runtime-controls>.toggle-row,.runtime-controls>.launch-button{margin-block-start:25px}
-.runtime-controls>.launch-button{white-space:normal}
+.runtime-controls>.toggle-row,.runtime-controls>.launch-controls{margin-block-start:25px}
+.runtime-controls>.launch-controls{white-space:normal}
 @media(max-width:1450px){.header-actions .je-action:not(.je-icon-only)>.je-action-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.header-actions .je-action{min-width:36px;min-height:38px}.flight-status{min-width:120px}}
 @media(max-width:900px){.site-switcher{grid-template-columns:1fr}.site-switcher>.running-site-note,.site-switcher>p:not(.running-site-note){grid-column:1}.site-switcher>.saved-site-management{grid-template-columns:minmax(160px,1fr) auto auto}}
-@media(max-width:540px){.site-switcher>.saved-site-management{grid-template-columns:1fr 1fr}.site-switcher>.saved-site-management>.field{grid-column:1/-1}.site-switcher>.saved-site-management>.button{padding-inline:10px}.runtime-controls>.toggle-row,.runtime-controls>.launch-button{margin-block-start:8px}.flight-status{min-width:0}}
+@media(max-width:540px){.site-switcher>.saved-site-management{grid-template-columns:1fr 1fr}.site-switcher>.saved-site-management>.field{grid-column:1/-1}.site-switcher>.saved-site-management>.button{padding-inline:10px}.runtime-controls>.toggle-row,.runtime-controls>.launch-controls{margin-block-start:8px}.flight-status{min-width:0}}
 .language-options{inset-inline-start:auto;inset-inline-end:0;min-width:min(280px,calc(100vw - 36px));width:max-content;max-width:calc(100vw - 36px)}
-@media(max-width:760px){.runtime-controls>.launch-button{grid-column:1/-1}}
+@media(max-width:760px){.runtime-controls>.launch-controls{grid-column:1/-1}}
 .dashboard-countdown{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:14px 0 0;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--gold)}
 .dashboard-countdown>span{font-size:24px;line-height:1.2;min-width:2ch}
 .dashboard-countdown>p{flex:1 1 180px;min-width:0;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
@@ -211,3 +212,5 @@ html,body{background:var(--canvas);color:var(--ink)}
 .extension-warnings>button{float:inline-end}.extension-warnings ul{margin:8px 0 0;padding-inline-start:20px}.extension-warnings li+li{margin-top:8px}.extension-warnings details{margin-top:6px}.extension-warnings pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:200px;overflow:auto}
 .deployment-image-list{display:grid;gap:12px;padding:0;list-style:none}.deployment-image-list li{display:flex;align-items:center;gap:16px;border:1px solid var(--line);padding:14px;border-radius:8px}.deployment-image-list .image-description{flex:1;min-width:0}.deployment-image-list strong,.deployment-image-list small{display:block;overflow-wrap:anywhere}.deployment-image-list small{color:var(--muted);margin-top:5px}
 .deploy-dialog{width:min(1220px,calc(100vw - 30px))}.deployment-choice{display:flex;gap:7px;align-items:stretch}.deployment-choice select{min-width:0;flex:1}.deployment-choice button{padding:8px 12px;flex:none}.deployment-library{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr);gap:14px 20px;padding:16px 0;border-block:1px solid var(--line);margin-bottom:16px}.deployment-library-actions{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px}.deployment-library>p{grid-column:1/-1;margin:0}.deployment-library .field{margin:0}.full-width,.template-parameter-editor{grid-column:1/-1}.structured-editor{display:grid;gap:10px}.structured-row,.command-row{padding:10px;border:1px solid var(--line);border-radius:7px;min-width:0}.structured-field{display:flex;flex-wrap:wrap;gap:7px;align-items:center;min-width:0}.structured-field>input,.structured-field>textarea{min-width:100px;flex:1}.structured-field>select{width:auto;max-width:160px}.structured-children,.command-arguments{display:grid;gap:8px;margin:9px 0 0 14px;border-inline-start:2px solid var(--line);padding-inline-start:12px}.structured-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.structured-editor button{padding:7px 11px;font-size:12px}.structured-editor label{font-size:12px}.structured-editor textarea{resize:vertical;min-height:38px}.deployment-extras>.dialog-error{grid-column:1/-1}@media(max-width:760px){.deployment-library{grid-template-columns:1fr}.deployment-library-actions>.button{flex:1}.structured-children,.command-arguments{margin-inline-start:3px;padding-inline-start:7px}.structured-field{align-items:stretch}.structured-field>input,.structured-field>textarea{flex-basis:100%}.deploy-dialog{width:calc(100vw - 20px)}}
+
+.launch-controls{min-width:0}.launch-controls>.launch-button{white-space:normal}.launch-readiness{min-height:1.65em;margin-block:8px 0}.launch-readiness[data-readiness="fast"]{color:var(--gold)}

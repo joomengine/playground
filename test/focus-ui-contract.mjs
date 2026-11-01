@@ -65,8 +65,8 @@ async function assertShellAppearance(page, capture) {
   };
   try {
     if (!settingsVisible) await page.locator('#settings-toggle').click();
-    assert.equal(await theme.evaluate(button => button.previousElementSibling?.id), 'download-dialog-button',
-      'The single appearance icon stays immediately beside Downloads.');
+    assert.equal(await page.locator('.header-actions #theme-toggle').count(), 1,
+      'The single appearance control remains in the header.');
     assert.equal(await page.locator('#theme-preference').count(), 0, 'There is no separate System selector.');
     const brand = await page.evaluate(async () => {
       const link = document.querySelector('link[rel=icon]');

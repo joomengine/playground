@@ -17,6 +17,7 @@ export async function stageSodium({ directory, destination, version, upstream })
   const sha256 = await hashFile(path.join(directory, file));
   if (provenance.schemaVersion !== 1 || provenance.name !== 'sodium'
     || !await matchesNativeRuntime(provenance, version, upstream)
+    || provenance.nativePatchSha256 !== await hashFile(fileURLToPath(new URL('../native/sodium-int64.patch', import.meta.url)))
     || provenance.extension?.file !== file || provenance.extension?.sha256 !== sha256
     || JSON.stringify(provenance.sodiumSource) !== JSON.stringify(sodiumSource)
     || provenance.buildScriptSha256 !== await hashFile(fileURLToPath(new URL('./build-sodium.mjs', import.meta.url)))) {

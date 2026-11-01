@@ -15,9 +15,12 @@ import { assertFrameLayoutStable } from './frame-layout-contract.mjs';
 import { assertJoomlaDebugConfiguration } from './joomla-debug-contract.mjs';
 import { assertJcbCompiler } from './jcb-compiler-contract.mjs';
 import { assertLaunchCountdown, assertFailedDeploymentRecovery } from './launch-ui-contract.mjs';
+import { assertImmediateShareOption, assertImmediateLaunch } from './share-immediate-browser.mjs';
 import { assertLiveFocusMode, assertInitialFocusMode } from './focus-ui-contract.mjs';
 import { assertJcbHardReload } from './jcb-hard-reload-contract.mjs';
 import { assertSavedSiteRecovery } from './saved-site-recovery-contract.mjs';
+import { assertResponsiveSave } from './save-ui-contract.mjs';
+import { assertBuildUpdate } from './build-update-browser.mjs';
 import { assertExtensionFormValidation } from './extension-form-contract.mjs';
 import { classifyAssetDiagnostics, classifyNavigationAbortDiagnostics } from './asset-diagnostics.mjs';
 import { assertMcpHttp } from './mcp-http.mjs';
@@ -58,9 +61,6 @@ for (const joomla of joomlaVersions) assert.ok(manifest.joomla.some((entry) => e
 
 const PDO = "$db = new PDO('mysql:dbname=joomla;charset=utf8mb4', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);";
 const requestTimeout = 240_000;
-// A custom build includes the exporter's bounded ten-minute image capture.
-// Ordinary prepared-image launches and requests retain their existing limit.
-const imageBuildTimeout = 900_000;
 const installedAssetNonce = randomUUID();
 const extensionArchive = zipSync({
   'mod_playground_contract.xml': strToU8('<?xml version="1.0" encoding="utf-8"?><extension type="module" client="site" method="upgrade"><name>mod_playground_contract</name><author>JoomEngine</author><version>1.0.0</version><description>Browser integration fixture</description><files><filename module="mod_playground_contract">mod_playground_contract.php</filename><filename>contract.php</filename><filename>asset-proof.html</filename><folder>assets</folder></files></extension>'),
@@ -88,13 +88,15 @@ if (($_GET['action'] ?? '') === 'settings') {
     return;
 }
 if (($_GET['action'] ?? '') === 'seed') {
-    $db->exec('CREATE TABLE IF NOT EXISTS playground_ui_contract (id INT PRIMARY KEY, marker VARCHAR(100)) ENGINE=InnoDB');
-    $db->exec("REPLACE INTO playground_ui_contract VALUES (1, 'saved through real MariaDB')");
+    $db->exec('CREATE TABLE IF NOT EXISTS playground_ui_contract (id INT PRIMARY KEY, marker VARCHAR(100), full_width BIGINT) ENGINE=InnoDB');
+    $db->exec("REPLACE INTO playground_ui_contract VALUES (1, 'saved through real MariaDB', 9223372036854775807)");
     file_put_contents($path, 'saved through the real PHP filesystem');
 }
 $exists = (bool) $db->query("SHOW TABLES LIKE 'playground_ui_contract'")->fetchColumn();
+$fullWidth = $exists ? $db->query('SELECT full_width FROM playground_ui_contract WHERE id=1')->fetchColumn() : null;
 echo json_encode(['php' => PHP_VERSION,
     'database' => $exists ? $db->query('SELECT marker FROM playground_ui_contract WHERE id=1')->fetchColumn() : null,
+    'integer' => $fullWidth === null ? null : (string) $fullWidth, 'integerType' => get_debug_type($fullWidth),
     'file' => is_file($path) ? file_get_contents($path) : null,
 ], JSON_THROW_ON_ERROR);
 `),
@@ -944,10 +946,9 @@ for (const name of browserNames) {
         });
         const manualService = await startDeploy(page, new URLSearchParams({ deploy: 'blank',
           joomla: servicePackage.joomlaVersion, php: '8.4', fresh: '1',
-        }).toString(), { ...setup(), extensions: servicePackage.extensions }, { timeoutMs: imageBuildTimeout });
-        const savedImage = manualService.progress.findIndex(event => event.message === 'Saving the prepared image for future sites…');
-        assert.ok(savedImage >= 0 && manualService.progress.findIndex(event => event.phase === 'launch-image') > savedImage,
-          'The manual Service Directory image must finish building and saving before launch.');
+        }).toString(), { ...setup(), extensions: servicePackage.extensions });
+        assert.ok(!manualService.progress.some(event => /Preparing the image for reuse|Saving the prepared image/.test(event.message)),
+          'Custom installations must launch without waiting for an optional full-site export.');
         assert.equal(manualService.configuration.phpSettings.max_execution_time, 60,
           'A manually supplied package must install without inheriting preset PHP settings.');
         assert.equal(manualService.configuration.menus.length, 0);
@@ -1048,6 +1049,10 @@ for (const name of browserNames) {
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         proof.push({ id: 'jcb', defaultDomainCountdown: true, preparedLaunchMs });
+        page.testStep = 'immediate shared deployment skips countdown while start=0 still waits';
+        proof.push({ id: 'immediate-shared-launch', ...(await assertImmediateLaunch(page, server.url, () => renderedSiteFrame(page))) });
+        await showSiteActions(page);
+        await page.locator('#close-button').click();
         for (const [url, requests] of newsFeeds) assert.ok(requests > 0, `The installed JCB must exercise its news feed fixture: ${url}`);
         proof.push({ id: 'jcb-news-feed-fixture', requests: Object.fromEntries(newsFeeds) });
         await assertCleanConsole(page, { contentImages: true });
@@ -1095,7 +1100,14 @@ for (const name of browserNames) {
           file_put_contents('/persist/www/export-proof.bin', hex2bin('0001ff5c273b0a'));
           echo 'created';`);
         assert.equal(ddl.status, 200, ddl.text);
-        const expected = await phpJSON(page, `${PDO} echo json_encode(['numbers'=>$db->query('SELECT big,amount,HEX(payload) AS payload,nullable FROM playground_contract WHERE id=1')->fetch(PDO::FETCH_ASSOC),'view'=>$db->query('SELECT * FROM export_view_second')->fetchAll(PDO::FETCH_ASSOC)], JSON_THROW_ON_ERROR);`);
+        const exportedState = `${PDO}
+          $integers = $db->query('SELECT value FROM playground_int64 ORDER BY value')->fetchAll(PDO::FETCH_COLUMN);
+          echo json_encode([
+            'numbers' => $db->query('SELECT big,amount,HEX(payload) AS payload,nullable FROM playground_contract WHERE id=1')->fetch(PDO::FETCH_ASSOC),
+            'integers' => array_map('strval', $integers), 'integerTypes' => array_map('get_debug_type', $integers),
+            'view' => $db->query('SELECT * FROM export_view_second')->fetchAll(PDO::FETCH_ASSOC),
+          ], JSON_THROW_ON_ERROR);`;
+        const expected = await phpJSON(page, exportedState);
         page.testStep = 'download export';
         const downloading = page.waitForEvent('download');
         await bounded(page.evaluate(async () => {
@@ -1121,7 +1133,7 @@ for (const name of browserNames) {
         await start(page, { ...configuration(defaultPair, { persistence: false }), snapshot });
         assert.equal(snapshotDownloads, 1, 'An unrelated cached blank image must not replace the explicit export.');
         assert.equal(await page.evaluate(() => window.playground.installation.fromSnapshot), true);
-        const actual = await phpJSON(page, `${PDO} echo json_encode(['numbers'=>$db->query('SELECT big,amount,HEX(payload) AS payload,nullable FROM playground_contract WHERE id=1')->fetch(PDO::FETCH_ASSOC),'view'=>$db->query('SELECT * FROM export_view_second')->fetchAll(PDO::FETCH_ASSOC)], JSON_THROW_ON_ERROR);`);
+        const actual = await phpJSON(page, exportedState);
         assert.deepEqual(actual, expected, 'A portable restore must preserve exact SQL values and dependent views.');
         const triggered = await phpJSON(page, `${PDO} $db->exec("INSERT INTO export_trigger (id,value) VALUES (276,'after restore')"); echo json_encode($db->query('SELECT audit FROM export_trigger WHERE id=276')->fetchColumn());`);
         assert.equal(triggered, 'checked:after restore', 'The restored trigger must execute against the new database.');
@@ -1133,7 +1145,7 @@ for (const name of browserNames) {
         await start(page, { ...configuration(defaultPair, { persistence: false, fresh: true }), snapshot });
         assert.equal(snapshotDownloads, 2, 'Fresh must download the selected snapshot again instead of building a blank site or reusing cached bytes.');
         assert.equal(await page.evaluate(() => window.playground.installation.fromSnapshot), true);
-        const freshActual = await phpJSON(page, `${PDO} echo json_encode(['numbers'=>$db->query('SELECT big,amount,HEX(payload) AS payload,nullable FROM playground_contract WHERE id=1')->fetch(PDO::FETCH_ASSOC),'view'=>$db->query('SELECT * FROM export_view_second')->fetchAll(PDO::FETCH_ASSOC)], JSON_THROW_ON_ERROR);`);
+        const freshActual = await phpJSON(page, exportedState);
         assert.deepEqual(freshActual, expected, 'Fresh restoration must preserve the selected export, before later edits to another site.');
         await assertSite(page, config);
         await assertCleanConsole(page);
@@ -1179,6 +1191,8 @@ for (const name of browserNames) {
         const marker = await previewContract(page, 'seed');
         assert.equal(marker.database, 'saved through real MariaDB');
         assert.equal(marker.file, 'saved through the real PHP filesystem');
+        assert.equal(marker.integer, '9223372036854775807');
+        assert.equal(marker.integerType, 'int');
         page.testStep = 'Site/Admin reuse the running runtime and existing iframe';
         const navigationWorkers = [];
         const observeNavigationWorker = worker => navigationWorkers.push(worker.url());
@@ -1454,6 +1468,7 @@ for (const name of browserNames) {
         await page.locator('#share-button').click();
         await page.locator('#share-dialog').waitFor({ state: 'visible' });
         const link = await page.locator('#share-url').inputValue();
+        await assertImmediateShareOption(page);
         const shared = await page.evaluate(async link => (await import('./src/config.mjs')).readURLConfiguration(link).config, link);
         assert.equal(shared.siteName, 'Rocket shared demonstration');
         assert.equal(shared.deployId, 'blank');
@@ -1493,6 +1508,8 @@ for (const name of browserNames) {
         assert.equal(await page.locator('#credential-username').inputValue(), credentials.username);
         assert.equal(await page.locator('#credential-password').inputValue(), credentials.password);
         await page.locator('#credentials-dialog [data-close-dialog]').click();
+        page.testStep = 'persistent saving leaves the surrounding interface responsive';
+        await assertResponsiveSave(page);
         page.testStep = 'a failed save keeps the running site available';
         const savedFrameURL = await page.locator('#site-frame').getAttribute('src');
         await page.evaluate(() => {
@@ -1630,10 +1647,13 @@ for (const name of browserNames) {
         assert.equal(await page.evaluate(() => window.__rocketIdentity), shellIdentity);
         assert.equal(await page.locator('#site-frame').getAttribute('src'), frameURL);
         assert.deepEqual(await previewContract(page), marker);
+        page.testStep = 'build updates preserve the running site and saved files/database';
+        const buildUpdate = await assertBuildUpdate(page, { fixtures, indexHTML: await readFile(path.join(directory, 'index.html'), 'utf8'),
+          readSite: async () => { await renderedSiteFrame(page); return previewContract(page); } });
         await bounded(Promise.allSettled([...page.responseChecks]), 'Read embedded site responses', 10_000);
         await assertCleanConsole(page);
         records.push({ ...defaultPair, rocket: true, shareLink: true, independentInterfaceLanguage: true, rtl: true,
-          temporaryToSaved: true, retainedCredentials: true, effectivePhpSettings: settings, singleScroll: true, focus,
+          temporaryToSaved: true, retainedCredentials: true, effectivePhpSettings: settings, singleScroll: true, focus, buildUpdate,
           knownBrowserDiagnostics: page.knownBrowserDiagnostics });
       } catch (error) {
         if (!page.isClosed()) await saveBrowserDiagnostics(page, `rocket-${name}`, error);

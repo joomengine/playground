@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { builtWrapper, builtRuntimeDirectory, builtManifest, releasedLibraries } from './runtime-artifacts.mjs';
+import { builtWrapper, builtManifest, releasedLibraries } from './runtime-artifacts.mjs';
 import { phpIni } from '../src/php-settings.mjs';
 
 const temporary = await mkdtemp(path.join(tmpdir(), 'rocket-cgi-'));
@@ -18,9 +18,8 @@ test('staged int64 CGI carries binary API bodies and multipart uploads', { timeo
   for (const version of pins.php.filter(value => !selected || selected.includes(value.version))) {
     await t.test(`PHP ${version.version} request methods and effective settings`, async () => {
       const { PhpCgiNode } = await builtWrapper(version.version);
-      const original = await builtRuntimeDirectory(version.version);
       const php = new PhpCgiNode({ sharedLibs: await releasedLibraries(version.version), version: version.version, persist: [], docroot: '/www', prefix: '/',
-        locateFile: name => name === preload ? name : path.join(original, path.basename(name)), ini: phpIni(),
+        ini: phpIni(),
         files: [{ parent: '/internal', name: 'preload-ready.php', url: preload }],
       });
       const initialized = await php.binary;
@@ -66,11 +65,13 @@ test('staged int64 CGI carries binary API bodies and multipart uploads', { timeo
     const missing = path.join(temporary, 'missing-preload.php');
     const version = pins.php.at(-1).version;
     const { PhpCgiNode } = await builtWrapper(version);
-    const original = await builtRuntimeDirectory(version);
     const php = new PhpCgiNode({ sharedLibs: await releasedLibraries(version), version, persist: [],
-      locateFile: name => name === missing ? name : path.join(original, path.basename(name)),
       files: [{ parent: '/internal', name: 'missing-preload.php', url: missing }],
     });
-    await assert.rejects(php.binary, /Unable to preload \/internal\/missing-preload\.php:/);
+    await assert.rejects(php.binary, error => {
+      assert.equal(error.code, 'ENOENT');
+      assert.equal(error.path, missing, 'Initialization failure must identify the missing preload file.');
+      return true;
+    });
   });
 });

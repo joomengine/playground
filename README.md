@@ -171,6 +171,11 @@ same artifact. A failed upstream refresh or validation leaves the previous deplo
 catalog and packages available. Use a new site to try a newly published nightly;
 retain a complete site export when the exact old build must remain portable.
 
+Playground checks for a new published build on startup, when returning to the tab,
+and before launching. When a build changes, it refreshes this deployment’s cached
+catalogs and offers **Reload Playground**. Close the running site before reloading;
+saved sites, databases, local images and preferences are preserved.
+
 ## Build and run locally
 
 Use Node.js 26.12.1 as pinned in [.node-version](.node-version), npm, Git, Docker,
@@ -290,6 +295,10 @@ configuration or manually selecting a saved site also cancels the countdown.
 Manual selections wait for Launch and leave the current site running. Use
 `?start=0` to load setup without a countdown; explicit deployment/share links keep
 their own configuration and review requirements.
+In Share, **Immediate deployment** adds `immediate=1` to skip that countdown;
+leaving it unchecked preserves the normal startup, and `start=0` still prevents automatic launch.
+The hint beneath Launch updates with your choices: a prepared fast start, a prepared
+base needing additional setup, or a fresh installation that takes longer.
 
 The chevron opens one dashboard containing saved-site management, runtime
 configuration, site actions and appearance. **Site** and **Admin**, beside
@@ -400,6 +409,14 @@ database finish saving, including during configuration changes and PHP restarts.
 A successful Save can therefore be reopened after a
 whole-page reload without using Close first. Checkpoint or storage errors remain
 visible save failures; they do not advance the saved-state indicator.
+
+The interface opens the site before its first background checkpoint. Saving starts
+as soon as the runtime is idle, then repeats about a minute after each completed
+save. Saves run in the filesystem and database workers, keep the surrounding
+controls usable, and never overlap. Close waits for an active save and completes
+the first checkpoint if it has not started. Launch uses published prepared images
+or compatible images already cached locally; it does not delay first use to export
+a new reusable image. Saved sites still resume from their own files and database.
 
 The credentials dialog shows the generated administrator login details, including
 when automatic login is disabled. Each fresh site receives new credentials;
@@ -620,6 +637,7 @@ The interface recognizes these query parameters:
 | `extensions=[...]` | Additional objects containing `url` and optional `sha256` |
 | `commands=[["cache:clean"]]` | Additional Joomla console argument arrays |
 | `start=0` | Show setup first; the default page offers a ten-second countdown |
+| `immediate=1` | Skip the countdown for automatic deployment; `start=0` still takes precedence |
 | `config=https://example.org/deploy.json` | Load a public deployment document, optionally verified with `sha256` |
 
 For a deployment hosted at `/playground/`, this same-origin iframe opens an

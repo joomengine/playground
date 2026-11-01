@@ -67,7 +67,7 @@ export async function createStaticServer({ directory, prefix = '/playground/', i
         return;
       }
       if (Object.hasOwn(fixtures, relative)) {
-        response.setHeader('Content-Type', contentTypes[path.extname(relative)] || 'application/octet-stream');
+        response.setHeader('Content-Type', contentTypes[path.extname(relative || 'index.html')] || 'application/octet-stream');
         response.end(typeof fixtures[relative] === 'function' ? await fixtures[relative](request) : fixtures[relative]);
         return;
       }

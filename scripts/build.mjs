@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { downloadVerified, extractTarGzip, hashFile, inventory, verifyBridgeBundle } from './assets.mjs';
 import { stageDeployCatalog } from './deploys.mjs';
 import { stageVersionCatalog } from './version-catalog.mjs';
+import { writeBuildIdentity } from './build-identity.mjs';
 import { stageCurl } from './curl.mjs';
 import { stageSodium } from './sodium.mjs';
 import { applyCgiRequestOverlay } from './cgi-request-overlay.mjs';
@@ -221,6 +222,7 @@ try {
     defaults: versions.defaults,
   };
   await writeFile(path.join(assets, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeBuildIdentity(staging, manifest);
   await writeFile(path.join(staging, 'asset-inventory.json'), `${JSON.stringify(await inventory(staging), null, 2)}\n`);
   await chmod(staging, 0o755);
   await rm(destination, { recursive: true, force: true });
