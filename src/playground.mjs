@@ -63,6 +63,7 @@ export class PhpSession {
     this.pending = new Map();
     this.queue = Promise.resolve();
     this.queued = 0;
+    this.flushing = 0;
     this.failure = null;
     this.workspaceListeners = new Set();
     this.workspaceReads = new Set();
@@ -256,7 +257,9 @@ export class PhpSession {
     this.queue = result.catch(() => {});
     return result;
   }
+  get idle() { return !this.failure && !this.queued && !this.flushing && !this.pending.size && this.debugState === 'idle'; }
   async flushTogether() {
+    this.flushing++;
     const previous = this.queue;
     let release;
     const held = new Promise(resolve => { release = resolve; });
@@ -273,7 +276,7 @@ export class PhpSession {
         catch (error) { this.fail(error); }
       });
       await this.database?.flush();
-    } finally { release(); }
+    } finally { this.flushing--; release(); }
   }
   fail(error) {
     if (this.failure) return this.recovery;
@@ -337,7 +340,7 @@ export async function resetPlayground({ storageKey = 'default' } = {}) {
 }
 
 /** Create a real Joomla installation backed by upstream PHP and MariaDB WASM. */
-export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, siteExport = null, recovery = false, rotateAdministrator = false } = {}) {
+export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, siteExport = null, recovery = false, rotateAdministrator = false, deferInitialSave = false } = {}) {
   const environment = await prepareEnvironment();
   if (environment.reloadRequired) throw new Error(environment.reason + ' Complete the controlled page navigation before starting the playground.');
   let imagePhase;
@@ -454,6 +457,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       get closed() { return Boolean(closePromise); },
       get healthy() { return !closePromise && !session.failure; },
       get changing() { return changing; },
+      get idle() { return !changing && !closePromise && session.idle; },
       recovery: null,
       lastSavedAt: null,
       debugger: {
@@ -710,7 +714,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     } else {
       if (pristine && config.restoredSite) throw new Error('The saved uploaded site is unavailable. Upload its complete site export ZIP again.');
       const imageWarning = message => progress({ phase: 'warning', message });
-      let image, fingerprint, completeImage = false, captureImage = false;
+      let image, fingerprint, completeImage = false;
       if (pristine) {
         // Revalidate the small server catalog before using cached maintained
         // bytes. A changed image hash is authoritative, including for a base
@@ -718,9 +722,9 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         await deploymentImages.reconcile(manifest).catch(() => {});
         const snapshot = deploymentSnapshotSource(config, manifest, base.href);
         const maintained = snapshot?.maintained;
-        captureImage = !maintained || Boolean(config.addonExtensions?.length || config.addonStartupCommands?.length
+        const customImage = !maintained || Boolean(config.addonExtensions?.length || config.addonStartupCommands?.length
           || config.addonLanguages?.length || config.addonTemplate?.url || config.deploymentRecipe);
-        if (captureImage) {
+        if (customImage) {
           fingerprint = await deploymentImageFingerprint(config, manifest, { baseURL: base.href });
           if (!config.fresh) {
             image = await deploymentImages.getCustom(fingerprint);
@@ -765,23 +769,14 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         archiveBytes = await archive.arrayBuffer();
       }
       if (!installed) installed = await installJoomla(handle, config, { archiveBytes, sha256: joomlaEntry.sha256, progress, fetchPackage });
-      if (pristine && captureImage && !completeImage && !installed.extensionWarnings?.length) {
-        imagePhase = 'build-image';
-        try {
-          // This runs before registration/UI exposure, so the image contains
-          // the completed recipe, never later edits made to an installed site.
-          progress({ message: 'Preparing the image for reuse in this browser…' });
-          const exported = await exportSite(handle, { format: 'bundle' });
-          await deploymentImages.saveCustom(config, manifest, exported.bytes, {
-            fingerprint, onProgress: progress, onWarning: imageWarning,
-          });
-        } catch { imageWarning('The image could not be saved locally. This site can still launch.'); }
-      }
+      // Saved sites already resume from their persistent files and database.
+      // An optional full export here delays first use; doing it after launch
+      // would cache subsequent user edits as though they were a clean recipe.
       imagePhase = 'launch-image';
       if (pristine) progress({ message: 'Launching your site…' });
     }
     imagePhase = undefined;
-    await handle.flush();
+    if (!config.persistence || !deferInitialSave) await handle.flush();
     await session.send('enablePersistence');
     handle.installation = installed;
     registerSession();

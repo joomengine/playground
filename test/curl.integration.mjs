@@ -30,6 +30,10 @@ async function fixture(t) {
     } else if (request.url === '/binary') {
       response.writeHead(200, { 'Content-Type': 'application/octet-stream' });
       response.end(payload);
+    } else if (request.url === '/large-head') {
+      assert.equal(request.method, 'HEAD', 'The large length fixture must never allocate or transfer its advertised body.');
+      response.writeHead(200, { 'Content-Length': '5000000000' });
+      response.end();
     } else if (request.url === '/missing') {
       response.writeHead(404, { 'Content-Type': 'text/plain' });
       response.end('Missing fixture');
@@ -79,6 +83,16 @@ for (const version of pins.php) {
       }
       $get = executeCurl($base . '/binary', [CURLOPT_USERAGENT => 'JoomEngine native cURL proof',
         CURLOPT_SSL_VERIFYPEER => false]);
+      $infoHandle = curl_init($base . '/large-head');
+      $unknownFileTime = curl_getinfo($infoHandle, CURLINFO_FILETIME);
+      curl_setopt_array($infoHandle, [CURLOPT_NOBODY => true, CURLOPT_RETURNTRANSFER => true]);
+      $largeHeadBody = curl_exec($infoHandle);
+      $largeContentLength = curl_getinfo($infoHandle, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T);
+      $authMaskAccepted = curl_setopt($infoHandle, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
+      $overflowRejected = false;
+      try { curl_setopt($infoHandle, CURLOPT_TIMEOUT, 4294967297); }
+      catch (ValueError $exception) { $overflowRejected = true; }
+      unset($infoHandle);
       $loopback = executeCurl($base . '/site/callback');
       $afterLoopback = executeCurl($base . '/binary');
       $post = executeCurl($base . '/echo', [CURLOPT_POST => true,
@@ -97,6 +111,8 @@ for (const version of pins.php) {
       $unsupported = executeCurl('ftp://127.0.0.1/unsupported');
       $failStatus = executeCurl($base . '/missing', [CURLOPT_FAILONERROR => true]);
       $shortWrite = executeCurl($base . '/binary', [CURLOPT_WRITEFUNCTION => static fn($handle, $data) => 0]);
+      $wideWrite = executeCurl($base . '/binary', [CURLOPT_WRITEFUNCTION => static fn($handle, $data) => 4294967296 + strlen($data)]);
+      $wideHeader = executeCurl($base . '/binary', [CURLOPT_HEADERFUNCTION => static fn($handle, $data) => 4294967296 + strlen($data)]);
       $events = [];
       $callbacks = executeCurl($base . '/binary', [
         CURLOPT_HEADERFUNCTION => static function ($handle, $data) use (&$events) { $events[] = 'header'; return strlen($data); },
@@ -104,10 +120,13 @@ for (const version of pins.php) {
       ]);
       echo json_encode(['php' => PHP_VERSION, 'intSize' => PHP_INT_SIZE, 'loaded' => extension_loaded('curl'),
         'version' => phpversion('curl'), 'protocols' => curl_version()['protocols'],
+        'unknownFileTime' => $unknownFileTime, 'largeHeadBody' => $largeHeadBody,
+        'largeContentLength' => $largeContentLength, 'authMaskAccepted' => $authMaskAccepted, 'overflowRejected' => $overflowRejected,
         'get' => $get, 'loopback' => $loopback, 'afterLoopback' => $afterLoopback,
         'post' => $post, 'head' => $head, 'missing' => $missing, 'status' => $status,
         'redirect' => $redirect, 'custom' => $custom, 'timeout' => $timeout, 'unsupported' => $unsupported,
-        'afterTimeout' => $afterTimeout, 'failStatus' => $failStatus, 'shortWrite' => $shortWrite, 'events' => $events,
+        'afterTimeout' => $afterTimeout, 'failStatus' => $failStatus, 'shortWrite' => $shortWrite,
+        'wideWrite' => $wideWrite, 'wideHeader' => $wideHeader, 'events' => $events,
         'timeoutCode' => CURLE_OPERATION_TIMEDOUT, 'unsupportedCode' => CURLE_UNSUPPORTED_PROTOCOL,
         'statusCode' => CURLE_HTTP_RETURNED_ERROR, 'writeCode' => CURLE_WRITE_ERROR], JSON_THROW_ON_ERROR);
     `);
@@ -125,6 +144,11 @@ for (const version of pins.php) {
     assert.equal(result.loaded, true);
     assert.equal(result.version, version.patchVersion);
     assert.ok(result.protocols.includes('http') && result.protocols.includes('https'));
+    assert.equal(result.unknownFileTime, -1, 'C long output must sign-extend correctly to a PHP int64.');
+    assert.equal(result.largeHeadBody, '');
+    assert.equal(result.largeContentLength, 5000000000, 'curl_off_t output must retain all 64 bits.');
+    assert.equal(result.authMaskAccepted, true, 'Valid authentication flags must retain their unsigned C-long bit pattern.');
+    assert.equal(result.overflowRejected, true, 'A PHP int64 option must never silently wrap at the C long boundary.');
     for (const key of ['get', 'afterLoopback', 'post', 'head', 'missing', 'status', 'redirect', 'custom', 'afterTimeout']) {
       assert.equal(result[key].error, '', `${key}: ${result[key].error}`);
       assert.equal(result[key].errno, 0, key);
@@ -154,7 +178,8 @@ for (const version of pins.php) {
       authorization: `Basic ${Buffer.from('fixture:password').toString('base64')}`,
     });
     assert.deepEqual(Buffer.from(result.afterTimeout.body, 'base64'), payload);
-    for (const [key, code] of [['timeout', 'timeoutCode'], ['unsupported', 'unsupportedCode'], ['failStatus', 'statusCode'], ['shortWrite', 'writeCode']]) {
+    for (const [key, code] of [['timeout', 'timeoutCode'], ['unsupported', 'unsupportedCode'], ['failStatus', 'statusCode'],
+      ['shortWrite', 'writeCode'], ['wideWrite', 'writeCode'], ['wideHeader', 'writeCode']]) {
       assert.equal(result[key].body, false, key);
       assert.equal(result[key].errno, result[code], key);
       assert.ok(result[key].error.length > 0, key);

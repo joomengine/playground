@@ -29,6 +29,11 @@ try {
   execFileSync('emmake', ['make', '-j2', 'install'], { cwd: librarySource, stdio: 'inherit' });
   const extensionSource = path.join(scratch, 'php-sodium');
   await cp(path.join(source, 'ext/sodium'), extensionSource, { recursive: true });
+  const nativePatch = path.join(root, 'native/sodium-int64.patch');
+  // Apply to these copied sources without discovering the outer checkout.
+  const patchOptions = { cwd: extensionSource, env: { ...process.env, GIT_CEILING_DIRECTORIES: scratch }, stdio: 'inherit' };
+  execFileSync('git', ['apply', '--check', nativePatch], patchOptions);
+  execFileSync('git', ['apply', nativePatch], patchOptions);
   const sources = ['libsodium.c', 'sodium_pwhash.c'];
   const configuration = await readFile(path.join(extensionSource, 'config.m4'), 'utf8');
   for (const filename of sources) if (!configuration.includes(filename)) throw new Error('Review the changed sodium extension source list.');
@@ -46,7 +51,7 @@ try {
   }
   const provenance = {
     schemaVersion: 1, name: 'sodium', ...nativeProvenance(context),
-    sodiumSource, buildScriptSha256: await hashFile(fileURLToPath(import.meta.url)),
+    sodiumSource, nativePatchSha256: await hashFile(nativePatch), buildScriptSha256: await hashFile(fileURLToPath(import.meta.url)),
     sources, phpSourceInventory: await inventory(extensionSource), sodiumSourceInventory,
     flags, libraryFlags, configureFlags, licenses,
     extension: { file: `${basename}.so`, sha256: await hashFile(path.join(output, `${basename}.so`)) },

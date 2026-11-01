@@ -337,10 +337,12 @@ export function readURLConfiguration(url) {
   if (params.has('commands') || params.has('startupCommands')) config.startupCommands = parseStartupCommands(params.get('commands') ?? params.get('startupCommands'));
   const deploymentOptions = ['name', 'deploy', 'php', 'joomla', 'jcb', 'language', 'login', 'fresh', 'extensions', 'extension', 'commands', 'startupCommands'];
   const document = params.has('config') ? parseExtensions([{ url: params.get('config'), ...(params.has('sha256') ? { sha256: params.get('sha256') } : {}) }], location.href, { allowHttp: false })[0] : null;
-  return { config, autostart: params.has('start') ? boolean('start') : !!document || fragment.has('deploy') || deploymentOptions.some((name) => params.has(name)), ...(document ? { document } : {}) };
+  const immediate = params.has('immediate') ? boolean('immediate') : false;
+  return { config, immediate, autostart: params.has('start') ? boolean('start') : immediate || !!document || fragment.has('deploy') || deploymentOptions.some((name) => params.has(name)), ...(document ? { document } : {}) };
 }
 
-export function createShareURL(location, config) {
+export function createShareURL(location, config, { immediate = false } = {}) {
+  if (typeof immediate !== 'boolean') throw new TypeError('Immediate deployment must be a boolean.');
   const url = new URL(location);
   const document = createDeploymentDocument(config, { baseURL: url.href });
   config = document.configuration;
@@ -365,6 +367,7 @@ export function createShareURL(location, config) {
     url.searchParams.set('start', '1');
     url.hash = `deploy=${encodeDocument(document)}`;
   } else url.searchParams.set('start', '1');
+  if (immediate) url.searchParams.set('immediate', '1');
   if (url.href.length > MAX_SHARE_URL_LENGTH) throw new RangeError('This deployment is too large for a reliable share link. Export the deployment JSON, or host it and share its configuration URL.');
   return url.href;
 }

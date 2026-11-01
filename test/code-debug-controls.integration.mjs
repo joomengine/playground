@@ -211,6 +211,32 @@ echo 'done';
   } finally { await runtime.stop(); await execution.catch(() => {}); }
 });
 
+test(`native PHP ${version} inspects full-width integer values and array keys exactly`, { timeout: 20_000 }, async () => {
+  const runtime = runtimeFor(`<?php
+$values = [PHP_INT_MIN => PHP_INT_MIN, 9007199254740993 => 9007199254740993, PHP_INT_MAX => PHP_INT_MAX];
+echo 'done';
+`);
+  await runtime.setBreakpoints('/persist/www/index.php', [{ line: 3 }]);
+  const stopped = nextStop(runtime);
+  const execution = runtime.execute(request);
+  execution.catch(() => {});
+  try {
+    await Promise.race([stopped, execution.then(() => { throw new Error('Breakpoint was not reached.'); })]);
+    assert.equal((await runtime.evaluate('PHP_INT_SIZE')).result, '8');
+    assert.equal((await runtime.evaluate('PHP_INT_MIN')).result, '-9223372036854775808');
+    assert.equal((await runtime.evaluate('PHP_INT_MAX')).result, '9223372036854775807');
+    const values = await runtime.evaluate('$values');
+    assert.ok(values.variablesReference);
+    const entries = await runtime.variables(values.variablesReference, { start: 0, count: 3 });
+    assert.deepEqual(entries.map(({ name, value, type }) => ({ name, value, type })),
+      ['-9223372036854775808', '9007199254740993', '9223372036854775807']
+        .map(value => ({ name: value, value, type: 'int' })));
+    await runtime.setBreakpoints('/persist/www/index.php', []);
+    await runtime.continue();
+    assert.equal(new TextDecoder().decode((await execution).body), 'done');
+  } finally { await runtime.stop(); await execution.catch(() => {}); }
+});
+
 test(`native PHP ${version} accepts pause and stop during an executing loop without replay`, { timeout: 20_000 }, async () => {
   const runtime = runtimeFor(`<?php
 file_put_contents('/persist/www/once.txt', 'once');

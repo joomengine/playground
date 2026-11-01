@@ -34,7 +34,27 @@ for (const version of pins.php.filter(value => !selected || selected.includes(va
       $signature = sodium_crypto_sign_detached($message, sodium_crypto_sign_secretkey($pair));
       $aeadNonce = random_bytes(SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_NPUBBYTES);
       $aead = sodium_crypto_aead_xchacha20poly1305_ietf_encrypt($message, 'context', $aeadNonce, $key);
-      echo json_encode(['php' => PHP_VERSION, 'sodium' => extension_loaded('sodium'), 'library' => SODIUM_LIBRARY_VERSION,
+      $variant = SODIUM_BASE64_VARIANT_ORIGINAL;
+      $base64 = sodium_bin2base64($message, $variant);
+      $overflowVariant = 4294967296 + $variant;
+      $variantRejected = [];
+      foreach ([static fn() => sodium_bin2base64($message, $overflowVariant),
+        static fn() => sodium_base642bin($base64, $overflowVariant)] as $invalid) {
+        try { $invalid(); $variantRejected[] = false; }
+        catch (SodiumException $exception) { $variantRejected[] = true; }
+      }
+      $ops = SODIUM_CRYPTO_PWHASH_OPSLIMIT_INTERACTIVE;
+      $memory = SODIUM_CRYPTO_PWHASH_MEMLIMIT_INTERACTIVE;
+      $hash = sodium_crypto_pwhash_str('runtime contract', $ops, $memory);
+      $memoryRejected = [];
+      foreach ([4294967296 + $memory, -4294967296 + $memory] as $invalidMemory) {
+        try { sodium_crypto_pwhash_str_needs_rehash($hash, $ops, $invalidMemory); $memoryRejected[] = false; }
+        catch (SodiumException $exception) { $memoryRejected[] = true; }
+      }
+      echo json_encode(['php' => PHP_VERSION, 'intSize' => PHP_INT_SIZE, 'sodium' => extension_loaded('sodium'), 'library' => SODIUM_LIBRARY_VERSION,
+        'base64' => sodium_base642bin($base64, $variant) === $message,
+        'variantRejected' => $variantRejected, 'memoryRejected' => $memoryRejected,
+        'rehash' => sodium_crypto_pwhash_str_needs_rehash($hash, $ops, $memory),
         'secretbox' => sodium_crypto_secretbox_open($cipher, $nonce, $key) === $message,
         'tamperRejected' => sodium_crypto_secretbox_open($tampered, $nonce, $key) === false,
         'independentKeys' => strlen($key) === 32 && $key !== $other,
@@ -46,7 +66,8 @@ for (const version of pins.php.filter(value => !selected || selected.includes(va
     `);
     const response = await php.request({ url: '/index.php', method: 'GET', headers: { host: 'localhost' } });
     const body = await response.text(); assert.equal(response.status, 200, body);
-    assert.deepEqual(JSON.parse(body), { php: version.patchVersion, sodium: true, library: '1.0.22', secretbox: true,
+    assert.deepEqual(JSON.parse(body), { php: version.patchVersion, intSize: 8, sodium: true,
+      library: record.provenance.sodiumSource.version, base64: true, variantRejected: [true, true], memoryRejected: [true, true], rehash: false, secretbox: true,
       tamperRejected: true, independentKeys: true, signature: true, signatureRejectsChange: true, aead: true, contextRejected: true, hash: true });
   });
 }

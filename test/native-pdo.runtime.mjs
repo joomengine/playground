@@ -144,7 +144,7 @@ for (const minor of minors) {
       const database = await createMariaDB({ database: 'joomla' });
       const operations = [];
       const { PhpCgiNode } = await releasedWrapper(minor, 'php-cgi-wasm', 'PhpCgiNode');
-    const php = new PhpCgiNode({
+      const php = new PhpCgiNode({
         version: minor,
         persist: [],
         docroot: '/www',

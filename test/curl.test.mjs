@@ -33,6 +33,7 @@ test('curl staging verifies PHP and fetch transport identities, binary checksum 
     runtime: { fingerprint: version.runtimeFingerprint, archiveSha256: version.runtimeArchiveSha256, abi },
     flags: ['-DZEND_WASM_INT64=1'],
     nativeHelperSha256: await hashFile(fileURLToPath(new URL('../scripts/native-runtime.mjs', import.meta.url))),
+    nativePatchSha256: await hashFile(fileURLToPath(new URL('../native/curl-int64.patch', import.meta.url))),
     phpSourceInventory: [{ path: 'interface.c', sha256: 'c'.repeat(64) }],
     httpStreams: { sourceSha256: await hashFile(fileURLToPath(new URL('../native/http-stream.c', import.meta.url))),
       originalInterfaceSha256: 'f'.repeat(64), interfaceSha256: 'c'.repeat(64) },
@@ -44,6 +45,11 @@ test('curl staging verifies PHP and fetch transport identities, binary checksum 
   assert.equal((await stageCurl(options)).url, 'extensions/php8.4-curl.so');
   assert.deepEqual(await readFile(path.join(destination, file)), bytes);
   for (const license of licenses) assert.equal(await hashFile(path.join(destination, license.file)), license.sha256);
+  const patchSha256 = provenance.nativePatchSha256;
+  provenance.nativePatchSha256 = '0'.repeat(64);
+  await save();
+  await assert.rejects(stageCurl(options), /provenance differs/);
+  provenance.nativePatchSha256 = patchSha256;
   provenance.phpVersion = '8.5.2';
   await save();
   await assert.rejects(stageCurl(options), /provenance differs/);

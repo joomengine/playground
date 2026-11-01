@@ -23,6 +23,11 @@ try {
   const curlSourceInventory = await inventory(librarySource);
   const extensionSource = path.join(scratch, 'php-curl');
   await cp(path.join(source, 'ext/curl'), extensionSource, { recursive: true });
+  const nativePatch = path.join(root, 'native/curl-int64.patch');
+  // Apply to these copied sources without discovering the outer checkout.
+  const patchOptions = { cwd: extensionSource, env: { ...process.env, GIT_CEILING_DIRECTORIES: scratch }, stdio: 'inherit' };
+  execFileSync('git', ['apply', '--check', nativePatch], patchOptions);
+  execFileSync('git', ['apply', nativePatch], patchOptions);
   const configuration = await readFile(path.join(extensionSource, 'config.m4'), 'utf8');
   const sources = ['interface.c', 'multi.c', 'share.c', 'curl_file.c'];
   if (!configuration.includes(sources.join(' '))) throw new Error('Review the changed curl extension build inputs.');
@@ -62,7 +67,7 @@ try {
   }
   const provenance = {
     schemaVersion: 1, name: 'curl', ...nativeProvenance(context),
-    curlSource, buildScriptSha256: await hashFile(fileURLToPath(import.meta.url)),
+    curlSource, nativePatchSha256: await hashFile(nativePatch), buildScriptSha256: await hashFile(fileURLToPath(import.meta.url)),
     sources, phpSourceInventory: await inventory(extensionSource), curlSourceInventory, httpStreams, flags,
     licenses, extension: { file: `${basename}.so`, sha256: await hashFile(path.join(output, `${basename}.so`)) },
   };

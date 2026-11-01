@@ -4,6 +4,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { inventory } from './assets.mjs';
+import { writeBuildIdentity } from './build-identity.mjs';
 import { createNodeRuntime } from './node-runtime.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -146,6 +147,7 @@ export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || 
     }
     manifest.prebuiltDeploys = prepared;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await writeBuildIdentity(distribution, manifest);
     await writeFile(inventoryPath, `${JSON.stringify((await inventory(distribution)).filter((entry) => entry.path !== 'asset-inventory.json'), null, 2)}\n`);
     console.log(`Published ${prepared.length} verified prepared deploys.`);
     return prepared;

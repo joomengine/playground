@@ -1,0 +1,35 @@
+diff --git a/libsodium.c b/libsodium.c
+index c5170a9..afd7de4 100644
+--- a/libsodium.c
++++ b/libsodium.c
+@@ -1565,7 +1565,11 @@ PHP_FUNCTION(sodium_crypto_pwhash_str_needs_rehash)
+ 									&hash_str, &hash_str_len, &opslimit, &memlimit) == FAILURE) {
+ 		RETURN_THROWS();
+ 	}
+-	if (crypto_pwhash_str_needs_rehash(hash_str, opslimit, memlimit) == 0) {
++	if (memlimit < 0 || memlimit > SIZE_MAX) {
++		zend_argument_error(sodium_exception_ce, 3, "is too large");
++		RETURN_THROWS();
++	}
++	if (crypto_pwhash_str_needs_rehash(hash_str, (unsigned long long) opslimit, (size_t) memlimit) == 0) {
+ 		RETURN_FALSE;
+ 	}
+ 	RETURN_TRUE;
+@@ -2297,7 +2301,7 @@ PHP_FUNCTION(sodium_bin2base64)
+ 		sodium_remove_param_values_from_backtrace(EG(exception));
+ 		RETURN_THROWS();
+ 	}
+-	if ((((unsigned int) variant) & ~ 0x6U) != 0x1U) {
++	if (variant < 0 || (zend_ulong) variant > UINT_MAX || (((unsigned int) variant) & ~ 0x6U) != 0x1U) {
+ 		zend_argument_error(sodium_exception_ce, 2, "must be a valid base64 variant identifier");
+ 		RETURN_THROWS();
+ 	}
+@@ -2330,7 +2334,7 @@ PHP_FUNCTION(sodium_base642bin)
+ 		sodium_remove_param_values_from_backtrace(EG(exception));
+ 		RETURN_THROWS();
+ 	}
+-	if ((((unsigned int) variant) & ~ 0x6U) != 0x1U) {
++	if (variant < 0 || (zend_ulong) variant > UINT_MAX || (((unsigned int) variant) & ~ 0x6U) != 0x1U) {
+ 		zend_argument_error(sodium_exception_ce, 2, "must be a valid base64 variant identifier");
+ 		RETURN_THROWS();
+ 	}

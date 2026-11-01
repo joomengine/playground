@@ -46,10 +46,3 @@ export async function builtWrapper(minor, mode = 'cgi') {
   const wrapper = mode === 'debugger' ? 'PhpDbgNode.mjs' : 'PhpCgiNode.mjs';
   return import(new URL(wrapper, new URL(module, pathToFileURL(manifestPath))).href);
 }
-
-export async function builtRuntimeDirectory(minor, mode = 'cgi') {
-  const entry = (await builtManifest()).php.find(value => value.version === minor);
-  if (!entry) throw new Error(`Built distribution does not contain PHP ${minor}.`);
-  return fileURLToPath(new URL('.', new URL(mode === 'debugger' ? entry.debugger.moduleUrl : entry.moduleUrl,
-    pathToFileURL(manifestPath))));
-}

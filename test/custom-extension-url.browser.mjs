@@ -25,8 +25,8 @@ function configuration(extensionURL, extra = {}) {
     extensions: [extension], addonExtensions: [extension], startupCommands: [], ...extra };
 }
 
-async function start(page, configuration) {
-  return page.evaluate(async configuration => {
+async function start(page, configuration, options = {}) {
+  return page.evaluate(async ({ configuration, options }) => {
     const { createPlayground, PhpSession } = await import('./src/playground.mjs');
     if (!window.observedConsoleCommands) {
       window.observedConsoleCommands = [];
@@ -43,7 +43,7 @@ async function start(page, configuration) {
       };
     }
     window.validationProgress = [];
-    window.playground = await createPlayground(configuration, { onProgress: event => window.validationProgress.push(event) });
+    window.playground = await createPlayground(configuration, { ...options, onProgress: event => window.validationProgress.push(event) });
     const frontend = await window.playground.request('/');
     const administrator = await window.playground.request('/administrator/');
     const marker = JSON.parse(new TextDecoder().decode(await window.playground.fs.readFile('/persist/meta/joomla-install.json')));
@@ -62,15 +62,29 @@ async function start(page, configuration) {
     const account = JSON.parse(response.text ?? new TextDecoder().decode(response.body));
     return { installation, identity: { username: identity.username, name: identity.name, email: identity.email }, account,
       frontendStatus: frontend.status, administratorStatus: administrator.status, markerWarnings: marker.extensionWarnings,
-      module, commands: structuredClone(window.observedConsoleCommands), progress: window.validationProgress };
-  }, configuration);
+      module, commands: structuredClone(window.observedConsoleCommands), progress: window.validationProgress,
+      lastSavedAt: window.playground.lastSavedAt };
+  }, { configuration, options });
 }
 
 async function closeSite(page) {
   await page.evaluate(async () => { await window.playground?.close(); window.playground = null; });
 }
 
-test('browser Joomla CLI custom URLs and complete local image reuse', { timeout: 900000 }, async t => {
+// Seed an image as an earlier build did. New launches must still read compatible
+// cached images, but must not pay this full export cost before opening the site.
+async function cacheInstalledImage(page) {
+  return page.evaluate(async () => {
+    const started = performance.now();
+    const { deploymentImages } = await import('./src/deployment-images.mjs');
+    const manifest = await (await fetch('./assets/manifest.json')).json();
+    const exported = await window.playground.exportSite({ format: 'bundle' });
+    await deploymentImages.saveCustom(window.playground.configuration, manifest, exported.bytes);
+    return { durationMs: Math.round(performance.now() - started), images: await deploymentImages.list() };
+  });
+}
+
+test('browser Joomla CLI custom URLs launch directly and retain compatible local images', { timeout: 900000 }, async t => {
   let downloads = 0;
   const server = await createStaticServer({ directory });
   const cors = await createStaticServer({ directory, prefix: '/addons/', corsOrigin: new URL(server.url).origin,
@@ -91,8 +105,27 @@ test('browser Joomla CLI custom URLs and complete local image reuse', { timeout:
     assert.equal(result.account.passwordMatches, true);
   };
 
+  await t.test('deferred first persistence exposes a usable site and an awaited checkpoint can resume it', async st => {
+    st.after(() => closeSite(page));
+    const config = configuration(extensionURL, { persistence: true, storageKey: 'deferred-save-contract' });
+    const first = await start(page, config, { deferInitialSave: true });
+    assertHealthy(first);
+    assert.equal(first.lastSavedAt, null, 'Ready must not claim storage completion before the background checkpoint.');
+    const savedAt = await page.evaluate(async () => { await window.playground.flush(); return window.playground.lastSavedAt; });
+    assert.ok(Number.isFinite(Date.parse(savedAt)));
+    const before = downloads;
+    await closeSite(page);
+    const resumed = await start(page, config);
+    assertHealthy(resumed);
+    assert.equal(resumed.installation.resumed, true);
+    assert.ok(Number.isFinite(Date.parse(resumed.lastSavedAt)), 'The default API still awaits initial persistence.');
+    assert.equal(downloads, before, 'Saved-site resume must not reinstall the extension.');
+    await closeSite(page);
+  });
+
   await t.test('failed optional URLs and their dependencies warn without preventing site access', async st => {
     st.after(() => closeSite(page));
+    const before = downloads;
     const config = configuration(extensionURL);
     const missing = { url: new URL('missing.zip', cors.url).href };
     config.extensions.push(missing);
@@ -105,7 +138,7 @@ test('browser Joomla CLI custom URLs and complete local image reuse', { timeout:
     assertHealthy(result);
     assert.deepEqual(result.installation.extensionWarnings.map(warning => warning.package), ['Extension 2', 'Template', 'Menu', 'Command 1']);
     assert.deepEqual(result.markerWarnings, result.installation.extensionWarnings);
-    assert.equal(downloads, 1, 'The readable cross-origin custom package is installed exactly once.');
+    assert.equal(downloads, before + 1, 'The readable cross-origin custom package is installed exactly once.');
     assert.ok(!result.progress.some(event => event.message === 'Saving the prepared image for future sites…'), 'An incomplete recipe must not become a reusable complete image.');
     await closeSite(page);
   });
@@ -116,9 +149,9 @@ test('browser Joomla CLI custom URLs and complete local image reuse', { timeout:
     const first = await start(page, config);
     assertHealthy(first);
     assert.deepEqual(first.installation.extensionWarnings, []);
-    const saved = first.progress.findIndex(event => event.message === 'Saving the prepared image for future sites…');
-    const launched = first.progress.findIndex(event => event.phase === 'launch-image');
-    assert.ok(saved >= 0 && launched > saved, 'The completed image is saved before launch.');
+    assert.ok(!first.progress.some(event => /Preparing the image for reuse|Saving the prepared image/.test(event.message)),
+      'A custom site must open before any optional archive export.');
+    await cacheInstalledImage(page);
     const before = downloads;
     await closeSite(page);
     const second = await start(page, { ...config, siteName: 'A separate second site',
@@ -140,6 +173,7 @@ test('browser Joomla CLI custom URLs and complete local image reuse', { timeout:
     const first = await start(page, config);
     assertHealthy(first);
     assert.equal(first.commands.filter(argv => argv[0] === 'list').length, 1);
+    await cacheInstalledImage(page);
     const before = downloads;
     await closeSite(page);
     const second = await start(page, { ...config, admin: { ...config.admin, password: 'Rotated-password-789!' } });
@@ -151,7 +185,7 @@ test('browser Joomla CLI custom URLs and complete local image reuse', { timeout:
   });
 });
 
-test('large custom Service Directory image builds within its export allowance and reuses all data', { timeout: 900000 }, async t => {
+test('large custom Service Directory launches without export and still reads a compatible cached image', { timeout: 900000 }, async t => {
   const recipe = JSON.parse(await readFile(new URL('../deploys/servicedirectory.json', import.meta.url), 'utf8'));
   const sourceURL = recipe.variants['6'].extensions[0].url;
   const maintainedPackage = manifest.deploys.packages.find(entry => entry.sourceUrl === sourceURL);
@@ -209,7 +243,12 @@ test('large custom Service Directory image builds within its export allowance an
       };
     }
     const progress = window.largeImageProgress = [];
-    window.playground = await createPlayground(configuration, { onProgress: event => progress.push(event) });
+    try {
+      window.playground = await createPlayground(configuration, { onProgress: event => progress.push(event) });
+    } catch (error) {
+      window.largeImageFailure = { message: error.message, technicalDetails: error.technicalDetails };
+      throw error;
+    }
     const result = await window.playground.runPhp(`<?php
       require '/persist/www/configuration.php';
       $config = new JConfig();
@@ -236,16 +275,27 @@ test('large custom Service Directory image builds within its export allowance an
       images: await deploymentImages.list(), calls: structuredClone(window.largeImageCalls), progress };
   }, configuration);
   const buildStarted = performance.now();
-  const first = await launch(config);
+  let first;
+  try { first = await launch(config); }
+  catch (error) {
+    t.diagnostic(JSON.stringify({ consoleErrors, state: await page.evaluate(() => ({
+      failure: window.largeImageFailure, progress: window.largeImageProgress, database: window.largeImageDatabase,
+    })) }));
+    throw error;
+  }
   assert.deepEqual(first.data, { cities: 151233, states: 5073, executionTime: 60, siteName: config.siteName });
   assert.equal(first.configuredExecutionTime, 60);
   assert.equal(first.administratorStatus, 200);
   assert.deepEqual(first.warnings, []);
-  assert.deepEqual(first.calls.exports, [570]);
-  assert.equal(first.images.filter(image => image.kind === 'custom').length, 1);
+  assert.deepEqual(first.calls.exports, [], 'Launching must not dump and compress all 151233 cities into an optional image.');
+  assert.equal(first.images.filter(image => image.kind === 'custom').length, 0);
   assert.equal(downloads, 1);
-  assert.ok(first.progress.some(event => event.message === 'Saving the prepared image for future sites…'));
+  assert.ok(!first.progress.some(event => /Preparing the image for reuse|Saving the prepared image/.test(event.message)));
   assert.ok(!first.progress.some(event => event.phase === 'warning'));
+  const buildMs = Math.round(performance.now() - buildStarted);
+  const cached = await cacheInstalledImage(page);
+  const callsAfterExport = await page.evaluate(() => structuredClone(window.largeImageCalls));
+  assert.deepEqual(callsAfterExport.exports, [570], 'An explicitly requested export retains its full allowance.');
   if (process.env.PLAYGROUND_LARGE_IMAGE_ARTIFACT) {
     const encoded = await page.evaluate(async key => {
       const { deploymentImages } = await import('./src/deployment-images.mjs');
@@ -253,11 +303,10 @@ test('large custom Service Directory image builds within its export allowance an
       let binary = '';
       for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
       return btoa(binary);
-    }, first.images.find(image => image.kind === 'custom').key);
+    }, cached.images.find(image => image.kind === 'custom').key);
     await writeFile(process.env.PLAYGROUND_LARGE_IMAGE_ARTIFACT, Buffer.from(encoded, 'base64'));
   }
-  const buildMs = Math.round(performance.now() - buildStarted);
-  t.diagnostic(`Large custom image built and stored in ${buildMs} ms with ${first.data.cities} cities; ordinary PHP requests retain ${first.data.executionTime} seconds.`);
+  t.diagnostic(`Site opened in ${buildMs} ms with ${first.data.cities} cities. The optional export/cache cost removed from launch was ${cached.durationMs} ms.`);
   await closeSite(page);
   const restoreStarted = performance.now();
   let second;
@@ -277,7 +326,7 @@ test('large custom Service Directory image builds within its export allowance an
   assert.deepEqual(second.warnings, []);
   assert.equal(second.configuredExecutionTime, 60);
   assert.equal(downloads, 1, 'The complete large image must not download the extension again.');
-  assert.deepEqual(second.calls, first.calls, 'Reuse must not reinstall the extension or rebuild/export the image.');
+  assert.deepEqual(second.calls, callsAfterExport, 'Reuse must not reinstall the extension or rebuild/export the image.');
   assert.ok(!second.progress.some(event => event.phase === 'build-image'));
   assert.deepEqual(consoleErrors, [], 'Both building and reusing the image must leave a clean browser console.');
   t.diagnostic(`The separate site reused the large image in ${Math.round(performance.now() - restoreStarted)} ms without an extension download or CLI install.`);
