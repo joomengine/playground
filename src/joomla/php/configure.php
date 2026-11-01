@@ -2,18 +2,22 @@
 try {
     $root = playgroundRoot($playground);
     [$application, $container, $database] = playgroundApplication($root, true);
-    $administratorPath = dirname($root) . '/meta/administrator.json';
-    if (!is_file($administratorPath)) {
-        throw new RuntimeException('The saved administrator identity is unavailable.');
+    // Model edits need the saved Joomla identity. Renaming an existing site
+    // must also work when its owner changed that account inside Joomla.
+    if (!empty($playground['menus']) || !empty($playground['template'])) {
+        $administratorPath = dirname($root) . '/meta/administrator.json';
+        if (!is_file($administratorPath)) {
+            throw new RuntimeException('The saved administrator identity is unavailable.');
+        }
+        $credentials = json_decode(file_get_contents($administratorPath), true, 512, JSON_THROW_ON_ERROR);
+        $username = $credentials['administrator']['username'] ?? null;
+        $administratorId = (int) $database->setQuery('SELECT id FROM #__users WHERE username = ' . $database->quote($username ?? ''))->loadResult();
+        $administrator = $container->get(\Joomla\CMS\User\UserFactoryInterface::class)->loadUserById($administratorId);
+        if (!$administrator->authorise('core.admin')) {
+            throw new RuntimeException('The configured administrator cannot change site menus or templates.');
+        }
+        $application->loadIdentity($administrator);
     }
-    $credentials = json_decode(file_get_contents($administratorPath), true, 512, JSON_THROW_ON_ERROR);
-    $username = $credentials['administrator']['username'] ?? null;
-    $administratorId = (int) $database->setQuery('SELECT id FROM #__users WHERE username = ' . $database->quote($username ?? ''))->loadResult();
-    $administrator = $container->get(\Joomla\CMS\User\UserFactoryInterface::class)->loadUserById($administratorId);
-    if (!$administrator->authorise('core.admin')) {
-        throw new RuntimeException('The configured administrator cannot change site menus or templates.');
-    }
-    $application->loadIdentity($administrator);
     if (!defined('JPATH_COMPONENT')) define('JPATH_COMPONENT', $root . '/administrator/components/com_menus');
     \Joomla\CMS\Form\Form::addFormPath($root . '/administrator/components/com_menus/forms');
     \Joomla\CMS\Form\Form::addFormPath($root . '/administrator/components/com_templates/forms');

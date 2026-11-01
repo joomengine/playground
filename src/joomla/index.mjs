@@ -813,7 +813,12 @@ export async function applyJoomlaConfiguration(runtime, config, {
   progress({ stage: 'configure', message: 'Applying the site settings, menus and template…' });
   const identity = await execute(runtime, 'administrator', { ...location, mode: 'read' }, sourceLoader);
   if (configureLanguage) await execute(runtime, 'customize', { ...location, language: options.language, content: null, admin: identity.administrator, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
-  const configured = await configureDeployment(runtime, options, config, extensionWarnings, sourceLoader, progress, { siteName: options.siteName });
+  const configured = await configureDeployment(runtime, options, config, extensionWarnings, sourceLoader, progress, {
+    siteName: options.siteName,
+    // Validate homes when changing their setup, without rejecting later manual
+    // menu changes while copying or renaming an existing multilingual site.
+    multilingual: options.multilingual && (configureLanguage || options.menus.length > 0),
+  });
   await runDeploymentCommands(runtime, options.startupCommands, config, extensionWarnings, sourceLoader, progress);
   const health = await checkJoomla(runtime, { sourceLoader });
   await runtime.fs.writeFile(location.marker, JSON.stringify({ ...state.marker, language: health.language, extensionWarnings, updatedAt: new Date().toISOString() }));

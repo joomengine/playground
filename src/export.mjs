@@ -3,6 +3,9 @@ import { createFullDeploymentDocument } from './config.mjs';
 
 const FORMATS = new Set(['bundle', 'files', 'database']);
 const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;
+const EXPORT_TIMEOUT_MS = 600_000;
+// Leave time for PHP's error response and cleanup before the host deadline.
+const EXPORT_EXECUTION_SECONDS = EXPORT_TIMEOUT_MS / 1000 - 30;
 let sourcePromise;
 
 async function source() {
@@ -64,7 +67,9 @@ export async function exportSite(runtime, options = {}, { sourceLoader = source 
   const progress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
   try {
     progress({ phase: 'export', message: settings.format === 'database' ? 'Exporting the database…' : 'Preparing the portable Joomla export…' });
-    const result = await parseProvisioningResult(await runtime.runPhp(program(php, { ...payload, operation: 'create' }), { timeoutMs: 600_000 }));
+    const result = await parseProvisioningResult(await runtime.runPhp(program(php, {
+      ...payload, operation: 'create', executionTimeSeconds: EXPORT_EXECUTION_SECONDS,
+    }), { timeoutMs: EXPORT_TIMEOUT_MS }));
     const expectedName = settings.format === 'database' ? 'database.sql' : 'site.zip';
     if (result.path !== `${directory}/${expectedName}` || !Number.isSafeInteger(result.size) || result.size < 1 || result.size > MAX_DOWNLOAD_BYTES
         || typeof result.sha256 !== 'string' || !/^[a-f\d]{64}$/.test(result.sha256)) {

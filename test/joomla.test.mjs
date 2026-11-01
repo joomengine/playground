@@ -9,6 +9,44 @@ const configuration = {
   admin: { password: 'Local-Demo-Password-123!' },
 };
 
+test('renaming existing multilingual sites preserves manual homes while deliberate setup changes remain validated', async () => {
+  const { applyJoomlaConfiguration } = await import('../src/joomla/index.mjs');
+  const makeRuntime = () => {
+    const calls = [];
+    return { calls, fs: { writeFile: async () => {} },
+      request: async () => new Response('<a href="index.php?option=com_login&task=logout">Logout</a>'),
+      runPhp: async source => {
+        const operation = [...source.matchAll(/operation:([a-z-]+)/g)].at(-1)[1];
+        const payload = JSON.parse(Buffer.from(/base64_decode\('([^']+)'\)/.exec(source)[1], 'base64'));
+        calls.push({ operation, payload });
+        let result = { ok: true };
+        if (operation === 'status') result = { ...result, marker: { state: 'complete', joomlaVersion: '6.2.0' }, configured: true, installerPresent: false };
+        if (operation === 'health') result = { ...result, version: '6.2.0', language: 'en-GB', siteName: 'Renamed copy' };
+        // Model a site whose owner unpublished its original French home in Joomla.
+        if (operation === 'configure' && payload.multilingual) result = { ok: false, error: 'A multilingual deployment needs exactly one published home menu for fr-FR.' };
+        return { status: 200, text: '\n__JOOMENGINE_RESULT__' + JSON.stringify(result) };
+      } };
+  };
+  const sourceLoader = async name => `<?php\n// operation:${name}\n`;
+  const input = { ...configuration, siteName: 'Renamed copy', multilingual: true, languageTags: ['en-GB', 'fr-FR'] };
+  const runtime = makeRuntime();
+  await applyJoomlaConfiguration(runtime, input, { sourceLoader, configureLanguage: false });
+  const configured = runtime.calls.find(call => call.operation === 'configure').payload;
+  assert.equal(configured.siteName, 'Renamed copy');
+  assert.equal(configured.multilingual, false);
+  assert.equal(runtime.calls.some(call => call.operation === 'customize'), false);
+  assert.equal(input.multilingual, true, 'Stored deployment metadata remains unchanged.');
+  for (const [changed, settings] of [
+    [input, {}], // Direct callers keep the existing strict default.
+    [{ ...input, language: 'fr-FR' }, { configureLanguage: true }],
+    [{ ...input, menus: [{ title: 'French home', component: 'com_content', view: 'featured', language: 'fr-FR', home: true }] }, { configureLanguage: false }],
+  ]) {
+    const strict = makeRuntime();
+    await assert.rejects(applyJoomlaConfiguration(strict, changed, { sourceLoader, ...settings }), /exactly one published home/);
+    assert.equal(strict.calls.find(call => call.operation === 'configure').payload.multilingual, true);
+  }
+});
+
 test('installation options preserve command arguments without shell interpretation', () => {
   const argv = ['config:set', 'sitename=A site; $(echo text)'];
   const options = validateInstallOptions({ ...configuration, startupCommands: [argv] });

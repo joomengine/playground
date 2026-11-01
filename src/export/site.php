@@ -9,6 +9,21 @@ const PLAYGROUND_EXPORT_ENTRIES = 100000;
 const PLAYGROUND_EXPORT_BATCH_BYTES = 512 * 1024;
 const PLAYGROUND_EXPORT_CHUNK_BYTES = 128 * 1024;
 const PLAYGROUND_EXPORT_STATEMENT_BYTES = 4 * 1024 * 1024;
+const PLAYGROUND_EXPORT_EXECUTION_SECONDS = 570;
+
+/** Large database exports have a bounded allowance within the host deadline. */
+function exportExecutionAllowance(array $options): int
+{
+    $seconds = $options['executionTimeSeconds'] ?? PLAYGROUND_EXPORT_EXECUTION_SECONDS;
+    if (!is_int($seconds) || $seconds < 5 || $seconds > PLAYGROUND_EXPORT_EXECUTION_SECONDS) {
+        throw new InvalidArgumentException('Invalid export execution allowance.');
+    }
+    $previous = (int) ini_get('max_execution_time');
+    if (!set_time_limit($seconds) || (int) ini_get('max_execution_time') !== $seconds) {
+        throw new RuntimeException('Cannot apply the export execution allowance.');
+    }
+    return $previous;
+}
 
 function exportFinish(array $result): void
 {
@@ -558,6 +573,7 @@ function exportInstructions(string $format): string
         . "This export contains site content, account password hashes and configuration values. Store it as a site backup.\n";
 }
 
+$exportPreviousExecutionTime = null;
 try {
     $directory = exportDirectory($exportOptions);
     if (($exportOptions['operation'] ?? '') === 'cleanup') {
@@ -566,6 +582,7 @@ try {
         return;
     }
     if (($exportOptions['operation'] ?? '') !== 'create') throw new InvalidArgumentException('Unknown export operation.');
+    $exportPreviousExecutionTime = exportExecutionAllowance($exportOptions);
     $root = realpath($exportOptions['root'] ?? '/persist/www');
     if ($root === false || !is_file($root . '/configuration.php') || is_dir($root . '/installation')) throw new RuntimeException('A completed Joomla installation is required for export.');
     $format = $exportOptions['format'] ?? 'bundle';
@@ -634,4 +651,6 @@ try {
         try { exportRemove($directory); } catch (Throwable $ignored) { }
     }
     exportFinish(['ok' => false, 'error' => $error->getMessage()]);
+} finally {
+    if ($exportPreviousExecutionTime !== null) set_time_limit($exportPreviousExecutionTime);
 }

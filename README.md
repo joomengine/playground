@@ -420,8 +420,8 @@ and complete site downloads retain the known sandbox administrator. Browser stor
 evicted or cleared and is not a backup. A save reports completion only after both
 stores flush; closing a tab cannot guarantee an unfinished save completes.
 
-External packages must be public ZIP archives. Extension URLs accept HTTP or
-HTTPS; template URLs require HTTPS, with localhost HTTP allowed for development.
+External packages must be public ZIP archives. Extension and template URLs accept
+HTTP or HTTPS.
 Prefer HTTPS for integrity in transit. HTTP package URLs remain subject to the
 browser's mixed-content rules.
 Managed packages are limited to 128 MiB and repository packages have verified
