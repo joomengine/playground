@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "Pilih maksimal 30 paket ekstensi.",
   "label.extensionUrlNumber": "URL ZIP ekstensi {number}",
   "action.removeExtensionUrl": "Hapus URL ekstensi {number}",
-  "help.extensionDownloads": "Host paket harus mengizinkan unduhan melalui browser. Halaman HTTPS dapat memblokir unduhan HTTP.",
+  "help.extensionDownloads": "Paket ZIP publik diunduh otomatis saat Anda meluncurkan atau menerapkan konfigurasi ini.",
   "error.operationFailed": "Operasi tidak dapat diselesaikan. Buka detail teknis untuk informasi selengkapnya.",
   "title.technicalDetails": "Detail teknis",
   "help.temporaryRetry": "Penerapan sementara ini belum selesai. Coba lagi membuat situs sementara baru. Pemulihan dan pengaturan ulang situs tersimpan hanya tersedia jika penyimpanan diaktifkan.",

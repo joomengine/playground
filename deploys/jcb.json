@@ -30,5 +30,11 @@
       ]
     }
   },
-  "prebuild": true
+  "prebuild": true,
+  "requirements": {
+    "jcb": "required",
+    "joomlaFallbacks": {
+      "7": "6"
+    }
+  }
 }

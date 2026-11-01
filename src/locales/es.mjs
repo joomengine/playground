@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "Elige como máximo 30 paquetes de extensiones.",
   "label.extensionUrlNumber": "URL ZIP de la extensión {number}",
   "action.removeExtensionUrl": "Eliminar URL de extensión {number}",
-  "help.extensionDownloads": "El servidor del paquete debe permitir las descargas desde el navegador. Las páginas HTTPS pueden bloquear las descargas HTTP.",
+  "help.extensionDownloads": "Los paquetes ZIP públicos se descargan automáticamente al iniciar o aplicar esta configuración.",
   "error.operationFailed": "No se pudo completar la operación. Abre los detalles técnicos para obtener más información.",
   "title.technicalDetails": "Detalles técnicos",
   "help.temporaryRetry": "Este despliegue temporal está incompleto. Volver a intentar crea un nuevo sitio temporal. La recuperación y el restablecimiento de sitios guardados solo están disponibles cuando se activa el guardado.",

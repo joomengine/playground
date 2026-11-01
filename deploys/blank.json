@@ -11,5 +11,11 @@
   "configuration": {
     "siteName": "Joomla Playground",
     "initialPath": "/"
+  },
+  "requirements": {
+    "jcb": "optional",
+    "joomlaFallbacks": {
+      "7": "6"
+    }
   }
 }

@@ -20,6 +20,12 @@ try {
     $menuFactory = $application->bootComponent('com_menus')->getMVCFactory();
     $created = [];
     $homes = [];
+    $skipped = [];
+    $warnings = [];
+    $allowMissingDependencies = !empty($playground['allowMissingDependencies']);
+    $warn = static function (string $package, string $message) use (&$warnings): void {
+        $warnings[] = ['package' => $package, 'message' => $message];
+    };
     foreach ($playground['menus'] ?? [] as $entry) {
         $component = $entry['component'];
         if (!preg_match('/^com_[a-z0-9_]+$/', $component)) {
@@ -27,6 +33,11 @@ try {
         }
         $componentId = (int) $database->setQuery("SELECT extension_id FROM #__extensions WHERE type = 'component' AND enabled = 1 AND element = " . $database->quote($component))->loadResult();
         if (!$componentId || !is_dir($root . '/components/' . $component)) {
+            if ($allowMissingDependencies) {
+                $skipped[$entry['key']] = true;
+                $warn('Menu', 'Menu "' . $entry['title'] . '" was skipped because its component is unavailable: ' . $component . '.');
+                continue;
+            }
             throw new RuntimeException('Install the site component before creating its menu: ' . $component);
         }
         $view = $entry['view'];
@@ -35,6 +46,11 @@ try {
         }
         if (!is_dir($root . '/components/' . $component . '/tmpl/' . $view)
             && !is_dir($root . '/components/' . $component . '/views/' . $view)) {
+            if ($allowMissingDependencies) {
+                $skipped[$entry['key']] = true;
+                $warn('Menu', 'Menu "' . $entry['title'] . '" was skipped because its component view is unavailable: ' . $component . '/' . $view . '.');
+                continue;
+            }
             throw new RuntimeException('The component does not provide this site view: ' . $component . '/' . $view);
         }
         $type = new \Joomla\CMS\Table\MenuType($database);
@@ -65,7 +81,9 @@ try {
             'params' => $entry['params'], 'request' => $query, 'home' => $currentHome,
         ];
         if ($entry['templateStyle'] && !(int) $database->setQuery('SELECT id FROM #__template_styles WHERE client_id = 0 AND id = ' . (int) $entry['templateStyle'])->loadResult()) {
-            throw new RuntimeException('The selected menu template style does not exist.');
+            if (!$allowMissingDependencies) throw new RuntimeException('The selected menu template style does not exist.');
+            $data['template_style_id'] = 0;
+            $warn('Menu', 'Menu "' . $entry['title'] . '" uses the current site template because its selected template style is unavailable.');
         }
         $form = $model->getForm($data, false);
         if (!$form || ($validated = $model->validate($form, $data)) === false) {
@@ -102,36 +120,47 @@ try {
         $query .= isset($template['styleId']) ? ' AND id = ' . (int) $template['styleId'] : ' AND template = ' . $database->quote($template['element']);
         $style = $database->setQuery($query . ' ORDER BY id ASC', 0, 1)->loadAssoc();
         if (!$style || (isset($template['element']) && $style['template'] !== $template['element'])) {
-            throw new RuntimeException('Install the selected site template before configuring it.');
+            if (empty($playground['optionalTemplate'])) throw new RuntimeException('Install the selected site template before configuring it.');
+            $warn('Template', 'The selected custom template is unavailable. The current site template has been kept.');
+            $style = null;
         }
-        $styleId = (int) $style['id'];
-        $model = $application->bootComponent('com_templates')->getMVCFactory()->createModel('Style', 'Administrator', ['ignore_request' => true]);
-        $model->setCurrentUser($administrator);
-        $model->setState('item.client_id', 0);
-        $model->setState('item.template', $style['template']);
-        $model->setState('style.id', $styleId);
-        $parameters = new \Joomla\Registry\Registry($style['params']);
-        foreach ($template['params'] ?? [] as $name => $value) $parameters->set($name, $value);
-        $data = $style;
-        $data['params'] = $parameters->toArray();
-        if (!empty($template['menuKeys'])) {
-            $data['assigned'] = [];
-            foreach ($template['menuKeys'] as $key) {
-                if (!isset($created[$key])) throw new RuntimeException('Template assignment references an unknown deployment menu: ' . $key);
-                $data['assigned'][] = $created[$key];
+        if ($style) {
+            $styleId = (int) $style['id'];
+            $model = $application->bootComponent('com_templates')->getMVCFactory()->createModel('Style', 'Administrator', ['ignore_request' => true]);
+            $model->setCurrentUser($administrator);
+            $model->setState('item.client_id', 0);
+            $model->setState('item.template', $style['template']);
+            $model->setState('style.id', $styleId);
+            $parameters = new \Joomla\Registry\Registry($style['params']);
+            foreach ($template['params'] ?? [] as $name => $value) $parameters->set($name, $value);
+            $data = $style;
+            $data['params'] = $parameters->toArray();
+            if (!empty($template['menuKeys'])) {
+                $data['assigned'] = [];
+                foreach ($template['menuKeys'] as $key) {
+                    if (isset($skipped[$key])) {
+                        $warn('Template', 'A template assignment was skipped because its deployment menu is unavailable.');
+                        continue;
+                    }
+                    if (!isset($created[$key])) throw new RuntimeException('Template assignment references an unknown deployment menu: ' . $key);
+                    $data['assigned'][] = $created[$key];
+                }
             }
+            $form = $model->getForm($data, false);
+            if (!$form || ($validated = $model->validate($form, $data)) === false) {
+                throw new RuntimeException('Template settings are invalid: ' . implode('; ', array_map('strval', $model->getErrors())));
+            }
+            if (!$model->save(array_replace($data, $validated))) throw new RuntimeException('Cannot save template style: ' . $model->getError());
+            if (empty($template['menuKeys']) && !$model->setHome($styleId)) throw new RuntimeException('Cannot select the default template: ' . $model->getError());
         }
-        $form = $model->getForm($data, false);
-        if (!$form || ($validated = $model->validate($form, $data)) === false) {
-            throw new RuntimeException('Template settings are invalid: ' . implode('; ', array_map('strval', $model->getErrors())));
-        }
-        if (!$model->save(array_replace($data, $validated))) throw new RuntimeException('Cannot save template style: ' . $model->getError());
-        if (empty($template['menuKeys']) && !$model->setHome($styleId)) throw new RuntimeException('Cannot select the default template: ' . $model->getError());
     }
     if (!empty($playground['multilingual'])) {
         foreach ($playground['languageTags'] ?? [] as $tag) {
             $homeCount = (int) $database->setQuery('SELECT COUNT(*) FROM #__menu WHERE client_id = 0 AND home = 1 AND published = 1 AND language = ' . $database->quote($tag))->loadResult();
-            if ($homeCount !== 1) throw new RuntimeException('A multilingual deployment needs exactly one published home menu for ' . $tag . '.');
+            if ($homeCount !== 1) {
+                if (!$skipped) throw new RuntimeException('A multilingual deployment needs exactly one published home menu for ' . $tag . '.');
+                $warn('Menu', 'The home menu for ' . $tag . ' could not be configured because a required extension is unavailable.');
+            }
         }
     }
     if (array_key_exists('siteName', $playground)) {
@@ -153,7 +182,7 @@ try {
             if (is_file($temporary)) unlink($temporary);
         }
     }
-    playgroundFinish(['ok' => true, 'menus' => $created, 'templateStyle' => $styleId]);
+    playgroundFinish(['ok' => true, 'menus' => $created, 'templateStyle' => $styleId, 'warnings' => $warnings]);
 } catch (Throwable $error) {
     playgroundFinish(['ok' => false, 'error' => $error->getMessage()]);
 }

@@ -1,0 +1,128 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { createDeploymentImageCache, deploymentImageFingerprint, maintainedDeploymentImages,
+  completedDeploymentImageConfiguration } from '../src/deployment-images.mjs';
+
+const baseURL = 'https://playground.example/project/';
+const bytes = Uint8Array.of(0x50, 0x4b, 3, 4, 1, 2, 3, 4);
+const hash = async value => [...new Uint8Array(await crypto.subtle.digest('SHA-256', value))]
+  .map(byte => byte.toString(16).padStart(2, '0')).join('');
+const sha256 = await hash(bytes);
+const manifest = { sourceCommit: 'reviewed-build', php: [{ version: '8.4', patchVersion: '8.4.1' }],
+  joomla: [{ version: '6.2.0', sha256: 'a'.repeat(64) }],
+  prebuiltDeploys: [{ id: 'jcb', joomlaVersion: '6.2.0', phpVersion: '8.4',
+    url: 'snapshots/prepared.zip', sha256, size: bytes.length }] };
+const config = { deployId: 'custom-example', joomlaVersion: '6.2.0', phpVersion: '8.4', siteName: 'First site',
+  admin: { name: 'First administrator', username: 'admin', email: 'first@example.test', password: 'private-password' },
+  extensions: [{ url: 'https://example.test/package.zip', sha256: 'b'.repeat(64) }], startupCommands: [],
+  deploymentRecipe: { name: 'My deployment' } };
+
+function memoryStorage() {
+  const records = new Map();
+  return { records, writes: 0,
+    async list() { return [...records.values()].map(({ blob, ...record }) => ({ ...record })); },
+    async get(key) { return records.get(key); },
+    async put(record, data) { this.writes++; records.set(record.key, { ...record, blob: new Blob([data]) }); },
+    async touch(key, lastUsedAt) { if (records.has(key)) records.get(key).lastUsedAt = lastUsedAt; },
+    async remove(key) { records.delete(key); },
+  };
+}
+
+test('maintained images reuse verified bytes and replace stale hashes before reuse', async () => {
+  const storage = memoryStorage();
+  let downloads = 0, served = bytes;
+  const cache = createDeploymentImageCache({ baseURL, storage,
+    fetcher: async () => { downloads++; return new Response(served); } });
+  const entry = cache.maintained({ deployId: 'jcb', joomlaVersion: '6.2.0' }, manifest);
+  const [first, concurrent] = await Promise.all([cache.getMaintained(entry), cache.getMaintained(entry)]);
+  assert.deepEqual(first.bytes, bytes);
+  assert.deepEqual(concurrent.bytes, bytes);
+  assert.equal(downloads, 1);
+  assert.equal((await cache.getMaintained(entry)).cached, true);
+  assert.equal(storage.writes, 1, 'Reading updates metadata without rewriting the ZIP.');
+  const list = await cache.list(manifest);
+  assert.equal(list[0].available, true);
+  assert.equal(list[0].size, bytes.length);
+  assert.equal('url' in list[0], false);
+  assert.equal('sha256' in list[0], false);
+  assert.equal((await cache.list(undefined)).length, 1, 'Offline management retains cached images.');
+
+  served = Uint8Array.of(...bytes, 9);
+  const updated = { ...manifest, prebuiltDeploys: [{ ...manifest.prebuiltDeploys[0], sha256: await hash(served), size: served.length }] };
+  assert.equal((await cache.list(updated))[0].available, false);
+  assert.equal(storage.records.size, 0, 'Old server bytes are invalidated when the authoritative hash changes.');
+  const latest = await cache.getMaintained(cache.maintained({ deployId: 'jcb', joomlaVersion: '6.2.0' }, updated));
+  assert.deepEqual(latest.bytes, served);
+  assert.equal(downloads, 2);
+  await cache.remove(entry.key);
+  assert.equal((await cache.list(updated))[0].available, false);
+});
+
+test('corruption is discarded, downloads require integrity, and quota failure does not block a valid image', async () => {
+  const storage = memoryStorage();
+  const entry = maintainedDeploymentImages(manifest, baseURL)[0];
+  await storage.put(entry, Uint8Array.of(9, 9, 9));
+  let downloads = 0;
+  const cache = createDeploymentImageCache({ baseURL, storage, fetcher: async () => { downloads++; return new Response(bytes); } });
+  assert.deepEqual((await cache.getMaintained(entry)).bytes, bytes);
+  assert.equal(downloads, 1);
+  await cache.remove(entry.key);
+  const broken = createDeploymentImageCache({ baseURL, storage, fetcher: async () => new Response(Uint8Array.of(1)) });
+  await assert.rejects(broken.getMaintained(entry), /integrity/);
+  assert.equal(storage.records.size, 0);
+  const warnings = [];
+  storage.put = async () => { throw new Error('Quota exceeded'); };
+  const result = await cache.getMaintained(entry, { onWarning: value => warnings.push(value) });
+  assert.deepEqual(result.bytes, bytes);
+  assert.equal(warnings.length, 1);
+  assert.doesNotMatch(warnings[0], /https?:/);
+});
+
+test('custom images persist independently, expose no credentials, and survive server reconciliation', async () => {
+  const storage = memoryStorage();
+  const cache = createDeploymentImageCache({ baseURL, storage });
+  const fingerprint = await deploymentImageFingerprint(config, manifest);
+  const saved = await cache.saveCustom(config, manifest, bytes, { fingerprint });
+  assert.equal(saved.title, 'My deployment');
+  assert.deepEqual((await cache.getCustom(fingerprint)).bytes, bytes);
+  assert.equal((await cache.list({ ...manifest, prebuiltDeploys: [] })).length, 1);
+  assert.doesNotMatch(JSON.stringify(await cache.list()), /password|first@example|First administrator/);
+  storage.records.get(saved.key).blob = new Blob([]);
+  assert.equal(await cache.getCustom(fingerprint), null, 'An incomplete image is removed before it reaches the importer.');
+  assert.equal(storage.records.size, 0);
+});
+
+test('fingerprints reuse ordinary site copies but isolate changed packages, runtimes and command identity', async () => {
+  const original = await deploymentImageFingerprint(config, manifest);
+  assert.equal(await deploymentImageFingerprint({ ...config, siteName: 'Second site', storageKey: 'second',
+    admin: { ...config.admin, username: 'second', email: 'second@example.test', password: 'different-private-password' } }, manifest), original);
+  for (const modified of [{ ...config, extensions: [{ ...config.extensions[0], sha256: 'c'.repeat(64) }] },
+    { ...config, language: 'af-ZA' }, { ...config, content: { articles: [{ title: 'New content' }] } }]) {
+    assert.notEqual(await deploymentImageFingerprint(modified, manifest), original);
+  }
+  assert.notEqual(await deploymentImageFingerprint(config, { ...manifest, php: [{ version: '8.4', patchVersion: '8.4.2' }] }), original);
+  const commands = { ...config, startupCommands: [['config:get', 'sitename']] };
+  assert.notEqual(await deploymentImageFingerprint(commands, manifest),
+    await deploymentImageFingerprint({ ...commands, siteName: 'Second site' }, manifest));
+  const derived = { ...config, deployId: 'jcb', snapshot: {} };
+  assert.notEqual(await deploymentImageFingerprint(derived, manifest),
+    await deploymentImageFingerprint(derived, { ...manifest, prebuiltDeploys: [{ ...manifest.prebuiltDeploys[0], sha256: 'd'.repeat(64) }] }));
+});
+
+test('complete local images keep setup data while preventing package and command replay', () => {
+  const source = { ...config, addonExtensions: config.extensions, addonStartupCommands: [['cache:clean']],
+    addonLanguages: [{ tag: 'af-ZA' }], template: { element: 'cassiopeia', url: 'https://example.test/template.zip',
+      sha256: 'a'.repeat(64), params: { brand: 'Keep' } } };
+  const restored = completedDeploymentImageConfiguration(source);
+  assert.deepEqual(restored.addonExtensions, []);
+  assert.deepEqual(restored.addonStartupCommands, []);
+  assert.deepEqual(restored.addonLanguages, []);
+  assert.deepEqual(restored.template, { element: 'cassiopeia', params: { brand: 'Keep' } });
+  assert.equal(restored.admin, source.admin, 'The receiving administrator still reaches snapshot import.');
+  assert.equal(source.template.url, 'https://example.test/template.zip', 'The editable recipe remains intact.');
+});
+
+test('maintained image catalog rejects external URLs and conflicting identities', () => {
+  assert.throws(() => maintainedDeploymentImages({ prebuiltDeploys: [{ ...manifest.prebuiltDeploys[0], url: 'https://elsewhere.test/image.zip' }] }, baseURL), /catalog is invalid/);
+  assert.throws(() => maintainedDeploymentImages({ prebuiltDeploys: [manifest.prebuiltDeploys[0], manifest.prebuiltDeploys[0]] }, baseURL), /duplicate/);
+});

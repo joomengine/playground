@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { customSetupDetails, defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from '../src/ui-state.mjs';
+import { createFullDeploymentDocument, parseDeploymentDocument } from '../src/config.mjs';
 
 const configuration = {
   deployId: 'jcb', joomlaVersion: '6.2.0', phpVersion: '8.4', siteName: 'Saved work',
@@ -36,6 +37,33 @@ test('saved launch preferences whitelist public settings and consume fresh reque
   assert.deepEqual(value.startupCommands, [['cache:clean']]);
   value.startupCommands[0].push('extra');
   assert.deepEqual(configuration.startupCommands, [['cache:clean']]);
+});
+
+test('saved custom sites retain an independent complete recipe without administrator details', () => {
+  const document = createFullDeploymentDocument({ ...configuration, deployId: 'custom-saved', sourceDeployId: 'jcb', addonExtensions: [],
+    addonStartupCommands: [], addonLanguages: [] }, { name: 'My saved deployment', requirements: { joomla: ['6'], jcb: 'required' } });
+  const input = { ...configuration, ...parseDeploymentDocument(document) };
+  const remembered = rememberSite(empty(), input);
+  const restored = readSavedState({ getItem: () => JSON.stringify(remembered) }, 'settings').sites.work;
+  assert.equal(restored.deploymentRecipe.name, document.name);
+  assert.equal(restored.deploymentRecipe.configuration.sourceDeployId, 'jcb');
+  assert.equal(restored.deploymentRecipe.configuration.fresh, false);
+  assert.deepEqual(restored.deploymentRecipe.requirements, document.requirements);
+  assert.deepEqual(restored.deploymentRecipe.configuration.extensions, document.configuration.extensions);
+  assert.deepEqual(restored.addonExtensions, []);
+  assert.equal(restored.admin, undefined);
+  assert.equal(restored.deploymentRecipe.configuration.admin, undefined);
+  assert.doesNotMatch(JSON.stringify(restored), /private administrator|private@example/);
+  restored.deploymentRecipe.configuration.extensions.length = 0;
+  assert.equal(document.configuration.extensions.length, 1);
+});
+
+test('local custom persistence does not require a recipe to be suitable for a public share', () => {
+  const input = { ...configuration, startupCommands: [['user:add', '--password=local-command-password']] };
+  input.deploymentRecipe = createFullDeploymentDocument(input, { name: 'Local setup' });
+  const site = rememberSite(empty(), input).sites.work;
+  assert.deepEqual(site.deploymentRecipe.configuration.startupCommands, input.startupCommands);
+  assert.equal(site.deploymentRecipe.configuration.admin, undefined);
 });
 
 test('persistent sites remember the active key while reset preserves other sites', () => {

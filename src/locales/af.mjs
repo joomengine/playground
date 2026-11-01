@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "Kies hoogstens 30 uitbreidingspakkette.",
   "label.extensionUrlNumber": "Uitbreiding se ZIP-URL {number}",
   "action.removeExtensionUrl": "Verwyder uitbreidings-URL {number}",
-  "help.extensionDownloads": "Die pakketgasheer moet blaaieraflaaie toelaat. HTTPS-bladsye kan HTTP-aflaaie blokkeer.",
+  "help.extensionDownloads": "Openbare ZIP-pakkette word outomaties afgelaai wanneer jy hierdie konfigurasie begin of toepas.",
   "error.operationFailed": "Die bewerking kon nie voltooi word nie. Maak Tegniese besonderhede oop vir meer inligting.",
   "title.technicalDetails": "Tegniese besonderhede",
   "help.temporaryRetry": "Hierdie tydelike ontplooiing is onvolledig. Probeer weer skep ’n nuwe tydelike webwerf. Herstel en terugstel van gestoorde webwerwe is slegs beskikbaar wanneer stoor geaktiveer is.",

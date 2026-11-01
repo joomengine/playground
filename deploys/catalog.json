@@ -11,7 +11,13 @@
       "joomla": [
         "5",
         "6"
-      ]
+      ],
+      "requirements": {
+        "jcb": "required",
+        "joomlaFallbacks": {
+          "7": "6"
+        }
+      }
     },
     {
       "id": "jcb-mcp",
@@ -20,7 +26,10 @@
       "joomla": [
         "6"
       ],
-      "file": "./jcb-mcp.json"
+      "file": "./jcb-mcp.json",
+      "requirements": {
+        "jcb": "required"
+      }
     },
     {
       "id": "servicedirectory",
@@ -30,7 +39,10 @@
         "5",
         "6"
       ],
-      "file": "./servicedirectory.json"
+      "file": "./servicedirectory.json",
+      "requirements": {
+        "jcb": "optional"
+      }
     },
     {
       "id": "blank",
@@ -40,7 +52,13 @@
       "joomla": [
         "5",
         "6"
-      ]
+      ],
+      "requirements": {
+        "jcb": "optional",
+        "joomlaFallbacks": {
+          "7": "6"
+        }
+      }
     },
     {
       "id": "heritage-demo",
@@ -50,7 +68,10 @@
       "joomla": [
         "5",
         "6"
-      ]
+      ],
+      "requirements": {
+        "jcb": "optional"
+      }
     },
     {
       "id": "patchtester",
@@ -60,7 +81,10 @@
       "joomla": [
         "5",
         "6"
-      ]
+      ],
+      "requirements": {
+        "jcb": "optional"
+      }
     },
     {
       "id": "weblinks",
@@ -70,7 +94,10 @@
       "joomla": [
         "5",
         "6"
-      ]
+      ],
+      "requirements": {
+        "jcb": "optional"
+      }
     }
   ],
   "languages": {

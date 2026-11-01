@@ -1,4 +1,4 @@
-# Browser isolation and approved public images
+# Browser isolation, public downloads and approved images
 
 Playground keeps its existing PHP and MariaDB WebAssembly runtimes. Browser
 compatibility changes neither database credentials nor saved-site storage.
@@ -11,7 +11,18 @@ compatibility changes neither database credentials nor saved-site storage.
 COEP selects the embedding policy. CORP permits particular cross-origin
 embeddings. CORS permits reading a response from another origin. These are
 separate permissions: an image that can be displayed is not necessarily readable
-by PHP's browser Fetch transport.
+by a browser Fetch request. PHP HTTP requests also use this browser transport.
+
+## Custom extension installation
+
+Rocket passes custom extension and template URLs to Joomla's console command
+`extension:install --url=URL`. Joomla downloads, unpacks and installs the package;
+Rocket does not prefetch custom ZIPs. User-supplied checksum fields are ignored.
+An installer failure is shown with its details while the site continues opening.
+Required core packages retain their verified installation path.
+
+This flow uses the existing PHP HTTP transport and page isolation policy.
+Cross-origin reads follow CORS, and HTTP URLs follow browser mixed-content rules.
 
 ## Startup and ownership
 

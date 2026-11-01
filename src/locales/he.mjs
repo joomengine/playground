@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "בחרו עד 30 חבילות הרחבה.",
   "label.extensionUrlNumber": "כתובת ZIP של הרחבה {number}",
   "action.removeExtensionUrl": "הסרת כתובת ההרחבה {number}",
-  "help.extensionDownloads": "השרת המארח את החבילה חייב לאפשר הורדות מהדפדפן. דפי HTTPS עשויים לחסום הורדות HTTP.",
+  "help.extensionDownloads": "חבילות ZIP ציבוריות יורדות באופן אוטומטי בעת הפעלה או החלה של תצורה זו.",
   "error.operationFailed": "לא ניתן היה להשלים את הפעולה. למידע נוסף, פתחו את הפרטים הטכניים.",
   "title.technicalDetails": "פרטים טכניים",
   "help.temporaryRetry": "הפריסה הזמנית הזו לא הושלמה. ניסיון חוזר יוצר אתר זמני חדש. שחזור ואיפוס של אתר שמור זמינים רק כאשר השמירה מופעלת.",

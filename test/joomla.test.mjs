@@ -79,6 +79,12 @@ test('provisioning accepts only an explicit successful PHP envelope', async () =
   await assert.rejects(parseProvisioningResult(new Response('PHP fatal error', { status: 500 })), /did not complete/);
   await assert.rejects(parseProvisioningResult({ status: 200, text: '\n__JOOMENGINE_RESULT__{"ok":false,"error":"Cannot connect to MariaDB"}' }), /Cannot connect to MariaDB/);
   await assert.rejects(parseProvisioningResult({ status: 200, text: '\n__JOOMENGINE_RESULT__{"ok":false,"exitCode":1,"output":"Installer rejected the package"}' }), /Installer rejected/);
+  const consoleOutput = 'Install Extension\n=================\n\n [ERROR] Unable to install extension\n\n [WARNING] Error connecting to the server: 404\n';
+  await assert.rejects(parseProvisioningResult({ status: 200, text: '\n__JOOMENGINE_RESULT__' + JSON.stringify({ ok: false, exitCode: 1, output: consoleOutput }) }), error => {
+    assert.equal(error.message, 'Error connecting to the server: 404');
+    assert.match(error.technicalDetails, /Install Extension/);
+    return true;
+  });
   await assert.rejects(parseProvisioningResult({ status: 200, text: '\n__JOOMENGINE_RESULT__{"ok":true}\nFatal error during shutdown' }), /Invalid PHP provisioning response/);
   await assert.rejects(parseProvisioningResult({ status: 500, text: '\n__JOOMENGINE_RESULT__{"ok":true}' }), /HTTP 500 after/);
 });
@@ -184,9 +190,9 @@ test('installer errors identify package, phase and deadline without exposing HTM
     return { status: 500, text: '\n__JOOMENGINE_RESULT__{"ok":false,"error":"Maximum execution time of 180 seconds exceeded"}<!DOCTYPE html>' };
   } };
   await assert.rejects(installExtension(runtime, bytes, { sourceLoader: async () => '<?php', packageUrl: 'https://example.test/package.zip?token=secret' }), error => {
-    assert.match(error.message, /package.zip installation exceeded PHP's 180-second limit/);
-    assert.doesNotMatch(error.message, /DOCTYPE|secret/);
-    assert.equal(error.packageUrl, 'https://example.test/package.zip');
+    assert.match(error.message, /Extension package installation exceeded PHP's 180-second limit/);
+    assert.doesNotMatch(error.message, /DOCTYPE|secret|example\.test|package\.zip/);
+    assert.equal(error.packageUrl, 'Extension package');
     assert.equal(error.phase, 'installation');
     assert.equal(error.incomplete, true);
     assert.equal(error.executionTimeSeconds, 180);
@@ -210,8 +216,8 @@ test('applying packages distinguishes unreadable downloads, verification and ins
   await assert.rejects(applyJoomlaConfiguration(runtime, config, { sourceLoader, progress: event => progress.push(event),
     fetchPackage: async () => { throw new TypeError('Failed to fetch'); } }), error => {
     assert.equal(error.phase, 'download');
-    assert.match(error.message, /browser could not read/);
-    assert.doesNotMatch(error.message, /private/);
+    assert.match(error.message, /download could not be completed/);
+    assert.doesNotMatch(error.message, /private|example\.test|cross-origin|HTTP downloads/);
     return true;
   });
   assert.equal(writes.length, 0);
@@ -224,4 +230,127 @@ test('applying packages distinguishes unreadable downloads, verification and ins
   assert.equal(calls.at(-1).payload.installationExecutionTimeSeconds, 180);
   assert.equal(calls.at(-1).options.timeoutMs, 210000);
   assert.equal(writes.length, 1, 'Failure must not rewrite the complete marker or replay installation.');
+});
+
+test('custom extension URLs go directly to Joomla CLI without a staged archive', async () => {
+  const { installExtensionFromURL } = await import('../src/joomla/index.mjs');
+  const url = 'https://github.com/joomengine/pkg-component-builder/archive/refs/heads/6.x.zip';
+  const calls = [];
+  const runtime = {
+    fs: { writeFile: async () => assert.fail('Custom URL installation must not stage an archive.') },
+    runPhp: async (source, options) => {
+      const payload = JSON.parse(Buffer.from(/base64_decode\('([^']+)'\)/.exec(source)[1], 'base64'));
+      calls.push({ payload, options });
+      return { status: 200, text: '\n__JOOMENGINE_RESULT__{"ok":true,"exitCode":0,"output":"Extension installed successfully."}' };
+    },
+  };
+  const result = await installExtensionFromURL(runtime, url, { sourceLoader: async () => '<?php' });
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(calls[0].payload.argv, ['extension:install', `--url=${url}`]);
+  assert.equal(calls[0].payload.archive, undefined);
+  assert.equal(calls[0].payload.installationExecutionTimeSeconds, 180);
+  assert.equal(calls[0].options.timeoutMs, 210000);
+});
+
+test('custom extension and template checksum metadata is ignored while managed packages remain strict', () => {
+  const extension = { url: 'https://example.test/extension.zip', sha256: 'ignored', sha512: 'ignored' };
+  const template = { url: 'https://example.test/template.zip', element: 'custom', sha256: 'ignored' };
+  const options = validateInstallOptions({ ...configuration, extensions: [extension], addonExtensions: [extension], template, addonTemplate: template });
+  assert.deepEqual(options.extensions, [{ url: extension.url }]);
+  assert.equal(options.template.sha256, undefined);
+  assert.throws(() => validateInstallOptions({ ...configuration, extensions: [extension], addonExtensions: [] }), /SHA-256/);
+  assert.throws(() => validateInstallOptions({ ...configuration, template }), /SHA-256/);
+});
+
+test('failed custom URLs remain warnings while later extensions and site configuration continue', async () => {
+  const { applyJoomlaConfiguration } = await import('../src/joomla/index.mjs');
+  const first = { url: 'https://example.test/failing.zip', sha256: 'ignored' };
+  const second = { url: 'https://example.test/working.zip' };
+  const template = { url: 'https://example.test/template.zip', element: 'missing', sha256: 'ignored' };
+  const sourceLoader = async name => `<?php\n// operation:${name}\n`;
+  const calls = [], writes = [], progress = [];
+  const runtime = {
+    fs: { writeFile: async (...args) => writes.push(args) },
+    request: async () => new Response('<a href="index.php?option=com_login&task=logout">Logout</a>'),
+    runPhp: async source => {
+      const operation = [...source.matchAll(/operation:([a-z-]+)/g)].at(-1)[1];
+      const payload = JSON.parse(Buffer.from(/base64_decode\('([^']+)'\)/.exec(source)[1], 'base64'));
+      calls.push({ operation, payload });
+      let result = { ok: true };
+      if (operation === 'status') result = { ...result, marker: { state: 'complete', joomlaVersion: '6.2.0' }, configured: true, installerPresent: false };
+      if (operation === 'health') result = { ...result, version: '6.2.0', language: 'en-GB', siteName: 'Custom site' };
+      if (operation === 'console' && payload.argv[1] !== `--url=${second.url}`) {
+        result = { ok: false, exitCode: 1, output: 'Joomla could not install this package.' };
+      }
+      return { status: 200, text: '\n__JOOMENGINE_RESULT__' + JSON.stringify(result) };
+    },
+  };
+  const result = await applyJoomlaConfiguration(runtime, { ...configuration, extensions: [first, second], addonExtensions: [first, second], template, addonTemplate: template }, {
+    sourceLoader, progress: event => progress.push(event), fetchPackage: async () => assert.fail('Joomla must fetch custom URLs itself.'),
+  });
+  assert.deepEqual(calls.filter(call => call.operation === 'console').map(call => call.payload.argv), [
+    ['extension:install', `--url=${first.url}`], ['extension:install', `--url=${second.url}`], ['extension:install', `--url=${template.url}`],
+  ]);
+  assert.equal(calls.find(call => call.operation === 'configure').payload.template, null, 'A failed optional template must not be selected as the site template.');
+  assert.equal(result.extensionWarnings.length, 2);
+  assert.deepEqual(result.extensionWarnings.map(warning => warning.package), ['Extension 1', 'Template']);
+  assert.ok(result.extensionWarnings.every(warning => warning.exitCode === 1));
+  assert.ok(result.extensionWarnings.every(warning => warning.technicalDetails.includes('Joomla could not install')));
+  assert.equal(progress.at(-1).stage, 'ready');
+  assert.equal(writes.length, 1, 'Only the completed site marker is written by the wrapper.');
+  const marker = JSON.parse(writes[0][1]);
+  assert.equal(marker.state, 'complete');
+  assert.deepEqual(marker.extensionWarnings, result.extensionWarnings);
+});
+
+test('missing addon dependencies and custom command failures stay visible while the site opens', async () => {
+  const { applyJoomlaConfiguration } = await import('../src/joomla/index.mjs');
+  const extension = { url: 'https://example.test/addon.zip' };
+  const command = ['addon:prepare'];
+  const calls = [];
+  const runtime = {
+    fs: { writeFile: async () => {} },
+    request: async () => new Response('<a href="index.php?option=com_login&task=logout">Logout</a>'),
+    runPhp: async source => {
+      const operation = [...source.matchAll(/operation:([a-z-]+)/g)].at(-1)[1];
+      const payload = JSON.parse(Buffer.from(/base64_decode\('([^']+)'\)/.exec(source)[1], 'base64'));
+      calls.push({ operation, payload });
+      let result = { ok: true };
+      if (operation === 'status') result = { ...result, marker: { state: 'complete', joomlaVersion: '6.2.0' }, configured: true, installerPresent: false };
+      if (operation === 'health') result = { ...result, version: '6.2.0', language: 'en-GB' };
+      if (operation === 'console') result = { ok: false, exitCode: 1, output: 'The optional addon is unavailable.' };
+      if (operation === 'configure') {
+        assert.equal(payload.allowMissingDependencies, true);
+        result.warnings = [{ package: 'Menu', message: 'Menu was skipped because its component is unavailable.' }];
+      }
+      return { status: 200, text: '\n__JOOMENGINE_RESULT__' + JSON.stringify(result) };
+    },
+  };
+  const result = await applyJoomlaConfiguration(runtime, { ...configuration, extensions: [extension], addonExtensions: [extension],
+    startupCommands: [command], addonStartupCommands: [command] }, { sourceLoader: async name => `<?php\n// operation:${name}\n` });
+  assert.deepEqual(result.extensionWarnings.map(warning => warning.package), ['Extension 1', 'Menu', 'Command 1']);
+  assert.equal(calls.filter(call => call.operation === 'console').length, 2, 'A failed optional command is attempted only once.');
+  assert.ok(calls.some(call => call.operation === 'health'), 'Joomla health still has to succeed.');
+});
+
+test('custom installation does not hide engine failures or malformed PHP results', async () => {
+  const { applyJoomlaConfiguration } = await import('../src/joomla/index.mjs');
+  const extension = { url: 'https://example.test/addon.zip' };
+  for (const failure of [new Error('WebAssembly runtime is unavailable.'), { status: 500, text: 'PHP engine terminated' }]) {
+    let calls = 0;
+    const runtime = {
+      fs: { writeFile: async () => assert.fail('A failed engine cannot mark this site complete.') },
+      runPhp: async () => {
+        if (++calls === 1) return { status: 200, text: '\n__JOOMENGINE_RESULT__' + JSON.stringify({
+          ok: true, marker: { state: 'complete', joomlaVersion: '6.2.0' }, configured: true, installerPresent: false,
+        }) };
+        if (failure instanceof Error) throw failure;
+        return failure;
+      },
+    };
+    await assert.rejects(applyJoomlaConfiguration(runtime, { ...configuration, extensions: [extension], addonExtensions: [extension] }, {
+      sourceLoader: async () => '<?php',
+    }), /WebAssembly runtime|PHP did not complete/);
+    assert.equal(calls, 2);
+  }
 });

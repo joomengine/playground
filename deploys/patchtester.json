@@ -17,5 +17,8 @@
         "sha256": "2633eb69d81e0345c6285301e6d5a07e62708613240bacdbbf80f180297b9c31"
       }
     ]
+  },
+  "requirements": {
+    "jcb": "optional"
   }
 }

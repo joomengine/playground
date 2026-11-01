@@ -1,3 +1,5 @@
+import { deploymentRequiresJcb } from './deployment-compatibility.mjs';
+
 // Read the version from the upstream identity, not the name of a staged ZIP.
 function jcbVersion(entry) {
   const source = entry?.sourceUrl || entry?.url || '';
@@ -28,14 +30,19 @@ export function initialJcbSelection({ input, deploy, major, pinned, isSaved }) {
   const fallback = pinned.get(recipeMajor(major, pinned))?.version;
   // Historical sites without JCB selection must retain the original recipe.
   if (isSaved) return { version: fallback && recipeIncludesJcb(deploy, major, fallback) ? fallback : 'none', omit: true };
-  return { version: input.deployId === 'blank' ? 'none' : fallback || 'none', omit: false };
+  return { version: fallback && (deploymentRequiresJcb(deploy) || recipeIncludesJcb(deploy, major, fallback)) ? fallback : 'none', omit: false };
 }
 
 export function jcbSelectionInput({ selection, major, deploy, pinned }) {
   if (selection.omit) return {};
   const version = selection.version;
-  if (version === 'none') return { jcbVersion: version };
+  if (version === 'none') {
+    if (deploymentRequiresJcb(deploy)) throw new TypeError(`${deploy.title || 'This deployment'} requires Joomla Component Builder. Choose a compatible JCB version.`);
+    return { jcbVersion: version };
+  }
   if (!version) throw new TypeError('Choose a JCB version.');
+  const selectedMajor = version.split('.')[0];
+  if (selectedMajor !== major && !(major === '7' && selectedMajor === '6')) throw new TypeError(`JCB ${version} is not a selectable package for Joomla ${major}.`);
   const explicit = selection.package;
   const pinnedEntry = pinned.get(recipeMajor(major, pinned));
   if (!explicit && recipeIncludesJcb(deploy, major, version)) return { jcbVersion: version };

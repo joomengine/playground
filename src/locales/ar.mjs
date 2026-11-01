@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "اختر 30 حزمة إضافات كحد أقصى.",
   "label.extensionUrlNumber": "عنوان ZIP للإضافة {number}",
   "action.removeExtensionUrl": "إزالة عنوان الإضافة {number}",
-  "help.extensionDownloads": "يجب أن يسمح مضيف الحزمة بالتنزيل عبر المتصفح. قد تحظر صفحات HTTPS تنزيلات HTTP.",
+  "help.extensionDownloads": "تُنزَّل حزم ZIP العامة تلقائيًا عند تشغيل هذا الإعداد أو تطبيقه.",
   "error.operationFailed": "تعذر إكمال العملية. افتح التفاصيل التقنية لمزيد من المعلومات.",
   "title.technicalDetails": "التفاصيل التقنية",
   "help.temporaryRetry": "هذا النشر المؤقت غير مكتمل. تؤدي إعادة المحاولة إلى إنشاء موقع مؤقت جديد. لا تتوفر استعادة المواقع المحفوظة وإعادة تعيينها إلا عند تمكين الحفظ.",

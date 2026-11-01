@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "Kies maximaal 30 extensiepakketten.",
   "label.extensionUrlNumber": "ZIP-URL van extensie {number}",
   "action.removeExtensionUrl": "Extensie-URL {number} verwijderen",
-  "help.extensionDownloads": "De pakkethost moet downloads via de browser toestaan. HTTPS-pagina’s kunnen HTTP-downloads blokkeren.",
+  "help.extensionDownloads": "Openbare ZIP-pakketten worden automatisch gedownload wanneer je deze configuratie start of toepast.",
   "error.operationFailed": "De bewerking kon niet worden voltooid. Open Technische details voor meer informatie.",
   "title.technicalDetails": "Technische details",
   "help.temporaryRetry": "Deze tijdelijke implementatie is onvolledig. Opnieuw proberen maakt een nieuwe tijdelijke website. Herstel en reset van opgeslagen websites zijn alleen beschikbaar als opslaan is ingeschakeld.",

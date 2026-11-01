@@ -28,6 +28,7 @@ test('repository catalog and every manifest validate with required integrity pin
   for (const entry of loaded.deploys) {
     const deploy = normalizeDeploy(JSON.parse(files.get(entry.url)), { baseURL: entry.url });
     assert.equal(deploy.id, entry.id);
+    assert.deepEqual(deploy.requirements, entry.requirements, 'Catalog availability and launch requirements must agree.');
   }
 });
 

@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "Choisissez au maximum 30 paquets d’extensions.",
   "label.extensionUrlNumber": "URL ZIP de l’extension {number}",
   "action.removeExtensionUrl": "Supprimer l’URL d’extension {number}",
-  "help.extensionDownloads": "L’hôte du paquet doit autoriser les téléchargements depuis le navigateur. Les pages HTTPS peuvent bloquer les téléchargements HTTP.",
+  "help.extensionDownloads": "Les paquets ZIP publics sont téléchargés automatiquement lorsque vous lancez ou appliquez cette configuration.",
   "error.operationFailed": "L’opération n’a pas pu se terminer. Ouvrez les détails techniques pour en savoir plus.",
   "title.technicalDetails": "Détails techniques",
   "help.temporaryRetry": "Ce déploiement temporaire est incomplet. Réessayer crée un nouveau site temporaire. La récupération et la réinitialisation des sites enregistrés ne sont disponibles que si l’enregistrement est activé.",

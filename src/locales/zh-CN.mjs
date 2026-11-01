@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "最多选择 30 个扩展安装包。",
   "label.extensionUrlNumber": "扩展 ZIP URL {number}",
   "action.removeExtensionUrl": "移除扩展 URL {number}",
-  "help.extensionDownloads": "安装包托管服务器必须允许浏览器下载。HTTPS 页面可能会阻止 HTTP 下载。",
+  "help.extensionDownloads": "启动或应用此配置时，系统会自动下载公开的 ZIP 安装包。",
   "error.operationFailed": "操作未能完成。请展开技术详情以了解更多信息。",
   "title.technicalDetails": "技术详情",
   "help.temporaryRetry": "此临时部署尚未完成。重试将创建一个新的临时站点。只有启用保存功能后，才能恢复和重置已保存的站点。",

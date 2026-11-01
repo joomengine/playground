@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { catalogWithSelectedJoomlaPackage, createShareURL, normalizeConfiguration, normalizeInitialPath, resolveSiteURL, parseCatalog, parseExtensions, parseStartupCommands, readURLConfiguration } from '../src/config.mjs';
+import { catalogWithSelectedJoomlaPackage, createShareURL, normalizeConfiguration, normalizeInitialPath, resolveSiteURL, parseCatalog, parseExtensions, parseUserExtensions, parseUserTemplate, parseStartupCommands, readURLConfiguration, createFullDeploymentDocument, createDeploymentDocument, normalizeDeploymentRecipe, normalizeDeploymentRequirements, parseDeploymentDocument } from '../src/config.mjs';
 
 const manifest = {
   php: [{ version: '8.3' }, { version: '8.4' }, { version: '8.5' }],
@@ -198,4 +198,86 @@ test('HTTP extension URLs round-trip without changing language or configuration-
   assert.throws(() => createDeploymentSourceURL('https://playground.test/', { url: 'http://example.test/deploy.json' }), /HTTPS/);
   await assert.rejects(loadDeploymentDocument('http://example.test/deploy.json'), /HTTPS/);
   assert.throws(() => parseExtensions('["https://example.test/package.zip"]'), /object containing a url/);
+});
+
+test('complete deployment exports preserve private setup, materialized packages and provenance', () => {
+  const managed = { url: 'https://example.test/managed.zip', sha256: 'a'.repeat(64) };
+  const custom = { url: 'https://example.test/custom.zip', sha256: 'not-a-digest', sha512: 42 };
+  const configuration = {
+    deployId: 'jcb', sourceDeployId: 'jcb', joomlaVersion: '6.2.0', jcbVersion: '6.2.0', phpVersion: '8.4', siteName: 'My complete site',
+    initialPath: '/administrator/', admin: { name: 'Site owner', username: 'owner', email: 'owner@example.test', password: 'a-private-long-password' },
+    extensions: [managed, custom], addonExtensions: [custom], startupCommands: [['cache:clean'], ['config:set', 'sitename', 'My site']],
+    addonStartupCommands: [['config:set', 'sitename', 'My site']], languageTags: ['af-ZA'],
+    languages: [{ tag: 'af-ZA', url: 'https://example.test/af.zip', sha256: 'b'.repeat(64) }], addonLanguages: [],
+    template: { url: 'https://example.test/managed-template.zip', element: 'reviewed', sha256: 'c'.repeat(64) }, addonTemplate: null,
+    menus: [], phpSettings: { memory_limit: '512M' },
+    content: { categories: [], articles: [] }, storageKey: 'browser-only', snapshot: { url: 'https://example.test/prebuilt.zip' },
+  };
+  const requirements = { joomla: ['5', '6'], jcb: 'required', php: ['8.4', '8.5'], joomlaFallbacks: { '7': '6' } };
+  const document = createFullDeploymentDocument(configuration, { name: 'Component Builder Custom', requirements });
+  assert.equal(document.schemaVersion, 2);
+  assert.equal(document.name, 'Component Builder Custom');
+  assert.deepEqual(document.requirements, requirements);
+  assert.deepEqual(document.configuration.admin, configuration.admin);
+  assert.equal(document.configuration.sourceDeployId, 'jcb');
+  assert.deepEqual(document.configuration.template, { ...configuration.template, params: {}, menuKeys: [] });
+  assert.deepEqual(document.configuration.extensions, [managed, { url: custom.url }]);
+  assert.deepEqual(document.configuration.addonExtensions, [{ url: custom.url }]);
+  assert.deepEqual(document.configuration.startupCommands, configuration.startupCommands);
+  assert.deepEqual(document.configuration.addonStartupCommands, configuration.addonStartupCommands);
+  assert.equal(document.configuration.storageKey, undefined);
+  assert.equal(document.configuration.snapshot, undefined);
+  const parsed = parseDeploymentDocument(JSON.stringify(document));
+  assert.deepEqual(parsed.deploymentRecipe, document);
+  assert.deepEqual(createFullDeploymentDocument(parsed), document, 'Saving an imported recipe is idempotent and does not nest recipes.');
+  assert.deepEqual(createDeploymentDocument(configuration, { includePrivate: true, name: document.name, requirements }), document);
+});
+
+test('custom share links carry their standalone recipe without administrator or browser state', () => {
+  const full = createFullDeploymentDocument({ deployId: 'custom-local-only', siteName: 'Shared custom',
+    admin: { name: 'Private owner', email: 'private@example.test', password: 'private-long-password' },
+    extensions: [{ url: 'https://example.test/extension.zip' }], startupCommands: [['cache:clean']],
+    template: { element: 'cassiopeia' }, storageKey: 'local-only-key',
+  }, { name: 'My custom deployment', requirements: { joomla: ['6'], jcb: 'optional' } });
+  const parsed = parseDeploymentDocument(full);
+  const shared = createDeploymentDocument(parsed);
+  assert.equal(shared.schemaVersion, 1);
+  assert.equal(shared.configuration.deploymentRecipe.name, full.name);
+  assert.equal(shared.configuration.deploymentRecipe.configuration.admin, undefined);
+  assert.doesNotMatch(JSON.stringify(shared), /Private owner|private@example|private-long-password|local-only-key/);
+  const restored = readURLConfiguration(createShareURL('https://playground.test/', parsed)).config;
+  assert.deepEqual(restored, parseDeploymentDocument(shared));
+  assert.deepEqual(restored.deploymentRecipe.configuration.extensions, full.configuration.extensions);
+  assert.throws(() => parseDeploymentDocument(full, { publicOnly: true }), /unsupported property admin/);
+  const secretCommand = parseDeploymentDocument(createFullDeploymentDocument({ startupCommands: [['user:add', '--password=private-value']] }, { name: 'Private setup' }));
+  assert.throws(() => createShareURL('https://playground.test/', secretCommand), /secrets/);
+});
+
+test('user package and template checksum metadata never blocks the normal installer URL', () => {
+  const entry = { url: 'https://example.test/custom.zip', sha256: 'bad', sha512: { invalid: true } };
+  assert.deepEqual(parseUserExtensions(JSON.stringify([entry])), [{ url: entry.url }]);
+  assert.throws(() => parseExtensions([entry]), /SHA-256/);
+  const template = parseUserTemplate(JSON.stringify({ ...entry, element: 'custom' }));
+  assert.equal(template.url, entry.url);
+  assert.equal(template.sha256, undefined);
+  const document = createFullDeploymentDocument({ extensions: [entry], template: { ...entry, element: 'custom' }, addonTemplate: { ...entry, element: 'custom' } }, { name: 'Custom URLs' });
+  assert.deepEqual(document.configuration.extensions, [{ url: entry.url }]);
+  assert.equal(document.configuration.template.sha256, undefined);
+  const claimedManaged = normalizeDeploymentRecipe({ ...document, configuration: { extensions: [entry], addonExtensions: [], template: { ...entry, element: 'custom' }, addonTemplate: null } });
+  assert.deepEqual(claimedManaged.configuration.extensions, [{ url: entry.url }]);
+  assert.equal(claimedManaged.configuration.template.sha256, undefined, 'Unverified imported provenance cannot make a malformed user checksum block the installer.');
+  assert.equal(parseDeploymentDocument({ schemaVersion: 1, configuration: { extensions: [entry] } }).extensions[0].sha256, undefined);
+  for (const url of ['javascript:alert(1)', 'https://user:password@example.test/a.zip']) assert.throws(() => parseUserExtensions([{ ...entry, url }]));
+});
+
+test('portable recipe validation rejects malformed requirements, nesting, unsafe keys and oversize data', () => {
+  const document = createFullDeploymentDocument({ siteName: 'Validated' }, { name: 'Validated' });
+  assert.deepEqual(normalizeDeploymentRequirements({ joomla: ['7', '7'], jcb: 'optional' }).joomla, ['7']);
+  for (const requirements of [{ joomla: [] }, { joomla: ['4'] }, { joomla: ['6'], jcb: 'sometimes' }, { joomla: ['6'], php: ['8'] }, { joomla: ['6'], joomlaFallbacks: { '7': '5' } }]) {
+    assert.throws(() => normalizeDeploymentRecipe({ ...document, requirements }));
+  }
+  assert.throws(() => normalizeDeploymentRecipe({ ...document, configuration: { deploymentRecipe: document } }), /unsupported property deploymentRecipe/);
+  assert.throws(() => normalizeDeploymentRecipe({ ...document, configuration: { admin: { password: 'short' } } }), /at least 12/);
+  assert.throws(() => parseDeploymentDocument('{"schemaVersion":2,"name":"Unsafe","requirements":{"joomla":["6"]},"configuration":{"content":{"__proto__":{}}}}'), /invalid property/);
+  assert.throws(() => createFullDeploymentDocument({ content: { articles: ['x'.repeat(1_048_576)] } }), /exceeds/);
 });

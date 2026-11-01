@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createShareURL, normalizeConfiguration, parseCatalog, readURLConfiguration } from '../src/config.mjs';
+import { createShareURL, createFullDeploymentDocument, normalizeConfiguration, parseCatalog, readURLConfiguration } from '../src/config.mjs';
 import { normalizeDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
 import { verifyPackage, validateInstallOptions } from '../src/joomla/index.mjs';
 import { customSetupDetails, isolateSetup, publicConfiguration } from '../src/ui-state.mjs';
@@ -33,9 +33,7 @@ test('explicit JCB version changes replace only JCB and do not reuse the preset 
   const alternate = (await resolveDeployConfiguration({ admin, deployId: 'jcb', jcbVersion: '6.2.1-alpha1', jcbPackage: dynamicJcb }, withSnapshot)).configuration;
   assert.deepEqual(alternate.extensions, [dynamicJcb]);
   assert.equal(alternate.snapshot, undefined);
-  const none = (await resolveDeployConfiguration({ admin, deployId: 'jcb', jcbVersion: 'none' }, withSnapshot)).configuration;
-  assert.deepEqual(none.extensions, []);
-  assert.equal(none.snapshot, undefined);
+  await assert.rejects(resolveDeployConfiguration({ admin, deployId: 'jcb', jcbVersion: 'none' }, withSnapshot), /requires Joomla Component Builder/);
   await assert.rejects(resolveDeployConfiguration({ admin, deployId: 'jcb', jcbVersion: '6.2.1-alpha1' }, options), /package is unavailable/);
 });
 
@@ -50,16 +48,65 @@ test('other presets retain their package when adding JCB, including Joomla-only 
   const j7 = (await resolveDeployConfiguration({ admin, deployId: 'jcb', joomlaVersion: '7.0.0-alpha1-dev', jcbVersion: '6.2.1-alpha1', jcbPackage: dynamicJcb }, options)).configuration;
   assert.equal(j7.joomlaVersion, '7.0.0-alpha1-dev');
   assert.deepEqual(j7.extensions, [dynamicJcb]);
-  for (const deployId of ['jcb-mcp', 'servicedirectory', 'patchtester', 'weblinks']) {
-    const fallback = await resolveDeployConfiguration({ admin, deployId, joomlaVersion: '7.0.0-alpha1-dev', jcbVersion: '6.2.1-alpha1', jcbPackage: dynamicJcb }, options);
-    assert.equal(fallback.recipeMajor, '6');
-    assert.deepEqual(fallback.configuration.extensions[0], dynamicJcb);
-    assert.equal(fallback.configuration.extensions.length, 2);
+  for (const deployId of ['jcb-mcp', 'servicedirectory', 'patchtester', 'weblinks', 'heritage-demo']) {
+    await assert.rejects(resolveDeployConfiguration({ admin, deployId, joomlaVersion: '7.0.0-alpha1-dev', jcbVersion: '6.2.1-alpha1', jcbPackage: dynamicJcb }, options), /not available for Joomla 7/);
   }
-  const heritage = await resolveDeployConfiguration({ admin, deployId: 'heritage-demo', joomlaVersion: '7.0.0-alpha1-dev', jcbVersion: '6.2.1-alpha1', jcbPackage: dynamicJcb }, options);
-  assert.equal(heritage.recipeMajor, '6');
-  assert.ok(heritage.configuration.languages.length > 1);
-  assert.deepEqual(heritage.configuration.extensions, [dynamicJcb]);
+});
+
+test('Service Directory and heritage accept None or the shared pinned JCB without missing-package errors', async () => {
+  for (const deployId of ['servicedirectory', 'heritage-demo']) {
+    const plain = (await resolveDeployConfiguration({ admin, deployId, jcbVersion: 'none' }, options)).configuration;
+    assert.equal(plain.extensions.some(entry => entry.url.includes('component-builder')), false);
+    const added = (await resolveDeployConfiguration({ admin, deployId, jcbVersion: '6.2.0' }, options)).configuration;
+    assert.match(added.extensions[0].url, /v6\.2\.0\.zip$/);
+    assert.equal(added.extensions.length, plain.extensions.length + 1);
+  }
+});
+
+test('a complete custom recipe replaces removed core packages and commands without restoring hidden defaults', async () => {
+  const original = (await resolveDeployConfiguration({ admin, deployId: 'servicedirectory', jcbVersion: 'none' }, options)).configuration;
+  const recipe = createFullDeploymentDocument(original, { name: 'Directory Custom', requirements: { joomla: ['5', '6'], jcb: 'optional' }, baseURL });
+  const removed = await resolveDeployConfiguration({ admin, deployId: 'custom-directory', deploymentRecipe: recipe, extensions: [], startupCommands: [], initialPath: '/' }, options);
+  assert.deepEqual(removed.configuration.extensions, []);
+  assert.deepEqual(removed.configuration.startupCommands, []);
+  assert.equal(removed.configuration.snapshot, undefined);
+  assert.equal(removed.deploy.title, 'Directory Custom');
+  const retained = (await resolveDeployConfiguration({ admin, deployId: 'custom-directory', deploymentRecipe: recipe }, options)).configuration;
+  assert.deepEqual(retained.extensions, original.extensions);
+  assert.deepEqual(retained.addonExtensions, []);
+  const edited = (await resolveDeployConfiguration({ admin, deployId: 'custom-directory', deploymentRecipe: recipe,
+    extensions: [{ ...original.extensions[0], sha256: 'not-a-digest' }, { url: 'https://example.test/custom.zip', sha512: 'invalid' }] }, options)).configuration;
+  assert.deepEqual(edited.extensions, [{ url: original.extensions[0].url }, { url: 'https://example.test/custom.zip' }]);
+  assert.deepEqual(edited.addonExtensions, edited.extensions);
+});
+
+test('a custom JCB opening page still requires JCB and can select another compatible package', async () => {
+  const original = (await resolveDeployConfiguration({ admin, deployId: 'jcb', jcbVersion: '6.2.0' }, options)).configuration;
+  const recipe = createFullDeploymentDocument(original, { name: 'JCB Custom', requirements: { joomla: ['6'], jcb: 'optional' }, baseURL });
+  await assert.rejects(resolveDeployConfiguration({ admin, deployId: 'custom-jcb', deploymentRecipe: recipe, jcbVersion: 'none' }, options), /requires Joomla Component Builder/);
+  const selected = (await resolveDeployConfiguration({ admin, deployId: 'custom-jcb', deploymentRecipe: recipe, jcbVersion: '6.2.1-alpha1', jcbPackage: dynamicJcb }, options)).configuration;
+  assert.deepEqual(selected.extensions, [dynamicJcb]);
+  assert.deepEqual(selected.addonExtensions, []);
+  assert.equal(selected.snapshot, undefined);
+});
+
+test('custom recipes switch unchanged managed variant packages with the selected Joomla major', async () => {
+  const original = (await resolveDeployConfiguration({ admin, deployId: 'servicedirectory', joomlaVersion: '5.4.10', jcbVersion: 'none' }, options)).configuration;
+  const recipe = createFullDeploymentDocument(original, { name: 'Directory Custom', requirements: { joomla: ['5', '6'], jcb: 'optional' }, baseURL });
+  const switched = (await resolveDeployConfiguration({ admin, deployId: 'custom-directory', deploymentRecipe: recipe, joomlaVersion: '6.2.0' }, options)).configuration;
+  const expected = (await resolveDeployConfiguration({ admin, deployId: 'servicedirectory', joomlaVersion: '6.2.0', jcbVersion: 'none' }, options)).configuration;
+  assert.deepEqual(switched.extensions, expected.extensions);
+  assert.notDeepEqual(switched.extensions, original.extensions);
+  assert.deepEqual(switched.addonExtensions, []);
+});
+
+test('imported provenance cannot turn an arbitrary extension into a managed core package', async () => {
+  const recipe = createFullDeploymentDocument({ admin, deployId: 'servicedirectory', sourceDeployId: 'servicedirectory', joomlaVersion: '6.2.0', phpVersion: '8.4',
+    extensions: [{ url: 'https://example.test/custom.zip', sha256: 'a'.repeat(64) }], addonExtensions: [] },
+  { name: 'Imported Custom', requirements: { joomla: ['6'], jcb: 'optional' }, baseURL });
+  const selected = (await resolveDeployConfiguration({ admin, deployId: 'custom-import', deploymentRecipe: recipe }, options)).configuration;
+  assert.deepEqual(selected.extensions, [{ url: 'https://example.test/custom.zip' }]);
+  assert.deepEqual(selected.addonExtensions, selected.extensions);
 });
 
 test('versioned packages survive public configuration and share links with their checksums', async () => {

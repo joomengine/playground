@@ -28,7 +28,7 @@ export default Object.freeze({
   "error.extensionLimit": "अधिकतम 30 एक्सटेंशन पैकेज चुनें।",
   "label.extensionUrlNumber": "एक्सटेंशन ZIP URL {number}",
   "action.removeExtensionUrl": "एक्सटेंशन URL {number} हटाएँ",
-  "help.extensionDownloads": "पैकेज होस्ट को ब्राउज़र से डाउनलोड की अनुमति देनी होगी। HTTPS पेज HTTP डाउनलोड रोक सकते हैं।",
+  "help.extensionDownloads": "इस कॉन्फ़िगरेशन को शुरू करने या लागू करने पर सार्वजनिक ZIP पैकेज अपने आप डाउनलोड हो जाते हैं।",
   "error.operationFailed": "कार्रवाई पूरी नहीं हो सकी। अधिक जानकारी के लिए तकनीकी विवरण खोलें।",
   "title.technicalDetails": "तकनीकी विवरण",
   "help.temporaryRetry": "यह अस्थायी परिनियोजन अधूरा है। दोबारा कोशिश करने से एक नई अस्थायी साइट बनती है। सहेजी गई साइट को पुनर्प्राप्त और रीसेट करने के विकल्प तभी उपलब्ध होते हैं जब सहेजना चालू हो।",
