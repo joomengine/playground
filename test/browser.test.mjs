@@ -58,6 +58,9 @@ for (const joomla of joomlaVersions) assert.ok(manifest.joomla.some((entry) => e
 
 const PDO = "$db = new PDO('mysql:dbname=joomla;charset=utf8mb4', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);";
 const requestTimeout = 240_000;
+// A custom build includes the exporter's bounded ten-minute image capture.
+// Ordinary prepared-image launches and requests retain their existing limit.
+const imageBuildTimeout = 900_000;
 const installedAssetNonce = randomUUID();
 const extensionArchive = zipSync({
   'mod_playground_contract.xml': strToU8('<?xml version="1.0" encoding="utf-8"?><extension type="module" client="site" method="upgrade"><name>mod_playground_contract</name><author>JoomEngine</author><version>1.0.0</version><description>Browser integration fixture</description><files><filename module="mod_playground_contract">mod_playground_contract.php</filename><filename>contract.php</filename><filename>asset-proof.html</filename><folder>assets</folder></files></extension>'),
@@ -330,19 +333,25 @@ async function start(page, config) {
   }, config), 'Joomla installation');
 }
 
-async function startDeploy(page, query, extra = {}) {
-  return bounded(page.evaluate(async ({ query, extra }) => {
-    const { readURLConfiguration, parseCatalog } = await import('./src/config.mjs');
-    const { loadDeployCatalog, resolveDeployConfiguration } = await import('./src/deploys.mjs');
-    const { createPlayground } = await import('./src/playground.mjs');
-    const catalog = parseCatalog(await (await fetch('./assets/manifest.json')).json());
-    const deployCatalog = await loadDeployCatalog();
-    const input = { ...readURLConfiguration(new URL(`?${query}`, location.href)).config, ...extra };
-    const resolved = await resolveDeployConfiguration(input, { catalog, deployCatalog, baseURL: location.href });
-    window.validationProgress = [];
-    window.playground = await createPlayground(resolved.configuration, { onProgress(progress) { window.validationProgress.push(progress); } });
-    return { configuration: { ...resolved.configuration, admin: undefined }, installation: { ...window.playground.installation, administrator: undefined }, progress: window.validationProgress };
-  }, { query, extra }), 'Deploy installation');
+async function startDeploy(page, query, extra = {}, { timeoutMs = requestTimeout } = {}) {
+  try {
+    return await bounded(page.evaluate(async ({ query, extra }) => {
+      const { readURLConfiguration, parseCatalog } = await import('./src/config.mjs');
+      const { loadDeployCatalog, resolveDeployConfiguration } = await import('./src/deploys.mjs');
+      const { createPlayground } = await import('./src/playground.mjs');
+      const catalog = parseCatalog(await (await fetch('./assets/manifest.json')).json());
+      const deployCatalog = await loadDeployCatalog();
+      const input = { ...readURLConfiguration(new URL(`?${query}`, location.href)).config, ...extra };
+      const resolved = await resolveDeployConfiguration(input, { catalog, deployCatalog, baseURL: location.href });
+      window.validationProgress = [];
+      window.playground = await createPlayground(resolved.configuration, { onProgress(progress) { window.validationProgress.push(progress); } });
+      return { configuration: { ...resolved.configuration, admin: undefined }, installation: { ...window.playground.installation, administrator: undefined }, progress: window.validationProgress };
+    }, { query, extra }), 'Deploy installation', timeoutMs);
+  } catch (error) {
+    const progress = await bounded(page.evaluate(() => window.validationProgress?.at(-1)), 'Deployment progress snapshot', 2_000).catch(() => null);
+    if (progress) error.message += ` Current stage: ${progress.phase ?? progress.stage ?? 'unknown'} — ${progress.message ?? ''}`;
+    throw error;
+  }
 }
 
 async function php(page, code, options = {}) {
@@ -804,7 +813,7 @@ for (const name of browserNames) {
         records.push({ ...defaultPair, staticServiceWorkerIsolation: true, externalAssets });
       } finally { if (page) await close(page).catch(() => {}); await context.close(); await plainServer.close(); }
     });
-    if (scenarios.includes('deploys')) await runScenario('repository and URL recipes install actual components, languages and prepared content', { timeout: 900_000 }, async () => {
+    if (scenarios.includes('deploys')) await runScenario('repository and URL recipes install actual components, languages and prepared content', { timeout: 1_200_000 }, async () => {
       const context = await withPinnedCatalog(browser);
       // JCB's optional news feed is not part of the compiler/runtime contract.
       // Keep its two reviewed requests deterministic instead of depending on a
@@ -920,7 +929,10 @@ for (const name of browserNames) {
         });
         const manualService = await startDeploy(page, new URLSearchParams({ deploy: 'blank',
           joomla: servicePackage.joomlaVersion, php: '8.4', fresh: '1',
-        }).toString(), { ...setup(), extensions: servicePackage.extensions });
+        }).toString(), { ...setup(), extensions: servicePackage.extensions }, { timeoutMs: imageBuildTimeout });
+        const savedImage = manualService.progress.findIndex(event => event.message === 'Saving the prepared image for future sites…');
+        assert.ok(savedImage >= 0 && manualService.progress.findIndex(event => event.phase === 'launch-image') > savedImage,
+          'The manual Service Directory image must finish building and saving before launch.');
         assert.equal(manualService.configuration.phpSettings.max_execution_time, 60,
           'A manually supplied package must install without inheriting preset PHP settings.');
         assert.equal(manualService.configuration.menus.length, 0);
@@ -1085,12 +1097,14 @@ for (const name of browserNames) {
         assert.doesNotMatch(strFromU8(archive['site/configuration.php']), /\/persist\/|\/__site\//, 'The deployment configuration must use ordinary server paths.');
         assert.deepEqual(archive['site/export-proof.bin'], new Uint8Array([0, 1, 255, 92, 39, 59, 10]));
         assert.match(strFromU8(archive['database.sql']), /CREATE.*TRIGGER/s);
-        fixtures['__test_snapshot.zip'] = bytes;
+        let snapshotDownloads = 0;
+        fixtures['__test_snapshot.zip'] = () => { snapshotDownloads++; return bytes; };
+        const snapshot = { url: new URL('__test_snapshot.zip', server.url).href,
+          sha256: createHash('sha256').update(bytes).digest('hex'), joomlaVersion: defaultPair.joomlaVersion };
         await close(page);
         page.testStep = 'restore export into a fresh runtime';
-        await start(page, { ...configuration(defaultPair, { persistence: false }), snapshot: {
-          url: new URL('__test_snapshot.zip', server.url).href, sha256: createHash('sha256').update(bytes).digest('hex'), joomlaVersion: defaultPair.joomlaVersion,
-        } });
+        await start(page, { ...configuration(defaultPair, { persistence: false }), snapshot });
+        assert.equal(snapshotDownloads, 1, 'An unrelated cached blank image must not replace the explicit export.');
         assert.equal(await page.evaluate(() => window.playground.installation.fromSnapshot), true);
         const actual = await phpJSON(page, `${PDO} echo json_encode(['numbers'=>$db->query('SELECT big,amount,HEX(payload) AS payload,nullable FROM playground_contract WHERE id=1')->fetch(PDO::FETCH_ASSOC),'view'=>$db->query('SELECT * FROM export_view_second')->fetchAll(PDO::FETCH_ASSOC)], JSON_THROW_ON_ERROR);`);
         assert.deepEqual(actual, expected, 'A portable restore must preserve exact SQL values and dependent views.');
@@ -1098,6 +1112,14 @@ for (const name of browserNames) {
         assert.equal(triggered, 'checked:after restore', 'The restored trigger must execute against the new database.');
         const file = await page.evaluate(async () => [...await window.playground.fs.readFile('/persist/www/export-proof.bin')]);
         assert.deepEqual(file, [0, 1, 255, 92, 39, 59, 10]);
+        await assertSite(page, config);
+        await close(page);
+        page.testStep = 'fresh explicit snapshot bypasses cached bytes and preserves exported content';
+        await start(page, { ...configuration(defaultPair, { persistence: false, fresh: true }), snapshot });
+        assert.equal(snapshotDownloads, 2, 'Fresh must download the selected snapshot again instead of building a blank site or reusing cached bytes.');
+        assert.equal(await page.evaluate(() => window.playground.installation.fromSnapshot), true);
+        const freshActual = await phpJSON(page, `${PDO} echo json_encode(['numbers'=>$db->query('SELECT big,amount,HEX(payload) AS payload,nullable FROM playground_contract WHERE id=1')->fetch(PDO::FETCH_ASSOC),'view'=>$db->query('SELECT * FROM export_view_second')->fetchAll(PDO::FETCH_ASSOC)], JSON_THROW_ON_ERROR);`);
+        assert.deepEqual(freshActual, expected, 'Fresh restoration must preserve the selected export, before later edits to another site.');
         await assertSite(page, config);
         await assertCleanConsole(page);
         records.push({ ...defaultPair, exportRoundTrip: true, exactSQL: true, files: true, dependentViews: true, trigger: true });

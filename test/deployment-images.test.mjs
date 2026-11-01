@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createDeploymentImageCache, deploymentImageFingerprint, maintainedDeploymentImages,
-  completedDeploymentImageConfiguration } from '../src/deployment-images.mjs';
+  completedDeploymentImageConfiguration, deploymentSnapshotSource } from '../src/deployment-images.mjs';
 
 const baseURL = 'https://playground.example/project/';
 const bytes = Uint8Array.of(0x50, 0x4b, 3, 4, 1, 2, 3, 4);
@@ -16,6 +16,9 @@ const config = { deployId: 'custom-example', joomlaVersion: '6.2.0', phpVersion:
   admin: { name: 'First administrator', username: 'admin', email: 'first@example.test', password: 'private-password' },
   extensions: [{ url: 'https://example.test/package.zip', sha256: 'b'.repeat(64) }], startupCommands: [],
   deploymentRecipe: { name: 'My deployment' } };
+const maintainedConfig = { deployId: 'jcb', joomlaVersion: '6.2.0', snapshot: {
+  url: new URL('assets/snapshots/prepared.zip', baseURL).href, sha256, joomlaVersion: '6.2.0',
+} };
 
 function memoryStorage() {
   const records = new Map();
@@ -33,7 +36,7 @@ test('maintained images reuse verified bytes and replace stale hashes before reu
   let downloads = 0, served = bytes;
   const cache = createDeploymentImageCache({ baseURL, storage,
     fetcher: async () => { downloads++; return new Response(served); } });
-  const entry = cache.maintained({ deployId: 'jcb', joomlaVersion: '6.2.0' }, manifest);
+  const entry = cache.maintained(maintainedConfig, manifest);
   const [first, concurrent] = await Promise.all([cache.getMaintained(entry), cache.getMaintained(entry)]);
   assert.deepEqual(first.bytes, bytes);
   assert.deepEqual(concurrent.bytes, bytes);
@@ -51,7 +54,7 @@ test('maintained images reuse verified bytes and replace stale hashes before reu
   const updated = { ...manifest, prebuiltDeploys: [{ ...manifest.prebuiltDeploys[0], sha256: await hash(served), size: served.length }] };
   assert.equal((await cache.list(updated))[0].available, false);
   assert.equal(storage.records.size, 0, 'Old server bytes are invalidated when the authoritative hash changes.');
-  const latest = await cache.getMaintained(cache.maintained({ deployId: 'jcb', joomlaVersion: '6.2.0' }, updated));
+  const latest = await cache.getMaintained(cache.maintained(maintainedConfig, updated));
   assert.deepEqual(latest.bytes, served);
   assert.equal(downloads, 2);
   await cache.remove(entry.key);
@@ -104,9 +107,25 @@ test('fingerprints reuse ordinary site copies but isolate changed packages, runt
   const commands = { ...config, startupCommands: [['config:get', 'sitename']] };
   assert.notEqual(await deploymentImageFingerprint(commands, manifest),
     await deploymentImageFingerprint({ ...commands, siteName: 'Second site' }, manifest));
-  const derived = { ...config, deployId: 'jcb', snapshot: {} };
-  assert.notEqual(await deploymentImageFingerprint(derived, manifest),
-    await deploymentImageFingerprint(derived, { ...manifest, prebuiltDeploys: [{ ...manifest.prebuiltDeploys[0], sha256: 'd'.repeat(64) }] }));
+  const derived = { ...config, ...maintainedConfig };
+  assert.notEqual(await deploymentImageFingerprint(derived, manifest, { baseURL }),
+    await deploymentImageFingerprint(derived, { ...manifest, prebuiltDeploys: [{ ...manifest.prebuiltDeploys[0], sha256: 'd'.repeat(64) }] }, { baseURL }));
+});
+
+test('explicit snapshots cannot collide with blank images or a different maintained image', async () => {
+  const plain = { ...config, deployId: 'jcb' };
+  const explicit = { ...plain, snapshot: { url: 'https://example.test/export.zip', sha256: 'c'.repeat(64), joomlaVersion: '6.2.0' } };
+  const original = await deploymentImageFingerprint(explicit, manifest, { baseURL });
+  assert.notEqual(original, await deploymentImageFingerprint(plain, manifest, { baseURL }));
+  for (const snapshot of [{ ...explicit.snapshot, sha256: 'd'.repeat(64) }, { ...explicit.snapshot, url: 'https://example.test/other.zip' }]) {
+    assert.notEqual(original, await deploymentImageFingerprint({ ...explicit, snapshot }, manifest, { baseURL }));
+  }
+  const cache = createDeploymentImageCache({ baseURL, storage: memoryStorage() });
+  assert.equal(cache.maintained(explicit, manifest), null, 'Matching deployment and Joomla IDs do not replace an explicitly selected image.');
+  const changed = { ...manifest, prebuiltDeploys: [{ ...manifest.prebuiltDeploys[0], sha256: 'e'.repeat(64) }] };
+  assert.equal(deploymentSnapshotSource(maintainedConfig, changed, baseURL).sha256, 'e'.repeat(64),
+    'The current server hash is authoritative for a recognized maintained URL.');
+  assert.equal(deploymentSnapshotSource(explicit, changed, baseURL).sha256, explicit.snapshot.sha256);
 });
 
 test('complete local images keep setup data while preventing package and command replay', () => {
