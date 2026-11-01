@@ -151,7 +151,7 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
     assert.equal(result.invalid, 'Choose a complete JoomEngine site export ZIP.');
   });
 
-  await t.test('outdated exported login details do not overwrite the account or block restore and resume', async () => {
+  await t.test('outdated exported login details do not overwrite the account or block restore, rename and resume', async () => {
     const result = await page.evaluate(async () => {
       const { createPlayground } = await import('./src/playground.mjs');
       const { readSiteExport, configurationForSiteExport } = await import('./src/site-import.mjs');
@@ -159,6 +159,7 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
       const { unzipSync, zipSync, strToU8 } = await import('./assets/fflate/browser.js');
       const files = unzipSync(window.originalBundle);
       const metadata = JSON.parse(new TextDecoder().decode(files['export.json']));
+      metadata.playground.configuration.admin.username = 'outdated-exported-user';
       metadata.playground.configuration.admin.password = 'Outdated-login-password-456!';
       metadata.playground.configuration.autoLogin = false;
       files['export.json'] = strToU8(JSON.stringify(metadata));
@@ -167,18 +168,26 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
       const configuration = configurationForSiteExport(siteExport, catalog);
       const site = await createPlayground(configuration, { siteExport });
       const unavailable = site.installation.administratorUnavailable;
+      await site.applyConfiguration({ siteName: 'Renamed without replacing the account' });
+      const renamedConfiguration = site.configuration;
       const expected = btoa(window.sourceConfig.admin.password);
-      const response = await site.runPhp(`<?php require '/persist/www/configuration.php'; $config = new JConfig();
+      const inspect = `<?php require '/persist/www/configuration.php'; $config = new JConfig();
         $db = new PDO('mysql:dbname=joomla;charset=utf8mb4','root','');
         $hash = $db->query('SELECT password FROM ' . $config->dbprefix . "users WHERE username='portableadmin'")->fetchColumn();
-        echo json_encode(password_verify(base64_decode('${expected}'), $hash));`);
+        $obsolete = $db->query('SELECT COUNT(*) FROM ' . $config->dbprefix . "users WHERE username='outdated-exported-user'")->fetchColumn();
+        echo json_encode(['accountUnchanged' => password_verify(base64_decode('${expected}'), $hash),
+          'obsoleteAccountCreated' => (bool) $obsolete, 'siteName' => $config->sitename]);`;
+      const response = await site.runPhp(inspect);
       await site.close();
-      const resumed = await createPlayground(configuration);
+      const resumed = await createPlayground(renamedConfiguration);
       const unavailableAfterResume = resumed.installation.administratorUnavailable;
+      const resumedResponse = await resumed.runPhp(inspect);
       await resumed.close();
-      return { unavailable, unavailableAfterResume, accountUnchanged: JSON.parse(response.text ?? new TextDecoder().decode(response.body)) };
+      return { unavailable, unavailableAfterResume, state: JSON.parse(response.text ?? new TextDecoder().decode(response.body)),
+        resumedState: JSON.parse(resumedResponse.text ?? new TextDecoder().decode(resumedResponse.body)) };
     });
-    assert.deepEqual(result, { unavailable: true, unavailableAfterResume: true, accountUnchanged: true });
+    const state = { accountUnchanged: true, obsoleteAccountCreated: false, siteName: 'Renamed without replacing the account' };
+    assert.deepEqual(result, { unavailable: true, unavailableAfterResume: true, state, resumedState: state });
   });
 
   await t.test('dashboard Upload opens the complete site and editor Use preserves it in a separate copy', async () => {

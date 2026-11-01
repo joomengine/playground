@@ -47,7 +47,7 @@ A saved selection can remain visible under **Saved version** after it drops from
 
 In **Deployment → Extension packages**, paste the package ZIP URL and add rows for further packages. The advanced JSON editor accepts objects with a `url`; user-supplied checksum fields are ignored. Choose **Use** for a new site or **Apply to this site** for the current site. Rocket passes each custom URL to Joomla's `extension:install --url=URL` command for download and installation. The running Joomla administrator also provides its normal extension installer.
 
-Extension URLs support HTTP and HTTPS; template URLs require HTTPS except for localhost development. If a custom package fails, its installer error remains available while the site opens, and it can be retried in Joomla. Core deployment packages remain required. PHP's HTTP transport follows the browser's CORS and mixed-content rules; the error details identify the failed operation.
+Extension and template URLs support HTTP and HTTPS. If a custom package fails, its installer error remains available while the site opens, and it can be retried in Joomla. Core deployment packages remain required. PHP's HTTP transport follows the browser's CORS and mixed-content rules; the error details identify the failed operation.
 
 ## Understand JCB's sources and results
 

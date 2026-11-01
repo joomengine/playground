@@ -304,3 +304,26 @@ test('portable recipe validation rejects malformed requirements, nesting, unsafe
   assert.throws(() => parseDeploymentDocument('{"schemaVersion":2,"name":"Unsafe","requirements":{"joomla":["6"]},"configuration":{"content":{"__proto__":{}}}}'), /invalid property/);
   assert.throws(() => createFullDeploymentDocument({ content: { articles: ['x'.repeat(1_048_576)] } }), /exceeds/);
 });
+
+test('public HTTP and HTTPS template URLs survive configuration parsing for Joomla installation', async () => {
+  const { parseTemplate } = await import('../src/site-configuration.mjs');
+  for (const protocol of ['http:', 'https:']) {
+    const url = `${protocol}//packages.example.test/template.zip?version=2`;
+    const input = { url, element: 'custom', sha256: 'ignored-user-checksum' };
+    const template = parseUserTemplate(input);
+    assert.equal(template.url, url);
+    assert.equal(template.sha256, undefined);
+    const config = normalizeConfiguration({ admin, template: input });
+    assert.equal(config.template.url, url);
+    const document = createFullDeploymentDocument(config, { name: 'Public template' });
+    assert.equal(parseDeploymentDocument(document).template.url, url);
+    assert.equal(parseTemplate({ url, element: 'managed', sha256: 'A'.repeat(64) }).sha256, 'a'.repeat(64),
+      'Managed template digest normalization remains intact.');
+    assert.throws(() => parseTemplate({ url, element: 'managed', sha256: 'invalid' }), /SHA-256/);
+  }
+  for (const url of ['ftp://packages.example.test/template.zip', 'file:///template.zip', 'data:text/plain,template',
+    'javascript:alert(1)', 'http://user:password@packages.example.test/template.zip',
+    'https://user@packages.example.test/template.zip', 'http://packages.example.test/template.zip#fragment']) {
+    assert.throws(() => parseTemplate({ url, element: 'custom' }), /HTTP or HTTPS without credentials or fragments/);
+  }
+});

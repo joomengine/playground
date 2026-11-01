@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { PhpNode } from 'php-wasm/PhpNode.mjs';
-import { exportPlaygroundConfiguration, normalizeExportOptions } from '../src/export.mjs';
+import { exportPlaygroundConfiguration, exportSite, normalizeExportOptions } from '../src/export.mjs';
 
 test('portable export validates formats and destination settings', () => {
   assert.equal(normalizeExportOptions().format, 'bundle');
@@ -17,6 +17,58 @@ test('portable export validates formats and destination settings', () => {
   assert.equal(normalizeExportOptions({ format: 'files', includePlaygroundConfiguration: true }).includePlaygroundConfiguration, undefined);
   assert.equal(normalizeExportOptions({ format: 'database', includePlaygroundConfiguration: true }).includePlaygroundConfiguration, undefined);
   assert.throws(() => normalizeExportOptions({ includePlaygroundConfiguration: 'yes' }), /boolean/);
+});
+
+test('export grants PHP a bounded build allowance below the host deadline and cleans up normally', async () => {
+  const calls = [];
+  const bytes = new TextEncoder().encode('Exported archive');
+  const runtime = {
+    fs: { readFile: async () => bytes },
+    async runPhp(source, options) {
+      const payload = JSON.parse(Buffer.from(/base64_decode\('([^']+)'\)/.exec(source)[1], 'base64'));
+      calls.push({ payload, options });
+      return { text: '\n__JOOMENGINE_RESULT__' + JSON.stringify({ ok: true,
+        path: `${payload.directory}/site.zip`, size: bytes.length,
+        sha256: createHash('sha256').update(bytes).digest('hex'), filename: 'site.zip' }) };
+    },
+  };
+  await exportSite(runtime, {}, { sourceLoader: async () => '<?php' });
+  assert.equal(calls[0].payload.executionTimeSeconds, 570);
+  assert.equal(calls[0].options.timeoutMs, 600_000);
+  assert.ok(calls[0].payload.executionTimeSeconds * 1000 < calls[0].options.timeoutMs);
+  assert.equal(calls[1].payload.operation, 'cleanup');
+  assert.equal(calls[1].payload.executionTimeSeconds, undefined);
+  assert.equal(calls[1].options, undefined);
+});
+
+test('actual PHP export uses its allowance only for creation and restores the ordinary limit on failure', { timeout: 120_000 }, async () => {
+  const php = new PhpNode({ version: '8.4', persist: [] });
+  let output = '', errors = '';
+  php.addEventListener('output', event => { output += event.detail.join(''); });
+  php.addEventListener('error', event => { errors += event.detail.join(''); });
+  await php.writeFile('/export.php', await readFile(new URL('../src/export/site.php', import.meta.url), 'utf8'));
+  const result = await php.run(`<?php
+    set_time_limit(60);
+    mkdir('/site');
+    file_put_contents('/site/configuration.php', '<?php class JConfig { function __construct() { $GLOBALS["insideExport"]=(int)ini_get("max_execution_time"); throw new RuntimeException("Fixture export failure"); } }');
+    $exportOptions = ['operation'=>'create','root'=>'/site','executionTimeSeconds'=>570,'directory'=>'/tmp/joomengine-export-00000000-0000-0000-0000-000000000000'];
+    ob_start(); require '/export.php'; $response=ob_get_clean();
+    $restored=(int)ini_get('max_execution_time');
+    $invalid=0;
+    foreach ([0, 571, '570'] as $seconds) {
+      try { exportExecutionAllowance(['executionTimeSeconds'=>$seconds]); }
+      catch (InvalidArgumentException $error) { ++$invalid; }
+    }
+    echo json_encode(['inside'=>$insideExport,'restored'=>$restored,'invalid'=>$invalid,'response'=>$response]);
+  `);
+  assert.equal(result, 0, `${errors}\n${output}`);
+  assert.equal(errors, '');
+  const report = JSON.parse(output);
+  assert.equal(report.inside, 570);
+  assert.equal(report.restored, 60);
+  assert.equal(report.invalid, 3);
+  assert.match(report.response, /Fixture export failure/);
+  await php.refresh();
 });
 
 test('complete export metadata retains runtime and current credentials without a local site identity', () => {

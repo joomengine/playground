@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -149,4 +149,137 @@ test('browser Joomla CLI custom URLs and complete local image reuse', { timeout:
     assert.deepEqual(second.commands, first.commands, 'Neither the extension install nor the command may be replayed.');
     await closeSite(page);
   });
+});
+
+test('large custom Service Directory image builds within its export allowance and reuses all data', { timeout: 900000 }, async t => {
+  const recipe = JSON.parse(await readFile(new URL('../deploys/servicedirectory.json', import.meta.url), 'utf8'));
+  const sourceURL = recipe.variants['6'].extensions[0].url;
+  const maintainedPackage = manifest.deploys.packages.find(entry => entry.sourceUrl === sourceURL);
+  assert.ok(maintainedPackage, 'The built catalog must contain the Service Directory fixture.');
+  const serviceArchive = await readFile(path.join(directory, 'assets', maintainedPackage.url));
+  let downloads = 0;
+  const server = await createStaticServer({ directory, fixtures: {
+    'manual-servicedirectory.zip': () => { downloads++; return serviceArchive; },
+  } });
+  let browser;
+  t.after(async () => { try { await browser?.close(); } finally { await server.close(); } });
+  const executablePath = process.env.PLAYGROUND_CHROMIUM_EXECUTABLE;
+  browser = await chromium.launch({ headless: true, args: ['--no-sandbox'], ...(executablePath ? { executablePath } : {}) });
+  const page = await browser.newPage();
+  const consoleErrors = [];
+  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  page.on('pageerror', error => consoleErrors.push(error.message));
+  await page.goto(new URL('__test__.html', server.url).href);
+  await prepareBrowserEnvironment(page);
+  const config = configuration(new URL('manual-servicedirectory.zip', server.url).href, {
+    phpVersion: '8.4', joomlaVersion: manifest.joomla.find(entry => entry.version.startsWith('6.')).version,
+  });
+  // Exercise the public configuration boundary: URL-only addons do not inherit
+  // the maintained Service Directory preset's longer normal request timeout.
+  delete config.addonExtensions;
+  const launch = configuration => page.evaluate(async configuration => {
+    const { createPlayground, PhpSession } = await import('./src/playground.mjs');
+    if (!window.largeImageCalls) {
+      window.largeImageCalls = { commands: [], exports: [] };
+      window.largeImageDatabase = { pending: null, lastCompleted: null };
+      const receive = PhpSession.prototype.receive;
+      PhpSession.prototype.receive = async function (message) {
+        if (message?.type !== 'database-call') return receive.call(this, message);
+        const payload = JSON.parse(message.payload);
+        const summary = { operation: payload.op, sql: payload.sql?.match(/^(?:[A-Za-z_]+|\s|`[A-Za-z_]+`)+/)?.[0]?.slice(0, 100) };
+        window.largeImageDatabase.pending = summary;
+        const started = performance.now();
+        try { return await receive.call(this, message); }
+        finally {
+          window.largeImageDatabase.lastCompleted = { ...summary, durationMs: performance.now() - started };
+          window.largeImageDatabase.pending = null;
+        }
+      };
+      const send = PhpSession.prototype.send;
+      PhpSession.prototype.send = function (operation, args, ...rest) {
+        if (operation === 'runPhp') {
+          const encoded = /base64_decode\('([^']+)'\)/.exec(args.source)?.[1];
+          if (encoded) {
+            const payload = JSON.parse(atob(encoded));
+            if (payload.argv) window.largeImageCalls.commands.push(payload.argv);
+            if (payload.operation === 'create') window.largeImageCalls.exports.push(payload.executionTimeSeconds);
+          }
+        }
+        return send.call(this, operation, args, ...rest);
+      };
+    }
+    const progress = window.largeImageProgress = [];
+    window.playground = await createPlayground(configuration, { onProgress: event => progress.push(event) });
+    const result = await window.playground.runPhp(`<?php
+      require '/persist/www/configuration.php';
+      $config = new JConfig();
+      $db = new PDO('mysql:dbname=joomla;charset=utf8mb4', 'root', '', [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
+      echo json_encode(['cities'=>(int)$db->query('SELECT COUNT(*) FROM jml_servicedirectory_city')->fetchColumn(),
+        'states'=>(int)$db->query('SELECT COUNT(*) FROM jml_servicedirectory_state')->fetchColumn(),
+        'executionTime'=>(int)ini_get('max_execution_time'), 'siteName'=>$config->sitename]);
+    `);
+    const data = JSON.parse(result.text ?? new TextDecoder().decode(result.body));
+    const administrator = await window.playground.request('/administrator/index.php?option=com_servicedirectory&view=cities');
+    const planResult = await window.playground.runPhp(`<?php
+      $db = new PDO('mysql:dbname=joomla;charset=utf8mb4', 'root', '');
+      echo json_encode($db->query('EXPLAIN SELECT a.*,g.name AS state_name,g.id AS state_id,ag.title AS access_level
+        FROM jml_servicedirectory_city a LEFT JOIN jml_servicedirectory_state g ON a.state=g.guid
+        LEFT JOIN jml_viewlevels ag ON ag.id=a.access WHERE a.published=0 OR a.published=1
+        ORDER BY a.id DESC LIMIT 20')->fetchAll(PDO::FETCH_ASSOC));
+    `);
+    const plan = JSON.parse(planResult.text ?? new TextDecoder().decode(planResult.body));
+    const { deploymentImages } = await import('./src/deployment-images.mjs');
+    return { data, plan, administratorStatus: administrator.status,
+      warnings: window.playground.installation.extensionWarnings,
+      fromSnapshot: window.playground.installation.fromSnapshot,
+      configuredExecutionTime: window.playground.configuration.phpSettings.max_execution_time,
+      images: await deploymentImages.list(), calls: structuredClone(window.largeImageCalls), progress };
+  }, configuration);
+  const buildStarted = performance.now();
+  const first = await launch(config);
+  assert.deepEqual(first.data, { cities: 151233, states: 5073, executionTime: 60, siteName: config.siteName });
+  assert.equal(first.configuredExecutionTime, 60);
+  assert.equal(first.administratorStatus, 200);
+  assert.deepEqual(first.warnings, []);
+  assert.deepEqual(first.calls.exports, [570]);
+  assert.equal(first.images.filter(image => image.kind === 'custom').length, 1);
+  assert.equal(downloads, 1);
+  assert.ok(first.progress.some(event => event.message === 'Saving the prepared image for future sites…'));
+  assert.ok(!first.progress.some(event => event.phase === 'warning'));
+  if (process.env.PLAYGROUND_LARGE_IMAGE_ARTIFACT) {
+    const encoded = await page.evaluate(async key => {
+      const { deploymentImages } = await import('./src/deployment-images.mjs');
+      const { bytes } = await deploymentImages.getCustom(key.slice('custom:'.length));
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+      return btoa(binary);
+    }, first.images.find(image => image.kind === 'custom').key);
+    await writeFile(process.env.PLAYGROUND_LARGE_IMAGE_ARTIFACT, Buffer.from(encoded, 'base64'));
+  }
+  const buildMs = Math.round(performance.now() - buildStarted);
+  t.diagnostic(`Large custom image built and stored in ${buildMs} ms with ${first.data.cities} cities; ordinary PHP requests retain ${first.data.executionTime} seconds.`);
+  await closeSite(page);
+  const restoreStarted = performance.now();
+  let second;
+  try {
+    second = await launch({ ...config, siteName: 'Separate cached directory',
+      admin: { username: 'directoryowner', name: 'Directory Owner', email: 'directory@example.test', password: 'Directory-password-456!' } });
+  } catch (error) {
+    t.diagnostic(JSON.stringify({ consoleErrors, state: await page.evaluate(() => ({
+      progress: window.largeImageProgress, database: window.largeImageDatabase,
+    })) }));
+    throw error;
+  }
+  assert.equal(second.fromSnapshot, true);
+  assert.deepEqual(second.data, { cities: 151233, states: 5073, executionTime: 60, siteName: 'Separate cached directory' });
+  assert.equal(second.administratorStatus, 200);
+  assert.equal(second.plan.find(row => row.table === 'g').key, 'idx_guid', 'The restored state lookup must use its index rather than scan thousands of states for every city.');
+  assert.deepEqual(second.warnings, []);
+  assert.equal(second.configuredExecutionTime, 60);
+  assert.equal(downloads, 1, 'The complete large image must not download the extension again.');
+  assert.deepEqual(second.calls, first.calls, 'Reuse must not reinstall the extension or rebuild/export the image.');
+  assert.ok(!second.progress.some(event => event.phase === 'build-image'));
+  assert.deepEqual(consoleErrors, [], 'Both building and reusing the image must leave a clean browser console.');
+  t.diagnostic(`The separate site reused the large image in ${Math.round(performance.now() - restoreStarted)} ms without an extension download or CLI install.`);
+  await closeSite(page);
 });

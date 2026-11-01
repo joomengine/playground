@@ -1,4 +1,21 @@
 <?php
+/** Bulk imports need fresh index cardinalities before Joomla chooses its plans. */
+function playgroundRefreshImportedStatistics(PDO $connection): void
+{
+    $tables = $connection->query('SHOW FULL TABLES')->fetchAll(PDO::FETCH_NUM);
+    foreach ($tables as [$name, $type]) {
+        if ($type !== 'BASE TABLE') continue;
+        $identifier = '`' . str_replace('`', '``', $name) . '`';
+        $results = $connection->query('ANALYZE TABLE ' . $identifier)->fetchAll(PDO::FETCH_ASSOC);
+        if (!$results) throw new RuntimeException('Cannot refresh the imported database statistics.');
+        foreach ($results as $result) {
+            if (strtolower($result['Msg_type'] ?? '') === 'error') {
+                throw new RuntimeException('Cannot refresh the imported database statistics: ' . ($result['Msg_text'] ?? 'Unknown database error.'));
+            }
+        }
+    }
+}
+
 /** Validate payload bytes before touching the destination site or database. */
 function playgroundValidateContentHash(ZipArchive $zip, array $metadata): bool
 {
@@ -145,6 +162,7 @@ try {
         $count++;
     }
     $connection->exec('COMMIT');
+    playgroundRefreshImportedStatistics($connection);
     fclose($statements);
     $zip->close();
     unlink($playground['archive']);
