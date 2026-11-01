@@ -784,7 +784,7 @@ export async function discoverJoomlaConfiguration(runtime, { sourceLoader } = {}
 
 /** Apply explicitly selected changes to a running installation after a caller checkpoint. */
 export async function applyJoomlaConfiguration(runtime, config, {
-  sourceLoader, fetchPackage = fetch, progress = () => {}, installPackages = true, jcbPackageOptions,
+  sourceLoader, fetchPackage = fetch, progress = () => {}, installPackages = true, jcbPackageOptions, configureLanguage = true,
 } = {}) {
   const options = validateInstallOptions(config);
   const location = paths(runtime);
@@ -812,7 +812,7 @@ export async function applyJoomlaConfiguration(runtime, config, {
   }
   progress({ stage: 'configure', message: 'Applying the site settings, menus and template…' });
   const identity = await execute(runtime, 'administrator', { ...location, mode: 'read' }, sourceLoader);
-  await execute(runtime, 'customize', { ...location, language: options.language, content: null, admin: identity.administrator, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
+  if (configureLanguage) await execute(runtime, 'customize', { ...location, language: options.language, content: null, admin: identity.administrator, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
   const configured = await configureDeployment(runtime, options, config, extensionWarnings, sourceLoader, progress, { siteName: options.siteName });
   await runDeploymentCommands(runtime, options.startupCommands, config, extensionWarnings, sourceLoader, progress);
   const health = await checkJoomla(runtime, { sourceLoader });

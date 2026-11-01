@@ -124,7 +124,9 @@ function renderDeploymentChoices(selected = fields.deployId.value) {
   $('editor-deployment').value = selected;
   $('delete-deployment').disabled = !customRegistry.deployments.some(entry => entry.id === selected);
 }
-function markDeploymentEdited() {
+let administratorEdited = false;
+function markDeploymentEdited(event) {
+  if (['admin-name', 'admin-username', 'admin-email', 'admin-password'].includes(event?.target?.id)) administratorEdited = true;
   pauseAutomaticLaunch();
   $('deployment-save-status').hidden = true;
   const descriptor = deploymentDescriptor(fields.deployId.value);
@@ -595,6 +597,7 @@ function administrator() {
 }
 function applyAdministrator(value) {
   if (!value) return;
+  administratorEdited = false;
   for (const name of ['name', 'username', 'email', 'password']) {
     if (typeof value[name] === 'string') $(`admin-${name}`).value = value[name];
   }
@@ -836,6 +839,7 @@ async function changeJcbSelection() {
 }
 
 function applyConfiguration(config, input = config, deploy) {
+  administratorEdited = false;
   refreshNightlyOnNextLaunch = false;
   if (deploy) currentDeployRecipe = deploy;
   editorConfiguration = structuredClone(config);
@@ -927,7 +931,7 @@ function findProfile(deployId, joomlaVersion) {
   return drafts.get(`${deployId}:${joomlaVersion}`)
     || Object.values(savedState.sites).reverse().find((item) => item.deployId === deployId && item.joomlaVersion === joomlaVersion);
 }
-async function launch({ siteExport, checkpoint, importedConfiguration, deploymentChanges } = {}) {
+async function launch({ siteExport, checkpoint, importedConfiguration, deploymentChanges, rotateAdministrator = false } = {}) {
   if (busy || launching || !initialized || !catalog || !deployCatalog) return;
   launching = true;
   let switchingStarted = false;
@@ -980,7 +984,7 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     $('preview-label').textContent = currentConfig.siteName;
     activity(`Starting ${resolved.deploy?.title || currentConfig.deployId} with Joomla ${currentConfig.joomlaVersion} and PHP ${currentConfig.phpVersion}.`);
     const resumePath = resumeLastRoute && !input.fresh && currentConfig.persistence && savedState.sites[currentConfig.storageKey]?.lastPath;
-    runtime = await createPlayground({ ...currentConfig, ...(resumePath ? { initialPath: safeSavedRoute(resumePath, currentConfig.initialPath) } : {}) }, { onProgress: progress, siteExport, checkpoint });
+    runtime = await createPlayground({ ...currentConfig, ...(resumePath ? { initialPath: safeSavedRoute(resumePath, currentConfig.initialPath) } : {}) }, { onProgress: progress, siteExport, checkpoint, rotateAdministrator });
     if (deploymentChanges) {
       await runtime.applyConfiguration(deploymentChanges);
       currentConfig = runtime.configuration;
@@ -1521,12 +1525,13 @@ async function useDeployment() {
         if (databaseHost && !databaseHost.closed && !await databaseHost.beforeClose()) return;
         const sourceConfiguration = { ...(savedState.sites[input.storageKey] || editorConfiguration),
           storageKey: input.storageKey, admin: input.admin };
-        copy = await prepareUploadedSiteCopy({ input, sourceConfiguration, runtime, storageKey,
+        copy = await prepareUploadedSiteCopy({ input, sourceConfiguration, runtime, storageKey, administratorEdited,
           open: async source => createPlayground((await resolve(source)).configuration, { onProgress: progress }) });
       } finally { setBusy(false); }
       freshKeyPending = false; selectedSiteId = null; resumeLastRoute = false;
       $('deploy-dialog').close();
-      await launch({ checkpoint: copy.checkpoint, importedConfiguration: copy.configuration, deploymentChanges: copy.changes });
+      await launch({ checkpoint: copy.checkpoint, importedConfiguration: copy.configuration, deploymentChanges: copy.changes,
+        rotateAdministrator: copy.rotateAdministrator });
       return;
     }
     // Using a recipe creates an independent installation, including when a

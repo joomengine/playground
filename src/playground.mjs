@@ -10,6 +10,7 @@ import { ownedClientURL } from './isolation.mjs';
 import { loadPublicAssetConfiguration } from './public-assets.mjs';
 import { deploymentImages, deploymentImageFingerprint, completedDeploymentImageConfiguration } from './deployment-images.mjs';
 import { catalogForRestoredSite } from './site-import.mjs';
+import { deploymentConfigurationChanges } from './deployment-changes.mjs';
 import { importJoomlaSiteExport } from './joomla/index.mjs';
 
 const base = new URL('../', import.meta.url);
@@ -336,7 +337,7 @@ export async function resetPlayground({ storageKey = 'default' } = {}) {
 }
 
 /** Create a real Joomla installation backed by upstream PHP and MariaDB WASM. */
-export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, siteExport = null, recovery = false } = {}) {
+export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, siteExport = null, recovery = false, rotateAdministrator = false } = {}) {
   const environment = await prepareEnvironment();
   if (environment.reloadRequired) throw new Error(environment.reason + ' Complete the controlled page navigation before starting the playground.');
   let imagePhase;
@@ -586,7 +587,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         if (next.phpVersion !== config.phpVersion || next.joomlaVersion !== config.joomlaVersion || next.persistence !== config.persistence || next.storageKey !== config.storageKey) {
           throw new Error('Use a new deployment or the PHP settings control to change the runtime or storage.');
         }
-        if (next.jcbVersion !== config.jcbVersion || JSON.stringify(next.jcbPackage ?? null) !== JSON.stringify(config.jcbPackage ?? null)) {
+        if ((next.jcbVersion ?? 'none') !== (config.jcbVersion ?? 'none') || JSON.stringify(next.jcbPackage ?? null) !== JSON.stringify(config.jcbPackage ?? null)) {
           throw new Error('Use a new deployment to change the selected JCB version.');
         }
         if (JSON.stringify(next.phpSettings) !== JSON.stringify(config.phpSettings)) throw new Error('Apply PHP settings using the PHP settings dialog before changing site configuration.');
@@ -595,12 +596,9 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         try {
           progress({ phase: 'saving', message: 'Creating a recovery checkpoint before applying deployment changes…' });
           recoveryCheckpoint = await handle.checkpoint(pausedOperation);
-          const signature = value => JSON.stringify(value);
-          const additions = next.extensions.filter(entry => !config.extensions.some(previous => previous.url === entry.url && previous.sha256 === entry.sha256 && previous.sha512 === entry.sha512));
-          const commands = next.startupCommands.filter(argv => !config.startupCommands.some(previous => signature(previous) === signature(argv)));
-          const template = next.template ? { ...next.template } : null;
-          if (template?.url && template.url === config.template?.url && template.sha256 === config.template?.sha256) { delete template.url; delete template.sha256; }
-          const result = await applyJoomlaConfiguration(handle, { ...next, extensions: additions, startupCommands: commands, template }, { progress, fetchPackage });
+          const changes = deploymentConfigurationChanges(config, next);
+          const result = await applyJoomlaConfiguration(handle, changes.configuration, { progress, fetchPackage,
+            configureLanguage: changes.configureLanguage });
           Object.assign(config, next);
           handle.url = resolveSiteURL(config.initialPath, siteUrl);
           handle.installation = { ...handle.installation, ...result, administrator: handle.installation.administrator };
@@ -697,7 +695,12 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         archiveBytes: checkpoint.archive, sha256: checkpoint.sha256, progress,
       });
       await session.send('restoreCheckpoint', { bytes: checkpoint.filesystem }, 600_000);
-      if (config.restoredSite) installed = { ...installed, ...await installJoomla(handle, config, { progress, fetchPackage }) };
+      if (rotateAdministrator) {
+        installed = { ...installed, ...await checkJoomla(handle),
+          administrator: await restoreJoomlaSession(handle, config, { rotateAdministrator: true }),
+          administratorUnavailable: false, loginNotice: undefined };
+      }
+      else if (config.restoredSite) installed = { ...installed, ...await installJoomla(handle, config, { progress, fetchPackage }) };
       else {
         installed = { ...installed, ...await checkJoomla(handle) };
         installed.administrator = await restoreJoomlaSession(handle, config);
