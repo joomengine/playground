@@ -51,9 +51,9 @@ PHP errors with source locations, and implements caller-aware Step Over and
 Step Out. Unlike upstream phpdbg's `next`, Step Over stays in the caller across
 nested calls while honoring breakpoints inside callees. Its access to phpdbg globals uses the upstream exported
 `php_wasm_get_bpcount` address and the exact pinned PHP header offset. No guessed
-memory layout is used. A hash-verified build overlay corrects the pinned web
-JavaScript package's environment detection and eager DOM target registration so
-the same WebAssembly binary runs in a dedicated worker without a fabricated DOM.
+memory layout is used. A hash-verified build overlay supplies the released web
+JavaScript package's complete Emscripten worker loading and optional DOM handling.
+The WebAssembly binary is unchanged; no fabricated DOM is used.
 
 Variable inspection uses native bounded handles and Zend property tables. It
 does not invoke application getters, `__debugInfo`, or recursively print large

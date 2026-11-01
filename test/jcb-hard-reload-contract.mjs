@@ -86,6 +86,7 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
 
   for (let saved = 1; saved <= 2; saved++) {
     page.testStep = `prepared JCB save ${saved} then whole-page reload without Close`;
+    if (!await page.locator('#settings').isVisible()) await page.locator('#settings-toggle').click();
     await page.locator('#save-button').click();
     await page.locator('#status-message').filter({ hasText: 'Files and database saved to browser storage.' }).waitFor({ timeout });
     await page.locator('#save-button:enabled').waitFor({ timeout });

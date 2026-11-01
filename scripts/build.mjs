@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { downloadVerified, extractTarGzip, hashFile, inventory, verifyBridgeBundle } from './assets.mjs';
 import { stageDeployCatalog } from './deploys.mjs';
 import { stageVersionCatalog } from './version-catalog.mjs';
-import { writeBuildIdentity } from './build-identity.mjs';
+import { phpRuntimeAssetPath, writeBuildIdentity } from './build-identity.mjs';
 import { stageCurl } from './curl.mjs';
 import { stageSodium } from './sodium.mjs';
 import { applyCgiRequestOverlay } from './cgi-request-overlay.mjs';
@@ -124,12 +124,15 @@ try {
   const php = [];
   await mkdir(path.join(assets, 'extensions'));
   for (const version of versions.php) {
-    const runtimeBase = `php/${version.version}/${version.runtimeArchiveSha256}`;
-    for (const name of ['php-cgi-wasm', 'php-dbg-wasm', ...extensionPackages]) await copyRuntimePackage(version, name, runtimeBase);
-    const cgiRequestOverlay = await applyCgiRequestOverlay(path.join(assets, runtimeBase, 'php-cgi-wasm'),
+    const runtimeStaging = `php/${version.version}/${version.runtimeArchiveSha256}`;
+    for (const name of ['php-cgi-wasm', 'php-dbg-wasm', ...extensionPackages]) await copyRuntimePackage(version, name, runtimeStaging);
+    const cgiRequestOverlay = await applyCgiRequestOverlay(path.join(assets, runtimeStaging, 'php-cgi-wasm'),
       { manifest: version.manifest, upstreamVersion: versions.runtime.version });
-    const debuggerWorkerOverlay = await applyPhpDebugWorkerOverlay(path.join(assets, runtimeBase, 'php-dbg-wasm'),
+    const debuggerWorkerOverlay = await applyPhpDebugWorkerOverlay(path.join(assets, runtimeStaging, 'php-dbg-wasm'),
       { minor: version.version, manifest: version.manifest, upstreamVersion: versions.runtime.version });
+    const runtimeBase = phpRuntimeAssetPath(version.version, version.runtimeArchiveSha256,
+      { 'php-cgi-wasm': cgiRequestOverlay, 'php-dbg-wasm': debuggerWorkerOverlay });
+    await rename(path.join(assets, runtimeStaging), path.join(assets, runtimeBase));
     const runtimeArchive = versions.runtime.archives.find(archive => archive.minor === version.version);
     packages.push({ name: '@joomengine/php-wasm-int64', version: versions.runtime.version, php: version.version,
       sha256: runtimeArchive.sha256, url: runtimeArchive.url });

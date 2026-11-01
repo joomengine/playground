@@ -12,7 +12,8 @@ const directory = path.resolve(process.env.PLAYGROUND_DIST || path.join(root, 'd
 const manifest = JSON.parse(await readFile(path.join(directory, 'assets/manifest.json'), 'utf8'));
 
 test('complete site ZIP roundtrip preserves edits and credentials independently', { timeout: 900000 }, async t => {
-  const server = await createStaticServer({ directory });
+  const fixtures = {};
+  const server = await createStaticServer({ directory, fixtures });
   let browser;
   t.after(async () => { await browser?.close(); await server.close(); });
   const executablePath = process.env.PLAYGROUND_CHROMIUM_EXECUTABLE;
@@ -199,9 +200,15 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
     ui.on('pageerror', error => errors.push(error.message));
     ui.on('console', message => { if (message.type() === 'error') consoleErrors.push(`${message.text()} ${message.location().url || ''}`.trim()); });
     ui.on('response', response => { if (response.status() >= 400) consoleErrors.push(`HTTP ${response.status()} ${response.url()}`); });
-    const ready = async label => {
+    const ready = async (label, { previousKey, previousFrameURL } = {}) => {
       stage = label;
-      await ui.waitForFunction(() => !document.getElementById('credentials-button').disabled || !document.getElementById('error-view').hidden, null, { timeout: 120000 });
+      await ui.waitForFunction(({ previousKey, previousFrameURL }) => {
+        if (!document.getElementById('error-view').hidden) return true;
+        const frame = document.getElementById('site-frame');
+        return !document.getElementById('credentials-button').disabled && frame
+          && (previousKey === undefined || document.getElementById('storage-key').value !== previousKey)
+          && (!previousFrameURL || frame.getAttribute('src') !== previousFrameURL);
+      }, { previousKey, previousFrameURL }, { timeout: 120000 });
       if (await ui.locator('#error-view').isVisible()) throw new Error(await ui.locator('#error-message').textContent());
       t.diagnostic(label);
     };
@@ -236,6 +243,7 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
           await ui.locator('#launch-button:enabled').waitFor();
         }
         const sourceKey = await ui.locator('#storage-key').inputValue();
+        const previousFrameURL = await ui.evaluate(() => document.getElementById('site-frame')?.getAttribute('src'));
         await ui.locator('#deploy-editor-button').click();
         await ui.locator('#site-name').fill(sourceOpen ? 'Copy from open upload' : 'Copy from closed upload');
         if (sourceOpen) {
@@ -243,8 +251,29 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
           await ui.locator('#admin-password').fill('Independent-copy-password-567!');
         }
         stage = sourceOpen ? 'creating a copy from the open uploaded site' : 'creating a copy from the closed uploaded site';
-        await ui.locator('#use-deploy').click();
-        await ready(sourceOpen ? 'open-source copy completed' : 'closed-source copy completed');
+        // Hold the publication check to expose any unlocked gap between the
+        // checkpoint and the replacement runtime becoming available.
+        const buildMarker = await readFile(path.join(directory, 'build.json'));
+        let seenCheck, releaseCheck, checkTimer;
+        const checking = new Promise(resolve => { seenCheck = resolve; });
+        fixtures['build.json'] = async () => {
+          seenCheck();
+          await new Promise(resolve => { releaseCheck = resolve; });
+          return buildMarker;
+        };
+        try {
+          await ui.locator('#use-deploy').click();
+          await Promise.race([checking, new Promise((resolve, reject) => {
+            checkTimer = setTimeout(() => reject(new Error('The copied site did not reach its publication check.')), 120000);
+          })]);
+          for (const id of ['credentials-button', 'launch-button', 'use-deploy']) {
+            assert.equal(await ui.locator(`#${id}`).isDisabled(), true,
+              `${id} must remain locked while checking the build before opening a copied site.`);
+          }
+          releaseCheck();
+          delete fixtures['build.json'];
+          await ready(sourceOpen ? 'open-source copy completed' : 'closed-source copy completed', { previousKey: sourceKey, previousFrameURL });
+        } finally { clearTimeout(checkTimer); releaseCheck?.(); delete fixtures['build.json']; }
         assert.notEqual(await ui.locator('#storage-key').inputValue(), sourceKey);
         const copiedURL = new URL(await ui.locator('#site-frame').getAttribute('src'));
         const copiedProof = new URL('roundtrip-proof.txt', new URL('./', copiedURL.href.replace(/administrator\/.*$/, ''))).href;

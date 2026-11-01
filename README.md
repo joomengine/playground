@@ -123,12 +123,8 @@ provide the exact PHP patch versions, matching extension headers and source pins
 The generated catalog records the selected versions; PHP release candidates and
 unpublished builds are not selected.
 
-These are the patch versions contained in the selected upstream `0.2.0`
-packages. They are recorded explicitly for ABI compatibility; the minor-version
-selector does not imply a newer PHP patch release. The pinned baseline is Joomla
-6.2.0 and PHP 8.4.1. PHP 8.5 remains selectable, and existing saved sites retain
-their selected runtime. [versions.json](versions.json) is the authoritative runtime
-build catalog; the published version catalog adds current and forward packages.
+[versions.json](versions.json) defines the supported PHP lines and default
+selection; the generated runtime manifest records their exact released builds.
 
 ## Current and forward version selection
 
