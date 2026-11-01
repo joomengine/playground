@@ -4,7 +4,33 @@ import { fileURLToPath } from 'node:url';
 import { hashFile, sha256 } from './assets.mjs';
 import { matchesNativeRuntime } from './native-runtime.mjs';
 
-/** Emscripten's web build still references optional DOM targets in a worker. */
+const workerAssertion = 'assert(!ENVIRONMENT_IS_WORKER,"worker environment detected but not enabled at build time (add `worker` to `-sENVIRONMENT` to enable)");';
+
+/** Complete the JS-only web/worker glue emitted by the release's Emscripten 6.0.6. */
+function enableDedicatedWorker(source, manifest, file) {
+  if (!source.includes(workerAssertion)) {
+    if (source.includes('worker environment detected but not enabled')) throw new Error(`Review the changed debugger worker assertion: ${file}`);
+    return source;
+  }
+  if (manifest?.emscripten?.version !== '6.0.6') throw new Error(`Review debugger worker glue for Emscripten ${manifest?.emscripten?.version}: ${file}`);
+  // These are the complete generated glue differences between ENVIRONMENT=web
+  // and ENVIRONMENT=web,worker for this compiler. The resulting Wasm is identical.
+  // Keep the synchronous worker loader as well as the asynchronous Fetch path;
+  // merely removing the environment assertion leaves that fallback unavailable.
+  const changes = [
+    ['{readAsync=async url=>', '{if(ENVIRONMENT_IS_WORKER){readBinary=url=>{var xhr=new XMLHttpRequest;xhr.open("GET",url,false);xhr.responseType="arraybuffer";xhr.send(null);return new Uint8Array(xhr.response)}}readAsync=async url=>'],
+    ['var domElement=specialHTMLTargets[target]||document.querySelector(target);', 'var domElement=specialHTMLTargets[target]||globalThis.document?.querySelector(target);'],
+    ['targetThread>>>=0;return registerVisibilityChangeEventCallback(specialHTMLTargets[1],', 'targetThread>>>=0;if(!specialHTMLTargets[1])return-4;return registerVisibilityChangeEventCallback(specialHTMLTargets[1],'],
+    [workerAssertion, ''],
+  ];
+  for (const [before, after] of changes) {
+    if (source.split(before).length !== 2) throw new Error(`Review the changed debugger worker glue: ${file}`);
+    source = source.replace(before, after);
+  }
+  return source;
+}
+
+/** Adapt the release's web module for Playground's disposable debugger Worker. */
 export async function applyPhpDebugWorkerOverlay(directory, { minor, upstreamVersion, manifest } = {}) {
   const selected = minor ? [`php${minor}-dbg-web.mjs`]
     : (await readdir(directory)).filter(file => /^php\d+\.\d+-dbg-web\.mjs$/.test(file));
@@ -21,19 +47,21 @@ export async function applyPhpDebugWorkerOverlay(directory, { minor, upstreamVer
       if (source.split(legacyEnvironment).length !== 2) throw new Error(`Ambiguous debugger worker environment: ${file}`);
       source = source.replace(legacyEnvironment, environment);
     } else if (!source.includes(environment)) throw new Error(`Review the changed debugger worker environment: ${file}`);
+    source = enableDedicatedWorker(source, manifest, file);
     const before = 'var specialHTMLTargets=[0,document,window];';
-    const after = 'var specialHTMLTargets=[0,globalThis.document,globalThis.window];';
+    const after = 'var specialHTMLTargets=[0,globalThis.document??0,globalThis.window??0];';
     if (source.includes(before)) {
       if (source.split(before).length !== 2) throw new Error(`Ambiguous debugger DOM target registration: ${file}`);
       source = source.replace(before, after);
     } else if (!source.includes(after)) throw new Error(`Review the changed debugger DOM target registration: ${file}`);
     if (sha256(source) !== originalSha256) {
-      source = '/* Modified by JoomEngine: optional DOM targets for a dedicated worker; PHP/WASM unchanged. */\n' + source;
+      source = '/* Modified by JoomEngine: Emscripten dedicated-worker loading and optional DOM targets; PHP/WASM unchanged. */\n' + source;
       await writeFile(path.join(directory, file), source);
     }
     files.push({ file, originalSha256, sha256: sha256(source) });
   }
-  return { name: 'phpdbg-dedicated-worker', upstreamVersion, files };
+  return { name: 'phpdbg-dedicated-worker', upstreamVersion,
+    buildScriptSha256: await hashFile(fileURLToPath(import.meta.url)), files };
 }
 
 /** Stage only the debugger extension built from this checkout and runtime pin. */

@@ -433,6 +433,7 @@ async function stageSavedSite(page, key) {
 }
 
 async function saveRunningSite(page) {
+  await showSiteActions(page);
   const previous = await page.locator('#activity-log li').last().elementHandle();
   try {
     await page.locator('#save-button').click();
@@ -629,7 +630,10 @@ async function assertAbnormalShutdown(page, config) {
     const step = fatal ? 'intentional PHP fatal request cleanup' : 'intentional PHP exit request cleanup';
     page.testStep = step;
     const ownerId = await page.evaluate(() => window.playground.isolation.ownerId);
-    const source = new URL(`__runtime/${encodeURIComponent(ownerId)}/assets/php-cgi-wasm/PhpCgiBase.mjs`, page.url()).href;
+    const phpEntry = manifest.php.find(entry => entry.version === config.phpVersion);
+    assert.ok(phpEntry, 'The selected PHP runtime must be present in the built manifest.');
+    const ownedAssets = new URL(`__runtime/${encodeURIComponent(ownerId)}/assets/`, page.url());
+    const source = new URL('PhpCgiBase.mjs', new URL(phpEntry.moduleUrl, ownedAssets)).href;
     const expectedMessage = fatal
       ? new RegExp(`^\\[[^\\]\\r\\n]+\\] PHP Fatal error:  Uncaught RuntimeException: ${failure} in (/internal/operation-[a-f0-9-]+\\.php):1\\nStack trace:\\n#0 \\{main\\}\\n  thrown in \\1 on line 1\\n$`)
       : /^$/;
@@ -1109,7 +1113,7 @@ for (const name of browserNames) {
           ], JSON_THROW_ON_ERROR);`;
         const expected = await phpJSON(page, exportedState);
         page.testStep = 'download export';
-        const downloading = page.waitForEvent('download');
+        const downloading = page.waitForEvent('download', { timeout: requestTimeout });
         await bounded(page.evaluate(async () => {
           const result = await window.playground.exportSite({ format: 'bundle' });
           const url = URL.createObjectURL(new Blob([result.bytes], { type: result.mimeType }));
@@ -1284,9 +1288,10 @@ for (const name of browserNames) {
         const publicPreferences = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith('joomengine:launch:'))));
         assert.doesNotMatch(JSON.stringify(publicPreferences), /"(?:password|admin|administrator)"\s*:/, 'Automatic-resume preferences must not expose administrator credentials.');
         page.testStep = 'download portable files and database';
+        await showSiteActions(page);
         await page.locator('#download-dialog-button').click();
         await page.locator('#export-format').selectOption('bundle');
-        const downloaded = page.waitForEvent('download');
+        const downloaded = page.waitForEvent('download', { timeout: requestTimeout });
         await page.locator('#export-button').click();
         const download = await downloaded;
         const exported = unzipSync(await readFile(await download.path()));

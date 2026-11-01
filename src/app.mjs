@@ -318,6 +318,7 @@ function updateSaveState() {
     if (savingSite === runtime) status = t('status.saving');
     else if (saveFailed) status = t('status.saveFailed');
     else if (!currentConfig?.persistence) status = t('status.temporary');
+    else if (runtime.recovery) status = t('status.saved');
     else status = lastSavedAt
       ? t('status.savedAt', { time: lastSavedAt.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) })
       : t('status.saving');
@@ -640,6 +641,7 @@ async function recoverSite() {
     currentInput = input;
     currentConfig = resolved.configuration;
     runtime = await createPlayground(currentConfig, { recovery: true, onProgress: progress });
+    lastSavedAt = undefined; saveFailed = false;
     runningSiteId = currentConfig.storageKey;
     runningAdministrator = runtime.installation?.administrator || currentInput.admin;
     clearFeedback();
@@ -995,8 +997,6 @@ function findProfile(deployId, joomlaVersion) {
 }
 async function launch({ siteExport, checkpoint, importedConfiguration, deploymentChanges, rotateAdministrator = false } = {}) {
   if (busy || launching || !initialized || !catalog || !deployCatalog) return;
-  if (await buildUpdates.check({ force: true })) return;
-  if (busy || launching) return;
   launching = true;
   let switchingStarted = false;
   launchCountdown.stop();
@@ -1004,6 +1004,10 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
   $('dashboard-countdown').hidden = true;
   try {
     if (!siteExport && !checkpoint && !$('launch-form').checkValidity()) { setDrawer(true); openDialog('deploy-dialog'); $('advanced-settings').open = true; $('launch-form').reportValidity(); return; }
+    // Reserve the transition before checking the network. Validate first:
+    // disabled form controls do not participate in native form validation.
+    setBusy(true);
+    if (await buildUpdates.check({ force: true })) return;
     let input = importedConfiguration || formInput();
     const nightly = dynamicMetadata.joomla.find(entry => entry.version === input.joomlaVersion && entry.source === 'nightly');
     if (nightly && input.joomlaPackage && refreshNightlyOnNextLaunch) {
@@ -1551,7 +1555,7 @@ function saveSite({ quiet = false } = {}) {
     } catch (error) {
       saveFailed = true;
       databaseHost?.cancelRuntimeTransfer();
-      fields.persistence.checked = currentConfig.persistence;
+      if (wasTemporary) fields.persistence.checked = currentConfig.persistence;
       activity(`Save failed: ${messageOf(error)}`);
       if (runtime?.healthy) { if (wasTemporary) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl)); }
       else displayError(error);
@@ -1649,6 +1653,7 @@ async function applyDeployment() {
     runningAdministrator = runtime.installation?.administrator || currentInput.admin;
     applyAdministrator(runningAdministrator);
     lastSavedAt = currentConfig.persistence ? new Date() : undefined;
+    saveFailed = false;
     rememberCurrentSite();
     currentSitePath = currentConfig.initialPath;
     mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
