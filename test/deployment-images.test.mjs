@@ -32,6 +32,83 @@ function memoryStorage() {
   };
 }
 
+const settled = () => new Promise(resolve => setImmediate(resolve));
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+test('verified maintained images launch before cache writes finish and share immutable downloads while writing', { timeout: 2_000 }, async t => {
+  const storage = memoryStorage();
+  const write = deferred();
+  t.after(() => write.resolve());
+  const originalPut = storage.put.bind(storage);
+  storage.put = async (record, blob) => { await write.promise; return originalPut(record, blob); };
+  let downloads = 0;
+  const cache = createDeploymentImageCache({ baseURL, storage, fetcher: async () => { downloads++; return new Response(bytes); } });
+  const entry = maintainedDeploymentImages(manifest, baseURL)[0];
+  const first = await cache.getMaintained(entry);
+  assert.deepEqual(first.bytes, bytes);
+  assert.equal(storage.records.size, 0, 'Installation starts without waiting for IndexedDB.');
+  first.bytes.fill(0);
+  structuredClone(first.bytes.buffer, { transfer: [first.bytes.buffer] });
+  const second = await cache.getMaintained(entry);
+  assert.deepEqual(second.bytes, bytes, 'A later caller receives verified bytes even if the importer detached its buffer.');
+  second.bytes.fill(9);
+  assert.deepEqual((await cache.getMaintained(entry)).bytes, bytes);
+  assert.equal(downloads, 1, 'The verified download stays shared until its cache write settles.');
+  write.resolve();
+  await settled();
+  const cached = await cache.getMaintained(entry);
+  assert.equal(cached.cached, true);
+  assert.deepEqual(cached.bytes, bytes, 'Only the immutable verified snapshot reaches storage.');
+  assert.equal(downloads, 1);
+});
+
+test('a delayed cache failure reports once without another launch phase, then a later launch can retry', { timeout: 2_000 }, async t => {
+  const storage = memoryStorage();
+  const write = deferred();
+  t.after(() => write.resolve());
+  const originalPut = storage.put.bind(storage);
+  storage.put = () => write.promise;
+  const warnings = [], progress = [];
+  let downloads = 0;
+  const cache = createDeploymentImageCache({ baseURL, storage, fetcher: async () => { downloads++; return new Response(bytes); } });
+  const entry = maintainedDeploymentImages(manifest, baseURL)[0];
+  const first = await cache.getMaintained(entry, { onWarning: message => warnings.push(message), onProgress: event => progress.push(event.phase) });
+  assert.deepEqual(first.bytes, bytes);
+  assert.deepEqual(warnings, []);
+  assert.deepEqual((await cache.getMaintained(entry)).bytes, bytes);
+  assert.equal(downloads, 1);
+  write.reject(new Error('Quota exceeded'));
+  await settled();
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /could not be saved locally/);
+  assert.deepEqual(progress, ['download-image'], 'A completed launch never receives a late save/ready progress transition.');
+  storage.put = originalPut;
+  assert.deepEqual((await cache.getMaintained(entry)).bytes, bytes);
+  await settled();
+  assert.equal(downloads, 2);
+  assert.equal(storage.records.size, 1);
+});
+
+test('optional last-used metadata never delays a verified cached image', { timeout: 2_000 }, async t => {
+  const storage = memoryStorage();
+  const touch = deferred();
+  t.after(() => touch.resolve());
+  const entry = maintainedDeploymentImages(manifest, baseURL)[0];
+  await storage.put(entry, bytes);
+  storage.touch = () => touch.promise;
+  const warnings = [];
+  const cache = createDeploymentImageCache({ baseURL, storage, fetcher: () => { throw new Error('No download is required'); } });
+  assert.deepEqual((await cache.getMaintained(entry, { onWarning: message => warnings.push(message) })).bytes, bytes);
+  touch.reject(new Error('Metadata storage unavailable'));
+  await settled();
+  assert.match(warnings[0], /cached image is available/);
+  assert.equal(storage.records.size, 1);
+});
+
 test('maintained images reuse verified bytes and replace stale hashes before reuse', async () => {
   const storage = memoryStorage();
   let downloads = 0, served = bytes;
@@ -78,6 +155,7 @@ test('corruption is discarded, downloads require integrity, and quota failure do
   storage.put = async () => { throw new Error('Quota exceeded'); };
   const result = await cache.getMaintained(entry, { onWarning: value => warnings.push(value) });
   assert.deepEqual(result.bytes, bytes);
+  await settled();
   assert.equal(warnings.length, 1);
   assert.doesNotMatch(warnings[0], /https?:/);
 });

@@ -589,6 +589,7 @@ function progress(event) {
   const message = details?.phase === 'warning' ? presentError(new Error(rawMessage), {
     secrets: [$('admin-password').value, runningAdministrator?.password], fallback: 'PHP reported diagnostic output. Check the browser console for details.',
   }).summary : rawMessage;
+  if (details?.background) { activity(message); return; }
   if (details?.phase === 'failed' && runtime && !closing && !busy) {
     destroyPreview();
     displayError(new Error(message));
