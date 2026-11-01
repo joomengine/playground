@@ -8,7 +8,8 @@ import { observeIcons, decorateAction } from './icons.mjs';
 import { createLanguageSelector } from './language-selector.mjs';
 
 import { connectFrame } from './frame-view.mjs';
-import { loginFromCredentialsDialog } from './credentials-login.mjs';
+import { loginFromCredentialsDialog, populateCredentialsDialog } from './credentials-login.mjs';
+import { prepareUploadedSiteCopy } from './site-copy.mjs';
 import { DEFAULT_PHP_SETTINGS, normalizePhpSettings } from './php-settings.mjs';
 import { UI_LANGUAGES, getLocale, initializeLocale, setLocale, t } from './i18n.mjs';
 import { createLaunchCountdown } from './launch-countdown.mjs';
@@ -22,6 +23,7 @@ import { loadVersionCatalog } from './version-catalog.mjs';
 import { dynamicJoomlaChoices, matchingJcbChoices } from './dynamic-selection.mjs';
 import { selectCatalogPackage } from './dynamic-packages.mjs';
 import { deploymentImages } from './deployment-images.mjs';
+import { readSiteExport, configurationForSiteExport, catalogForRestoredSite } from './site-import.mjs';
 
 const $ = (id) => document.getElementById(id);
 const deploymentURL = new URL('../', import.meta.url).href;
@@ -411,6 +413,7 @@ function setBusy(value) {
   const targetRunning = Boolean(runtime && fields.storageKey.value === currentConfig?.storageKey && fields.persistence.checked === currentConfig?.persistence);
   $('launch-button').disabled = locked || unavailable;
   $('embedded-launch').disabled = locked || unavailable;
+  $('upload-site-button').disabled = locked || unavailable;
   $('retry-button').disabled = locked || unavailable;
   $('recover-button').disabled = locked || unavailable || !fields.persistence.checked;
   $('repair-button').hidden = filesOnly || !runtime?.recovery?.configured;
@@ -598,7 +601,7 @@ function applyAdministrator(value) {
 }
 function formInput(overrides = {}) {
   const joomlaVersion = overrides.joomlaVersion ?? fields.joomlaVersion.value;
-  const jcbInput = jcbSelectionInput({ selection: { ...jcbSelection, version: fields.jcbVersion.value },
+  const jcbInput = editorConfiguration?.restoredSite ? { jcbVersion: editorConfiguration.jcbVersion ?? 'none' } : jcbSelectionInput({ selection: { ...jcbSelection, version: fields.jcbVersion.value },
     major: joomlaVersion.split('.')[0], deploy: currentDeployRecipe, pinned: pinnedJcb });
   const candidate = {
     ...(editorConfiguration || {}),
@@ -617,6 +620,7 @@ function formInput(overrides = {}) {
   if (candidate.jcbVersion === 'none' || (editorConfiguration?.jcbVersion !== candidate.jcbVersion && !jcbInput.jcbPackage)) delete candidate.jcbPackage;
   if (candidate.content == null) delete candidate.content;
   const full = normalizeConfiguration(candidate, { catalog, baseURL: deploymentURL });
+  if (full.restoredSite) return full;
   const setupFields = ['siteName', 'initialPath', 'admin', 'extensions', 'startupCommands', 'menus', 'template', 'languageTags', 'multilingual', 'content', 'language', 'autoLogin', 'phpSettings'];
   const sameSetup = editorConfiguration && setupFields.every(name => JSON.stringify(full[name] ?? null) === JSON.stringify(editorConfiguration[name] ?? null));
   if (sameSetup && !editorSourceInput?.deploymentRecipe && !fields.deployId.value.startsWith('custom-')) {
@@ -641,6 +645,12 @@ function formInput(overrides = {}) {
   return { ...full, deploymentRecipe: document };
 }
 async function resolve(input) {
+  if (input.restoredSite) {
+    catalog = catalogForRestoredSite(catalog, input);
+    selectedJoomlaPackages.set(input.joomlaVersion, { ...catalog.joomla.find(entry => entry.version === input.joomlaVersion) });
+    fillJoomlaOptions();
+    return { configuration: normalizeConfiguration(input, { catalog, baseURL: deploymentURL }), deploy: deploymentDescriptor('blank') };
+  }
   input = customDeploymentInput(input);
   input.joomlaVersion ||= catalog.defaults.joomlaVersion;
   const descriptor = deploymentDescriptor(input.deployId ?? deployCatalog.default);
@@ -696,7 +706,10 @@ function updateCompatibility({ preserve = false } = {}) {
   const compatiblePhp = deploymentPhpVersions(deploy, joomla);
   for (const option of fields.phpVersion.options) option.disabled = !compatiblePhp.includes(option.value);
   for (const option of fields.joomlaVersion.options) {
-    option.disabled = !deploymentPhpVersions(deploy, catalog.joomla.find(entry => entry.version === option.value)).length;
+    const release = catalog.joomla.find(entry => entry.version === option.value);
+    const archiveOnly = release && !release.url && !pinnedCatalog?.joomla.some(entry => entry.version === release.version)
+      && !dynamicMetadata.joomla.some(entry => entry.version === release.version);
+    option.disabled = (!editorConfiguration?.restoredSite && archiveOnly) || !deploymentPhpVersions(deploy, release).length;
   }
   if (!compatiblePhp.includes(fields.phpVersion.value)) {
     if (preserve) throw new Error('The selected Joomla and PHP versions are incompatible.');
@@ -704,9 +717,11 @@ function updateCompatibility({ preserve = false } = {}) {
   }
   $('compatibility-note').textContent = `${joomla.label} · PHP ${compatiblePhp.join(', ')}`;
   const major = joomla.version.split('.')[0];
-  for (const option of fields.deployId.options) {
-    const descriptor = deploymentDescriptor(option.value);
-    option.disabled = !catalog.joomla.some(release => deploymentPhpVersions(descriptor, release).length);
+  for (const select of [fields.deployId, $('editor-deployment')]) {
+    for (const option of select.options) {
+      const descriptor = deploymentDescriptor(option.value);
+      option.disabled = !catalog.joomla.some(release => deploymentPhpVersions(descriptor, release).length);
+    }
   }
   const tags = [...new Set(['en-GB', ...(deployCatalog.languages?.[major] || []).map((item) => item.tag)])];
   languageSelector?.setCatalog(tags);
@@ -767,7 +782,7 @@ async function prepareDynamicInput(input) {
     const available = catalog.joomla.find(item => item.version === version);
     if (entry && available) {
       const selected = selectedJoomlaPackages.get(version);
-      input.joomlaPackage = selectCatalogPackage(selected || entry, { php: available.php });
+      input.joomlaPackage = selectCatalogPackage(selected?.url ? selected : entry, { php: available.php });
       selectedJoomlaPackages.set(version, structuredClone(input.joomlaPackage));
     }
   }
@@ -790,7 +805,7 @@ function renderJcbOptions(major, selection = jcbSelection) {
   const choices = matchingJcbChoices(major, dynamicMetadata.jcb, pinnedJcb);
   if (selection.version !== 'none' && !choices.some(entry => entry.version === selection.version)) {
     const pinned = [...pinnedJcb.values()].find(entry => entry.version === selection.version);
-    if (selection.package || pinned) choices.push({ version: selection.version, label: `JCB ${selection.version}`, channel: 'saved' });
+    if (selection.package || pinned || editorConfiguration?.restoredSite) choices.push({ version: selection.version, label: `JCB ${selection.version}`, channel: 'saved' });
   }
   fillOptions(fields.jcbVersion, [{ version: 'none', label: t('label.jcbNone'), disabled: deploymentRequiresJcb(currentDeployRecipe) }, ...choices]);
   if (![...fields.jcbVersion.options].some(option => option.value === selection.version)) {
@@ -825,7 +840,7 @@ function applyConfiguration(config, input = config, deploy) {
   if (deploy) currentDeployRecipe = deploy;
   editorConfiguration = structuredClone(config);
   editorSourceInput = structuredClone(input);
-  extraDeploymentFields = Object.fromEntries(['content', 'languages', 'joomlaPackage', 'deploymentRecipe'].filter(key => config[key] !== undefined).map(key => [key, structuredClone(config[key])]));
+  extraDeploymentFields = Object.fromEntries(['content', 'languages', 'joomlaPackage', 'deploymentRecipe', 'restoredSite'].filter(key => config[key] !== undefined).map(key => [key, structuredClone(config[key])]));
   templateOptions = structuredClone(input.template || config.template || {});
   for (const name of ['deployId', 'joomlaVersion', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language']) {
     if (config[name] !== undefined) fields[name].value = config[name];
@@ -912,7 +927,7 @@ function findProfile(deployId, joomlaVersion) {
   return drafts.get(`${deployId}:${joomlaVersion}`)
     || Object.values(savedState.sites).reverse().find((item) => item.deployId === deployId && item.joomlaVersion === joomlaVersion);
 }
-async function launch() {
+async function launch({ siteExport, checkpoint, importedConfiguration, deploymentChanges } = {}) {
   if (busy || launching || !initialized || !catalog || !deployCatalog) return;
   launching = true;
   let switchingStarted = false;
@@ -920,8 +935,8 @@ async function launch() {
   $('launch-countdown').hidden = true;
   $('dashboard-countdown').hidden = true;
   try {
-    if (!$('launch-form').checkValidity()) { setDrawer(true); openDialog('deploy-dialog'); $('advanced-settings').open = true; $('launch-form').reportValidity(); return; }
-    let input = formInput();
+    if (!siteExport && !checkpoint && !$('launch-form').checkValidity()) { setDrawer(true); openDialog('deploy-dialog'); $('advanced-settings').open = true; $('launch-form').reportValidity(); return; }
+    let input = importedConfiguration || formInput();
     const nightly = dynamicMetadata.joomla.find(entry => entry.version === input.joomlaVersion && entry.source === 'nightly');
     if (nightly && input.joomlaPackage && refreshNightlyOnNextLaunch) {
       setBusy(true);
@@ -935,11 +950,11 @@ async function launch() {
     setBusy(true);
     $('loading-title').textContent = t('title.loading');
     $('loading-progress').removeAttribute('value');
-    if (freshKeyPending) {
+    if (freshKeyPending && !siteExport && !checkpoint) {
       input.storageKey = `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-fresh-${crypto.randomUUID().slice(0, 8)}`;
       fields.storageKey.value = input.storageKey;
     }
-    const recipe = await isolateSetup(savedState, input);
+    const recipe = input.restoredSite ? { configuration: input, changed: false } : await isolateSetup(savedState, input);
     input = recipe.configuration;
     if (recipe.changed) {
       fields.storageKey.value = input.storageKey;
@@ -950,7 +965,10 @@ async function launch() {
       setDrawer(false); $('site-frame')?.focus(); feedback(t('status.alreadyRunning')); return;
     }
     if (runtime) {
-      if (!currentConfig.persistence && !confirm(t('confirm.temporary'))) return;
+      if (!currentConfig.persistence && (siteExport || checkpoint)) {
+        setBusy(false);
+        if (!await saveSite({ quiet: true })) return;
+      } else if (!currentConfig.persistence && !confirm(t('confirm.temporary'))) return;
       setBusy(false);
       if (!await closeSite({ save: currentConfig.persistence })) return;
     }
@@ -958,10 +976,17 @@ async function launch() {
     setBusy(true); show('loading-view');
     currentInput = input;
     currentConfig = resolved.configuration;
+    if (siteExport || checkpoint) applyConfiguration(currentConfig, input, resolved.deploy);
     $('preview-label').textContent = currentConfig.siteName;
     activity(`Starting ${resolved.deploy?.title || currentConfig.deployId} with Joomla ${currentConfig.joomlaVersion} and PHP ${currentConfig.phpVersion}.`);
     const resumePath = resumeLastRoute && !input.fresh && currentConfig.persistence && savedState.sites[currentConfig.storageKey]?.lastPath;
-    runtime = await createPlayground({ ...currentConfig, ...(resumePath ? { initialPath: safeSavedRoute(resumePath, currentConfig.initialPath) } : {}) }, { onProgress: progress });
+    runtime = await createPlayground({ ...currentConfig, ...(resumePath ? { initialPath: safeSavedRoute(resumePath, currentConfig.initialPath) } : {}) }, { onProgress: progress, siteExport, checkpoint });
+    if (deploymentChanges) {
+      await runtime.applyConfiguration(deploymentChanges);
+      currentConfig = runtime.configuration;
+      currentInput = { ...deploymentChanges, admin: runtime.installation?.administrator || deploymentChanges.admin };
+      applyConfiguration(currentConfig, currentInput, resolved.deploy);
+    }
     runningSiteId = currentConfig.storageKey;
     selectedSiteId = currentConfig.persistence ? currentConfig.storageKey : null;
     const restoredPath = resumePath
@@ -1004,6 +1029,7 @@ async function launch() {
     activity(recipe.changed ? `Site ready under “${currentConfig.storageKey}”. Your previous site is available in Saved sites.` : currentConfig.persistence
       ? resumeSaved ? 'Site ready. Reopening this playground will resume your saved site.' : `Site ready. Keep saved site key “${currentConfig.storageKey}” to reopen it.`
       : 'Temporary site ready. Download your work before closing.');
+    if (siteExport) feedback(runtime.installation.contentHashValidated ? 'Package validated.' : 'Package validation is unavailable for this older export.');
   } catch (error) {
     if (!switchingStarted) { feedback(error, { error: true, persistent: true }); return; }
     destroyPreview();
@@ -1129,7 +1155,9 @@ async function changeProfile({ refreshNightly = false, deploymentChanged = false
   setBusy(true);
   try {
     const descriptor = deploymentDescriptor(fields.deployId.value);
-    const selected = deploymentChanged ? selectDeploymentRuntime(descriptor, catalog, {
+    const installableCatalog = deploymentChanged ? { ...catalog, joomla: dynamicJoomlaChoices(pinnedCatalog, dynamicMetadata.joomla,
+      new Map([...selectedJoomlaPackages].filter(([, entry]) => entry.url))).filter(entry => entry.php?.length) } : catalog;
+    const selected = deploymentChanged ? selectDeploymentRuntime(descriptor, installableCatalog, {
       joomlaVersion: fields.joomlaVersion.value, phpVersion: fields.phpVersion.value,
     }) : { joomlaVersion: fields.joomlaVersion.value, phpVersion: fields.phpVersion.value };
     const target = { deployId: fields.deployId.value, joomlaVersion: selected.joomlaVersion };
@@ -1141,7 +1169,7 @@ async function changeProfile({ refreshNightly = false, deploymentChanged = false
       hideToolbar,
       ...(!stored && target.deployId === previous?.deployId ? { language: fields.language.value } : {}),
       storageKey: stored?.storageKey || defaultSiteKey(target.deployId, target.joomlaVersion),
-      ...(!stored?.joomlaPackage && selectedJoomlaPackages.has(target.joomlaVersion)
+      ...(!stored?.restoredSite && !stored?.joomlaPackage && selectedJoomlaPackages.get(target.joomlaVersion)?.url
         ? { joomlaPackage: structuredClone(selectedJoomlaPackages.get(target.joomlaVersion)) } : {}),
       ...(!target.deployId.startsWith('custom-') ? { admin: { ...administrator(), ...(!stored ? { password: password() } : {}) } } : {}),
     };
@@ -1254,6 +1282,21 @@ async function resetSite({ start = false } = {}) {
   if (reset && start) await launch();
 }
 $('save-button').addEventListener('click', () => void saveSite());
+$('upload-site-button').addEventListener('click', () => { pauseAutomaticLaunch(); $('upload-site-file').click(); });
+$('upload-site-file').addEventListener('change', async event => {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file || busy || launching) return;
+  pauseAutomaticLaunch();
+  setBusy(true);
+  let siteExport, importedConfiguration;
+  try {
+    siteExport = await readSiteExport(file);
+    importedConfiguration = configurationForSiteExport(siteExport, catalog, { baseURL: deploymentURL, admin: administrator() });
+  } catch (error) { feedback(error, { error: true, persistent: true }); return; }
+  finally { setBusy(false); }
+  await launch({ siteExport, importedConfiguration });
+});
 $('export-button').addEventListener('click', async () => {
   if (!runtime || busy) return;
   setBusy(true);
@@ -1262,7 +1305,7 @@ $('export-button').addEventListener('click', async () => {
   try {
     const result = format === 'recovery' || runtime.recovery?.filesOnly || (runtime.recovery && !runtime.recovery.configured)
       ? await runtime.exportRecoveryFiles()
-      : await runtime.exportSite({ format, onProgress: (event) => activity(event.message || event) });
+      : await runtime.exportSite({ format, includePlaygroundConfiguration: format === 'bundle', onProgress: (event) => activity(event.message || event) });
     if (!result || typeof result.filename !== 'string' || !result.filename
         || (!(result.blob instanceof Blob) && !(result.bytes instanceof Uint8Array))) {
       throw new Error('The export did not produce a downloadable file.');
@@ -1469,9 +1512,26 @@ async function useDeployment() {
   $('deploy-error').hidden = true;
   try {
     let input = formInput();
+    const storageKey = `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`;
+    if (input.restoredSite) {
+      setBusy(true);
+      let copy;
+      try {
+        if (codeHost && !codeHost.closed && !await codeHost.beforeClose()) return;
+        if (databaseHost && !databaseHost.closed && !await databaseHost.beforeClose()) return;
+        const sourceConfiguration = { ...(savedState.sites[input.storageKey] || editorConfiguration),
+          storageKey: input.storageKey, admin: input.admin };
+        copy = await prepareUploadedSiteCopy({ input, sourceConfiguration, runtime, storageKey,
+          open: async source => createPlayground((await resolve(source)).configuration, { onProgress: progress }) });
+      } finally { setBusy(false); }
+      freshKeyPending = false; selectedSiteId = null; resumeLastRoute = false;
+      $('deploy-dialog').close();
+      await launch({ checkpoint: copy.checkpoint, importedConfiguration: copy.configuration, deploymentChanges: copy.changes });
+      return;
+    }
     // Using a recipe creates an independent installation, including when a
     // saved site's runtime is closed. Dashboard Launch resumes that saved site.
-    input = { ...input, storageKey: `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}` };
+    input = { ...input, storageKey };
     const resolved = await resolve(input);
     applyConfiguration(resolved.configuration, input, resolved.deploy); applyAdministrator(input.admin);
     freshKeyPending = false;
@@ -1623,13 +1683,14 @@ function setupInterface() {
   $('download-dialog-button').addEventListener('click', () => openDialog('download-dialog'));
   $('credentials-button').addEventListener('click', () => {
     updateMcpPreview();
-    $('credential-username').value = runningAdministrator?.username || ''; $('credential-password').value = runningAdministrator?.password || '';
-    $('credential-password').type = 'password'; $('reveal-credentials').textContent = t('action.show'); openDialog('credentials-dialog');
+    populateCredentialsDialog({ dialog: $('credentials-dialog'), administrator: runningAdministrator, installation: runtime?.installation });
+    $('reveal-credentials').textContent = t('action.show'); openDialog('credentials-dialog');
   });
   $('reveal-credentials').addEventListener('click', () => { const show = $('credential-password').type === 'password'; $('credential-password').type = show ? 'text' : 'password'; $('reveal-credentials').textContent = t(show ? 'action.hide' : 'action.show'); });
   $('credential-login').addEventListener('click', () => {
     loginFromCredentialsDialog({ dialog: $('credentials-dialog'), frame: $('site-frame'),
-      administrator: runningAdministrator, baseURL: runtime?.baseUrl });
+      administrator: runningAdministrator, baseURL: runtime?.baseUrl,
+      administratorUnavailable: runtime?.installation?.administratorUnavailable });
   });
   $('go-administrator').addEventListener('click', () => { if (runtime) navigatePreview('/administrator/'); $('credentials-dialog').close(); });
   $('copy-share').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('share-url').value); $('share-feedback').textContent = t('status.copied'); } catch { $('share-url').focus(); $('share-url').select(); $('share-feedback').textContent = t('help.clipboard'); } });

@@ -198,9 +198,9 @@ export function normalizeDeploy(value, { baseURL = defaultCatalogURL.href, requi
 
 async function fetchJSON(url, fetcher) {
   const response = await fetcher(url);
-  if (!response.ok) throw new Error(`Cannot load deploy configuration: HTTP ${response.status} (${url}).`);
+  if (!response.ok) throw new Error(`Cannot load deployment configuration: HTTP ${response.status}.`);
   const source = new TextDecoder('utf-8', { fatal: true }).decode(await readDeploymentBytes(response));
-  try { return JSON.parse(source); } catch { throw new Error(`Invalid deploy JSON: ${url}.`); }
+  try { return JSON.parse(source); } catch { throw new Error('The deployment configuration contains invalid JSON.'); }
 }
 
 export async function loadDeployCatalog({ url = defaultCatalogURL, fetcher = fetch } = {}) {
@@ -212,7 +212,7 @@ function uniquePackages(entries) {
   const result = new Map();
   for (const entry of entries) {
     const existing = result.get(entry.url);
-    if (existing && (existing.sha256 !== entry.sha256 || existing.sha512 !== entry.sha512)) throw new TypeError(`Conflicting checksums for package ${entry.url}.`);
+    if (existing && (existing.sha256 !== entry.sha256 || existing.sha512 !== entry.sha512)) throw new TypeError('The deployment contains conflicting package checksums.');
     result.set(entry.url, entry);
   }
   return [...result.values()];

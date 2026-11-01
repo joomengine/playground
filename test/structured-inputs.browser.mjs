@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { chromium } from 'playwright';
+import { chromium, firefox } from 'playwright';
 import { createStaticServer } from './server.mjs';
 
-test('structured editors preserve arguments and nested values across basic and JSON edits', { timeout: 60_000 }, async () => {
+for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split(',')) {
+test(`structured editors preserve arguments and nested values across basic and JSON edits (${browserName})`, { timeout: 60_000 }, async () => {
   const server = await createStaticServer({ directory: fileURLToPath(new URL('../', import.meta.url)) });
   let browser;
   try {
-    browser = await chromium.launch({ headless: true,
-      ...(process.env.PLAYGROUND_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYGROUND_CHROMIUM_EXECUTABLE } : {}),
-    });
+    const executablePath = process.env[`PLAYGROUND_${browserName.toUpperCase()}_EXECUTABLE`];
+    browser = await { chromium, firefox }[browserName].launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
     const page = await browser.newPage();
     await page.goto(`${server.url}__test__.html`);
     await page.evaluate(async () => {
@@ -54,7 +54,7 @@ test('structured editors preserve arguments and nested values across basic and J
     assert.deepEqual(await page.evaluate(() => window.parameters.read()), { nested: { retained: [1, 'two', false, null] } });
     assert.equal(await page.locator('#parameters-fields input').first().isDisabled(), false);
   } finally {
-    await browser?.close();
-    await server.close();
+    try { await browser?.close(); } finally { await server.close(); }
   }
 });
+}

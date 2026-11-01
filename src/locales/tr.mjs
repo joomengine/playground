@@ -24,7 +24,7 @@ export default Object.freeze({
   "action.addExtensionUrl": "Başka bir URL ekle",
   "title.extensionAdvanced": "Gelişmiş seçenekler",
   "label.extensionJson": "Eklenti paketleri JSON verisi",
-  "help.extensionJson": "Gelişmiş: url ve isteğe bağlı sha256 sağlama toplamı içeren nesnelerden oluşan bir dizi girin. Buradaki değişiklikler URL alanlarını günceller.",
+  "help.extensionJson": "Gelişmiş: url içeren nesnelerden oluşan bir dizi girin. Buradaki değişiklikler URL alanlarını günceller.",
   "error.extensionJson": "URL alanlarını düzenlemeden önce eklenti JSON verisini düzeltin.",
   "error.extensionLimit": "En fazla 30 eklenti paketi seçin.",
   "label.extensionUrlNumber": "Eklenti ZIP URL’si {number}",

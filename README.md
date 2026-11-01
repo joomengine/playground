@@ -383,6 +383,7 @@ parameters. Invalid JSON remains visible until corrected.
   without launching it. Locked or failed deletion retains its management entry
   so it can be retried.
 - **Download** exports the complete site, its files, or its SQL database.
+- **Upload** opens a complete site export ZIP as a new, independent saved site.
 - **Hide controls** in either the header or footer hides both bars, settings and
   activity together. Joomla keeps the same running iframe, current page and
   unsaved work. Small restore tabs occupy the top-left and bottom-left document
@@ -414,8 +415,8 @@ visible save failures; they do not advance the saved-state indicator.
 The credentials dialog shows the generated administrator login details, including
 when automatic login is disabled. Each fresh site receives new credentials;
 saved sites retain theirs. Credentials stay in private runtime metadata outside
-the webroot and share links. Saved custom recipes and explicit full configuration
-JSON exports also retain the configured administrator. Browser storage can be
+the webroot and share links. Saved custom recipes, full configuration JSON exports
+and complete site downloads retain the known sandbox administrator. Browser storage can be
 evicted or cleared and is not a backup. A save reports completion only after both
 stores flush; closing a tab cannot guarantee an unfinished save completes.
 
@@ -466,8 +467,19 @@ A complete export contains `site/`, `database.sql`, `database.ndjson` for
 prepared-site import, `export.json`, and `DEPLOYMENT.md`. Its Joomla configuration
 uses portable paths and placeholder hosting database settings. Follow the
 included instructions to upload files, import SQL, and configure the destination
-database. Private runtime metadata, browser sessions, and generated caches are
-excluded. Files-only ZIP and SQL-only downloads are also available. Tables,
+database. Private runtime files, browser sessions, and generated caches are
+excluded. Complete site downloads include the runtime settings, opening page,
+and known sandbox administrator credentials in `export.json`. **Upload** restores
+the installed files and database, including subsequent edits, with those same
+credentials and opening page under a new saved-site identity. It does not rerun
+extension installation or deployment commands. Ordinary extension ZIPs and
+incomplete exports are rejected.
+
+One SHA-256 content hash covers the exported site files and database, excluding
+`export.json` and export instructions. Upload reports **Package validated.** when
+the payload matches and rejects a mismatch before restoring the site. Older
+complete exports without a content hash remain importable and show a brief notice
+that validation is unavailable. Files-only ZIP and SQL-only downloads are also available. Tables,
 views, and simple triggers are supported. Stored routines, events, compound
 trigger bodies, system-versioned tables, cross-database references, and aliases
 or common table expressions matching the source database name stop export with
@@ -586,8 +598,8 @@ recipes, `npm run build:deploys` installs real Joomla, exports it, and imports
 the archive into a second runtime with new credentials before publishing it.
 Prepared copies match an exact Joomla release. JCB and the heritage demonstration
 are prepared for both catalog releases. Opening JCB restores the installed files
-and database instead of repeating its installer. Administrator credentials are
-rotated on every new import; PHP settings and explicit extension, language, menu
+and database instead of repeating its installer. New sites created from prepared
+images receive their own configured administrator; PHP settings and explicit extension, language, menu
 and template choices still apply. `fresh=1` builds the original recipe instead.
 
 Prepared JCB copies use the stable package releases pinned in
@@ -757,6 +769,12 @@ provisioning completes:
 | `close()` | Close the instance while keeping saved data |
 | `reset()` | Close the instance and delete its saved data |
 
+The dashboard's complete-site download calls
+`exportSite({ format: 'bundle', includePlaygroundConfiguration: true })` to include
+the runtime configuration, opening page and known administrator in `export.json`.
+Internal prepared-image builds omit that option. Files-only and SQL-only exports
+do not include this restore metadata.
+
 `resetPlayground({ storageKey })`, exported from the same module, erases a closed
 or partially installed saved site. Call it only after the user confirms deletion.
 Private checkpoints include authentication state: keep them local and do not
@@ -792,13 +810,11 @@ other credentials. Fonts, JavaScript modules, and requests that read remote data
 still follow normal CORS rules; an explicit remote CORP restriction is respected.
 No extension-specific image URLs or artwork snapshots are maintained.
 
-Current desktop Chromium and Firefox are the validated browser targets. The
-required `COEP: credentialless` policy is not currently supported by Safari/iOS
-or Firefox for Android. Those browsers cannot run this release's combined
-MariaDB and public-asset setup; the interface stops with a compatibility message
-after the single isolation reload instead of silently applying a policy that
-breaks extension assets. Responsive layout does not imply runtime support on
-every mobile browser.
+When `credentialless` cannot establish shared memory and worker support, startup
+automatically tries `require-corp`. Chromium and WebKit have passed automatic
+fallback and real PHP/MariaDB/Joomla startup checks; device names and screen size
+do not select a policy. See [browser compatibility](docs/browser-compatibility.md) for the tested
+engines and remaining physical-device checks.
 
 The **Publish playground to Pages** workflow runs on every push or merge to
 `main`, daily at 03:15 UTC to refresh the current and nightly packages, and can

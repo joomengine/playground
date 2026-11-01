@@ -24,7 +24,7 @@ export default Object.freeze({
   "action.addExtensionUrl": "एक और URL जोड़ें",
   "title.extensionAdvanced": "उन्नत विकल्प",
   "label.extensionJson": "एक्सटेंशन पैकेज JSON",
-  "help.extensionJson": "उन्नत: url और वैकल्पिक sha256 चेकसम वाले ऑब्जेक्ट का ऐरे दर्ज करें। यहाँ किए गए बदलाव URL फ़ील्ड अपडेट करते हैं।",
+  "help.extensionJson": "उन्नत: url वाले ऑब्जेक्ट का ऐरे दर्ज करें। यहाँ किए गए बदलाव URL फ़ील्ड अपडेट करते हैं।",
   "error.extensionJson": "URL फ़ील्ड संपादित करने से पहले एक्सटेंशन JSON ठीक करें।",
   "error.extensionLimit": "अधिकतम 30 एक्सटेंशन पैकेज चुनें।",
   "label.extensionUrlNumber": "एक्सटेंशन ZIP URL {number}",

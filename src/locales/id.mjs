@@ -24,7 +24,7 @@ export default Object.freeze({
   "action.addExtensionUrl": "Tambahkan URL lain",
   "title.extensionAdvanced": "Opsi lanjutan",
   "label.extensionJson": "JSON paket ekstensi",
-  "help.extensionJson": "Lanjutan: masukkan larik objek dengan url dan checksum sha256 opsional. Perubahan di sini memperbarui kolom URL.",
+  "help.extensionJson": "Lanjutan: masukkan larik objek dengan url. Perubahan di sini memperbarui kolom URL.",
   "error.extensionJson": "Perbaiki JSON ekstensi sebelum mengedit kolom URL.",
   "error.extensionLimit": "Pilih maksimal 30 paket ekstensi.",
   "label.extensionUrlNumber": "URL ZIP ekstensi {number}",

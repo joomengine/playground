@@ -545,6 +545,14 @@ export async function restoreJoomlaSession(runtime, config, { sourceLoader, rota
   return administrator;
 }
 
+async function restoreUploadedSiteSession(runtime, options, sourceLoader, progress) {
+  const identity = await execute(runtime, 'administrator', { ...paths(runtime), mode: 'verify' }, sourceLoader);
+  if (identity.credentialsValid) return { administrator: await restoreJoomlaSession(runtime, options, { sourceLoader }), administratorUnavailable: false, loginNotice: undefined };
+  const loginNotice = 'This site uses updated login details. Sign in with its current administrator password.';
+  progress({ phase: 'warning', message: loginNotice });
+  return { administrator: identity.administrator ?? options.admin, administratorUnavailable: true, loginNotice };
+}
+
 async function downloadAndInstall(runtime, item, fetchPackage, sourceLoader, progress = () => {}, selection, jcbPackageOptions = {}) {
   const label = packageLabel(item.url);
   progress({ stage: 'extensions', phase: 'download', message: `Downloading ${label}…` });
@@ -619,9 +627,10 @@ export async function installJoomla(runtime, config, {
       health = await checkJoomla(runtime, { sourceLoader });
       await runtime.fs.writeFile(location.marker, JSON.stringify({ ...state.marker, language: health.language }));
     }
-    const administrator = await restoreJoomlaSession(runtime, options, { sourceLoader });
+    const identity = config.restoredSite ? await restoreUploadedSiteSession(runtime, options, sourceLoader, progress)
+      : { administrator: await restoreJoomlaSession(runtime, options, { sourceLoader }) };
     progress({ stage: 'ready', message: 'Opened the saved Joomla site.' });
-    return { resumed: true, version: health.version, siteName: health.siteName, language: health.language, deployId: state.marker.deployId, administrator,
+    return { resumed: true, version: health.version, siteName: health.siteName, language: health.language, deployId: state.marker.deployId, ...identity,
       extensionWarnings: state.marker.extensionWarnings ?? [] };
   }
   if (state.marker || state.configured || state.installerPresent) throw new Error('This installation is incomplete. Recover your saved files, or reset and launch it again.');
@@ -727,6 +736,30 @@ export async function importJoomlaSnapshot(runtime, config, {
     deployId: options.deployId, administrator, extensionWarnings, ...(mcp ? { mcp } : {}) };
 }
 
+/** Restore a user's complete site, without reapplying the original recipe. */
+export async function importJoomlaSiteExport(runtime, config, {
+  archiveBytes, sha256: digest, preserveAdministrator = true, sourceLoader, progress = () => {},
+} = {}) {
+  const options = validateInstallOptions(config);
+  const location = paths(runtime);
+  const state = await inspectJoomla(runtime, { sourceLoader });
+  if (state.marker || state.configured || state.installerPresent) throw new Error('Upload a site into a new playground instance.');
+  const verified = await verifyArchive(archiveBytes, digest, MAX_CHECKPOINT_BYTES);
+  const archive = `/tmp/joomla-upload-${crypto.randomUUID()}.zip`;
+  await runtime.fs.writeFile(archive, verified);
+  progress({ stage: 'importing', message: 'Validating and restoring the uploaded site…' });
+  const imported = await execute(runtime, 'import', { ...location, archive, joomlaVersion: options.joomlaVersion, siteName: options.siteName, database: options.database }, sourceLoader);
+  progress({ stage: 'importing', message: imported.contentHashValidated ? 'Package validated.' : 'Package validation is unavailable for this older export.' });
+  await ensureManagedDatabaseConfiguration(runtime, options.joomlaVersion);
+  await execute(runtime, 'administrator', { ...location, mode: preserveAdministrator ? 'write' : 'replace', admin: options.admin }, sourceLoader);
+  const health = await checkJoomla(runtime, { sourceLoader });
+  const identity = await restoreUploadedSiteSession(runtime, { ...options, language: health.language }, sourceLoader, progress);
+  await runtime.fs.writeFile(location.marker, JSON.stringify({ state: 'complete', joomlaVersion: health.version,
+    language: health.language, deployId: options.deployId, importedAt: new Date().toISOString(), extensionWarnings: [] }));
+  return { resumed: false, fromSiteExport: true, contentHashValidated: imported.contentHashValidated,
+    version: health.version, siteName: health.siteName, language: health.language, deployId: options.deployId, ...identity, extensionWarnings: [] };
+}
+
 /** Restore only the verified bundle database/files; the caller restores its private filesystem next. */
 export async function importJoomlaCheckpoint(runtime, config, {
   archiveBytes, sha256: digest, sourceLoader, progress = () => {},
@@ -784,7 +817,8 @@ export async function applyJoomlaConfiguration(runtime, config, {
   await runDeploymentCommands(runtime, options.startupCommands, config, extensionWarnings, sourceLoader, progress);
   const health = await checkJoomla(runtime, { sourceLoader });
   await runtime.fs.writeFile(location.marker, JSON.stringify({ ...state.marker, language: health.language, extensionWarnings, updatedAt: new Date().toISOString() }));
-  const administrator = await restoreJoomlaSession(runtime, { ...options, admin: identity.administrator ?? options.admin }, { sourceLoader });
+  const session = config.restoredSite ? await restoreUploadedSiteSession(runtime, options, sourceLoader, progress)
+    : { administrator: await restoreJoomlaSession(runtime, { ...options, admin: identity.administrator ?? options.admin }, { sourceLoader }) };
   progress({ stage: 'ready', message: 'The site changes have been applied.' });
-  return { ...configured, ...health, administrator, extensionWarnings };
+  return { ...configured, ...health, ...session, extensionWarnings };
 }

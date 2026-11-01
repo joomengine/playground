@@ -35,6 +35,34 @@ function exportRemove(string $directory): void
     if (!rmdir($directory)) throw new RuntimeException('Cannot remove the export temporary directory.');
 }
 
+/** Attach browser restore settings only to an explicitly requested full bundle. */
+function exportPlaygroundConfiguration(array $value, string $root, JConfig $configuration, string $joomlaVersion): array
+{
+    if (($value['schemaVersion'] ?? null) !== 1 || !is_array($value['configuration'] ?? null)) {
+        throw new InvalidArgumentException('Invalid playground export configuration.');
+    }
+    $launch = $value['configuration'];
+    unset($launch['storageKey'], $launch['snapshot'], $launch['deploymentRecipe']);
+    $launch['siteName'] = $configuration->sitename;
+    $launch['joomlaVersion'] = $joomlaVersion;
+    $launch['phpVersion'] = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+    $launch['fresh'] = false;
+    $administratorPath = dirname($root) . '/meta/administrator.json';
+    if (is_file($administratorPath)) {
+        $saved = json_decode(file_get_contents($administratorPath), true, 512, JSON_THROW_ON_ERROR);
+        if (($saved['schemaVersion'] ?? null) !== 1 || !is_array($saved['administrator'] ?? null)) {
+            throw new RuntimeException('The saved site administrator is unavailable for export.');
+        }
+        $launch['admin'] = $saved['administrator'];
+    }
+    foreach (['name', 'username', 'email', 'password'] as $field) {
+        if (!is_string($launch['admin'][$field] ?? null) || $launch['admin'][$field] === '') {
+            throw new RuntimeException('The site administrator is incomplete for export.');
+        }
+    }
+    return ['schemaVersion' => 1, 'configuration' => $launch];
+}
+
 function exportIdentifier(string $name): string
 {
     if ($name === '' || str_contains($name, "\0")) throw new RuntimeException('The database contains an invalid identifier.');
@@ -465,7 +493,22 @@ function exportTransient(string $relative): bool
     return false;
 }
 
-function exportFiles(ZipArchive $zip, string $root, string $prefix, string $configuration): array
+/** Canonical payload identity excludes export.json and all export instructions. */
+function exportPayloadHash(array $records): array
+{
+    usort($records, static fn (array $left, array $right): int => strcmp($left['name'], $right['name']));
+    $context = hash_init('sha256');
+    foreach ($records as $entry) {
+        if (!is_string($entry['name'] ?? null) || !is_int($entry['size'] ?? null) || $entry['size'] < 0
+            || !is_string($entry['sha256'] ?? null) || !preg_match('/^[a-f0-9]{64}$/D', $entry['sha256'])) {
+            throw new RuntimeException('Cannot hash an incomplete site export payload.');
+        }
+        hash_update($context, strlen($entry['name']) . ':' . $entry['name'] . ':' . $entry['size'] . ':' . $entry['sha256'] . "\n");
+    }
+    return ['algorithm' => 'sha256', 'format' => 'joomengine-site-payload-v1', 'value' => hash_final($context)];
+}
+
+function exportFiles(ZipArchive $zip, string $root, string $prefix, string $configuration, ?array &$payloadRecords = null): array
 {
     $count = 0;
     $bytes = 0;
@@ -482,11 +525,17 @@ function exportFiles(ZipArchive $zip, string $root, string $prefix, string $conf
         }
         if (!$entry->isFile()) throw new RuntimeException('Cannot export a special filesystem entry: ' . $relative);
         ++$count;
-        $bytes += $relative === 'configuration.php' ? strlen($configuration) : $entry->getSize();
+        $fileBytes = $relative === 'configuration.php' ? strlen($configuration) : $entry->getSize();
+        $bytes += $fileBytes;
         if ($count > PLAYGROUND_EXPORT_FILES || $bytes > PLAYGROUND_EXPORT_LIMIT) throw new RuntimeException('The site export exceeds 100000 files or 768 MiB.');
         $added = $relative === 'configuration.php' ? $zip->addFromString($name, $configuration) : $zip->addFile($entry->getPathname(), $name);
         if (!$added) throw new RuntimeException('Cannot add an export file: ' . $relative);
         $zip->setExternalAttributesName($name, ZipArchive::OPSYS_UNIX, 0100644 << 16);
+        if ($payloadRecords !== null) {
+            $checksum = $relative === 'configuration.php' ? hash('sha256', $configuration) : hash_file('sha256', $entry->getPathname());
+            if ($checksum === false) throw new RuntimeException('Cannot hash an exported site file.');
+            $payloadRecords[] = ['name' => $name, 'size' => $fileBytes, 'sha256' => $checksum];
+        }
     }
     foreach (['cache', 'administrator/cache', 'tmp', 'administrator/logs'] as $directory) {
         if ($zip->locateName($prefix . $directory . '/') === false) $zip->addEmptyDir($prefix . $directory);
@@ -503,7 +552,7 @@ function exportInstructions(string $format): string
         . '3. ' . $location . " Keep database.sql, export.json and these instructions outside the public webroot.\n"
         . "4. Set host, user, password and db in configuration.php to the destination connection details. The exported values retain the source settings unless target database overrides were supplied when exporting. Keep dbprefix unchanged.\n"
         . "5. Ensure PHP can write cache/, administrator/cache/, administrator/logs/ and tmp/. The exported configuration resolves its temporary and log paths relative to its own location.\n"
-        . "6. Sign in using the site’s existing Joomla administrator account. Browser login sessions and the playground’s private credential metadata are excluded.\n\n"
+        . "6. Sign in using the site’s existing Joomla administrator account. Browser login sessions are excluded. Complete playground downloads include the sandbox login and opening page in export.json for the dashboard Upload action.\n\n"
         . "The archive uses ordinary Joomla files and SQL. The browser runtime and MariaDB bridge are not required on the destination server. Database sessions are enabled in the portable configuration. Views and triggers are owned by the account importing the dump; their SQL SECURITY mode is preserved. database.ndjson is the equivalent statement stream for verified playground snapshot imports.\n\n"
         . "Large database values are transferred in bounded SQL chunks. The destination server's max_allowed_packet must still accommodate the complete value; imports stop with the required size if that setting is too small. export.json records the largest value size. An upload limit is not a guarantee that a database row or the complete site fits available browser memory.\n\n"
         . "This export contains site content, account password hashes and configuration values. Store it as a site backup.\n";
@@ -535,6 +584,9 @@ try {
         'siteName' => $configuration->sitename,
         'archiveLayout' => $format === 'bundle' ? ['files' => 'site/', 'database' => 'database.sql'] : ['files' => $format === 'files' ? './' : null, 'database' => $format === 'database' ? 'database.sql' : null],
     ];
+    if ($format === 'bundle' && isset($exportOptions['playground'])) {
+        $metadata['playground'] = exportPlaygroundConfiguration($exportOptions['playground'], $root, $configuration, (string) $manifest->version);
+    }
     if ($format !== 'files') $metadata['database'] = exportDatabase($configuration, $directory . '/database.sql');
     if ($format === 'database') {
         $path = $directory . '/database.sql';
@@ -543,10 +595,19 @@ try {
         $zip = new ZipArchive();
         if ($zip->open($path, ZipArchive::CREATE | ZipArchive::EXCL) !== true) throw new RuntimeException('Cannot create the site ZIP export.');
         try {
-            $metadata['files'] = exportFiles($zip, $root, $format === 'bundle' ? 'site/' : '', exportConfiguration($configuration, $exportOptions['database'] ?? []));
+            $payloadRecords = isset($metadata['playground']) ? [] : null;
+            $metadata['files'] = exportFiles($zip, $root, $format === 'bundle' ? 'site/' : '', exportConfiguration($configuration, $exportOptions['database'] ?? []), $payloadRecords);
             if ($format === 'bundle') {
                 if ($metadata['files']['bytes'] + filesize($directory . '/database.sql') + filesize($directory . '/database.ndjson') > PLAYGROUND_EXPORT_LIMIT) throw new RuntimeException('The combined site export exceeds the 768 MiB extraction limit.');
                 if (!$zip->addFile($directory . '/database.sql', 'database.sql') || !$zip->addFile($directory . '/database.ndjson', 'database.ndjson')) throw new RuntimeException('Cannot add the SQL dump to the site export.');
+                if ($payloadRecords !== null) {
+                    foreach (['database.sql', 'database.ndjson'] as $file) {
+                        $checksum = hash_file('sha256', $directory . '/' . $file);
+                        if ($checksum === false) throw new RuntimeException('Cannot hash an exported database.');
+                        $payloadRecords[] = ['name' => $file, 'size' => filesize($directory . '/' . $file), 'sha256' => $checksum];
+                    }
+                    $metadata['playground']['contentHash'] = exportPayloadHash($payloadRecords);
+                }
                 if (!$zip->addFromString('export.json', json_encode($metadata, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n")
                     || !$zip->addFromString('DEPLOYMENT.md', exportInstructions($format))) throw new RuntimeException('Cannot add export metadata.');
             }

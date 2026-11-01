@@ -136,6 +136,29 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       assert.equal(await current.locator('#jcb-version').inputValue(), '6.2.1');
       assert.equal(await current.locator('#jcb-version option[value="6.2.0"]').count(), 0);
       await current.close();
+
+      // An uploaded site's installed versions do not require its old packages.
+      const restored = await context.newPage();
+      await restored.addInitScript(({ baseURL }) => {
+        const storageKey = 'uploaded-archived-version';
+        const site = { storageKey, deployId: 'blank', sourceDeployId: 'blank', persistence: true,
+          siteName: 'Archived uploaded site', joomlaVersion: '6.1.9', phpVersion: '8.4', jcbVersion: '6.1.8',
+          restoredSite: { joomlaVersion: '6.1.9', php: ['8.4'] }, extensions: [], startupCommands: [] };
+        localStorage.setItem(`joomengine:launch:${baseURL}`, JSON.stringify({ schemaVersion: 2, active: storageKey, sites: { [storageKey]: site } }));
+      }, { baseURL: server.url });
+      await restored.goto(`${server.url}?start=0`);
+      await restored.locator('#embedded-launch:enabled').waitFor();
+      assert.equal(await restored.locator('#joomla-version').inputValue(), '6.1.9');
+      assert.equal(await restored.locator('#jcb-version').inputValue(), '6.1.8');
+      await restored.locator('#settings-toggle').click();
+      await restored.locator('#deploy').selectOption('servicedirectory');
+      await restored.locator('#launch-button:enabled').waitFor();
+      assert.equal(await restored.locator('#joomla-version').inputValue(), '6.2.0');
+      assert.equal(await restored.locator('#jcb-version').inputValue(), 'none');
+      assert.equal(await restored.locator('#joomla-version option[value="6.1.9"]').isDisabled(), true,
+        'Archived site versions remain visible but cannot be used as new install packages.');
+      assert.equal((await selectedConfiguration(restored)).joomlaPackage, undefined);
+      await restored.close();
     } finally { await browser?.close(); await server.close(); }
   });
 }

@@ -9,6 +9,8 @@ import { prepareBrowserIsolation } from './isolation-bootstrap.mjs';
 import { ownedClientURL } from './isolation.mjs';
 import { loadPublicAssetConfiguration } from './public-assets.mjs';
 import { deploymentImages, deploymentImageFingerprint, completedDeploymentImageConfiguration } from './deployment-images.mjs';
+import { catalogForRestoredSite } from './site-import.mjs';
+import { importJoomlaSiteExport } from './joomla/index.mjs';
 
 const base = new URL('../', import.meta.url);
 const manifestUrl = new URL('assets/manifest.json', base);
@@ -334,7 +336,7 @@ export async function resetPlayground({ storageKey = 'default' } = {}) {
 }
 
 /** Create a real Joomla installation backed by upstream PHP and MariaDB WASM. */
-export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, recovery = false } = {}) {
+export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, siteExport = null, recovery = false } = {}) {
   const environment = await prepareEnvironment();
   if (environment.reloadRequired) throw new Error(environment.reason + ' Complete the controlled page navigation before starting the playground.');
   let imagePhase;
@@ -346,7 +348,8 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   const response = await fetch(manifestUrl, { cache: 'no-cache' });
   if (!response.ok) throw new Error(`Cannot load the runtime catalog: HTTP ${response.status}.`);
   const manifest = await response.json();
-  const selectedCatalog = catalogWithSelectedJoomlaPackage(parseCatalog(manifest), input, base.href);
+  const selectedCatalog = input.restoredSite ? catalogForRestoredSite(parseCatalog(manifest), input)
+    : catalogWithSelectedJoomlaPackage(parseCatalog(manifest), input, base.href);
   if (input.joomlaPackage !== undefined) {
     const selected = selectedCatalog.joomla.find(entry => entry.version === input.joomlaVersion);
     manifest.joomla = manifest.joomla.filter(entry => entry.version !== input.joomlaVersion);
@@ -355,7 +358,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   const config = normalizeConfiguration(input, { catalog: selectedCatalog, baseURL: base.href });
   const fetchPackage = createPackageFetcher([config.joomlaPackage, config.jcbPackage].filter(Boolean), fetch);
   let phpEntry = manifest.php.find(entry => entry.version === config.phpVersion);
-  const joomlaEntry = manifest.joomla.find(entry => entry.version === config.joomlaVersion);
+  const joomlaEntry = selectedCatalog.joomla.find(entry => entry.version === config.joomlaVersion);
   const isolation = Object.freeze({ policy: environment.policy, mode: environment.mode, ownerId: environment.ownerId, bootstrapVersion: environment.bootstrapVersion });
   let publicAssets;
   if (environment.mode === 'compatibility') {
@@ -683,16 +686,25 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       return handle;
     }
     let installed;
-    if (checkpoint) {
+    if (siteExport) {
+      if (!pristine) throw new Error('Upload a site into a new playground instance.');
+      imagePhase = 'launch-image';
+      installed = await importJoomlaSiteExport(handle, config, { archiveBytes: siteExport.bytes, sha256: siteExport.sha256,
+        preserveAdministrator: siteExport.preserveAdministrator, progress });
+    } else if (checkpoint) {
       if (!pristine) throw new Error('Restore a private checkpoint into a new site.');
       installed = await importJoomlaCheckpoint(handle, config, {
         archiveBytes: checkpoint.archive, sha256: checkpoint.sha256, progress,
       });
       await session.send('restoreCheckpoint', { bytes: checkpoint.filesystem }, 600_000);
-      installed = { ...installed, ...await checkJoomla(handle) };
-      installed.administrator = await restoreJoomlaSession(handle, config);
+      if (config.restoredSite) installed = { ...installed, ...await installJoomla(handle, config, { progress, fetchPackage }) };
+      else {
+        installed = { ...installed, ...await checkJoomla(handle) };
+        installed.administrator = await restoreJoomlaSession(handle, config);
+      }
       installed.resumed = true;
     } else {
+      if (pristine && config.restoredSite) throw new Error('The saved uploaded site is unavailable. Upload its complete site export ZIP again.');
       const imageWarning = message => progress({ phase: 'warning', message });
       let image, fingerprint, completeImage = false, captureImage = false;
       if (pristine) {

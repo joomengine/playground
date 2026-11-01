@@ -10,6 +10,13 @@ const browserName = process.env.PLAYGROUND_ISOLATION_BROWSER || 'chromium';
 if (!['chromium', 'webkit'].includes(browserName)) throw new Error('Use chromium or webkit for PLAYGROUND_ISOLATION_BROWSER.');
 const browserType = { chromium, webkit }[browserName];
 
+async function launchBrowser(server) {
+  try {
+    return await browserType.launch({ headless: true,
+      ...(process.env.PLAYGROUND_BROWSER_EXECUTABLE ? { executablePath: process.env.PLAYGROUND_BROWSER_EXECUTABLE } : {}) });
+  } catch (error) { await server.close(); throw error; }
+}
+
 async function prepare(page, url, { simulateUnsupportedCredentialless = false } = {}) {
   if (simulateUnsupportedCredentialless) await page.addInitScript(() => {
     if (new URL(location.href).searchParams.get('__je_coep')?.endsWith(':credentialless')) {
@@ -34,8 +41,7 @@ test(`${browserName}: headerless hosting, independent policies, owned workers, d
   // Exercise the configuration that ships, rather than enabling a test-only
   // fallback that could hide a disabled production deployment.
   const server = await createStaticServer({ directory, isolation: false });
-  const browser = await browserType.launch({ headless: true,
-    ...(process.env.PLAYGROUND_BROWSER_EXECUTABLE ? { executablePath: process.env.PLAYGROUND_BROWSER_EXECUTABLE } : {}) });
+  const browser = await launchBrowser(server);
   const context = await browser.newContext();
   try {
     const normal = await context.newPage(), compatible = await context.newPage();
@@ -88,8 +94,7 @@ test(`${browserName}: unavailable compatibility configuration retains automatic 
   const server = await createStaticServer({ directory, isolation: false, fixtures: {
     'config/browser-compatibility.json': 'unavailable',
   } });
-  const browser = await browserType.launch({ headless: true,
-    ...(process.env.PLAYGROUND_BROWSER_EXECUTABLE ? { executablePath: process.env.PLAYGROUND_BROWSER_EXECUTABLE } : {}) });
+  const browser = await launchBrowser(server);
   try {
     const page = await browser.newPage();
     const state = await prepare(page, new URL('__test__.html', server.url).href, { simulateUnsupportedCredentialless: true });
@@ -104,8 +109,7 @@ test(`${browserName}: mobile-sized compatibility mode runs PHP, MariaDB and Joom
   timeout: 300_000, skip: !process.env.PLAYGROUND_ISOLATION_RUNTIME_DIST,
 }, async () => {
   const server = await createStaticServer({ directory: path.resolve(process.env.PLAYGROUND_ISOLATION_RUNTIME_DIST), isolation: false });
-  const browser = await browserType.launch({ headless: true,
-    ...(process.env.PLAYGROUND_BROWSER_EXECUTABLE ? { executablePath: process.env.PLAYGROUND_BROWSER_EXECUTABLE } : {}) });
+  const browser = await launchBrowser(server);
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   try {
     const page = await context.newPage();

@@ -24,7 +24,7 @@ export default Object.freeze({
   "action.addExtensionUrl": "Voeg nog ’n URL by",
   "title.extensionAdvanced": "Gevorderde opsies",
   "label.extensionJson": "Uitbreidingspakkette se JSON",
-  "help.extensionJson": "Gevorderd: voer ’n skikking van objekte met ’n url en opsionele sha256-kontrolesom in. Veranderings hier werk die URL-velde by.",
+  "help.extensionJson": "Gevorderd: voer ’n skikking van objekte met ’n url in. Veranderings hier werk die URL-velde by.",
   "error.extensionJson": "Maak die uitbreidings-JSON reg voordat jy die URL-velde wysig.",
   "error.extensionLimit": "Kies hoogstens 30 uitbreidingspakkette.",
   "label.extensionUrlNumber": "Uitbreiding se ZIP-URL {number}",

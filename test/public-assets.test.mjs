@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
-  assetRouteURL, findApprovedAsset, parsePublicAssetRoute, resolvePublicAssetURL,
+  assetRouteURL, findApprovedAsset, loadPublicAssetConfiguration, parsePublicAssetRoute, resolvePublicAssetURL,
   validatePublicAssetConfiguration, validatePublicAssetRegistry, sha256Hex,
 } from '../src/public-assets.mjs';
 import { createPublicAssetHandler, handlePublicAssetRequest } from '../src/public-assets-worker.mjs';
@@ -69,6 +69,20 @@ test('disabled image delivery leaves original image requests untouched in compat
   const fetcher = () => { throw new Error('A disabled relay must not be contacted.'); };
   assert.equal(await handlePublicAssetRequest(request, { ...options, config: disabled, fetcher }), null);
   assert.equal((await handlePublicAssetRequest(new Request(route), { ...options, config: disabled, fetcher })).status, 503);
+});
+
+test('stalled optional image configuration is bounded and cancels both requests', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const signals = [];
+  const loading = loadPublicAssetConfiguration(baseURL, (_url, { signal }) => new Promise((_resolve, reject) => {
+    signals.push(signal);
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+  }));
+  const rejected = assert.rejects(loading, { name: 'AbortError' });
+  t.mock.timers.tick(5000);
+  await rejected;
+  assert.equal(signals.length, 2);
+  assert.ok(signals.every(signal => signal.aborted));
 });
 
 test('PHP image downloads preserve method, cancellation and original bytes through the external asset route', async () => {

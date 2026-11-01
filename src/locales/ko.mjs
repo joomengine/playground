@@ -24,7 +24,7 @@ export default Object.freeze({
   "action.addExtensionUrl": "다른 URL 추가",
   "title.extensionAdvanced": "고급 옵션",
   "label.extensionJson": "확장 기능 패키지 JSON",
-  "help.extensionJson": "고급: url과 선택적 sha256 체크섬을 포함하는 객체 배열을 입력하세요. 여기서 변경하면 URL 입력란도 업데이트됩니다.",
+  "help.extensionJson": "고급: url을 포함하는 객체 배열을 입력하세요. 여기서 변경하면 URL 입력란도 업데이트됩니다.",
   "error.extensionJson": "URL 입력란을 편집하기 전에 확장 기능 JSON을 수정하세요.",
   "error.extensionLimit": "확장 기능 패키지는 최대 30개까지 선택할 수 있습니다.",
   "label.extensionUrlNumber": "확장 기능 ZIP URL {number}",

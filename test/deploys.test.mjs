@@ -135,3 +135,25 @@ test('MCP remains an explicit Joomla 6 choice with both pinned packages', async 
   assert.equal(configuration.extensions.length, 2);
   assert.equal(configuration.language, 'en-GB');
 });
+
+test('deployment read failures keep internal recipe URLs out of displayed errors', async () => {
+  for (const response of [new Response('', { status: 404 }), new Response('{')]) {
+    await assert.rejects(loadDeployCatalog({ url: baseURL, fetcher: async () => response }), error => {
+      assert.doesNotMatch(error.message, /https?:|\/deploys\/|catalog\.json/);
+      assert.match(error.message, /deployment configuration/i);
+      return true;
+    });
+  }
+});
+
+test('conflicting managed packages do not expose their internal archive URL', async () => {
+  const source = JSON.parse(files.get('https://playground.joomengine.org/deploys/blank.json'));
+  const url = 'https://playground.joomengine.org/assets/packages/internal.zip';
+  source.configuration.extensions = [{ url, sha256: 'a'.repeat(64) }];
+  source.variants = { '6': { extensions: [{ url, sha256: 'b'.repeat(64) }] } };
+  const conflicting = async value => String(value).endsWith('/blank.json') ? new Response(JSON.stringify(source)) : fetcher(value);
+  await assert.rejects(resolveDeployConfiguration({ deployId: 'blank', admin }, { ...options, fetcher: conflicting }), error => {
+    assert.equal(error.message, 'The deployment contains conflicting package checksums.');
+    return true;
+  });
+});

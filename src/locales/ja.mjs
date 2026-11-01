@@ -24,7 +24,7 @@ export default Object.freeze({
   "action.addExtensionUrl": "別の URL を追加",
   "title.extensionAdvanced": "詳細オプション",
   "label.extensionJson": "拡張機能パッケージの JSON",
-  "help.extensionJson": "上級者向け：url と任意の sha256 チェックサムを含むオブジェクトの配列を入力してください。ここでの変更は URL 欄にも反映されます。",
+  "help.extensionJson": "上級者向け：url を含むオブジェクトの配列を入力してください。ここでの変更は URL 欄にも反映されます。",
   "error.extensionJson": "URL 欄を編集する前に、拡張機能の JSON を修正してください。",
   "error.extensionLimit": "拡張機能パッケージは最大 30 個まで選択できます。",
   "label.extensionUrlNumber": "拡張機能 ZIP の URL {number}",
