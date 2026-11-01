@@ -8,7 +8,7 @@ import { createPackageFetcher } from './dynamic-packages.mjs';
 import { prepareBrowserIsolation } from './isolation-bootstrap.mjs';
 import { ownedClientURL } from './isolation.mjs';
 import { loadPublicAssetConfiguration } from './public-assets.mjs';
-import { deploymentImages, deploymentImageFingerprint, completedDeploymentImageConfiguration } from './deployment-images.mjs';
+import { deploymentImages, deploymentImageFingerprint, deploymentSnapshotSource, completedDeploymentImageConfiguration } from './deployment-images.mjs';
 import { catalogForRestoredSite } from './site-import.mjs';
 import { deploymentConfigurationChanges } from './deployment-changes.mjs';
 import { importJoomlaSiteExport } from './joomla/index.mjs';
@@ -715,11 +715,12 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         // bytes. A changed image hash is authoritative, including for a base
         // that has local additions. Storage failure never prevents a launch.
         await deploymentImages.reconcile(manifest).catch(() => {});
-        const maintained = config.snapshot ? deploymentImages.maintained(config, manifest) : null;
+        const snapshot = deploymentSnapshotSource(config, manifest, base.href);
+        const maintained = snapshot?.maintained;
         captureImage = !maintained || Boolean(config.addonExtensions?.length || config.addonStartupCommands?.length
           || config.addonLanguages?.length || config.addonTemplate?.url || config.deploymentRecipe);
         if (captureImage) {
-          fingerprint = await deploymentImageFingerprint(config, manifest);
+          fingerprint = await deploymentImageFingerprint(config, manifest, { baseURL: base.href });
           if (!config.fresh) {
             image = await deploymentImages.getCustom(fingerprint);
             completeImage = Boolean(image);
@@ -730,6 +731,13 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           catch {
             imageWarning('The prepared image could not be loaded. Building the deployment from its packages…');
           }
+        }
+        if (!image && snapshot && !maintained) {
+          imagePhase = 'download-image';
+          progress({ message: 'Downloading the selected image…' });
+          const response = await fetchPackage(snapshot.url);
+          if (!response.ok) throw new Error(`The selected image could not be downloaded (HTTP ${response.status}).`);
+          image = { bytes: new Uint8Array(await response.arrayBuffer()), sha256: snapshot.sha256 };
         }
       }
       let archiveBytes;

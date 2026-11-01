@@ -27,7 +27,7 @@ function publicRecord(record, available = true) {
 }
 
 /** Exact build inputs identify custom images; credentials never enter metadata. */
-export async function deploymentImageFingerprint(config, manifest) {
+export async function deploymentImageFingerprint(config, manifest, { baseURL = DEFAULT_BASE } = {}) {
   const php = manifest.php?.find(entry => entry.version === config.phpVersion);
   const joomla = config.joomlaPackage || manifest.joomla?.find(entry => entry.version === config.joomlaVersion);
   const fields = ['deployId', 'sourceDeployId', 'joomlaVersion', 'phpVersion', 'jcbVersion', 'jcbPackage', 'language',
@@ -40,11 +40,28 @@ export async function deploymentImageFingerprint(config, manifest) {
     configuration.administrator = Object.fromEntries(['name', 'username', 'email']
       .filter(key => config.admin?.[key] !== undefined).map(key => [key, config.admin[key]]));
   }
+  const snapshot = deploymentSnapshotSource(config, manifest, baseURL);
   return digest(new TextEncoder().encode(JSON.stringify(canonical({ version: CACHE_VERSION,
     sourceCommit: manifest.sourceCommit, upstream: manifest.upstream, bridge: manifest.bridge,
     nativeDriver: manifest.nativeDriver, php, joomla,
-    baseImage: config.snapshot ? manifest.prebuiltDeploys?.find(entry => entry.id === config.deployId
-      && entry.joomlaVersion === config.joomlaVersion)?.sha256 : undefined, configuration }))));
+    baseImage: snapshot ? { url: snapshot.url, sha256: snapshot.sha256, joomlaVersion: snapshot.joomlaVersion } : undefined,
+    configuration }))));
+}
+
+/** An explicit snapshot is authoritative unless its URL identifies a maintained image. */
+export function deploymentSnapshotSource(config, manifest, baseURL = DEFAULT_BASE) {
+  if (!config.snapshot) return null;
+  const snapshot = config.snapshot;
+  if (typeof snapshot.url !== 'string' || !HASH.test(snapshot.sha256 || '')
+    || snapshot.joomlaVersion !== config.joomlaVersion) throw new TypeError('The prepared image configuration is invalid.');
+  const url = new URL(snapshot.url, baseURL);
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.hash) {
+    throw new TypeError('The prepared image URL is invalid.');
+  }
+  const maintained = maintainedDeploymentImages(manifest, baseURL).find(entry => entry.deploymentId === config.deployId
+    && entry.joomlaVersion === config.joomlaVersion && entry.url === url.href);
+  return { url: url.href, sha256: maintained?.sha256 ?? snapshot.sha256,
+    joomlaVersion: snapshot.joomlaVersion, maintained: maintained ?? null };
 }
 
 /** A complete local image already contains its packages, commands and template. */
@@ -177,8 +194,7 @@ export function createDeploymentImageCache({ baseURL = DEFAULT_BASE, storage = c
     },
     remove: key => storage.remove(key),
     reconcile,
-    maintained: (config, manifest) => maintainedDeploymentImages(manifest, baseURL)
-      .find(entry => entry.deploymentId === config.deployId && entry.joomlaVersion === config.joomlaVersion),
+    maintained: (config, manifest) => deploymentSnapshotSource(config, manifest, baseURL)?.maintained ?? null,
     async getMaintained(entry, { onProgress = () => {}, onWarning } = {}) {
       if (pending.has(entry.sha256)) return pending.get(entry.sha256);
       const operation = (async () => {
@@ -199,7 +215,7 @@ export function createDeploymentImageCache({ baseURL = DEFAULT_BASE, storage = c
     getCustom: fingerprint => read(`custom:${fingerprint}`),
     async saveCustom(config, manifest, bytes, { fingerprint, onProgress = () => {}, onWarning } = {}) {
       bytes = imageBytes(bytes);
-      fingerprint ||= await deploymentImageFingerprint(config, manifest);
+      fingerprint ||= await deploymentImageFingerprint(config, manifest, { baseURL });
       const sha256 = await digest(bytes);
       onProgress({ phase: 'save-image', message: 'Saving the prepared image for future sites…' });
       const record = { key: `custom:${fingerprint}`, kind: 'custom', deploymentId: config.deployId,
