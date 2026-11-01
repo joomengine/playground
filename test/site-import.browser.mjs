@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { chromium } from 'playwright';
 import { createStaticServer, prepareBrowserEnvironment } from './server.mjs';
+import { withPinnedCatalog } from './dynamic-catalog-fixture.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const directory = path.resolve(process.env.PLAYGROUND_DIST || path.join(root, 'dist'));
@@ -12,10 +13,11 @@ const manifest = JSON.parse(await readFile(path.join(directory, 'assets/manifest
 
 test('complete site ZIP roundtrip preserves edits and credentials independently', { timeout: 900000 }, async t => {
   const server = await createStaticServer({ directory });
+  let browser;
+  t.after(async () => { await browser?.close(); await server.close(); });
   const executablePath = process.env.PLAYGROUND_CHROMIUM_EXECUTABLE;
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'], ...(executablePath ? { executablePath } : {}) });
-  t.after(async () => { await browser.close(); await server.close(); });
-  const context = await browser.newContext();
+  browser = await chromium.launch({ headless: true, args: ['--no-sandbox'], ...(executablePath ? { executablePath } : {}) });
+  const context = await withPinnedCatalog(browser);
   const page = await context.newPage();
   page.setDefaultTimeout(240000);
   await page.goto(new URL('__test__.html', server.url).href);
@@ -32,6 +34,20 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
     window.site = await createPlayground(configuration);
     await window.site.fs.writeFile('/persist/www/roundtrip-proof.txt', 'Edited source file');
     const result = await window.site.runPhp("<?php $db = new PDO('mysql:dbname=joomla;charset=utf8mb4','root',''); $db->exec('CREATE TABLE roundtrip_proof (id INT PRIMARY KEY, value VARCHAR(255))'); $db->exec(\"INSERT INTO roundtrip_proof VALUES (1, 'Edited database row')\"); echo 'saved';");
+    await window.site.runPhp(`<?php require '/persist/www/configuration.php'; $prefix = (new JConfig())->dbprefix;
+      $db = new PDO('mysql:dbname=joomla;charset=utf8mb4','root','');
+      foreach (['menu', 'template_styles'] as $table) {
+        $row = $db->query('SELECT id, params FROM ' . $prefix . $table . ' WHERE client_id=0 AND home=1 LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+        $params = json_decode($row['params'], true) ?: []; $params['roundtrip_marker'] = 'Manual ' . $table . ' settings';
+        $query = $db->prepare('UPDATE ' . $prefix . $table . ' SET params=? WHERE id=?'); $query->execute([json_encode($params), $row['id']]);
+      }`);
+    await window.site.fs.writeFile('/persist/www/roundtrip-state.php', `<?php require __DIR__ . '/configuration.php'; $prefix = (new JConfig())->dbprefix;
+      $db = new PDO('mysql:dbname=joomla;charset=utf8mb4','root',''); $state = [];
+      foreach (['menu', 'template_styles'] as $table) {
+        $params = json_decode($db->query('SELECT params FROM ' . $prefix . $table . ' WHERE client_id=0 AND home=1 LIMIT 1')->fetchColumn(), true);
+        $state[$table] = $params['roundtrip_marker'] ?? null;
+      }
+      $state['row'] = $db->query('SELECT value FROM roundtrip_proof WHERE id=1')->fetchColumn(); header('Content-Type: application/json'); echo json_encode($state);`);
     await window.site.flush();
     const bundle = await window.site.exportSite({ format: 'bundle', includePlaygroundConfiguration: true });
     window.originalBundle = bundle.bytes;
@@ -169,8 +185,17 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
     const blobURL = await page.evaluate(() => URL.createObjectURL(new Blob([window.originalBundle], { type: 'application/zip' })));
     const ui = await page.context().newPage();
     ui.setDefaultTimeout(240000);
-    const errors = [];
+    const errors = [], consoleErrors = [];
+    let stage = 'opening the dashboard';
     ui.on('pageerror', error => errors.push(error.message));
+    ui.on('console', message => { if (message.type() === 'error') consoleErrors.push(`${message.text()} ${message.location().url || ''}`.trim()); });
+    ui.on('response', response => { if (response.status() >= 400) consoleErrors.push(`HTTP ${response.status()} ${response.url()}`); });
+    const ready = async label => {
+      stage = label;
+      await ui.waitForFunction(() => !document.getElementById('credentials-button').disabled || !document.getElementById('error-view').hidden, null, { timeout: 120000 });
+      if (await ui.locator('#error-view').isVisible()) throw new Error(await ui.locator('#error-message').textContent());
+      t.diagnostic(label);
+    };
     try {
       await ui.goto(`${server.url}?start=0`);
       await ui.locator('#embedded-launch:enabled').waitFor();
@@ -182,7 +207,7 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
         const input = document.getElementById('upload-site-file'); input.files = transfer.files;
         input.dispatchEvent(new Event('change', { bubbles: true }));
       }, blobURL);
-      await ui.waitForFunction(() => !document.getElementById('credentials-button').disabled);
+      await ready('dashboard upload completed');
       assert.equal(await ui.locator('#header-feedback').textContent(), 'Package validated.');
       const importedKey = await ui.locator('#storage-key').inputValue();
       assert.notEqual(importedKey, configuration.storageKey);
@@ -204,17 +229,50 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
         const sourceKey = await ui.locator('#storage-key').inputValue();
         await ui.locator('#deploy-editor-button').click();
         await ui.locator('#site-name').fill(sourceOpen ? 'Copy from open upload' : 'Copy from closed upload');
+        if (sourceOpen) {
+          await ui.locator('#admin-username').fill('copiedadmin');
+          await ui.locator('#admin-password').fill('Independent-copy-password-567!');
+        }
+        stage = sourceOpen ? 'creating a copy from the open uploaded site' : 'creating a copy from the closed uploaded site';
         await ui.locator('#use-deploy').click();
-        await ui.waitForFunction(() => !document.getElementById('credentials-button').disabled);
+        await ready(sourceOpen ? 'open-source copy completed' : 'closed-source copy completed');
         assert.notEqual(await ui.locator('#storage-key').inputValue(), sourceKey);
         const copiedURL = new URL(await ui.locator('#site-frame').getAttribute('src'));
         const copiedProof = new URL('roundtrip-proof.txt', new URL('./', copiedURL.href.replace(/administrator\/.*$/, ''))).href;
         assert.equal(await ui.evaluate(async url => (await fetch(url)).text(), copiedProof), 'Edited source file');
+        const state = await ui.evaluate(async url => (await fetch(url)).json(), copiedProof.replace('roundtrip-proof.txt', 'roundtrip-state.php'));
+        assert.deepEqual(state, { menu: 'Manual menu settings', template_styles: 'Manual template_styles settings', row: 'Edited database row' });
+        if (!await ui.locator('#credentials-button').isVisible()) await ui.locator('#settings-toggle').click();
+        await ui.locator('#credentials-button').click();
+        assert.equal(await ui.locator('#credential-username').inputValue(), 'copiedadmin');
+        assert.equal(await ui.locator('#credential-password').inputValue(), 'Independent-copy-password-567!');
+        await ui.locator('#credentials-dialog [data-close-dialog]').click();
       }
       assert.deepEqual(errors, []);
       if (!await ui.locator('#close-button').isVisible()) await ui.locator('#settings-toggle').click();
       await ui.locator('#close-button').click();
       await ui.locator('#launch-button:enabled').waitFor();
+      const source = await page.evaluate(async ({ key, admin, baseURL }) => {
+        const { createPlayground } = await import('./src/playground.mjs');
+        const saved = JSON.parse(localStorage.getItem(`joomengine:launch:${baseURL}`)).sites[key];
+        const site = await createPlayground({ ...saved, admin });
+        const login = site.installation.administrator;
+        const response = await site.request('/roundtrip-state.php'); const state = await response.json();
+        await site.close();
+        return { login, state };
+      }, { key: importedKey, admin: configuration.admin, baseURL: server.url });
+      assert.deepEqual(source.login, configuration.admin, 'Editing a copied administrator must not reset the source account.');
+      assert.deepEqual(source.state, { menu: 'Manual menu settings', template_styles: 'Manual template_styles settings', row: 'Edited database row' });
+      t.diagnostic('original uploaded site still has its original login and manual settings');
+      if (consoleErrors.length) t.diagnostic(`Browser console diagnostics: ${consoleErrors.join(' | ').slice(0, 2500)}`);
+    } catch (error) {
+      const state = await ui.evaluate(() => ({ error: document.getElementById('error-message')?.textContent,
+        deploymentError: document.getElementById('deploy-error')?.textContent,
+        progress: document.getElementById('loading-message')?.textContent, feedback: document.getElementById('header-feedback')?.textContent })).catch(() => ({}));
+      await mkdir('test-results', { recursive: true });
+      await ui.screenshot({ path: 'test-results/site-import-ui-failure.png' }).catch(() => {});
+      error.message += `\nUI stage: ${stage}\nState: ${JSON.stringify(state)}\nPage errors: ${errors.join(' | ')}\nConsole: ${consoleErrors.join(' | ').slice(0, 2500)}`;
+      throw error;
     } finally {
       await ui.close();
       await page.evaluate(url => URL.revokeObjectURL(url), blobURL);

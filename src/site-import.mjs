@@ -72,7 +72,7 @@ export function configurationForSiteExport(siteExport, catalog, { baseURL, admin
   const preferred = original.phpVersion ?? metadata.phpVersion?.split('.').slice(0, 2).join('.');
   const input = { ...original, joomlaVersion: metadata.joomlaVersion, phpVersion: php.includes(preferred) ? preferred : php[0],
     siteName: metadata.siteName || original.siteName || 'Imported Joomla site', initialPath: original.initialPath || '/administrator/',
-    admin: siteExport.preserveAdministrator ? original.admin : admin, deployId: 'blank', storageKey,
+    admin: siteExport.preserveAdministrator ? original.admin : admin, deployId: 'blank', jcbVersion: original.jcbVersion ?? 'none', storageKey,
     restoredSite: { joomlaVersion: metadata.joomlaVersion, php }, persistence: true, fresh: false };
   // These packages are already installed, including edited files and database
   // state. Importing or resuming must never resolve or download the recipe again.

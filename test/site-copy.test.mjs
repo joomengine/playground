@@ -20,6 +20,9 @@ test('copying an open uploaded site captures its data and applies only changed s
   assert.equal(copy.configuration.siteName, 'Existing site', 'Restore the actual base before applying the edited name.');
   assert.equal(copy.changes.siteName, 'Independent copy');
   assert.equal(copy.changes.storageKey, 'new-independent-key');
+  assert.deepEqual(copy.configuration.extensions, configuration.extensions, 'The restored baseline retains installed packages for runtime delta comparison.');
+  assert.deepEqual(copy.configuration.startupCommands, configuration.startupCommands);
+  assert.equal(copy.rotateAdministrator, false);
   assert.deepEqual(copy.configuration.admin, configuration.admin);
   copy.configuration.admin.password = 'Only-the-copy-changes';
   assert.equal(configuration.admin.password, 'Unchanged-password!');
@@ -55,4 +58,19 @@ test('copying does not relabel installed Joomla or JCB as a different version', 
     await assert.rejects(prepareUploadedSiteCopy({ input: { ...configuration, ...changed }, sourceConfiguration: configuration,
       storageKey: 'copy', runtime: { configuration, checkpoint: async () => ({ configuration }) } }), /installed Joomla or JCB/);
   }
+});
+
+test('only deliberate administrator edits replace the account in the new copy', async () => {
+  const configuration = original();
+  const input = { ...configuration, admin: { username: 'copy-owner', password: 'New-copy-password!' } };
+  const runtime = { configuration, checkpoint: async () => ({ configuration: structuredClone(configuration) }) };
+  const unchanged = await prepareUploadedSiteCopy({ input, sourceConfiguration: configuration, runtime, storageKey: 'unchanged-copy' });
+  assert.deepEqual(unchanged.configuration.admin, configuration.admin, 'Generated form placeholders must never reset a saved account.');
+  assert.equal(unchanged.rotateAdministrator, false);
+  const edited = await prepareUploadedSiteCopy({ input, sourceConfiguration: configuration, runtime, storageKey: 'edited-copy', administratorEdited: true });
+  assert.equal(edited.rotateAdministrator, true);
+  assert.deepEqual(edited.configuration.admin, input.admin);
+  assert.equal(edited.changes, undefined, 'Changing the account does not replay package setup steps.');
+  assert.deepEqual(edited.checkpoint.configuration.admin, configuration.admin, 'The source snapshot stays unchanged.');
+  assert.equal(configuration.admin.username, 'owner');
 });
