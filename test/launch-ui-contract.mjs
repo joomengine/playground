@@ -64,6 +64,8 @@ export async function assertFailedDeploymentRecovery(page, url) {
   await page.locator('#recover-button').click();
   await page.locator('#repair-button:not([hidden]):enabled').waitFor({ timeout: 60_000 });
   assert.equal(await page.locator('#error-title').innerText(), 'Your saved site is open for recovery');
+  assert.doesNotMatch(await page.locator('#save-state').innerText(), /saving/i,
+    'Recovery does not schedule a background checkpoint or report one in progress.');
   assert.equal(await page.locator('#download-dialog-button').isEnabled(), true);
   assert.equal(await page.locator('#open-link').count(), 0);
   await page.locator('#repair-button').click();

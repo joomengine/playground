@@ -27,6 +27,19 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       const downloads = [];
       page.on('request', request => { if (request.url().endsWith('.zip')) downloads.push(request.url()); });
       await page.goto(`${server.url}image-cache-fixture.html`);
+      const captured = await page.evaluate(async bytes => {
+        const { createIndexedDBImageStorage } = await import('./src/deployment-images.mjs');
+        const storage = createIndexedDBImageStorage({ baseURL: new URL('immutable-copy/', location.href).href });
+        const source = Uint8Array.from(bytes);
+        const writing = storage.put({ key: 'capture-before-open', kind: 'custom' }, source);
+        source.fill(0);
+        structuredClone(source.buffer, { transfer: [source.buffer] });
+        await writing;
+        const saved = await storage.get('capture-before-open');
+        await storage.remove('capture-before-open');
+        return [...new Uint8Array(await saved.blob.arrayBuffer())];
+      }, [...archive]);
+      assert.deepEqual(captured, [...archive], 'IndexedDB captures bytes before its asynchronous open, even if the caller detaches the input.');
       const load = async catalog => page.evaluate(async manifest => {
         const { deploymentImages } = await import('./src/deployment-images.mjs');
         const published = manifest.prebuiltDeploys[0];

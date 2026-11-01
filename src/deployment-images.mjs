@@ -140,10 +140,15 @@ export function createIndexedDBImageStorage({ indexedDB = globalThis.indexedDB, 
       metadata.onsuccess = () => { metadataReady = true; complete(); };
       archive.onsuccess = () => { archiveReady = true; complete(); };
     }),
-    put: (record, bytes) => transaction('readwrite', tx => {
-      tx.objectStore('images').put(record);
-      tx.objectStore('archives').put(new Blob([bytes], { type: 'application/zip' }), record.key);
-    }),
+    put(record, bytes) {
+      // Capture before opening the asynchronous transaction: the caller may
+      // transfer or reuse its buffer as soon as installation continues.
+      const blob = bytes instanceof Blob ? bytes : new Blob([bytes], { type: 'application/zip' });
+      return transaction('readwrite', tx => {
+        tx.objectStore('images').put(record);
+        tx.objectStore('archives').put(blob, record.key);
+      });
+    },
     touch: (key, lastUsedAt) => transaction('readwrite', tx => {
       const store = tx.objectStore('images');
       const request = store.get(key);
@@ -158,7 +163,10 @@ export function createIndexedDBImageStorage({ indexedDB = globalThis.indexedDB, 
 export function createDeploymentImageCache({ baseURL = DEFAULT_BASE, storage = createIndexedDBImageStorage({ baseURL }),
   fetcher = globalThis.fetch, now = () => new Date().toISOString() } = {}) {
   const pending = new Map();
-  const warning = onWarning => onWarning?.('The image could not be saved locally. This site can still launch.');
+  const warning = (onWarning, message = 'The image could not be saved locally. This site can still launch.') => {
+    try { onWarning?.(message); }
+    catch { /* An optional cache diagnostic cannot interrupt installation. */ }
+  };
   const read = async (key, expected, onWarning) => {
     let record;
     try { record = await storage.get(key); } catch { return null; }
@@ -172,7 +180,8 @@ export function createDeploymentImageCache({ baseURL = DEFAULT_BASE, storage = c
     if (record.size !== bytes.byteLength || await digest(bytes) !== record.sha256) {
       await storage.remove(key).catch(() => {}); return null;
     }
-    if (storage.touch) await storage.touch(key, now()).catch(() => warning(onWarning));
+    if (storage.touch) void Promise.resolve().then(() => storage.touch(key, now()))
+      .catch(() => warning(onWarning, 'The cached image is available, but its last-used time could not be updated.'));
     return { bytes, sha256: record.sha256, cached: true };
   };
   const reconcile = async manifest => {
@@ -196,21 +205,32 @@ export function createDeploymentImageCache({ baseURL = DEFAULT_BASE, storage = c
     reconcile,
     maintained: (config, manifest) => deploymentSnapshotSource(config, manifest, baseURL)?.maintained ?? null,
     async getMaintained(entry, { onProgress = () => {}, onWarning } = {}) {
-      if (pending.has(entry.sha256)) return pending.get(entry.sha256);
-      const operation = (async () => {
+      if (pending.has(entry.sha256)) {
+        const shared = pending.get(entry.sha256);
+        const image = await shared.operation;
+        return { ...image, bytes: new Uint8Array(await shared.blob.arrayBuffer()) };
+      }
+      const shared = {};
+      shared.operation = (async () => {
         const stored = await read(entry.key, entry, onWarning);
-        if (stored) { onProgress({ phase: 'launch-image', message: 'Restoring the image saved in this browser…' }); return stored; }
+        if (stored) {
+          shared.blob = new Blob([stored.bytes], { type: 'application/zip' });
+          onProgress({ phase: 'launch-image', message: 'Restoring the image saved in this browser…' }); return stored;
+        }
         onProgress({ phase: 'download-image', message: 'Downloading the prepared image…' });
         const response = await fetcher(entry.url);
         if (!response.ok) throw new Error('The prepared image could not be downloaded.');
         const bytes = imageBytes(await response.arrayBuffer());
         if (bytes.byteLength !== entry.size || await digest(bytes) !== entry.sha256) throw new Error('The prepared image failed its integrity check.');
         const { url, ...metadata } = entry;
-        await storage.put({ ...metadata, createdAt: now(), lastUsedAt: now() }, bytes).catch(() => warning(onWarning));
+        shared.blob = new Blob([bytes], { type: 'application/zip' });
+        shared.writing = Promise.resolve().then(() => storage.put({ ...metadata, createdAt: now(), lastUsedAt: now() }, shared.blob))
+          .catch(() => warning(onWarning)).finally(() => { if (pending.get(entry.sha256) === shared) pending.delete(entry.sha256); });
         return { bytes, sha256: entry.sha256, cached: false };
       })();
-      pending.set(entry.sha256, operation);
-      try { return await operation; } finally { pending.delete(entry.sha256); }
+      pending.set(entry.sha256, shared);
+      try { return await shared.operation; }
+      finally { if (!shared.writing && pending.get(entry.sha256) === shared) pending.delete(entry.sha256); }
     },
     getCustom: fingerprint => read(`custom:${fingerprint}`),
     async saveCustom(config, manifest, bytes, { fingerprint, onProgress = () => {}, onWarning } = {}) {

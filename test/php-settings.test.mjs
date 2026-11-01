@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_PHP_SETTINGS, normalizePhpSettings, phpIni, phpRequestBodyLimit, phpRequestTimeoutMs } from '../src/php-settings.mjs';
+import { DEFAULT_PHP_SETTINGS, assertRuntimeHealth, normalizePhpSettings, phpIni, phpRequestBodyLimit, phpRequestTimeoutMs } from '../src/php-settings.mjs';
 import { breakoutRequest } from '../src/cgi-request.mjs';
 
 test('PHP settings preserve JCB headroom and validate correlated limits', () => {
@@ -15,6 +15,16 @@ test('PHP settings preserve JCB headroom and validate correlated limits', () => 
   for (const settings of [{ post_max_size: '128M' }, { memory_limit: '128M' }, { upload_max_filesize: '2G' }, { memory_limit: -1 },
     { max_execution_time: 0 }, { max_input_time: '60\nfoo=1' }, { max_input_vars: 7000.5 }, { auto_prepend_file: '/evil.php' }]) {
     assert.throws(() => normalizePhpSettings(settings));
+  }
+});
+
+test('runtime health rejects a stale 32-bit binary even when all Joomla extensions are present', () => {
+  const info = { intSize: 8, pdoDrivers: ['mysql'], effectivePhpSettings: normalizePhpSettings(),
+    extensions: ['pdo_mariadb_wasm', 'curl', 'fileinfo', 'sodium', 'gd', 'intl', 'mbstring', 'openssl',
+      'dom', 'simplexml', 'xml', 'xmlreader', 'xmlwriter', 'json', 'zip', 'zlib'] };
+  assert.equal(assertRuntimeHealth(info), info);
+  for (const intSize of [4, undefined]) {
+    assert.throws(() => assertRuntimeHealth({ ...info, intSize }), /64-bit/);
   }
 });
 

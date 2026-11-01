@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { downloadVerified, extractTarGzip, hashFile, inventory, verifyBridgeBundle } from './assets.mjs';
 import { stageDeployCatalog } from './deploys.mjs';
 import { stageVersionCatalog } from './version-catalog.mjs';
-import { stageFileinfo } from './fileinfo.mjs';
+import { phpRuntimeAssetPath, writeBuildIdentity } from './build-identity.mjs';
 import { stageCurl } from './curl.mjs';
 import { stageSodium } from './sodium.mjs';
 import { applyCgiRequestOverlay } from './cgi-request-overlay.mjs';
@@ -14,9 +14,11 @@ import { stageAdminer } from './prepare-adminer.mjs';
 import { validatePublicAssetRegistry, validatePublicAssetConfiguration } from '../src/public-assets.mjs';
 import { validateCompatibilityConfiguration } from '../src/isolation-bootstrap.mjs';
 import { stagePhpDebugHttp, applyPhpDebugWorkerOverlay } from './phpdbg.mjs';
+import { loadPhpRuntime } from './php-runtime.mjs';
+import { matchesNativeRuntime } from './native-runtime.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const versions = JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
+const versions = await loadPhpRuntime({ root });
 const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
 const approvedImages = validatePublicAssetRegistry(JSON.parse(await readFile(path.join(root, 'config/public-assets.json'), 'utf8')));
@@ -32,16 +34,13 @@ if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
 const canonicalUrl = `https://${domain}/`;
 const cache = path.join(root, '.cache');
 const destination = path.join(root, 'dist');
-const driverDirectory = path.resolve(root, process.env.MARIADB_DRIVER_DIR || '../mariadb-wasm-bridge/.native-build/upstream');
-const fileinfoDirectory = path.resolve(root, process.env.FILEINFO_EXTENSION_DIR || '.cache/fileinfo');
+const driverDirectory = path.resolve(root, process.env.MARIADB_DRIVER_DIR || '.cache/native');
 const sodiumDirectory = path.resolve(root, process.env.SODIUM_EXTENSION_DIR || '.cache/sodium');
 const curlDirectory = path.resolve(root, process.env.CURL_EXTENSION_DIR || '.cache/curl');
 const phpdbgDirectory = path.resolve(root, process.env.PHPDBG_EXTENSION_DIR || '.cache/phpdbg');
 const extensionPackages = [
-  'php-wasm-zlib', 'php-wasm-libxml', 'php-wasm-xml', 'php-wasm-dom',
-  'php-wasm-simplexml', 'php-wasm-xmlreader', 'php-wasm-xmlwriter',
-  'php-wasm-iconv', 'php-wasm-mbstring', 'php-wasm-intl',
-  'php-wasm-libzip', 'php-wasm-gd', 'php-wasm-openssl',
+  'zlib', 'libxml', 'xml', 'dom', 'simplexml', 'xmlreader', 'xmlwriter',
+  'iconv', 'mbstring', 'intl', 'libzip', 'gd', 'openssl', 'phar', 'sqlite',
 ];
 await mkdir(cache, { recursive: true });
 const staging = await mkdtemp(path.join(cache, 'site-'));
@@ -56,15 +55,9 @@ async function versionNativeArtifact(artifact) {
   return artifact;
 }
 
-async function copyPackage(name) {
-  const directory = path.join(root, 'node_modules', name);
-  const installed = JSON.parse(await readFile(path.join(directory, 'package.json'), 'utf8'));
-  const pinned = lock.packages[`node_modules/${name}`];
-  if (!pinned?.integrity || installed.version !== pkg.dependencies[name] || installed.version !== pinned.version) {
-    throw new Error(`Installed package differs from lock: ${name}. Run npm ci --ignore-scripts.`);
-  }
-  if (name.startsWith('php-') && installed.version !== versions.upstream.version) throw new Error(`Upstream package version mismatch: ${name}`);
-  const target = path.join(assets, name);
+async function copyRuntimePackage(version, name, base) {
+  const directory = path.join(version.runtimeDirectory, 'packages', name);
+  const target = path.join(assets, base, name);
   await mkdir(target, { recursive: true });
   for (const filename of await readdir(directory)) {
     if (!/\.(?:m?js|wasm|data|so|dat)$/.test(filename) && !/^(?:LICENSE(?:-GPL)?|NOTICE|package\.json)$/.test(filename)) continue;
@@ -72,27 +65,24 @@ async function copyPackage(name) {
     if (!(await stat(source)).isFile()) throw new Error(`Unexpected package asset: ${name}/${filename}`);
     await cp(source, path.join(target, filename));
   }
-  return { name, version: installed.version, integrity: pinned.integrity, url: pinned.resolved };
 }
 
-async function relativeLibraryFile(url) {
+async function relativeLibraryFile(url, version, base) {
   const filename = fileURLToPath(url);
-  const relative = path.relative(path.join(root, 'node_modules'), filename).split(path.sep).join('/');
-  if (relative.startsWith('../') || path.isAbsolute(relative)) throw new Error(`Package asset outside node_modules: ${url}`);
-  await stat(path.join(assets, relative));
-  return relative;
+  const relative = path.relative(path.join(version.runtimeDirectory, 'packages'), filename).split(path.sep).join('/');
+  if (relative.startsWith('../') || path.isAbsolute(relative)) throw new Error(`Package asset outside verified PHP release: ${url}`);
+  const staged = path.posix.join(base, relative);
+  await stat(path.join(assets, staged));
+  return staged;
 }
 
 try {
-  console.log('Staging pinned upstream PHP runtime and extensions…');
+  console.log(`Staging PHP int64 ${versions.runtime.version} and its matching extensions…`);
   await mkdir(assets, { recursive: true });
   await stageAdminer(path.join(assets, 'adminer'));
   console.log('Bundling the lazy-loaded JoomEngine Code workbench…');
   const code = await stageCodeAssets({ root, assets });
   const packages = [];
-  for (const name of ['php-cgi-wasm', 'php-dbg-wasm', ...extensionPackages]) packages.push(await copyPackage(name));
-  const cgiRequestOverlay = await applyCgiRequestOverlay(path.join(assets, 'php-cgi-wasm'));
-  const debuggerWorkerOverlay = await applyPhpDebugWorkerOverlay(path.join(assets, 'php-dbg-wasm'));
   const fflatePin = lock.packages['node_modules/fflate'];
   if (fflatePin?.version !== pkg.dependencies.fflate) throw new Error('fflate lock mismatch');
   await mkdir(path.join(assets, 'fflate'));
@@ -134,17 +124,26 @@ try {
   const php = [];
   await mkdir(path.join(assets, 'extensions'));
   for (const version of versions.php) {
+    const runtimeStaging = `php/${version.version}/${version.runtimeArchiveSha256}`;
+    for (const name of ['php-cgi-wasm', 'php-dbg-wasm', ...extensionPackages]) await copyRuntimePackage(version, name, runtimeStaging);
+    const cgiRequestOverlay = await applyCgiRequestOverlay(path.join(assets, runtimeStaging, 'php-cgi-wasm'),
+      { manifest: version.manifest, upstreamVersion: versions.runtime.version });
+    const debuggerWorkerOverlay = await applyPhpDebugWorkerOverlay(path.join(assets, runtimeStaging, 'php-dbg-wasm'),
+      { minor: version.version, manifest: version.manifest, upstreamVersion: versions.runtime.version });
+    const runtimeBase = phpRuntimeAssetPath(version.version, version.runtimeArchiveSha256,
+      { 'php-cgi-wasm': cgiRequestOverlay, 'php-dbg-wasm': debuggerWorkerOverlay });
+    await rename(path.join(assets, runtimeStaging), path.join(assets, runtimeBase));
+    const runtimeArchive = versions.runtime.archives.find(archive => archive.minor === version.version);
+    packages.push({ name: '@joomengine/php-wasm-int64', version: versions.runtime.version, php: version.version,
+      sha256: runtimeArchive.sha256, url: runtimeArchive.url });
     console.log(`Checking PHP ${version.version} native driver…`);
     const basename = `php${version.version}-pdo-mariadb-wasm`;
     const driver = path.join(driverDirectory, `${basename}.so`);
     const provenance = JSON.parse(await readFile(path.join(driverDirectory, `${basename}.json`), 'utf8'));
     const driverHash = await hashFile(driver);
     if (provenance.schemaVersion !== 1 || provenance.protocolVersion !== versions.bridge.protocolVersion
-      || provenance.phpMinor !== version.version || provenance.phpVersion !== version.patchVersion
-      || provenance.emscriptenVersion !== versions.upstream.emscripten
-      || provenance.upstream?.commit !== versions.upstream.commit
-      || provenance.upstream?.runtimeVersion !== versions.upstream.version
-      || provenance.phpSource?.sha256 !== version.sourceSha256
+      || !await matchesNativeRuntime(provenance, version, versions.upstream)
+      || provenance.buildScriptSha256 !== await hashFile(new URL('./build-mariadb.mjs', import.meta.url))
       || provenance.extension?.file !== `${basename}.so` || provenance.extension?.sha256 !== driverHash) {
       throw new Error(`Native driver provenance does not match the pinned PHP runtime: ${version.version}`);
     }
@@ -153,31 +152,39 @@ try {
         throw new Error(`Native driver source differs from its pinned build source: ${filename}`);
       }
     }
+    const driverLicense = `${basename}.LICENSE`;
+    if (provenance.licenses?.length !== 1 || provenance.licenses[0].file !== driverLicense
+      || provenance.licenses[0].sha256 !== bridgeManifest.files.LICENSE?.sha256
+      || provenance.licenses[0].sha256 !== await hashFile(path.join(driverDirectory, driverLicense))) {
+      throw new Error(`Native driver license differs from its verified bridge release: ${version.version}`);
+    }
     const sharedLibs = [];
     const files = [];
     for (const name of extensionPackages) {
-      const helper = await import(pathToFileURL(path.join(root, 'node_modules', name, 'index.mjs')));
+      const helper = await import(pathToFileURL(path.join(version.runtimeDirectory, 'packages', name, 'index.mjs')));
       for (const library of helper.getLibs({ phpVersion: version.version })) {
-        sharedLibs.push({ name: library.name, url: await relativeLibraryFile(library.url), ini: library.ini === true });
+        sharedLibs.push({ name: library.name, url: await relativeLibraryFile(library.url, version, runtimeBase), ini: library.ini === true });
       }
       for (const file of helper.getFiles?.({ phpVersion: version.version }) || []) {
-        files.push({ name: file.name, parent: file.parent || path.posix.dirname(file.path || `/preload/${file.name}`), url: await relativeLibraryFile(file.url) });
+        files.push({ name: file.name, parent: file.parent || path.posix.dirname(file.path || `/preload/${file.name}`), url: await relativeLibraryFile(file.url, version, runtimeBase) });
       }
     }
     await cp(driver, path.join(assets, 'extensions', `${basename}.so`));
     await cp(path.join(driverDirectory, `${basename}.json`), path.join(assets, 'extensions', `${basename}.json`));
+    await cp(path.join(driverDirectory, driverLicense), path.join(assets, 'extensions', driverLicense));
     const driverArtifact = await versionNativeArtifact({ url: `extensions/${basename}.so`, sha256: driverHash, provenance });
     sharedLibs.push({ name: `${basename}.so`, url: driverArtifact.url, ini: true });
-    const fileinfo = await versionNativeArtifact(await stageFileinfo({ directory: fileinfoDirectory, destination: path.join(assets, 'extensions'), version, upstream: versions.upstream }));
-    sharedLibs.push({ name: `php${version.version}-fileinfo.so`, url: fileinfo.url, ini: true });
     const curl = await versionNativeArtifact(await stageCurl({ directory: curlDirectory, destination: path.join(assets, 'extensions'), version, upstream: versions.upstream }));
     sharedLibs.push({ name: `php${version.version}-curl.so`, url: curl.url, ini: true });
     const sodium = await versionNativeArtifact(await stageSodium({ directory: sodiumDirectory, destination: path.join(assets, 'extensions'), version, upstream: versions.upstream }));
     sharedLibs.push({ name: `php${version.version}-sodium.so`, url: sodium.url, ini: true });
     const debugHttp = await versionNativeArtifact(await stagePhpDebugHttp({ directory: phpdbgDirectory, destination: path.join(assets, 'extensions'), version, upstream: versions.upstream }));
-    php.push({ ...version, label: `PHP ${version.patchVersion}`, moduleUrl: 'php-cgi-wasm/PhpCgiWorker.mjs', sharedLibs, files,
-      fileinfo, curl, sodium,
-      debugger: { moduleUrl: 'php-dbg-wasm/PhpDbgWeb.mjs', http: debugHttp,
+    php.push({ version: version.version, patchVersion: version.patchVersion, sourceCommit: version.sourceCommit,
+      runtimeFingerprint: version.runtimeFingerprint, runtimeArchiveSha256: version.runtimeArchiveSha256,
+      abi: version.manifest.abi, label: `PHP ${version.patchVersion}`,
+      moduleUrl: `${runtimeBase}/php-cgi-wasm/PhpCgiWorker.mjs`, sharedLibs, files,
+      cgiRequestOverlay, debuggerWorkerOverlay, curl, sodium,
+      debugger: { moduleUrl: `${runtimeBase}/php-dbg-wasm/PhpDbgWeb.mjs`, http: debugHttp,
         sharedLibs: [...sharedLibs, { name: `php${version.version}-jec-phpdbg-http.so`, url: debugHttp.url, ini: true }] },
       driver: driverArtifact });
   }
@@ -206,7 +213,7 @@ try {
     schemaVersion: 1, projectVersion: pkg.version, sourceCommit, code,
     deployment: { canonicalUrl, domain },
     browserCompatibility, publicAssets: { registryVersion: approvedImages.version, enabled: imageDelivery.enabled },
-    upstream: { ...versions.upstream, cgiRequestOverlay, debuggerWorkerOverlay }, nativeDriver: versions.nativeDriver, packages, php, joomla, deploys, versionCatalog,
+    runtime: versions.runtime, upstream: versions.upstream, nativeDriver: versions.nativeDriver, packages, php, joomla, deploys, versionCatalog,
     bridge: {
       protocolVersion: versions.bridge.protocolVersion,
       sourceCommit: versions.nativeDriver.sourceCommit,
@@ -218,6 +225,7 @@ try {
     defaults: versions.defaults,
   };
   await writeFile(path.join(assets, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeBuildIdentity(staging, manifest);
   await writeFile(path.join(staging, 'asset-inventory.json'), `${JSON.stringify(await inventory(staging), null, 2)}\n`);
   await chmod(staging, 0o755);
   await rm(destination, { recursive: true, force: true });

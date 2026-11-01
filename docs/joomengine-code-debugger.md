@@ -51,9 +51,9 @@ PHP errors with source locations, and implements caller-aware Step Over and
 Step Out. Unlike upstream phpdbg's `next`, Step Over stays in the caller across
 nested calls while honoring breakpoints inside callees. Its access to phpdbg globals uses the upstream exported
 `php_wasm_get_bpcount` address and the exact pinned PHP header offset. No guessed
-memory layout is used. A hash-verified build overlay corrects the pinned web
-JavaScript package's environment detection and eager DOM target registration so
-the same WebAssembly binary runs in a dedicated worker without a fabricated DOM.
+memory layout is used. A hash-verified build overlay supplies the released web
+JavaScript package's complete Emscripten worker loading and optional DOM handling.
+The WebAssembly binary is unchanged; no fabricated DOM is used.
 
 Variable inspection uses native bounded handles and Zend property tables. It
 does not invoke application getters, `__debugInfo`, or recursively print large
@@ -61,17 +61,18 @@ objects. Private and protected property names remain visible; pages contain at
 most 1,000 entries and displayed strings are limited to 4 KiB. Continuing releases
 the handles before execution resumes.
 
-The `versions.json` pins cover PHP 8.3.11, 8.4.1 and 8.5.2, upstream PHP-WASM 0.2.0
-commit `1e1fb6703730759181e84c62bce35ee9129febb9`, and Emscripten 6.0.6. Prepare
-wasm32 PHP headers with the existing native PDO builder, then run:
+The selected JoomEngine int64 release supplies PHP source commits, configured
+SDK headers and the Emscripten compiler identity for each supported PHP minor.
+After `npm run prepare:php`, use that matching compiler as described in the main
+README, then run:
 
 ```sh
-PHPDBG_PHP_SOURCE_CACHE=/path/to/configured/php/sources node scripts/phpdbg-build.mjs 8.4
+node scripts/phpdbg-build.mjs 8.4
 ```
 
-Repeat for each supported PHP minor. The source cache contains the verified PHP
-archive and configured `php-VERSION` tree. The script checks the archive hash,
-PHP version, wasm32 headers and compiler version before compilation. Its output
+Repeat for each supported PHP minor. The source cache is reconstructed from the
+release's exact PHP commit and patches. The script checks the release fingerprint,
+PHP version, wasm32/int64 SDK and compiler version before compilation. Its output
 includes the extension, license and provenance hashes. The normal build rejects
 artifacts whose source, build script, runtime pin or license differs.
 

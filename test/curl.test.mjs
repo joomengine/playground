@@ -14,7 +14,9 @@ test('curl staging verifies PHP and fetch transport identities, binary checksum 
   const destination = path.join(root, 'output');
   await mkdir(directory);
   await mkdir(destination);
-  const version = { version: '8.4', patchVersion: '8.4.1', sourceSha256: 'a'.repeat(64) };
+  const abi = { target: 'wasm32-unknown-emscripten', integerBits: 64, pointerBits: 32, define: 'ZEND_WASM_INT64=1' };
+  const version = { version: '8.4', patchVersion: '8.4.123', sourceCommit: 'a'.repeat(40),
+    runtimeFingerprint: 'a'.repeat(64), runtimeArchiveSha256: 'b'.repeat(64), manifest: { abi } };
   const upstream = { commit: 'b'.repeat(40), version: '0.2.0', emscripten: '6.0.6' };
   const file = 'php8.4-curl.so';
   const bytes = Buffer.from('wasm extension fixture');
@@ -27,7 +29,11 @@ test('curl staging verifies PHP and fetch transport identities, binary checksum 
   }
   const provenance = { schemaVersion: 1, name: 'curl', phpMinor: version.version, phpVersion: version.patchVersion,
     upstream: { commit: upstream.commit, runtimeVersion: upstream.version }, emscriptenVersion: upstream.emscripten,
-    phpSource: { sha256: version.sourceSha256 }, extension: { file, sha256: sha256(bytes) }, curlSource: { ...curlSource },
+    phpSource: { commit: version.sourceCommit }, extension: { file, sha256: sha256(bytes) }, curlSource: { ...curlSource },
+    runtime: { fingerprint: version.runtimeFingerprint, archiveSha256: version.runtimeArchiveSha256, abi },
+    flags: ['-DZEND_WASM_INT64=1'],
+    nativeHelperSha256: await hashFile(fileURLToPath(new URL('../scripts/native-runtime.mjs', import.meta.url))),
+    nativePatchSha256: await hashFile(fileURLToPath(new URL('../native/curl-int64.patch', import.meta.url))),
     phpSourceInventory: [{ path: 'interface.c', sha256: 'c'.repeat(64) }],
     httpStreams: { sourceSha256: await hashFile(fileURLToPath(new URL('../native/http-stream.c', import.meta.url))),
       originalInterfaceSha256: 'f'.repeat(64), interfaceSha256: 'c'.repeat(64) },
@@ -39,10 +45,23 @@ test('curl staging verifies PHP and fetch transport identities, binary checksum 
   assert.equal((await stageCurl(options)).url, 'extensions/php8.4-curl.so');
   assert.deepEqual(await readFile(path.join(destination, file)), bytes);
   for (const license of licenses) assert.equal(await hashFile(path.join(destination, license.file)), license.sha256);
+  const patchSha256 = provenance.nativePatchSha256;
+  provenance.nativePatchSha256 = '0'.repeat(64);
+  await save();
+  await assert.rejects(stageCurl(options), /provenance differs/);
+  provenance.nativePatchSha256 = patchSha256;
   provenance.phpVersion = '8.5.2';
   await save();
   await assert.rejects(stageCurl(options), /provenance differs/);
   provenance.phpVersion = version.patchVersion;
+  provenance.runtime.fingerprint = 'f'.repeat(64);
+  await save();
+  await assert.rejects(stageCurl(options), /provenance differs/);
+  provenance.runtime.fingerprint = version.runtimeFingerprint;
+  provenance.flags = [];
+  await save();
+  await assert.rejects(stageCurl(options), /provenance differs/);
+  provenance.flags = ['-DZEND_WASM_INT64=1'];
   provenance.curlSource.commit = 'e'.repeat(40);
   await save();
   await assert.rejects(stageCurl(options), /provenance differs/);

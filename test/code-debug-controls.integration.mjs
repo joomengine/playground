@@ -1,16 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PhpDbgNode } from 'php-dbg-wasm/PhpDbgNode';
+import { builtWrapper, builtManifest, releasedLibraries } from './runtime-artifacts.mjs';
 import { PhpDebugRuntime } from '../src/code/debug-runtime.mjs';
 
-const versions = process.env.PHPDBG_TEST_VERSION ? [process.env.PHPDBG_TEST_VERSION] : ['8.3', '8.4', '8.5'];
+const versions = process.env.PHPDBG_TEST_VERSION ? [process.env.PHPDBG_TEST_VERSION] : (await builtManifest()).php.map(entry => entry.version);
 const encoder = new TextEncoder();
 for (const version of versions) {
+const { PhpDbgNode } = await builtWrapper(version, 'debugger');
+const libraries = await releasedLibraries(version);
 function runtimeFor(code) {
   const time = new Date('2026-01-01T00:00:00Z');
   const runtime = new PhpDebugRuntime({
     Runtime: PhpDbgNode, phpVersion: version, siteURL: 'https://example.test/site/',
-    sharedLibs: [{ name: `php${version}-jec-phpdbg-http.so`, ini: true,
+    sharedLibs: [...libraries, { name: `php${version}-jec-phpdbg-http.so`, ini: true,
       url: new URL(`../.cache/phpdbg/php${version}-jec-phpdbg-http.so`, import.meta.url) }],
     ini: 'variables_order=EGPCS\n', prepend: '/internal/prepend.php',
     snapshot: [
@@ -203,6 +205,32 @@ echo 'done';
     assert.equal(nested[0].value, '"root"');
     const all = await runtime.variables(object.variablesReference, { start: 0, count: 10 });
     assert.ok(all.some(value => value.name === 'secret (protected)' && value.value === '"hidden"'));
+    await runtime.setBreakpoints('/persist/www/index.php', []);
+    await runtime.continue();
+    assert.equal(new TextDecoder().decode((await execution).body), 'done');
+  } finally { await runtime.stop(); await execution.catch(() => {}); }
+});
+
+test(`native PHP ${version} inspects full-width integer values and array keys exactly`, { timeout: 20_000 }, async () => {
+  const runtime = runtimeFor(`<?php
+$values = [PHP_INT_MIN => PHP_INT_MIN, 9007199254740993 => 9007199254740993, PHP_INT_MAX => PHP_INT_MAX];
+echo 'done';
+`);
+  await runtime.setBreakpoints('/persist/www/index.php', [{ line: 3 }]);
+  const stopped = nextStop(runtime);
+  const execution = runtime.execute(request);
+  execution.catch(() => {});
+  try {
+    await Promise.race([stopped, execution.then(() => { throw new Error('Breakpoint was not reached.'); })]);
+    assert.equal((await runtime.evaluate('PHP_INT_SIZE')).result, '8');
+    assert.equal((await runtime.evaluate('PHP_INT_MIN')).result, '-9223372036854775808');
+    assert.equal((await runtime.evaluate('PHP_INT_MAX')).result, '9223372036854775807');
+    const values = await runtime.evaluate('$values');
+    assert.ok(values.variablesReference);
+    const entries = await runtime.variables(values.variablesReference, { start: 0, count: 3 });
+    assert.deepEqual(entries.map(({ name, value, type }) => ({ name, value, type })),
+      ['-9223372036854775808', '9007199254740993', '9223372036854775807']
+        .map(value => ({ name: value, value, type: 'int' })));
     await runtime.setBreakpoints('/persist/www/index.php', []);
     await runtime.continue();
     assert.equal(new TextDecoder().decode((await execution).body), 'done');

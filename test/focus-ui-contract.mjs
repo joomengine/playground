@@ -65,8 +65,8 @@ async function assertShellAppearance(page, capture) {
   };
   try {
     if (!settingsVisible) await page.locator('#settings-toggle').click();
-    assert.equal(await theme.evaluate(button => button.previousElementSibling?.id), 'download-dialog-button',
-      'The single appearance icon stays immediately beside Downloads.');
+    assert.equal(await page.locator('.header-actions #theme-toggle').count(), 1,
+      'The single appearance control remains in the header.');
     assert.equal(await page.locator('#theme-preference').count(), 0, 'There is no separate System selector.');
     const brand = await page.evaluate(async () => {
       const link = document.querySelector('link[rel=icon]');
@@ -92,8 +92,16 @@ async function assertShellAppearance(page, capture) {
       assert.equal(icon.objectFit, 'contain'); assert.equal(icon.filter, 'none', 'Pearl artwork stays full color.');
     }
     assert.equal(await page.locator('#theme-preference').count(), 0, 'Appearance has one toggle and no System selector.');
-    assert.equal(await theme.evaluate(button => button.previousElementSibling?.id), 'download-dialog-button',
-      'The appearance icon immediately follows Downloads.');
+    assert.equal(await page.locator('.header-actions #save-button, .header-actions #download-dialog-button').count(), 0,
+      'Save and Download belong to the running-site actions.');
+    assert.equal(await page.locator('#site-actions #save-button').count(), 1);
+    assert.equal(await page.locator('#site-actions #download-dialog-button').count(), 1);
+    assert.equal(await page.locator('#upload-site-button').evaluate(button => {
+      const buttons = [...button.parentElement.querySelectorAll('button')];
+      return buttons[buttons.indexOf(button) + 1]?.id;
+    }), 'download-dialog-button', 'Download immediately follows Upload in the site actions.');
+    assert.equal(await page.locator('#edit-deployment svg').count(), 1, 'Edit deployment has one decorated icon.');
+    assert.doesNotMatch(await page.locator('#edit-deployment').textContent(), /[✎✏]/);
     assert.equal(await page.locator('#configuration-fields').evaluate(fieldset => fieldset.querySelector('legend').nextElementSibling?.id), 'site-actions',
       'Site actions are the first dashboard row, above saved-site details.');
     // Start from a known OS value, then prove a manual toggle only lasts until

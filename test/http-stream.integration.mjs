@@ -3,8 +3,9 @@ import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { createNodeRuntime } from '../scripts/node-runtime.mjs';
 import { NESTED_PHP_REQUEST_ERROR } from '../src/php-network.mjs';
+import { builtManifest } from './runtime-artifacts.mjs';
 
-for (const phpVersion of (process.env.PLAYGROUND_PHP_VERSIONS?.split(',') || ['8.3', '8.4', '8.5'])) {
+for (const phpVersion of (process.env.PLAYGROUND_PHP_VERSIONS?.split(',') || (await builtManifest()).php.map(entry => entry.version))) {
 test(`PHP ${phpVersion}: native HTTP streams preserve bytes, contexts, response headers and timeouts`, { timeout: 60_000 }, async t => {
   const requests = [];
   const binary = Buffer.from([0, 255, 65, 128, 10]);

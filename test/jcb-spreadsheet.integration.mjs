@@ -4,10 +4,11 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { unzipSync, zipSync } from 'fflate';
 import { createNodeRuntime } from '../scripts/node-runtime.mjs';
-import { JCB_SOURCE_OVERLAY } from '../scripts/jcb-platform-overlay.mjs';
-import { JCB_VENDOR_OVERLAYS } from '../scripts/jcb-vendor-overlay.mjs';
 import { parseCatalog } from '../src/config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
+
+const readerPath = 'component-builder/libraries/vendor_jcb/VDM.Joomla/src/Import/Spreadsheet/ChunkReadFilter.php';
+const supportedPhp = JSON.parse(await readFile(new URL('../versions.json', import.meta.url), 'utf8')).php.map(entry => entry.version);
 
 async function spreadsheetArchive(runtime) {
   let packageBytes;
@@ -29,27 +30,25 @@ async function spreadsheetArchive(runtime) {
   const packages = unzipSync(packageBytes, { filter: (entry) => /joomla__Component-Builder__6\.x\.zip$/.test(entry.name) });
   assert.equal(Object.keys(packages).length, 1, 'The complete package must contain exactly one Joomla 6 component.');
   const prefix = 'component-builder/libraries/phpspreadsheet/vendor/';
-  const files = unzipSync(Object.values(packages)[0], { filter: (entry) => entry.name.startsWith(prefix) || entry.name === JCB_SOURCE_OVERLAY.path });
-  assert.equal(createHash('sha256').update(files[JCB_SOURCE_OVERLAY.path]).digest('hex'), JCB_SOURCE_OVERLAY.patchedSha256,
-    'The tested package must contain the reviewed JCB reader compatibility declaration.');
-  for (const overlay of JCB_VENDOR_OVERLAYS) {
-    assert.equal(createHash('sha256').update(files[prefix + overlay.path]).digest('hex'), overlay.patchedSha256,
-      `The tested package must contain the reviewed 32-bit packing correction: ${overlay.path}`);
-  }
+  const files = unzipSync(Object.values(packages)[0], { filter: (entry) => entry.name.startsWith(prefix) || entry.name === readerPath });
+  assert.ok(files[readerPath], 'The upstream JCB spreadsheet reader must be present.');
+  const metadata = JSON.parse(new TextDecoder().decode(files[prefix + 'composer/installed.json']));
+  const dependencies = Object.fromEntries(metadata.packages.map(entry => [entry.name, entry.version]));
   const archive = {};
   for (const [name, bytes] of Object.entries(files)) {
-    archive[name === JCB_SOURCE_OVERLAY.path ? 'jcb-chunk-read-filter.php' : `vendor/${name.slice(prefix.length)}`] = bytes;
+    archive[name === readerPath ? 'jcb-chunk-read-filter.php' : `vendor/${name.slice(prefix.length)}`] = bytes;
   }
   assert.ok(archive['vendor/autoload.php']);
   assert.ok(archive['vendor/composer/platform_check.php'], 'The Composer platform guard must remain present.');
-  return zipSync(archive);
+  return { archive: zipSync(archive), dependencies };
 }
 
-for (const phpVersion of ['8.3', '8.4', '8.5']) {
-  test(`PHP ${phpVersion}: maintained JCB spreadsheet dependencies write/read XLS and XLSX on wasm32`, { timeout: 180_000 }, async () => {
+for (const phpVersion of supportedPhp) {
+  test(`PHP ${phpVersion}: original JCB spreadsheet dependencies write/read XLS and XLSX with int64 PHP`, { timeout: 180_000 }, async () => {
     const runtime = await createNodeRuntime({ directory: process.env.PLAYGROUND_DIST, phpVersion });
     try {
-      await runtime.fs.writeFile('/tmp/spreadsheet-proof.zip', await spreadsheetArchive(runtime));
+      const { archive, dependencies } = await spreadsheetArchive(runtime);
+      await runtime.fs.writeFile('/tmp/spreadsheet-proof.zip', archive);
       const result = await runtime.runPhp(`<?php
         try {
             $zip = new ZipArchive();
@@ -102,23 +101,12 @@ for (const phpVersion of ['8.3', '8.4', '8.5']) {
                         && hash('sha256', $oleReader->getData($index, 0, strlen($payload))) === hash('sha256', $payload);
                 }
             }
-            $numericBoundaries = [];
-            foreach ([PHP_INT_MIN, PHP_INT_MAX, (float) PHP_INT_MIN - 1, (float) PHP_INT_MAX + 1, -11644473600.0] as $value) {
-                $converted = PhpOffice\\PhpSpreadsheet\\Shared\\IntOrFloat::evaluate($value);
-                $numericBoundaries[] = ['value' => $converted, 'type' => get_debug_type($converted)];
-            }
-            $nonFinite = [
-                is_nan(PhpOffice\\PhpSpreadsheet\\Shared\\IntOrFloat::evaluate(NAN)),
-                PhpOffice\\PhpSpreadsheet\\Shared\\IntOrFloat::evaluate(INF) === INF,
-                PhpOffice\\PhpSpreadsheet\\Shared\\IntOrFloat::evaluate(-INF) === -INF,
-            ];
             echo json_encode(['ok' => true, 'phpIntSize' => PHP_INT_SIZE,
                 'spreadsheet' => Composer\\InstalledVersions::getPrettyVersion('phpoffice/phpspreadsheet'),
                 'zipstream' => Composer\\InstalledVersions::getPrettyVersion('maennchen/zipstream-php'),
                 'filterIncludesFirstRow' => $filter->readCell('A', 1), 'filterExcludesSecondRow' => !$filter->readCell('A', 2),
-                'packing' => array_map(static fn (int $value): string => bin2hex(pack('V', $value)), [-1, -3, -4]),
-                'largeOle' => $largeOle, 'numericBoundaries' => $numericBoundaries,
-                'nonFinite' => $nonFinite, 'results' => $results], JSON_THROW_ON_ERROR);
+                'packing' => array_map(static fn (int $value): string => bin2hex(pack('V', $value)), [0xFFFFFFFF, 0xFFFFFFFD, 0xFFFFFFFC]),
+                'largeOle' => $largeOle, 'results' => $results], JSON_THROW_ON_ERROR);
         } catch (Throwable $error) { echo json_encode(['ok' => false, 'error' => $error->getMessage()], JSON_THROW_ON_ERROR); }
       `);
       assert.equal(result.status, 200, result.text);
@@ -126,19 +114,13 @@ for (const phpVersion of ['8.3', '8.4', '8.5']) {
       try { proof = JSON.parse(result.text); }
       catch { assert.fail(`The spreadsheet operation did not return clean JSON: ${result.text}`); }
       assert.equal(proof.ok, true, proof.error);
-      assert.equal(proof.phpIntSize, 4, 'Compatibility must be proved on actual 32-bit PHP.');
-      assert.equal(proof.spreadsheet, '3.10.8');
-      assert.equal(proof.zipstream, '2.4.0');
+      assert.equal(proof.phpIntSize, 8, 'Original Composer platform checks must pass on actual int64 PHP.');
+      assert.equal(proof.spreadsheet, dependencies['phpoffice/phpspreadsheet']);
+      assert.equal(proof.zipstream, dependencies['maennchen/zipstream-php']);
       assert.equal(proof.filterIncludesFirstRow, true);
       assert.equal(proof.filterExcludesSecondRow, true);
       assert.deepEqual(proof.packing, ['ffffffff', 'fdffffff', 'fcffffff']);
       assert.equal(proof.largeOle, true, 'A large OLE container must preserve its complete stream across extra allocation sectors.');
-      assert.deepEqual(proof.numericBoundaries, [
-        { value: -2147483648, type: 'int' }, { value: 2147483647, type: 'int' },
-        { value: -2147483649, type: 'float' }, { value: 2147483648, type: 'float' },
-        { value: -11644473600, type: 'float' },
-      ]);
-      assert.deepEqual(proof.nonFinite, [true, true, true]);
       for (const format of ['Xls', 'Xlsx']) {
         assert.ok(proof.results[format].bytes > 100);
         assert.equal(proof.results[format].text, 'Joomla — erfgoed / Grüß');

@@ -59,7 +59,8 @@ export async function createStaticServer({ directory, prefix = '/playground/', i
       if (allowCORS) {
         response.setHeader('Access-Control-Allow-Origin', corsOrigin);
         response.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, PATCH, OPTIONS');
-        response.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Playground-Proof');
+        // Firefox forwards Joomla's cURL User-Agent, including in preflight.
+        response.setHeader('Access-Control-Allow-Headers', 'Content-Type, User-Agent, X-Playground-Proof');
         response.setHeader('Vary', 'Origin');
       }
       if (request.method === 'OPTIONS') {
@@ -67,7 +68,7 @@ export async function createStaticServer({ directory, prefix = '/playground/', i
         return;
       }
       if (Object.hasOwn(fixtures, relative)) {
-        response.setHeader('Content-Type', contentTypes[path.extname(relative)] || 'application/octet-stream');
+        response.setHeader('Content-Type', contentTypes[path.extname(relative || 'index.html')] || 'application/octet-stream');
         response.end(typeof fixtures[relative] === 'function' ? await fixtures[relative](request) : fixtures[relative]);
         return;
       }

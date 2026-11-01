@@ -120,8 +120,8 @@ self.addEventListener('fetch', event => {
         }) : event.request, {
           // Revalidate the shell/module graph and catalog after a release. Large
           // runtime binaries use versioned/content-hashed URLs in the manifest.
-          ...(!sourceURL.pathname.startsWith(`${scope.pathname}assets/`) || sourceURL.pathname === `${scope.pathname}assets/manifest.json`
-            ? { cache: event.request.cache === 'no-store' ? 'no-store' : 'no-cache' } : {}),
+          ...(!sourceURL.pathname.startsWith(`${scope.pathname}assets/`) || ['manifest.json', 'version-catalog.json'].some(name => sourceURL.pathname === `${scope.pathname}assets/${name}`)
+            ? { cache: ['no-store', 'reload'].includes(event.request.cache) ? event.request.cache : 'no-cache' } : {}),
         }));
       if (response.type === 'opaque' || response.status === 0) return response;
       const headers = isolationResponseHeaders(response.headers, policy);

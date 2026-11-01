@@ -1,9 +1,10 @@
 # JoomEngine Playground
 
 Build Joomla extensions with **Joomla Component Builder (JCB)** in your browser.
-JCB is the development engine at the heart of JoomEngine. Sean Morris’s PHP
-WebAssembly runtime and a real MariaDB WebAssembly database run the site. The
-playground assembles published upstream PHP packages, the MariaDB bridge, and a separately compiled native PDO extension into
+JCB is the development engine at the heart of JoomEngine. JoomEngine's PHP-WASM
+int64 distribution, built on Sean Morris's runtime, and a real MariaDB WebAssembly
+database run the site. The playground assembles released 64-bit PHP builds,
+the MariaDB bridge, and a separately compiled native PDO extension into
 a static site. PHP requests and SQL execute in browser workers.
 
 The deployment address is **https://playground.joomengine.org/**. The default
@@ -48,14 +49,16 @@ This project builds directly on the work of these maintainers and contributors:
 - **[Joomla Component Builder](https://github.com/joomengine/Joomla-Component-Builder)**
   is JoomEngine’s core development tool and default deployment.
 - **[PHP/phpdbg](https://github.com/php/php-src)** supplies PHP and its debugger;
-  JoomEngine Code uses Sean Morris's pinned `php-dbg-wasm` package with a small,
+  JoomEngine Code uses the int64 distribution's `php-dbg-wasm` runtime with a small,
   reproducibly compiled HTTP/debugging bridge.
 - **[MariaDB](https://github.com/MariaDB/server)** provides the database engine.
+- **[joomengine/php-wasm-int64](https://github.com/joomengine/php-wasm-int64)**
+  provides PHP 8.3–8.5 with native 64-bit PHP integers, matching extensions,
+  and the configured headers used to build Playground's native adapters.
 - **[seanmorris/php-wasm](https://github.com/seanmorris/php-wasm)** — Sean Morris
   and the project’s contributors provide the PHP runtime, CGI implementation,
   filesystem, asynchronous JavaScript integration, and loadable extension
-  support. The playground consumes their published runtime and extension
-  packages directly.
+  support underlying JoomEngine's int64 distribution.
 - **[JoomEngine MariaDB WASM Bridge](https://github.com/joomengine/mariadb-wasm-bridge)**
   provides the database worker, persistence, host protocol, native PDO driver,
   and adapter for the upstream PHP runtime.
@@ -86,40 +89,42 @@ with its upstream foundations credited separately above.
 
 ## What is assembled
 
-The browser loads `php-cgi-wasm` and its published extension packages. A small
+The browser loads the released int64 `php-cgi-wasm` runtime and its matching
+extensions. A small
 `pdo_mariadb_wasm` module registers PDO’s `mysql` driver. Its asynchronous adapter
 passes database operations to the MariaDB bridge. The playground service worker
 routes site requests to a dedicated PHP worker and adds the isolation headers
 needed by the threaded MariaDB engine.
 
-The native build compiles the PDO, fileinfo, cURL, Sodium and phpdbg HTTP/debugging
-bridges against matching PHP headers. Fileinfo supplies MIME detection with its embedded magic
-database.
+The native build compiles the PDO, cURL, Sodium and phpdbg HTTP/debugging bridges
+against the selected int64 release's configured PHP headers. Fileinfo is already
+included in that runtime and supplies MIME detection with its embedded magic database.
 cURL uses Sean Morris’s [php-wasm-curl](https://github.com/seanmorris/php-wasm-curl)
 to connect PHP’s `ext/curl` to the host’s Fetch API. The implementation
 is pinned to [6085917954da9682c32ebcbea27a626d2308381b](https://github.com/seanmorris/php-wasm-curl/tree/6085917954da9682c32ebcbea27a626d2308381b)
-and loaded alongside the published `0.2.0` PHP runtime. Sodium uses the official
+and loaded alongside the matching int64 PHP runtime. Sodium uses the official
 libsodium 1.0.22 release and Web Crypto for its random source. A checksum-verified
 JavaScript CGI adapter preserves binary request bodies, uses indexed input reads
 for large uploads, and waits for preloaded files before starting or restoring PHP.
-The upstream PHP WebAssembly binary is unchanged.
+Playground uses the released int64 PHP WebAssembly binary unchanged.
 The distributed `.so`
 files are WebAssembly extensions for these specific upstream builds, not native
 Linux PHP modules.
 
-The current pinned catalog is:
+The supported catalog is:
 
 | Joomla distribution | Available PHP builds |
 | --- | --- |
-| 5.4.10 | 8.3.11, 8.4.1, 8.5.2 |
-| 6.2.0 | 8.3.11, 8.4.1, 8.5.2 |
+| 5.4.10 | 8.3, 8.4, 8.5 |
+| 6.2.0 | 8.3, 8.4, 8.5 |
 
-These are the patch versions contained in the selected upstream `0.2.0`
-packages. They are recorded explicitly for ABI compatibility; the minor-version
-selector does not imply a newer PHP patch release. The pinned baseline is Joomla
-6.2.0 and PHP 8.4.1. PHP 8.5 remains selectable, and existing saved sites retain
-their selected runtime. [versions.json](versions.json) is the authoritative runtime
-build catalog; the published version catalog adds current and forward packages.
+Each build resolves the latest stable JoomEngine int64 release once. Its manifests
+provide the exact PHP patch versions, matching extension headers and source pins.
+The generated catalog records the selected versions; PHP release candidates and
+unpublished builds are not selected.
+
+[versions.json](versions.json) defines the supported PHP lines and default
+selection; the generated runtime manifest records their exact released builds.
 
 ## Current and forward version selection
 
@@ -162,57 +167,38 @@ same artifact. A failed upstream refresh or validation leaves the previous deplo
 catalog and packages available. Use a new site to try a newly published nightly;
 retain a complete site export when the exact old build must remain portable.
 
+Playground checks for a new published build on startup, when returning to the tab,
+and before launching. When a build changes, it refreshes this deployment’s cached
+catalogs and offers **Reload Playground**. Close the running site before reloading;
+saved sites, databases, local images and preferences are preserved.
+
 ## Build and run locally
 
-Use Node.js 26.12.1 as pinned in [.node-version](.node-version), npm, Git, Python 3,
-Bash, curl, tar, Make, and the Emscripten toolchain pinned in `versions.json`.
+Use Node.js 26.12.1 as pinned in [.node-version](.node-version), npm, Git, Docker,
+Bash, curl and tar. Native compilation uses the Emscripten image pinned by the
+selected int64 release.
 This is the tested build runtime; Node.js 24.x has a known
 [V8 shared-WASM lifecycle crash](https://github.com/nodejs/node/issues/66366).
-On Ubuntu, install the native
-header-configuration prerequisites:
+JCB uses its original bundled spreadsheet dependencies. No local Composer build
+or replacement vendor tree is required.
 
-```bash
-sudo apt-get update
-sudo apt-get install -y build-essential autoconf automake bison re2c libtool pkg-config curl git python3 xz-utils php8.3-cli php8.3-mbstring php8.3-xml php8.3-gd php8.3-zip php8.3-curl
-```
-
-Native PHP composes the [locked JCB spreadsheet dependencies](dependencies/jcb-spreadsheet/README.md)
-for the browser's 32-bit PHP platform. The build downloads and verifies its pinned
-Composer binary. `PHP_BINARY` can select a native PHP executable; the browser
-continues to use the upstream WebAssembly runtime.
-
-Clone the playground, install its locked packages, and check out the exact bridge
-and Emscripten SDK revisions selected by the catalog:
+Clone the playground, resolve the current stable int64 release, and compile the
+native adapters with its matching toolchain and configured headers:
 
 ```bash
 git clone https://github.com/joomengine/playground.git
 cd playground
 npm ci --ignore-scripts
+npm run prepare:php
 
 mkdir -p external
 git clone https://github.com/joomengine/mariadb-wasm-bridge.git external/bridge
 bridge_ref=$(node --input-type=module -e "import p from './versions.json' with {type:'json'}; console.log(p.nativeDriver.sourceCommit)")
 git -C external/bridge checkout --detach "$bridge_ref"
 
-git clone https://github.com/emscripten-core/emsdk.git external/emsdk
-emsdk_ref=$(node --input-type=module -e "import p from './versions.json' with {type:'json'}; console.log(p.upstream.emsdkCommit)")
-git -C external/emsdk checkout --detach "$emsdk_ref"
-compiler_version=$(node --input-type=module -e "import p from './versions.json' with {type:'json'}; console.log(p.upstream.emscripten)")
-external/emsdk/emsdk install "$compiler_version"
-external/emsdk/emsdk activate "$compiler_version"
-source external/emsdk/emsdk_env.sh
-
-npm ci --prefix external/bridge --ignore-scripts
-node scripts/prepare-bridge-engine.mjs external/bridge
-npm run prepare:engine --prefix external/bridge
-
-while IFS= read -r minor; do
-  bash external/bridge/native/build-upstream.sh "$minor" "$PWD/.cache/native"
-  BRIDGE_SOURCE_DIR=external/bridge node scripts/build-fileinfo.mjs "$minor"
-  BRIDGE_SOURCE_DIR=external/bridge node scripts/build-curl.mjs "$minor"
-  BRIDGE_SOURCE_DIR=external/bridge node scripts/build-sodium.mjs "$minor"
-  BRIDGE_SOURCE_DIR=external/bridge node scripts/phpdbg-build.mjs "$minor"
-done < <(node --input-type=module -e "import p from './versions.json' with {type:'json'}; for (const v of p.php) console.log(v.version)")
+compiler_image=$(node --input-type=module -e "import {loadPhpRuntime} from './scripts/php-runtime.mjs'; console.log((await loadPhpRuntime()).upstream.emscriptenImage)")
+docker run --rm -v "$PWD:/work" -w /work -e BRIDGE_SOURCE_DIR=external/bridge \
+  "$compiler_image" node scripts/build-native.mjs
 
 MARIADB_DRIVER_DIR=.cache/native npm run build
 npm run build:deploys
@@ -222,25 +208,29 @@ npm run serve
 Open <http://127.0.0.1:4173/>. The local server serves static files and supplies
 COOP/COEP headers. `PORT` and `HOST` can override its listen address. Build outputs
 are written to `dist/`; source downloads and compiled modules are cached under
-`.cache/` and the bridge’s `.native-build/` directory.
+`.cache/`.
 
-If the bridge is checked out next to the playground, native extension compilation
-also supports `../mariadb-wasm-bridge` as its source directory. The static build
-uses `../mariadb-wasm-bridge/.native-build/upstream` as its default compiled-driver
-directory; all bridge JavaScript and engine assets come from the verified release.
+With the matching Emscripten compiler already activated, native compilation can
+also run directly with `BRIDGE_SOURCE_DIR=external/bridge node scripts/build-native.mjs`.
+Run `npm run prepare:php` at the start of a new build to select the latest stable
+release, then rebuild its native adapters. All later build steps use that same
+recorded selection. Bridge JavaScript and engine assets come from the verified
+MariaDB bridge release.
 
 ## Build provenance
 
 `package-lock.json` pins the npm packages and their integrity values.
-`versions.json` pins upstream source revisions, PHP source checksums, the MariaDB
-release archive checksum, native and adapter source hashes, Joomla distributions,
-and compatible runtime combinations.
+`versions.json` selects the supported PHP minors and stable int64 release policy,
+and pins the MariaDB release checksum, native and adapter source hashes, Joomla
+distributions and compatible runtime combinations. `.cache/php-int64/resolved.json`
+records the selected int64 release and archive hashes. Its verified manifests
+provide the exact PHP source commits, compiler image and ABI for the native build.
 
 The build verifies every entry in the MariaDB bridge 0.1.8 release inventory and
 stages its runtime, PHP adapter, engine JavaScript and WebAssembly directly from
 that release. Native driver source hashes must match the same release. The
 PDO extension’s compiler, PHP version, source hashes, upstream revision, and
-binary hash must also match. Native fileinfo, cURL and Sodium modules retain
+binary hash must also match. Native cURL and Sodium modules retain
 their matching source inventories, compiler identities and licenses. The CGI
 JavaScript adapter records original and adjusted hashes. Each Joomla archive is
 verified before staging. A missing driver or mismatched input fails the build.
@@ -301,6 +291,10 @@ configuration or manually selecting a saved site also cancels the countdown.
 Manual selections wait for Launch and leave the current site running. Use
 `?start=0` to load setup without a countdown; explicit deployment/share links keep
 their own configuration and review requirements.
+In Share, **Immediate deployment** adds `immediate=1` to skip that countdown;
+leaving it unchecked preserves the normal startup, and `start=0` still prevents automatic launch.
+The hint beneath Launch updates with your choices: a prepared fast start, a prepared
+base needing additional setup, or a fresh installation that takes longer.
 
 The chevron opens one dashboard containing saved-site management, runtime
 configuration, site actions and appearance. **Site** and **Admin**, beside
@@ -411,6 +405,14 @@ database finish saving, including during configuration changes and PHP restarts.
 A successful Save can therefore be reopened after a
 whole-page reload without using Close first. Checkpoint or storage errors remain
 visible save failures; they do not advance the saved-state indicator.
+
+The interface opens the site before its first background checkpoint. Saving starts
+as soon as the runtime is idle, then repeats about a minute after each completed
+save. Saves run in the filesystem and database workers, keep the surrounding
+controls usable, and never overlap. Close waits for an active save and completes
+the first checkpoint if it has not started. Launch uses published prepared images
+or compatible images already cached locally; it does not delay first use to export
+a new reusable image. Saved sites still resume from their own files and database.
 
 The credentials dialog shows the generated administrator login details, including
 when automatic login is disabled. Each fresh site receives new credentials;
@@ -631,6 +633,7 @@ The interface recognizes these query parameters:
 | `extensions=[...]` | Additional objects containing `url` and optional `sha256` |
 | `commands=[["cache:clean"]]` | Additional Joomla console argument arrays |
 | `start=0` | Show setup first; the default page offers a ten-second countdown |
+| `immediate=1` | Skip the countdown for automatic deployment; `start=0` still takes precedence |
 | `config=https://example.org/deploy.json` | Load a public deployment document, optionally verified with `sha256` |
 
 For a deployment hosted at `/playground/`, this same-origin iframe opens an
