@@ -713,7 +713,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       installed.resumed = true;
     } else {
       if (pristine && config.restoredSite) throw new Error('The saved uploaded site is unavailable. Upload its complete site export ZIP again.');
-      const imageWarning = message => progress({ phase: 'warning', message });
+      const imageWarning = message => progress({ phase: 'warning', message, background: true });
       let image, fingerprint, completeImage = false;
       if (pristine) {
         // Revalidate the small server catalog before using cached maintained
