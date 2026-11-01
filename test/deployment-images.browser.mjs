@@ -29,7 +29,12 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await page.goto(`${server.url}image-cache-fixture.html`);
       const load = async catalog => page.evaluate(async manifest => {
         const { deploymentImages } = await import('./src/deployment-images.mjs');
-        const entry = deploymentImages.maintained({ deployId: 'jcb', joomlaVersion: '6.2.0' }, manifest);
+        const published = manifest.prebuiltDeploys[0];
+        const snapshot = { url: new URL(published.url, new URL('assets/manifest.json', location.href)).href,
+          sha256: published.sha256, joomlaVersion: published.joomlaVersion };
+        const entry = deploymentImages.maintained({ deployId: published.id, joomlaVersion: published.joomlaVersion,
+          snapshot }, manifest);
+        if (!entry) throw new Error('The published snapshot did not resolve as a maintained image.');
         const image = await deploymentImages.getMaintained(entry);
         return { cached: image.cached, bytes: [...image.bytes], rows: await deploymentImages.list(manifest) };
       }, catalog);
