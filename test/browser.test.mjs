@@ -283,22 +283,23 @@ async function closeDeployEditor(page) {
   if (await page.locator('#deploy-dialog').isVisible()) await page.locator('#deploy-dialog [data-close-dialog]').click();
 }
 
-async function approveFixtureLaunch(page, button, source) {
-  const pending = page.waitForEvent('dialog');
-  const clicked = button.click();
-  const review = await pending;
-  assert.equal(review.type(), 'confirm');
-  assert.ok(review.message().includes(source), 'The source being installed must be visible in the launch review.');
-  await review.accept();
-  await clicked;
+async function launchFixture(page, button) {
+  const dialogs = [];
+  const observe = dialog => { dialogs.push(dialog.message()); void dialog.dismiss(); };
+  page.on('dialog', observe);
+  try {
+    await button.click();
+    await page.waitForFunction(() => !document.getElementById('loading-view').hidden || !document.getElementById('error-view').hidden);
+    assert.deepEqual(dialogs, [], 'Chosen custom packages must launch without another approval prompt.');
+    assert.equal(await page.locator('#error-view').isVisible(), false);
+  } finally { page.off('dialog', observe); }
 }
 
-async function reviewFixtureLink(page, source) {
-  await page.locator('#deploy-dialog[open]').waitFor();
+async function launchFixtureLink(page, source) {
+  await page.locator('#embedded-launch:enabled').waitFor();
   assert.ok((await page.locator('#extensions').inputValue()).includes(source));
-  assert.equal(await page.locator('#site-frame').count(), 0, 'Shared custom packages must wait for review before execution.');
-  await closeDeployEditor(page);
-  await approveFixtureLaunch(page, page.locator('#embedded-launch'), source);
+  assert.equal(await page.locator('#deploy-dialog').isVisible(), false, 'A custom package link does not force an editor review.');
+  await launchFixture(page, page.locator('#embedded-launch'));
 }
 
 async function showSiteActions(page) {
@@ -1127,11 +1128,12 @@ for (const name of browserNames) {
         await page.locator('#extension-url-2').fill('https://example.org/remove-this-package.zip');
         await page.getByRole('button', { name: 'Remove extension URL 2', exact: true }).click();
         assert.deepEqual(JSON.parse(await page.locator('#extensions').inputValue()), [{ url: new URL('__test_extension.zip', server.url).href }]);
+        await page.locator('#commands-advanced > summary').click();
         await page.locator('#startup-commands').fill(JSON.stringify([['list']]));
         await closeDeployEditor(page);
         await showQuickSettings(page);
         page.testStep = 'launch administrator';
-        await approveFixtureLaunch(page, page.locator('#launch-button'), new URL('__test_extension.zip', server.url).href);
+        await launchFixture(page, page.locator('#launch-button'));
         await renderedSiteFrame(page);
         await dismissAutomaticTour(page);
         assert.match(await page.frameLocator('#site-frame').locator('html').innerHTML(), /com_cpanel|task=logout|value=["']logout["']/i);
@@ -1252,12 +1254,12 @@ for (const name of browserNames) {
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
         const freshURL = new URL(server.url);
-        // A distinct source still needs review even after the original URL was
-        // approved through the simple fields without an optional checksum.
+        // A distinct source is installed into a separate fresh site without
+        // modifying the existing files or database.
         const freshSource = new URL('__test_extension.zip?fresh=1', server.url).href;
-        for (const [key, value] of Object.entries({ deploy: 'blank', joomla: defaultPair.joomlaVersion, php: changedPHP, key: savedKey, fresh: '1', extension: freshSource })) freshURL.searchParams.set(key, value);
+        for (const [key, value] of Object.entries({ deploy: 'blank', joomla: defaultPair.joomlaVersion, php: changedPHP, key: savedKey, fresh: '1', start: '0', extension: freshSource })) freshURL.searchParams.set(key, value);
         await page.goto(freshURL.href);
-        await reviewFixtureLink(page, freshSource);
+        await launchFixtureLink(page, freshSource);
         await renderedSiteFrame(page);
         await dismissAutomaticTour(page);
         const freshKey = await page.locator('#storage-key').inputValue();
@@ -1275,33 +1277,54 @@ for (const name of browserNames) {
         await renderedSiteFrame(page);
         assert.equal(await page.locator('#storage-key').inputValue(), savedKey);
         assert.deepEqual(await previewContract(page), afterSwitch, 'A fresh URL must leave the original saved site intact.');
-        page.testStep = 'changed sources on a saved-site link still require review';
+        page.testStep = 'changed source launches separately and reports optional installer failure';
         await showSiteActions(page);
         await page.locator('#close-button').click();
         await waitForSiteClosed(page);
         await page.locator('#embedded-launch:enabled').waitFor();
         const changedSourceURL = new URL(savedURL);
-        const unreviewedSource = new URL('unreviewed-extension.zip', server.url).href;
-        changedSourceURL.searchParams.set('extension', unreviewedSource);
+        const missingSource = new URL('missing-extension.zip', server.url).href;
+        const workingSource = new URL('__test_extension.zip', server.url).href;
+        page.expectedConsoleURLs.add(missingSource);
+        changedSourceURL.searchParams.set('extensions', JSON.stringify([{ url: workingSource }, { url: missingSource }]));
+        changedSourceURL.searchParams.set('start', '0');
         await page.goto(changedSourceURL.href);
-        await page.locator('#deploy-dialog[open]').waitFor();
-        assert.ok((await page.locator('#extensions').inputValue()).includes(unreviewedSource));
-        assert.equal(await page.locator('#launch-countdown').isVisible(), false);
-        assert.equal(await page.locator('#site-frame').count(), 0);
+        await launchFixtureLink(page, missingSource);
+        await renderedSiteFrame(page);
+        await dismissAutomaticTour(page);
+        assert.notEqual(await page.locator('#storage-key').inputValue(), savedKey,
+          'Changed setup steps must use a separate site identity.');
+        assert.equal((await previewContract(page)).database, null, 'The changed setup starts with an independent database.');
+        await page.locator('#extension-warnings:not([hidden])').waitFor();
+        assert.match(await page.locator('#extension-warnings').innerText(), /install|download|404|failed/i,
+          'The successful site must retain the optional installer error.');
+        assert.equal(await page.locator('#error-view').isVisible(), false, 'An optional extension failure does not replace the site with a fatal error.');
+        await showSiteActions(page);
+        await page.locator('#close-button').click();
+        await waitForSiteClosed(page);
         await page.goto(savedURL.href);
         await renderedSiteFrame(page);
-        assert.deepEqual(await previewContract(page), afterSwitch, 'Reviewing an altered link must preserve the original saved site.');
-        page.testStep = 'new site control preserves saved sites';
+        assert.deepEqual(await previewContract(page), afterSwitch, 'Launching an altered link must preserve the original saved site.');
+        page.testStep = 'deployment editor creates an independent site and preserves saved sites';
         await showSiteActions(page);
-        await page.locator('#new-site-button').click();
+        await page.locator('#deploy-editor-button').click();
         await page.locator('#deploy-dialog').waitFor({ state: 'visible' });
-        await closeDeployEditor(page);
-        await showQuickSettings(page);
-        await page.locator('#launch-button:enabled').waitFor();
-        assert.notEqual(await page.locator('#storage-key').inputValue(), savedKey);
+        await page.locator('#site-name').fill('Independent deployment site');
         assert.equal(await page.locator('#site-frame').count(), 1);
         assert.deepEqual(await previewContract(page), afterSwitch, 'Staging a new site leaves the running site intact.');
-        await launchStagedSite(page);
+        const previousDeploymentFrame = await page.locator('#site-frame').elementHandle();
+        try {
+          await page.locator('#use-deploy').click();
+          await page.waitForFunction(({ previous, savedKey }) => {
+            if (!document.getElementById('error-view').hidden) return true;
+            const frame = document.getElementById('site-frame');
+            const key = document.getElementById('storage-key').value;
+            return !document.getElementById('launch-button').disabled && frame && frame !== previous
+              && key !== savedKey && new URL(location.href).searchParams.get('key') === key;
+          }, { previous: previousDeploymentFrame, savedKey }, { timeout: requestTimeout });
+          await renderedSiteFrame(page);
+        } finally { await previousDeploymentFrame?.dispose(); }
+        assert.notEqual(await page.locator('#storage-key').inputValue(), savedKey);
         await dismissAutomaticTour(page);
         assert.equal((await previewContract(page)).database, null, 'New site must install an independent database.');
         await showQuickSettings(page);
@@ -1362,7 +1385,7 @@ for (const name of browserNames) {
         await page.locator('#launch-button:enabled').waitFor();
         await bounded(Promise.allSettled([...page.responseChecks]), 'Read dashboard responses', 10_000);
         await assertCleanConsole(page);
-        records.push({ ...defaultPair, interfaceLaunch: true, interfaceReset: true, phpSwitch: changedPHP, persistedAutomaticResume: true, portableDownload: true, freshPreservesOriginal: true, savedSiteSelector: true });
+        records.push({ ...defaultPair, interfaceLaunch: true, interfaceReset: true, phpSwitch: changedPHP, persistedAutomaticResume: true, portableDownload: true, freshPreservesOriginal: true, changedSourceIsolation: true, optionalInstallerWarning: true, savedSiteSelector: true });
       } catch (error) {
         await saveBrowserDiagnostics(page, `interface-${name}`, error);
         throw error;
@@ -1375,10 +1398,10 @@ for (const name of browserNames) {
       try {
         const url = new URL(server.url);
         for (const [key, value] of Object.entries({ deploy: 'blank', joomla: defaultPair.joomlaVersion, php: defaultPair.phpVersion,
-          name: 'Rocket shared demonstration', persist: '0', extension: new URL('__test_extension.zip', server.url).href })) url.searchParams.set(key, value);
+          name: 'Rocket shared demonstration', persist: '0', start: '0', extension: new URL('__test_extension.zip', server.url).href })) url.searchParams.set(key, value);
         page.testStep = 'launch temporary site in English';
         await page.goto(url.href);
-        await reviewFixtureLink(page, new URL('__test_extension.zip', server.url).href);
+        await launchFixtureLink(page, new URL('__test_extension.zip', server.url).href);
         await page.locator('#loading-view:not([hidden])').waitFor();
         await page.locator('#loading-message').filter({ hasText: /Starting MariaDB|Loading PHP|Loading Joomla|Extracting Joomla/ }).waitFor();
         await mkdir(path.join(root, 'test-results'), { recursive: true });
@@ -1448,11 +1471,11 @@ for (const name of browserNames) {
           };
         });
         await showSiteActions(page);
-        await page.locator('#new-site-button').click();
-        await closeDeployEditor(page);
-        await showQuickSettings(page);
+        await page.locator('#deploy-editor-button').click();
+        await page.locator('#deploy-dialog').waitFor({ state: 'visible' });
+        await page.locator('#site-name').fill('Unlaunched deployment after save failure');
         assert.deepEqual(await previewContract(page), marker, 'Staging a new site must not flush or close the running one.');
-        await page.locator('#launch-button').click();
+        await page.locator('#use-deploy').click();
         await page.locator('#header-feedback').filter({ hasText: 'Simulated storage quota failure' }).waitFor();
         assert.equal(await page.evaluate(() => window.__flushFailureInjected), true);
         await renderedSiteFrame(page);

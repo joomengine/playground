@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { createNodeRuntime } from '../scripts/node-runtime.mjs';
 import { parseCatalog } from '../src/config.mjs';
@@ -69,7 +70,7 @@ for (const [deployId, major] of pairs) {
   });
 }
 
-test('manual Service Directory package keeps normal PHP settings and installs every seeded city', { timeout: 360_000 }, async () => {
+test('manual Service Directory package keeps normal PHP settings and installs every seeded city', { timeout: 360_000 }, async t => {
   const runtime = await createNodeRuntime({ directory: process.env.PLAYGROUND_DIST, phpVersion: '8.4' });
   try {
     assert.equal(runtime.phpSettings.max_execution_time, 60);
@@ -82,17 +83,35 @@ test('manual Service Directory package keeps normal PHP settings and installs ev
     const administrator = { name: 'Manual Package Administrator', username: 'admin', email: 'admin@example.test', password: `Manual-${crypto.randomUUID()}!` };
     const { configuration: preset } = await resolveDeployConfiguration({ deployId: 'servicedirectory',
       joomlaVersion: release.version, phpVersion: '8.4', admin: administrator }, shared);
+    const packageResponse = await runtime.fetchAsset(preset.extensions[0].url);
+    assert.equal(packageResponse.status, 200, 'The fixture uses the staged Service Directory package.');
+    const packageBytes = Buffer.from(await packageResponse.arrayBuffer());
+    const requests = [];
+    const server = createServer((request, response) => {
+      requests.push({ method: request.method, url: request.url });
+      response.writeHead(200, { 'Content-Type': 'application/zip' });
+      response.end(packageBytes);
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
+    const packageURL = `http://127.0.0.1:${server.address().port}/servicedirectory.zip`;
     const { configuration } = await resolveDeployConfiguration({ deployId: 'blank', joomlaVersion: release.version,
-      phpVersion: '8.4', persistence: false, fresh: true, extensions: preset.extensions,
+      phpVersion: '8.4', persistence: false, fresh: true, extensions: [{ url: packageURL }],
       admin: administrator,
     }, shared);
     assert.equal(configuration.phpSettings.max_execution_time, 60, 'Entering a package URL must not import the preset PHP settings.');
     assert.equal(configuration.menus.length, 0, 'This exercises manual package entry, not the Service Directory preset.');
-    const recipe = JSON.parse(await readFile(new URL('../deploys/servicedirectory.json', import.meta.url), 'utf8'));
-    assert.equal(configuration.extensions[0].sha256, recipe.variants['6'].extensions[0].sha256, 'Install the exact reviewed package.');
+    assert.deepEqual(configuration.extensions, [{ url: packageURL }], 'Manual package URLs belong to Joomla, without wrapper checksums.');
+    assert.deepEqual(configuration.addonExtensions, configuration.extensions);
     const packageChecks = [];
+    const commands = [];
     const instrumented = { ...runtime, runPhp: async (source, options) => {
-      if (source.includes('manual-package-execution-budget')) packageChecks.push(options?.timeoutMs);
+      if (source.includes('manual-package-execution-budget')) {
+        packageChecks.push(options?.timeoutMs);
+        const payload = JSON.parse(Buffer.from(/base64_decode\('([^']+)'\)/.exec(source)[1], 'base64'));
+        commands.push(payload.argv);
+        assert.equal(payload.archive, undefined, 'The wrapper must not stage the custom URL package.');
+      }
       return runtime.runPhp(source, options);
     } };
     const checkedSourceLoader = async name => {
@@ -106,8 +125,11 @@ test('manual Service Directory package keeps normal PHP settings and installs ev
     const archive = await runtime.fetchAsset(new URL(release.url, manifestURL));
     assert.equal(archive.status, 200);
     const archiveBytes = await archive.arrayBuffer();
-    await installJoomla(instrumented, configuration, { archiveBytes, sha256: release.sha256,
-      sourceLoader: checkedSourceLoader, fetchPackage: runtime.fetchAsset });
+    const installed = await installJoomla(instrumented, configuration, { archiveBytes, sha256: release.sha256,
+      sourceLoader: checkedSourceLoader, fetchPackage: async () => assert.fail('Joomla CLI must download the custom URL itself.') });
+    assert.deepEqual(installed.extensionWarnings, []);
+    assert.deepEqual(commands, [['extension:install', `--url=${packageURL}`]]);
+    assert.deepEqual(requests, [{ method: 'GET', url: '/servicedirectory.zip' }]);
     assert.equal(packageChecks.length, 1, 'The package installer runs once without automatic replay.');
     assert.ok(packageChecks[0] >= 210_000, 'The host deadline must allow PHP its full 180 seconds and cleanup grace.');
     const result = await runtime.runPhp(`<?php

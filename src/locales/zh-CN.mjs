@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "action.login": "登录",
   "database.detach": "将数据库查看器分离到独立窗口",
   "database.redock": "将数据库查看器移回此窗口",
   "database.maximize": "最大化 数据库",

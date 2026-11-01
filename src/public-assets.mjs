@@ -90,15 +90,19 @@ export function validatePublicAssetConfiguration(input) {
 
 export async function loadPublicAssetConfiguration(baseURL, fetcher = fetch) {
   const base = new URL('./', baseURL);
-  const results = await Promise.all(['config/public-assets.json', 'config/public-assets-config.json'].map(async path => {
-    const response = await fetcher(new URL(path, base), { credentials: 'same-origin', cache: 'no-cache' });
-    if (!response.ok) throw new Error(`Public image configuration unavailable (${response.status}).`);
-    return response.json();
-  }));
-  const registry = validatePublicAssetRegistry(results[0]);
-  const config = validatePublicAssetConfiguration(results[1]);
-  if (!config.registryVersions.includes(registry.version)) throw new Error('Public image registry version is not enabled by this client configuration.');
-  return Object.freeze({ registry, config, baseURL: base.href });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  try {
+    const results = await Promise.all(['config/public-assets.json', 'config/public-assets-config.json'].map(async path => {
+      const response = await fetcher(new URL(path, base), { credentials: 'same-origin', cache: 'no-cache', signal: controller.signal });
+      if (!response.ok) throw new Error(`Public image configuration unavailable (${response.status}).`);
+      return response.json();
+    }));
+    const registry = validatePublicAssetRegistry(results[0]);
+    const config = validatePublicAssetConfiguration(results[1]);
+    if (!config.registryVersions.includes(registry.version)) throw new Error('Public image registry version is not enabled by this client configuration.');
+    return Object.freeze({ registry, config, baseURL: base.href });
+  } finally { clearTimeout(timer); controller.abort(); }
 }
 
 export function findApprovedAsset(registry, value) {

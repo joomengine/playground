@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "action.login": "Se connecter",
   "database.detach": "Détacher la base de données",
   "database.redock": "Ramener la base de données dans cette fenêtre",
   "database.maximize": "Agrandir Base de données",

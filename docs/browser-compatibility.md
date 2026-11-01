@@ -6,7 +6,7 @@ compatibility changes neither database credentials nor saved-site storage.
 | Mode | Document and dedicated-worker policy | External public images |
 | --- | --- | --- |
 | Normal | COOP `same-origin`, COEP `credentialless` | Original URLs and ordinary browser/PHP behavior; no automatic relay requests. |
-| Compatibility | COOP `same-origin`, COEP `require-corp` | Only explicitly registered images use the restricted relay. Other requests retain normal browser restrictions. |
+| Compatibility | COOP `same-origin`, COEP `require-corp` | Original URLs by default. When optional image delivery is configured, registered images use the restricted relay. |
 
 COEP selects the embedding policy. CORP permits particular cross-origin
 embeddings. CORS permits reading a response from another origin. These are
@@ -33,12 +33,14 @@ performs a controlled navigation under `credentialless`. Verification checks
 memory through a dedicated module worker and a nested module worker. User-agent
 names, screen size and similarly named properties do not select a mode.
 
-If that controlled normal-mode document fails verification, an enabled fallback
-gets one controlled navigation under `require-corp` and the same verification.
+If that controlled normal-mode document fails verification, the default enabled
+fallback gets one controlled navigation under `require-corp` and the same verification.
 Both failures stop startup with a diagnostic. The session-scoped state records
 the bootstrap version, initial takeover and attempted policies, so an image
 failure cannot cause a runtime restart or a reload loop. A later deployment may
 enable a previously untried fallback without requiring users to delete storage.
+If the small compatibility configuration cannot be read, automatic fallback
+remains available; a valid explicit `fallbackEnabled: false` disables it.
 
 The validated `__je_coep` navigation marker identifies the current page's
 bootstrap version and policy. It remains in the owner's URL during runtime
@@ -101,29 +103,32 @@ and the explicit exclusion of SVG from runtime relay delivery.
 
 ## Rollout and disable controls
 
-The checked-in defaults are deliberately inactive for relay-dependent fallback:
+The checked-in defaults enable runtime compatibility independently of image delivery:
 
-- `config/browser-compatibility.json`: `fallbackEnabled: false`.
+- `config/browser-compatibility.json`: `fallbackEnabled: true`.
 - `config/public-assets-config.json`: `enabled: false`, `relayBaseURL: null`.
 
-Adminer and normal-mode clients can be deployed with these defaults. A supported
-normal-mode page never depends on relay availability.
+Joomla, PHP, MariaDB and Adminer use the site's own runtime assets and do not
+require an image relay in either mode. A missing optional image configuration
+also leaves runtime startup available. Disabled image delivery preserves original
+image requests; `require-corp` still requires external image hosts to supply
+compatible response permissions.
 
-Before enabling compatibility delivery:
+To enable optional delivery for registered external images:
 
 1. Deploy the restricted server on an actual HTTPS host and verify its CORS,
    exact image bytes, error behavior and deployed registry versions.
 2. Set the client's real `relayBaseURL`, enable image delivery, and retain support
    for any registry version still used by the previous client release.
-3. Enable `fallbackEnabled`, build and verify the deployed candidate. The build
-   rejects enabling fallback while client relay delivery is disabled.
+3. Build and verify image delivery in a compatibility-mode page. This setting
+   does not enable or disable runtime isolation fallback.
 
 To disable new fallback sessions, set `fallbackEnabled: false` and deploy the
 configuration. Normal mode is unchanged; affected clients receive an accurate
 unsupported/disabled message. Do not reset saved sites or remove their storage.
 An already running page keeps its selected mode until its next navigation; image
-errors never select a different mode. Keep the relay available for old running
-clients and supported previous registry versions during rollout.
+errors never select a different mode. If image delivery has been enabled, keep
+its relay available for old running clients and supported registry versions.
 
 The local server defaults to host COEP `none`, exercising the actual
 service-worker bootstrap instead of masking it with server headers. Explicit
@@ -158,6 +163,10 @@ Run `node --test test/isolation.test.mjs` for the bounded-state and ownership
 contracts. Run `node --test test/isolation.browser.mjs` for Chromium, or set
 `PLAYGROUND_ISOLATION_BROWSER=webkit` for WebKit.
 `PLAYGROUND_BROWSER_EXECUTABLE` can select an installed browser executable.
+Set `PLAYGROUND_ISOLATION_RUNTIME_DIST=dist` to also start real PHP, MariaDB and
+Joomla under automatic fallback in a mobile-sized viewport with image delivery
+disabled. The tests use the shipped compatibility configuration and separately
+exercise an unreadable configuration.
 
 Run the image and native-PHP contract against the build with:
 
@@ -175,6 +184,5 @@ Automated WebKit is not a physical iPhone/iPad test, and responsive layout is no
 runtime compatibility. Maintainers will test real iOS Safari and representative
 Android browsers after deployment and record device/browser versions and any
 memory or storage limitations. Those physical-device checks do not block merging
-the implementation. Operational HTTPS relay verification is still required
-before enabling a production client that depends on it. This document does not
-claim universal browser support or an already deployed relay.
+the implementation. Operational HTTPS relay verification is required only before
+enabling optional image delivery. Runtime fallback ships enabled without it.

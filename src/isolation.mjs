@@ -1,5 +1,5 @@
 /** Shared by the page, workers and service worker. Never saved with a Joomla site. */
-export const ISOLATION_BOOTSTRAP_VERSION = '20261031-1';
+export const ISOLATION_BOOTSTRAP_VERSION = '20261101-1';
 export const ISOLATION_PARAMETER = '__je_coep';
 export const ISOLATION_POLICIES = Object.freeze(['credentialless', 'require-corp']);
 export const RUNTIME_ROUTE = '__runtime/';

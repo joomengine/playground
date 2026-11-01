@@ -270,6 +270,29 @@ test('user package and template checksum metadata never blocks the normal instal
   for (const url of ['javascript:alert(1)', 'https://user:password@example.test/a.zip']) assert.throws(() => parseUserExtensions([{ ...entry, url }]));
 });
 
+test('direct runtime custom URLs ignore checksums before validation while explicit managed packages stay strict', () => {
+  const custom = { url: './custom.zip', sha256: 'ignored', sha512: { invalid: true } };
+  const template = { url: './template.zip', element: 'custom', sha256: 'ignored' };
+  const baseURL = 'https://example.test/';
+  for (const input of [
+    { extensions: [custom], template },
+    { extensions: [custom], addonExtensions: [custom], template, addonTemplate: template },
+  ]) {
+    const normalized = normalizeConfiguration({ ...input, admin }, { baseURL });
+    assert.deepEqual(normalized.extensions, [{ url: 'https://example.test/custom.zip' }]);
+    assert.deepEqual(normalized.addonExtensions, normalized.extensions);
+    assert.equal(normalized.template.sha256, undefined);
+    assert.equal(normalized.addonTemplate.url, 'https://example.test/template.zip');
+  }
+  const managed = { url: 'https://example.test/managed.zip', sha256: 'a'.repeat(64) };
+  const mixed = normalizeConfiguration({ admin, extensions: [managed, custom], addonExtensions: [custom] }, { baseURL });
+  assert.deepEqual(mixed.extensions, [managed, { url: 'https://example.test/custom.zip' }]);
+  assert.throws(() => normalizeConfiguration({ admin, extensions: [custom], addonExtensions: [] }, { baseURL }), /SHA-256/);
+  assert.throws(() => normalizeConfiguration({ admin, template, addonTemplate: null }, { baseURL }), /SHA-256/);
+  assert.throws(() => normalizeConfiguration({ admin, template, addonTemplate: { ...template, url: './different.zip' } }, { baseURL }), /SHA-256/);
+  assert.equal(custom.sha256, 'ignored', 'Normalization does not mutate caller input.');
+});
+
 test('portable recipe validation rejects malformed requirements, nesting, unsafe keys and oversize data', () => {
   const document = createFullDeploymentDocument({ siteName: 'Validated' }, { name: 'Validated' });
   assert.deepEqual(normalizeDeploymentRequirements({ joomla: ['7', '7'], jcb: 'optional' }).joomla, ['7']);

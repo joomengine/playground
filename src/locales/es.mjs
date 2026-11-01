@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "action.login": "Iniciar sesión",
   "database.detach": "Separar el visor de base de datos",
   "database.redock": "Devolver el visor de base de datos a esta ventana",
   "database.maximize": "Maximizar Base de datos",

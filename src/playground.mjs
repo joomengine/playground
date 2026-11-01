@@ -357,7 +357,13 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   let phpEntry = manifest.php.find(entry => entry.version === config.phpVersion);
   const joomlaEntry = manifest.joomla.find(entry => entry.version === config.joomlaVersion);
   const isolation = Object.freeze({ policy: environment.policy, mode: environment.mode, ownerId: environment.ownerId, bootstrapVersion: environment.bootstrapVersion });
-  const publicAssets = environment.mode === 'compatibility' ? await loadPublicAssetConfiguration(base.href) : undefined;
+  let publicAssets;
+  if (environment.mode === 'compatibility') {
+    try { publicAssets = await loadPublicAssetConfiguration(base.href); }
+    catch {
+      progress({ phase: 'warning', message: 'Image delivery settings are unavailable. Original image URLs will be used.' });
+    }
+  }
   const resolveAsset = value => ownedClientURL(new URL(value, manifestUrl), { baseURL: base.href, ...isolation });
   const identity = await storageIdentity(config.storageKey);
   const clientId = await clientIdentity();

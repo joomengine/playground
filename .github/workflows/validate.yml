@@ -216,7 +216,7 @@ jobs:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
         run: |
           result=0
-          for suite in test/code-workbench.browser.mjs test/code-ai-browser.mjs test/code-host-lifecycle.browser.mjs test/language-selector.browser.mjs test/extension-inputs.browser.mjs test/dynamic-selection.browser.mjs test/deployment-images.browser.mjs test/deployment-editor.browser.mjs test/structured-inputs.browser.mjs; do
+          for suite in test/code-workbench.browser.mjs test/code-ai-browser.mjs test/code-host-lifecycle.browser.mjs test/language-selector.browser.mjs test/extension-inputs.browser.mjs test/dynamic-selection.browser.mjs test/deployment-images.browser.mjs test/deployment-editor.browser.mjs test/structured-inputs.browser.mjs test/credentials-login.browser.mjs; do
             node --test "$suite" || result=1
           done
           exit "$result"
@@ -289,6 +289,9 @@ jobs:
           PLAYGROUND_PHP_VERSIONS: ${{ needs.checks.outputs.php }}
           PLAYGROUND_JOOMLA_VERSIONS: ${{ needs.checks.outputs.joomla }}
         run: npm run test:browser
+      - name: Validate custom URL installation and reusable images
+        if: ${{ !cancelled() && steps.browser_install.outcome == 'success' && matrix.suite == 'runtime' && matrix.browser == 'chromium' }}
+        run: node --test test/custom-extension-url.browser.mjs
       - name: Retain browser receipts and diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -323,6 +326,7 @@ jobs:
       - name: Verify isolation and original image bytes through real PHP
         env:
           PLAYGROUND_ISOLATION_BROWSER: ${{ matrix.browser }}
+          PLAYGROUND_ISOLATION_RUNTIME_DIST: dist
           PUBLIC_ASSET_BROWSER: ${{ matrix.browser }}
           PUBLIC_ASSET_RUNTIME_DIST: dist
           PUBLIC_ASSET_BROWSER_EVIDENCE: test-results/public-assets-${{ matrix.browser }}.json

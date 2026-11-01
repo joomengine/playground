@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "action.login": "تسجيل الدخول",
   "database.detach": "فصل عارض قاعدة البيانات",
   "database.redock": "إعادة عارض قاعدة البيانات إلى هذه النافذة",
   "database.maximize": "تكبير قاعدة البيانات",

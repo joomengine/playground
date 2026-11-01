@@ -110,7 +110,7 @@ export async function handlePublicAssetRequest(request, {
   }
   if (!asset) return failure(404, 'unknown asset ID', route.id, onDiagnostic);
   if (!['GET', 'HEAD'].includes(request.method)) return failure(405, 'only GET and HEAD are supported', asset.id, onDiagnostic);
-  if (!config.enabled || !config.relayBaseURL) return failure(503, 'the public image relay is not configured', asset.id, onDiagnostic);
+  if (!config.enabled || !config.relayBaseURL) return route ? failure(503, 'the public image relay is not configured', asset.id, onDiagnostic) : null;
   const headers = new Headers(request.headers);
   if (headers.has('Authorization') || headers.has('Proxy-Authorization') || headers.has('Cookie') || headers.has('Range')) {
     return failure(400, 'authenticated or partial image requests are not supported', asset.id, onDiagnostic);

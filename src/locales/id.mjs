@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "action.login": "Masuk",
   "database.detach": "Pisahkan penampil basis data",
   "database.redock": "Kembalikan penampil basis data ke jendela ini",
   "database.maximize": "Maksimalkan Basis data",

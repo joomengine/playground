@@ -1,4 +1,5 @@
 export default Object.freeze({
+  "action.login": "ログイン",
   "database.detach": "データベースビューアーを別ウィンドウに移す",
   "database.redock": "データベースビューアーをこのウィンドウに戻す",
   "database.maximize": "データベース を最大化",

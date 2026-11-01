@@ -8,6 +8,7 @@ import { observeIcons, decorateAction } from './icons.mjs';
 import { createLanguageSelector } from './language-selector.mjs';
 
 import { connectFrame } from './frame-view.mjs';
+import { loginFromCredentialsDialog } from './credentials-login.mjs';
 import { DEFAULT_PHP_SETTINGS, normalizePhpSettings } from './php-settings.mjs';
 import { UI_LANGUAGES, getLocale, initializeLocale, setLocale, t } from './i18n.mjs';
 import { createLaunchCountdown } from './launch-countdown.mjs';
@@ -96,7 +97,7 @@ function deploymentDescriptor(id) {
   const entry = customRegistry.deployments.find(item => item.id === id);
   if (entry) return { id, title: entry.title, joomla: entry.document.requirements.joomla,
     requirements: entry.document.requirements, configuration: entry.document.configuration };
-  return deployCatalog?.deploys.find(item => item.id === id);
+  return deployCatalog?.deploys.find(item => item.id === id) || (currentDeployRecipe?.id === id ? currentDeployRecipe : undefined);
 }
 function customDeploymentInput(input) {
   if (input.deploymentRecipe) return input;
@@ -112,6 +113,9 @@ function customDeploymentInput(input) {
 function renderDeploymentChoices(selected = fields.deployId.value) {
   if (!deployCatalog) return;
   const entries = [...deployCatalog.deploys, ...customRegistry.deployments.map(entry => ({ id: entry.id, title: entry.title, group: 'Custom deployments' }))];
+  if (selected && !entries.some(entry => entry.id === selected) && currentDeployRecipe?.id === selected) {
+    entries.push({ id: selected, title: currentDeployRecipe.title || 'Saved deployment', group: 'Saved deployment' });
+  }
   fillOptions(fields.deployId, entries);
   fillOptions($('editor-deployment'), entries);
   fields.deployId.value = selected;
@@ -412,7 +416,6 @@ function setBusy(value) {
   $('repair-button').hidden = filesOnly || !runtime?.recovery?.configured;
   $('repair-button').disabled = locked || filesOnly;
   $('error-reset-button').disabled = locked || unavailable || !fields.persistence.checked;
-  $('new-site-button').disabled = locked || unavailable;
   $('saved-site').disabled = locked || unavailable || Object.keys(savedState.sites).length === 0;
   for (const id of ['saved-site-name', 'rename-site-button', 'delete-site-button']) $(id).disabled = locked || !selectedSiteId || !Object.hasOwn(savedState.sites, selectedSiteId);
   updateNavigation();
@@ -620,7 +623,8 @@ function formInput(overrides = {}) {
     // Keep unchanged core recipes eligible for their prepared image. The editor
     // shows full lists while the core resolver receives only genuine additions.
     const input = { ...full, extensions: editorConfiguration.addonExtensions || [],
-      startupCommands: editorConfiguration.addonStartupCommands || [], languages: editorConfiguration.addonLanguages || [] };
+      startupCommands: editorConfiguration.addonStartupCommands || [], languages: editorConfiguration.addonLanguages || [],
+      template: editorConfiguration.addonTemplate || editorSourceInput?.template };
     delete input.deploymentRecipe;
     return input;
   }
@@ -1063,35 +1067,6 @@ async function closeSite({ reset = false, save = false } = {}) {
   } finally { closing = false; setBusy(false); }
 }
 
-async function newSite() {
-  if (busy || launching || !catalog || !deployCatalog) return;
-  pauseAutomaticLaunch();
-  rememberDraft();
-  const label = deployCatalog.deploys.find((entry) => entry.id === fields.deployId.value)?.title || 'Joomla site';
-  fields.storageKey.value = `${defaultSiteKey(fields.deployId.value, fields.joomlaVersion.value).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`;
-  fields.siteName.value = `${label.slice(0, 88)} ${Object.keys(savedState.sites).length + 1}`;
-  $('admin-password').value = password();
-  refreshNightlyOnNextLaunch = dynamicMetadata.joomla.some(entry => entry.version === fields.joomlaVersion.value && entry.source === 'nightly');
-  pendingFresh = false;
-  freshKeyPending = false;
-  selectedSiteId = null; resumeLastRoute = false;
-  jcbSelection = initialJcbSelection({ input: { deployId: fields.deployId.value }, deploy: currentDeployRecipe,
-    major: fields.joomlaVersion.value.split('.')[0], pinned: pinnedJcb, isSaved: false });
-  if (deploymentRequiresJcb(currentDeployRecipe)) {
-    const current = matchingJcbChoices(fields.joomlaVersion.value.split('.')[0], dynamicMetadata.jcb, pinnedJcb)
-      .find(entry => entry.channel === 'stable');
-    if (current) jcbSelection = { version: current.version, omit: false,
-      ...(current.url ? { package: selectCatalogPackage(current) } : {}) };
-  }
-  renderJcbOptions(fields.joomlaVersion.value.split('.')[0]);
-  renderSavedSites('');
-  if (!runtime) show('welcome');
-  setBusy(false);
-  activity(`Choose settings for new site “${fields.storageKey.value}”, then Launch. Your saved sites are preserved.`);
-  openDialog('deploy-dialog');
-  fields.siteName.focus();
-}
-
 async function openSavedSite(key) {
   if (busy || launching || !Object.hasOwn(savedState.sites, key)) return;
   pauseAutomaticLaunch();
@@ -1221,7 +1196,6 @@ $('code-button').addEventListener('click', () => { void openCode(); });
 $('database-button').addEventListener('click', () => { void openDatabase(); });
 $('code-refresh-button').addEventListener('click', () => { void codeHost?.refresh().catch(error => feedback(error, { error: true, persistent: true })); });
 $('close-button').addEventListener('click', () => { if (runtime && !currentConfig.persistence && !confirm(t('confirm.temporary'))) return; void closeSite(); });
-$('new-site-button').addEventListener('click', () => void newSite());
 $('saved-site').addEventListener('change', (event) => void openSavedSite(event.target.value));
 $('saved-site-name').addEventListener('input', (event) => {
   savedSiteNameDraft = { key: selectedSiteId, value: event.target.value };
@@ -1495,9 +1469,13 @@ async function useDeployment() {
   $('deploy-error').hidden = true;
   try {
     let input = formInput();
-    if (runtime) input = { ...input, storageKey: `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`, admin: { ...input.admin, password: password() } };
+    // Using a recipe creates an independent installation, including when a
+    // saved site's runtime is closed. Dashboard Launch resumes that saved site.
+    input = { ...input, storageKey: `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}` };
     const resolved = await resolve(input);
     applyConfiguration(resolved.configuration, input, resolved.deploy); applyAdministrator(input.admin);
+    freshKeyPending = false;
+    refreshNightlyOnNextLaunch = dynamicMetadata.joomla.some(entry => entry.version === input.joomlaVersion && entry.source === 'nightly');
     selectedSiteId = null; resumeLastRoute = false; renderSavedSites();
     $('deploy-dialog').close();
     await launch();
@@ -1649,7 +1627,10 @@ function setupInterface() {
     $('credential-password').type = 'password'; $('reveal-credentials').textContent = t('action.show'); openDialog('credentials-dialog');
   });
   $('reveal-credentials').addEventListener('click', () => { const show = $('credential-password').type === 'password'; $('credential-password').type = show ? 'text' : 'password'; $('reveal-credentials').textContent = t(show ? 'action.hide' : 'action.show'); });
-  $('copy-credentials').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('credential-password').value); feedback(t('status.passwordCopied')); } catch { $('credential-password').type = 'text'; $('credential-password').select(); feedback(t('error.clipboard'), { error: true }); } });
+  $('credential-login').addEventListener('click', () => {
+    loginFromCredentialsDialog({ dialog: $('credentials-dialog'), frame: $('site-frame'),
+      administrator: runningAdministrator, baseURL: runtime?.baseUrl });
+  });
   $('go-administrator').addEventListener('click', () => { if (runtime) navigatePreview('/administrator/'); $('credentials-dialog').close(); });
   $('copy-share').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('share-url').value); $('share-feedback').textContent = t('status.copied'); } catch { $('share-url').focus(); $('share-url').select(); $('share-feedback').textContent = t('help.clipboard'); } });
   $('share-export-config').addEventListener('click', () => void downloadConfiguration(sharedConfiguration).catch(error => { $('share-feedback').textContent = messageOf(error); }));

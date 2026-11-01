@@ -2,6 +2,7 @@ import { ISOLATION_BOOTSTRAP_VERSION, isolationMarker, isolationNavigationURL, o
 
 const timeout = (message, milliseconds, reject) => setTimeout(() => reject(new Error(message)), milliseconds);
 const stateKey = baseURL => `joomengine:isolation-bootstrap:${new URL(baseURL).href}`;
+export const DEFAULT_COMPATIBILITY_CONFIGURATION = Object.freeze({ schemaVersion: 1, fallbackEnabled: true });
 
 export function validateCompatibilityConfiguration(value) {
   if (!value || value.schemaVersion !== 1 || typeof value.fallbackEnabled !== 'boolean'
@@ -140,14 +141,14 @@ export async function prepareBrowserIsolation({ baseURL, global = globalThis, fe
   if (!global.isSecureContext || !navigator?.serviceWorker) throw new Error('The playground needs HTTPS or localhost and service-worker support.');
   if (!navigator.locks?.request || !global.indexedDB) throw new Error('This browser does not provide IndexedDB and Web Locks required by the playground. No saved site was changed.');
   const identity = await establishServiceWorker(baseURL, navigator.serviceWorker);
-  let configuration = { schemaVersion: 1, fallbackEnabled: false }, configurationFailure;
+  let configuration = DEFAULT_COMPATIBILITY_CONFIGURATION, configurationFailure;
   const controller = new AbortController();
   const configurationTimer = setTimeout(() => controller.abort(), 5000);
   try {
     const response = await fetcher(new URL('config/browser-compatibility.json', baseURL), { cache: 'no-store', signal: controller.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     configuration = validateCompatibilityConfiguration(await response.json());
-  } catch (error) { configurationFailure = `Compatibility configuration is unavailable (${controller.signal.aborted ? 'request timed out' : error.message}); fallback is disabled.`; }
+  } catch (error) { configurationFailure = `Compatibility configuration is unavailable (${controller.signal.aborted ? 'request timed out' : error.message}); automatic browser compatibility defaults are in use.`; }
   finally { clearTimeout(configurationTimer); }
   const state = readBootstrapState(global.sessionStorage, baseURL);
   const verified = await verifySharedMemoryEnvironment({ baseURL, ownerId: identity.clientId, global });
