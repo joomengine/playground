@@ -1786,7 +1786,7 @@ async function initialize() {
         return response.json();
       }), loadDeployCatalog(),
     ]);
-    catalog = pinnedCatalog = parseCatalog(manifest);
+    catalog = pinnedCatalog = parseCatalog(manifest, { baseURL: new URL('../assets/manifest.json', import.meta.url) });
     deployCatalog = recipes;
     const jcbRecipe = await resolveDeployConfiguration({ deployId: 'jcb', joomlaVersion: catalog.defaults.joomlaVersion, admin: administrator() },
       { catalog, deployCatalog, baseURL: deploymentURL });

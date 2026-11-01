@@ -137,7 +137,7 @@ export function parseStartupCommands(value = []) {
   });
 }
 
-export function parseCatalog(manifest) {
+export function parseCatalog(manifest, { baseURL } = {}) {
   if (!manifest || !Array.isArray(manifest.php) || !Array.isArray(manifest.joomla)) {
     throw new TypeError('The runtime manifest must list available PHP and Joomla versions.');
   }
@@ -150,7 +150,8 @@ export function parseCatalog(manifest) {
     if (!entry || !VERSION.test(entry.version) || !Array.isArray(entry.php) || entry.php.length === 0 || entry.php.some((version) => !php.some((item) => item.version === version))) {
       throw new TypeError('The runtime manifest contains an invalid Joomla compatibility entry.');
     }
-    return { ...entry, label: entry.label || `Joomla ${entry.version}` };
+    return { ...entry, ...(baseURL && entry.url ? { url: new URL(entry.url, baseURL).href } : {}),
+      label: entry.label || `Joomla ${entry.version}` };
   });
   if (!php.length || !joomla.length) throw new TypeError('No tested runtime versions are available.');
   const defaults = {
@@ -206,7 +207,8 @@ export function normalizeConfiguration(input = {}, { catalog, baseURL = 'https:/
     if (typeof input.joomlaVersion !== 'string' || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(input.joomlaVersion)) {
       throw new TypeError('A Joomla package requires an exact Joomla version.');
     }
-    config.joomlaPackage = normalizeJoomlaPackage(config.joomlaPackage, baseURL);
+    config.joomlaPackage = normalizeJoomlaPackage(config.joomlaPackage, baseURL,
+      catalog?.joomla.find(entry => entry.version === config.joomlaVersion));
     if (!config.joomlaPackage.php.includes(config.phpVersion)) throw new TypeError('The Joomla package does not support the selected PHP runtime.');
   }
   if (config.jcbVersion !== undefined) config.jcbVersion = normalizeJcbVersion(config.jcbVersion);
@@ -259,11 +261,21 @@ export function normalizeJcbPackage(value, baseURL = 'https://playground.invalid
   return result;
 }
 
-export function normalizeJoomlaPackage(value, baseURL = 'https://playground.invalid/') {
+export function normalizeJoomlaPackage(value, baseURL = 'https://playground.invalid/', published) {
   const result = parseExtensions([value], baseURL, { allowHttp: false })[0];
   if (!result.sha256) throw new TypeError('The Joomla package requires a SHA-256 checksum.');
   if (!Array.isArray(value.php) || !value.php.length || value.php.length > 30 || value.php.some(version => typeof version !== 'string' || !/^\d+\.\d+$/.test(version))) {
     throw new TypeError('The Joomla package must list its available PHP versions.');
+  }
+  // Older profile switches resolved a manifest-relative ZIP against the page,
+  // dropping its assets/ prefix. Repair only that exact URL for the same bytes.
+  if (published?.url && published.sha256?.toLowerCase() === result.sha256) {
+    const assets = new URL('assets/', baseURL);
+    const canonical = new URL(published.url, assets);
+    if (canonical.origin === assets.origin && canonical.pathname.startsWith(assets.pathname)) {
+      const misplaced = new URL(canonical.pathname.slice(assets.pathname.length) + canonical.search, baseURL);
+      if (result.url === misplaced.href) result.url = canonical.href;
+    }
   }
   return { url: result.url, sha256: result.sha256, php: [...new Set(value.php)] };
 }
@@ -276,8 +288,8 @@ export function catalogWithSelectedJoomlaPackage(catalog, input, baseURL = 'http
   if (typeof input.joomlaVersion !== 'string' || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(input.joomlaVersion)) {
     throw new TypeError('A Joomla package requires an exact Joomla version.');
   }
-  const selected = normalizeJoomlaPackage(input.joomlaPackage, baseURL);
   const current = catalog.joomla.find(entry => entry.version === input.joomlaVersion);
+  const selected = normalizeJoomlaPackage(input.joomlaPackage, baseURL, current);
   // A nightly can publish different bytes and PHP requirements under the same
   // dev version. An older saved archive retains its own compatibility; stable
   // releases and the exact currently published bytes retain the catalog limits.

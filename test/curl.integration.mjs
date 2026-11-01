@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { PhpCgiNode } from 'php-cgi-wasm/PhpCgiNode.mjs';
+import { builtWrapper, runtimeConfiguration, releasedLibraries } from './runtime-artifacts.mjs';
 import { stageCurl } from '../scripts/curl.mjs';
 import { createPhpFetch, NESTED_PHP_REQUEST_ERROR } from '../src/php-network.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const pins = JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
+const pins = await runtimeConfiguration();
 const directory = path.resolve(root, process.env.CURL_EXTENSION_DIR || '.cache/curl');
 const payload = Buffer.from([0, 65, 255, 66, 128, 10]);
 
@@ -56,8 +56,9 @@ for (const version of pins.php) {
     t.after(() => rm(destination, { recursive: true, force: true }));
     const record = await stageCurl({ directory, destination, version, upstream: pins.upstream });
     const server = await fixture(t);
+    const { PhpCgiNode } = await builtWrapper(version.version);
     const php = new PhpCgiNode({ version: version.version, persist: [], docroot: '/www', prefix: '/',
-      sharedLibs: [{ name: record.provenance.extension.file,
+      sharedLibs: [...await releasedLibraries(version.version), { name: record.provenance.extension.file,
         url: pathToFileURL(path.join(destination, record.provenance.extension.file)).href, ini: true }],
       ini: 'display_errors=1\nerror_reporting=E_ALL\n',
     });
@@ -120,7 +121,7 @@ for (const version of pins.php) {
     assert.doesNotMatch(body, /Deprecated|Warning|Fatal error/, body);
     const result = JSON.parse(body);
     assert.equal(result.php, version.patchVersion);
-    assert.equal(result.intSize, 4);
+    assert.equal(result.intSize, 8);
     assert.equal(result.loaded, true);
     assert.equal(result.version, version.patchVersion);
     assert.ok(result.protocols.includes('http') && result.protocols.includes('https'));

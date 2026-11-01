@@ -1,32 +1,25 @@
 import assert from 'node:assert/strict';
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { applyCgiRequestOverlay } from '../scripts/cgi-request-overlay.mjs';
+import { builtWrapper, builtRuntimeDirectory, builtManifest, releasedLibraries } from './runtime-artifacts.mjs';
 import { phpIni } from '../src/php-settings.mjs';
 
-const root = fileURLToPath(new URL('../', import.meta.url));
-const original = path.join(root, 'node_modules/php-cgi-wasm');
 const temporary = await mkdtemp(path.join(tmpdir(), 'rocket-cgi-'));
-const packagePath = path.join(temporary, 'php-cgi-wasm');
-await mkdir(packagePath);
-for (const name of await readdir(original)) if (name.endsWith('.mjs') || name === 'package.json') await cp(path.join(original, name), path.join(packagePath, name));
-const overlay = await applyCgiRequestOverlay(packagePath);
-assert.equal(overlay.files.length, 3);
-const { PhpCgiNode } = await import(pathToFileURL(path.join(packagePath, 'PhpCgiNode.mjs')));
-const pins = JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
+const pins = await builtManifest();
 const selected = process.env.PLAYGROUND_PHP_VERSIONS?.split(',');
 const preload = path.join(temporary, 'preload-ready.php');
 await writeFile(preload, '<?php return "preload complete";');
 
-test('actual upstream CGI carries binary API bodies and multipart uploads', { timeout: 180_000 }, async t => {
+test('staged int64 CGI carries binary API bodies and multipart uploads', { timeout: 180_000 }, async t => {
   t.after(() => rm(temporary, { recursive: true, force: true }));
   for (const version of pins.php.filter(value => !selected || selected.includes(value.version))) {
     await t.test(`PHP ${version.version} request methods and effective settings`, async () => {
-      const php = new PhpCgiNode({ version: version.version, persist: [], docroot: '/www', prefix: '/',
+      const { PhpCgiNode } = await builtWrapper(version.version);
+      const original = await builtRuntimeDirectory(version.version);
+      const php = new PhpCgiNode({ sharedLibs: await releasedLibraries(version.version), version: version.version, persist: [], docroot: '/www', prefix: '/',
         locateFile: name => name === preload ? name : path.join(original, path.basename(name)), ini: phpIni(),
         files: [{ parent: '/internal', name: 'preload-ready.php', url: preload }],
       });
@@ -71,7 +64,10 @@ test('actual upstream CGI carries binary API bodies and multipart uploads', { ti
   }
   await t.test('a missing preload rejects initialization with its file context', async () => {
     const missing = path.join(temporary, 'missing-preload.php');
-    const php = new PhpCgiNode({ version: '8.5', persist: [],
+    const version = pins.php.at(-1).version;
+    const { PhpCgiNode } = await builtWrapper(version);
+    const original = await builtRuntimeDirectory(version);
+    const php = new PhpCgiNode({ sharedLibs: await releasedLibraries(version), version, persist: [],
       locateFile: name => name === missing ? name : path.join(original, path.basename(name)),
       files: [{ parent: '/internal', name: 'missing-preload.php', url: missing }],
     });

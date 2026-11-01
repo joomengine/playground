@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PhpCgiNode } from 'php-cgi-wasm/PhpCgiNode.mjs';
+import { builtWrapper, releasedLibraries } from './runtime-artifacts.mjs';
 import { configurePhpRouting } from '../src/php-routing.mjs';
 
 test('native CGI routes existing PHP script suffixes and resets PATH_INFO', { timeout: 30_000 }, async () => {
-  const php = new PhpCgiNode({ version: '8.4', docroot: '/www', prefix: '/site/', persist: [], staticFS: true });
+  const { PhpCgiNode } = await builtWrapper('8.4');
+  const php = new PhpCgiNode({ sharedLibs: await releasedLibraries('8.4'), version: '8.4', docroot: '/www', prefix: '/site/', persist: [], staticFS: true });
   const binary = await php.binary;
   configurePhpRouting(php, binary);
   for (const directory of ['/config', '/www/api', '/www/folder.php']) binary.FS.mkdirTree(directory);

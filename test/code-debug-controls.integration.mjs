@@ -1,16 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PhpDbgNode } from 'php-dbg-wasm/PhpDbgNode';
+import { builtWrapper, builtManifest, releasedLibraries } from './runtime-artifacts.mjs';
 import { PhpDebugRuntime } from '../src/code/debug-runtime.mjs';
 
-const versions = process.env.PHPDBG_TEST_VERSION ? [process.env.PHPDBG_TEST_VERSION] : ['8.3', '8.4', '8.5'];
+const versions = process.env.PHPDBG_TEST_VERSION ? [process.env.PHPDBG_TEST_VERSION] : (await builtManifest()).php.map(entry => entry.version);
 const encoder = new TextEncoder();
 for (const version of versions) {
+const { PhpDbgNode } = await builtWrapper(version, 'debugger');
+const libraries = await releasedLibraries(version);
 function runtimeFor(code) {
   const time = new Date('2026-01-01T00:00:00Z');
   const runtime = new PhpDebugRuntime({
     Runtime: PhpDbgNode, phpVersion: version, siteURL: 'https://example.test/site/',
-    sharedLibs: [{ name: `php${version}-jec-phpdbg-http.so`, ini: true,
+    sharedLibs: [...libraries, { name: `php${version}-jec-phpdbg-http.so`, ini: true,
       url: new URL(`../.cache/phpdbg/php${version}-jec-phpdbg-http.so`, import.meta.url) }],
     ini: 'variables_order=EGPCS\n', prepend: '/internal/prepend.php',
     snapshot: [

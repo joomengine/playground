@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { strToU8, unzipSync, zipSync } from 'fflate';
-import { createJcbCatalogValidator, joomlaPackagePhpMinimum, stageVersionCatalog } from '../scripts/version-catalog.mjs';
+import { joomlaPackagePhpMinimum, stageVersionCatalog } from '../scripts/version-catalog.mjs';
 import { compatibleDynamicPhp } from '../src/dynamic-selection.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -26,16 +26,14 @@ async function fixture(t, options = {}) {
   const assets = path.join(directory, 'assets');
   await mkdir(assets);
   const requests = [];
-  const validations = [];
   const configuration = { assets, cache: path.join(directory, 'cache'),
     discover: async () => ({ joomla: [stable], jcb: [jcb], errors: [] }),
     fetchImpl: async (url, init) => {
       requests.push({ url, init });
       return new Response(url === stable.url ? stableBytes : jcbBytes);
     },
-    validateJcb: async (entry, bytes) => validations.push({ entry, bytes }),
     now: () => Date.UTC(2026, 9, 31), ...options };
-  return { configuration, requests, validations,
+  return { configuration, requests,
     catalog: () => readFile(path.join(assets, 'version-catalog.json'), 'utf8').then(JSON.parse) };
 }
 
@@ -56,8 +54,6 @@ test('published catalog serves exact verified ZIP bytes on its own origin and re
   }
   assert.equal(catalog.jcb[0].sha512, jcb.sha512);
   assert.equal(catalog.joomla[0].phpMinimum, '8.3.0');
-  assert.equal(f.validations.length, 1);
-  assert.equal(f.validations[0].entry.sha256, sha256(jcbBytes));
   assert.ok(f.requests.every(request => request.init.credentials === 'omit' && request.init.cache === 'no-store'));
 });
 
@@ -98,15 +94,12 @@ test('a corrupted immutable cache is replaced only by a freshly verified source'
   assert.deepEqual(await readFile(cached), jcbBytes);
 });
 
-test('a changed publisher checksum or incompatible JCB leaves the previous catalog untouched', async t => {
+test('a changed publisher checksum leaves the previous catalog untouched', async t => {
   const f = await fixture(t);
   await stageVersionCatalog(f.configuration);
   const previous = await f.catalog();
   await assert.rejects(stageVersionCatalog({ ...f.configuration,
     discover: async () => ({ joomla: [stable], jcb: [{ ...jcb, sha512: '0'.repeat(128) }], errors: [] }) }), /published sha512 checksum/);
-  assert.deepEqual(await f.catalog(), previous);
-  await assert.rejects(stageVersionCatalog({ ...f.configuration,
-    validateJcb: async () => { throw new Error('Changed dependency contract'); } }), /Changed dependency contract/);
   assert.deepEqual(await f.catalog(), previous);
 });
 
@@ -141,16 +134,6 @@ test('staged pinned Joomla archives are verified and reused without a second ups
   await writeFile(path.join(f.configuration.assets, 'joomla', 'Joomla_6.2.0.zip'), zip('corrupt staged file'));
   await assert.rejects(stageVersionCatalog({ ...f.configuration,
     stagedJoomla: [{ version: stable.version, sourceUrl: stable.url, sha256: stable.sha256, url: 'joomla/Joomla_6.2.0.zip' }] }), /published sha256 checksum/);
-});
-
-test('new JCB builds require the reviewed dependency donor; prederived exact sources remain recognized', async () => {
-  const validate = createJcbCatalogValidator({ assets: '.', packages: [] });
-  await assert.rejects(validate({ ...jcb, sha256: sha256(jcbBytes) }, jcbBytes), /donor is missing/);
-  const packages = [{ sourceSha256: sha256(jcbBytes), sourceUrl: jcb.url, sha256: 'a'.repeat(64),
-    url: `packages/${'a'.repeat(64)}.zip`, provenanceUrl: `packages/${'a'.repeat(64)}.provenance.json` }];
-  await createJcbCatalogValidator({ assets: '.', packages })({ ...jcb, sha256: sha256(jcbBytes) }, jcbBytes);
-  await assert.rejects(createJcbCatalogValidator({ assets: '.', packages })
-    ({ ...jcb, version: '6.2.2', url: 'https://publisher.test/jcb-new.zip', sha256: sha256(jcbBytes) }, jcbBytes), /donor is missing/);
 });
 
 test('published Joomla 7 previews use the archive PHP requirement without a pinned Joomla 7 runtime entry', async t => {

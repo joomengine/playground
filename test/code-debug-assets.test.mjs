@@ -1,29 +1,62 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { applyPhpDebugWorkerOverlay } from '../scripts/phpdbg.mjs';
 import { sha256 } from '../scripts/assets.mjs';
 
-test('debugger worker overlay checks exact package inputs and records every modified file', async () => {
+const legacyEnvironment = 'var ENVIRONMENT_IS_WEB=true;var ENVIRONMENT_IS_WORKER=false;';
+const dynamicEnvironment = 'var ENVIRONMENT_IS_WEB=!!globalThis.window;var ENVIRONMENT_IS_WORKER=!!globalThis.WorkerGlobalScope;';
+const domTargets = 'var specialHTMLTargets=[0,document,window];';
+const optionalTargets = 'var specialHTMLTargets=[0,globalThis.document,globalThis.window];';
+
+async function fixture(t, source) {
   const directory = await mkdtemp(path.join(tmpdir(), 'jec-phpdbg-overlay-'));
-  try {
-    for (const version of ['8.3', '8.4', '8.5']) {
-      const file = `php${version}-dbg-web.mjs`;
-      await cp(new URL(`../node_modules/php-dbg-wasm/${file}`, import.meta.url), path.join(directory, file));
-    }
-    const result = await applyPhpDebugWorkerOverlay(directory);
-    assert.equal(result.files.length, 3);
-    for (const file of result.files) {
-      const source = await readFile(path.join(directory, file.file), 'utf8');
-      assert.equal(sha256(source), file.sha256);
-      assert.notEqual(file.sha256, file.originalSha256);
-      assert.ok(source.includes('var specialHTMLTargets=[0,globalThis.document,globalThis.window];'));
-      assert.ok(source.includes('var ENVIRONMENT_IS_WORKER=typeof WorkerGlobalScope!=="undefined";'));
-    }
-    await assert.rejects(applyPhpDebugWorkerOverlay(directory), /Review the upstream debugger worker correction/);
-    await writeFile(path.join(directory, 'php8.3-dbg-web.mjs'), 'unexpected upstream build');
-    await assert.rejects(applyPhpDebugWorkerOverlay(directory), /Review the upstream debugger worker correction/);
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const minor = '8.4';
+  const file = `php${minor}-dbg-web.mjs`;
+  await writeFile(path.join(directory, file), source);
+  const options = { minor, upstreamVersion: 'fixture', manifest: { files: {
+    [`packages/php-dbg-wasm/${file}`]: { sha256: sha256(source) },
+  } } };
+  return { directory, file, options };
+}
+
+test('debugger worker overlay validates manifest inputs and handles both generated environment forms', async t => {
+  for (const environment of [legacyEnvironment, dynamicEnvironment]) {
+    const original = environment + domTargets;
+    const item = await fixture(t, original);
+    const result = await applyPhpDebugWorkerOverlay(item.directory, item.options);
+    assert.equal(result.files.length, 1);
+    const source = await readFile(path.join(item.directory, item.file), 'utf8');
+    assert.equal(result.files[0].originalSha256, sha256(original));
+    assert.equal(result.files[0].sha256, sha256(source));
+    assert.notEqual(sha256(source), sha256(original));
+    const proof = runInNewContext(`${source};({web:ENVIRONMENT_IS_WEB,worker:ENVIRONMENT_IS_WORKER,targets:specialHTMLTargets})`, {
+      WorkerGlobalScope: class WorkerGlobalScope {},
+    });
+    assert.equal(proof.web, false);
+    assert.equal(proof.worker, true);
+    assert.equal(proof.targets[1], undefined);
+    assert.equal(proof.targets[2], undefined);
+    await assert.rejects(applyPhpDebugWorkerOverlay(item.directory, item.options), /differs from its release manifest/);
+  }
+});
+
+test('an already corrected release module is preserved without another overlay', async t => {
+  const original = dynamicEnvironment + optionalTargets;
+  const item = await fixture(t, original);
+  const result = await applyPhpDebugWorkerOverlay(item.directory, item.options);
+  assert.equal(result.files[0].sha256, result.files[0].originalSha256);
+  assert.equal(await readFile(path.join(item.directory, item.file), 'utf8'), original);
+});
+
+test('changed or ambiguous debugger structures cannot silently receive an overlay', async t => {
+  for (const source of ['unexpected module', dynamicEnvironment + domTargets + domTargets, legacyEnvironment + legacyEnvironment + domTargets]) {
+    const item = await fixture(t, source);
+    await assert.rejects(applyPhpDebugWorkerOverlay(item.directory, item.options), /changed debugger|Ambiguous debugger/);
+    assert.equal(await readFile(path.join(item.directory, item.file), 'utf8'), source);
+  }
 });

@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { PhpCgiNode } from 'php-cgi-wasm/PhpCgiNode.mjs';
+import { builtWrapper, runtimeConfiguration, releasedLibraries } from './runtime-artifacts.mjs';
 import { stageSodium } from '../scripts/sodium.mjs';
 import { runtimeRandomValue } from '../src/php-settings.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const pins = JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
+const pins = await runtimeConfiguration();
 const directory = path.resolve(root, process.env.SODIUM_EXTENSION_DIR || '.cache/sodium');
 const selected = process.env.PLAYGROUND_PHP_VERSIONS?.split(',');
 for (const version of pins.php.filter(value => !selected || selected.includes(value.version))) {
@@ -17,9 +17,10 @@ for (const version of pins.php.filter(value => !selected || selected.includes(va
     const destination = await mkdtemp(path.join(tmpdir(), 'rocket-sodium-'));
     t.after(() => rm(destination, { recursive: true, force: true }));
     const record = await stageSodium({ directory, destination, version, upstream: pins.upstream });
+    const { PhpCgiNode } = await builtWrapper(version.version);
     const php = new PhpCgiNode({ version: version.version, persist: [], docroot: '/www', prefix: '/',
       phpArgs: { getRandomValue: runtimeRandomValue },
-      sharedLibs: [{ name: record.provenance.extension.file, url: pathToFileURL(path.join(destination, record.provenance.extension.file)).href, ini: true }],
+      sharedLibs: [...await releasedLibraries(version.version), { name: record.provenance.extension.file, url: pathToFileURL(path.join(destination, record.provenance.extension.file)).href, ini: true }],
       ini: 'display_errors=1\n',
     });
     await php.mkdir('/config'); await php.mkdir('/www');

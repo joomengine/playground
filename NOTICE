@@ -11,8 +11,8 @@ documented in dependencies/joomla/README.md.
 Joomla Component Builder is provided by Llewellyn van der Merwe and Vast
 Development Method through https://github.com/joomengine/Joomla-Component-Builder .
 JCB is the core development tool and default deployment of JoomEngine.
-Its GPL-2.0-or-later license and copyright notices remain in the derived browser
-packages. The reviewed reader-interface adjustment preserves its source header.
+Its GPL-2.0-or-later license and copyright notices remain in the verified release
+packages, including their original bundled spreadsheet dependencies.
 The upstream fixture license is included at test/fixtures/LICENSE.jcb.txt.
 
 PHP and phpdbg are provided by the contributors to https://github.com/php/php-src
@@ -59,24 +59,13 @@ The PHP and MariaDB WebAssembly builds rely on Emscripten, maintained by the
 contributors to https://github.com/emscripten-core/emscripten . The compilation
 toolchain retains its upstream MIT/NCSA terms.
 
-JCB spreadsheet support builds on PHPOffice/PhpSpreadsheet and ZipStream-PHP,
-with Composer PCRE, Mark Baker's Complex and Matrix libraries, MyCLabs PHP Enum,
-and PHP-FIG HTTP Message and Simple Cache interfaces. Their MIT licenses are
-retained in the composed vendor tree. Four reviewed XLS/OLE packing constants
-use signed integer equivalents to preserve their bytes on 32-bit PHP. A numeric
-range check preserves floating-point values outside the integer range before
-casting. Original and adjusted source hashes are recorded without changing
-upstream notices.
-Exact source URLs, versions, archive
-checksums and license declarations are recorded in
-dependencies/jcb-spreadsheet/packages.json and each derived package's provenance.
-Composer is provided by https://github.com/composer/composer under the MIT
-license; its version and verified binary checksum are recorded in that provenance.
+JCB spreadsheet support uses PHPOffice/PhpSpreadsheet, ZipStream-PHP and their
+dependencies as bundled by the original JCB release. Their licenses and Composer
+package metadata remain in that vendor tree. Playground does not substitute or
+patch these dependencies for a 32-bit PHP platform.
 
-The loadable fileinfo extensions are compiled from the pinned official PHP
-sources and include libmagic. Their PHP and libmagic licenses and compiled-source
-copyright notices are distributed beside each module, with source checksums and
-build provenance.
+Fileinfo and libmagic are included in the JoomEngine int64 PHP build. Their PHP
+and libmagic licenses and source notices remain with that distribution.
 
 The loadable cURL extensions use PHP's ext/curl with a small source-verified
 request initialization hook for browser HTTP streams, and Sean Morris's
@@ -96,8 +85,8 @@ contributors' ISC license and the matching PHP license are shipped beside each
 module. The verified source archive digest, source inventories, compiler identity,
 and binary digest are recorded in the module's build provenance.
 
-The published php-cgi-wasm 0.2.0 JavaScript CGI adapter is supplied by Sean Morris
-and contributors under its preserved Apache-2.0 license. JoomEngine applies a
+The PHP-WASM JavaScript CGI adapter originates from Sean Morris and contributors
+and is included in the int64 distribution with its preserved license. Playground applies a
 reviewed request-input correction to breakoutRequest.mjs, PhpCgiBase.mjs, and
 PhpCgiWebBase.mjs: bounded byte decoding and indexed input reads preserve binary
 request bodies without repeated array shifts. The PHP WebAssembly binary is not
@@ -154,7 +143,7 @@ project's terms restricts modification for the user's own use or reverse
 engineering to debug such modifications.
 
 PHP debugging builds on PHP's phpdbg SAPI and Sean Morris's PHP-WASM browser
-debugger, using php-dbg-wasm 0.2.0. PHP/phpdbg retain their PHP licence and the
+debugger through the JoomEngine int64 distribution. PHP/phpdbg retain their PHP licence and the
 PHP-WASM adapters retain their Apache-2.0 or GPL-2.0-only notices; the runtime
 asset manifests record the selected PHP sources and compiled builds.
 

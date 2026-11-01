@@ -21,7 +21,7 @@ body.embedded .site-header,body.embedded .settings-panel,body.embedded .site-foo
 
 input[type=url],input[type=email],input[type=password],input[type=number],textarea,code,#storage-key,#template-name,#menu-component,#menu-view,#deploy-languages,#share-url,#credential-username,#credential-password,#php-settings-form input,#php-effective{direction:ltr;text-align:start}input[type=password],#credential-password{unicode-bidi:plaintext}
 
-@media(max-width:760px){.header-actions>#save-button>span:not([aria-hidden]),.header-actions>#share-button>span:not([aria-hidden]),.header-actions .action-menu>summary>span:not([aria-hidden]){position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.header-actions>.tool-button,.header-actions .action-menu>summary{min-width:34px;min-height:40px}.header-actions .action-menu>summary{padding-inline:8px}}
+@media(max-width:760px){.header-actions>#share-button>span:not([aria-hidden]),.header-actions .action-menu>summary>span:not([aria-hidden]){position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.header-actions>.tool-button,.header-actions .action-menu>summary{min-width:34px;min-height:40px}.header-actions .action-menu>summary{padding-inline:8px}}
 
 .flight-status #save-state{overflow:hidden;text-overflow:ellipsis}
 [dir=rtl] .launch-scene:after{background:linear-gradient(260deg,#080927 15%,#080927ab 40%,transparent 70%)}

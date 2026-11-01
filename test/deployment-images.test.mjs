@@ -8,7 +8,8 @@ const bytes = Uint8Array.of(0x50, 0x4b, 3, 4, 1, 2, 3, 4);
 const hash = async value => [...new Uint8Array(await crypto.subtle.digest('SHA-256', value))]
   .map(byte => byte.toString(16).padStart(2, '0')).join('');
 const sha256 = await hash(bytes);
-const manifest = { sourceCommit: 'reviewed-build', php: [{ version: '8.4', patchVersion: '8.4.1' }],
+const manifest = { sourceCommit: 'reviewed-build', php: [{ version: '8.4', patchVersion: '8.4.1',
+  runtimeFingerprint: '1'.repeat(64), runtimeArchiveSha256: '2'.repeat(64) }],
   joomla: [{ version: '6.2.0', sha256: 'a'.repeat(64) }],
   prebuiltDeploys: [{ id: 'jcb', joomlaVersion: '6.2.0', phpVersion: '8.4',
     url: 'snapshots/prepared.zip', sha256, size: bytes.length }] };
@@ -104,6 +105,11 @@ test('fingerprints reuse ordinary site copies but isolate changed packages, runt
     assert.notEqual(await deploymentImageFingerprint(modified, manifest), original);
   }
   assert.notEqual(await deploymentImageFingerprint(config, { ...manifest, php: [{ version: '8.4', patchVersion: '8.4.2' }] }), original);
+  for (const field of ['runtimeFingerprint', 'runtimeArchiveSha256']) {
+    assert.notEqual(await deploymentImageFingerprint(config, { ...manifest,
+      php: [{ ...manifest.php[0], [field]: '3'.repeat(64) }] }), original,
+    'A new runtime archive invalidates prepared images even when the PHP patch version is unchanged.');
+  }
   const commands = { ...config, startupCommands: [['config:get', 'sitename']] };
   assert.notEqual(await deploymentImageFingerprint(commands, manifest),
     await deploymentImageFingerprint({ ...commands, siteName: 'Second site' }, manifest));

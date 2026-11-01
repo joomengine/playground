@@ -562,9 +562,10 @@ async function assertSite(page, config) {
 }
 
 async function assertPDO(page, pair) {
-  const identity = await phpJSON(page, `echo json_encode(['php' => PHP_VERSION, 'drivers' => PDO::getAvailableDrivers(), 'native' => extension_loaded('pdo_mariadb_wasm')], JSON_THROW_ON_ERROR);`);
+  const identity = await phpJSON(page, `echo json_encode(['php' => PHP_VERSION, 'integerSize' => PHP_INT_SIZE, 'drivers' => PDO::getAvailableDrivers(), 'native' => extension_loaded('pdo_mariadb_wasm')], JSON_THROW_ON_ERROR);`);
   assert.equal(identity.native, true, 'The real native extension must be loaded.');
-  assert.ok(identity.php.startsWith(`${pair.phpVersion}.`));
+  assert.equal(identity.integerSize, 8, 'The production runtime must use native 64-bit PHP integers.');
+  assert.equal(identity.php, manifest.php.find(entry => entry.version === pair.phpVersion).patchVersion);
   assert.ok(identity.drivers.includes('mysql'));
   const result = await phpJSON(page, `${PDO}
     $db->exec('CREATE TABLE playground_contract (id INT PRIMARY KEY, big BIGINT UNSIGNED, amount DECIMAL(24,6), payload LONGBLOB, nullable VARCHAR(20) NULL) ENGINE=InnoDB');
@@ -592,10 +593,24 @@ async function assertPDO(page, pair) {
     $strings = $db->query($sql)->fetch(PDO::FETCH_ASSOC);
     echo json_encode(['values' => $row, 'types' => array_map('get_debug_type', $row), 'strings' => $strings], JSON_THROW_ON_ERROR);`);
   assert.deepEqual(typed, {
-    values: { integer_value: -7, wide_integer: '2147483648', numeric_text: '42', approximate: 1.25, exact_value: '1.25' },
-    types: { integer_value: 'int', wide_integer: 'string', numeric_text: 'string', approximate: 'float', exact_value: 'string' },
+    values: { integer_value: -7, wide_integer: 2147483648, numeric_text: '42', approximate: 1.25, exact_value: '1.25' },
+    types: { integer_value: 'int', wide_integer: 'int', numeric_text: 'string', approximate: 'float', exact_value: 'string' },
     strings: { integer_value: '-7', wide_integer: '2147483648', numeric_text: '42', approximate: '1.25', exact_value: '1.25' },
   }, 'PDO must preserve native numeric types, string columns and out-of-range precision.');
+  const integers = await phpJSON(page, `${PDO}
+    $db->exec('CREATE TABLE playground_int64 (value BIGINT PRIMARY KEY) ENGINE=InnoDB');
+    $insert = $db->prepare('INSERT INTO playground_int64 VALUES (?)');
+    foreach ([PHP_INT_MIN, -2147483649, 2147483648, 9007199254740993, PHP_INT_MAX] as $value) {
+      $insert->bindValue(1, $value, PDO::PARAM_INT); $insert->execute();
+    }
+    $values = $db->query('SELECT value FROM playground_int64 ORDER BY value')->fetchAll(PDO::FETCH_COLUMN);
+    // Preserve precision across JSON's Number boundary while checking PHP types separately.
+    echo json_encode(['values' => array_map('strval', $values), 'types' => array_map('get_debug_type', $values),
+      'maximum' => (string) PHP_INT_MAX, 'futureTimestamp' => (new DateTimeImmutable('2040-01-01T00:00:00Z'))->getTimestamp()], JSON_THROW_ON_ERROR);`);
+  assert.deepEqual(integers, {
+    values: ['-9223372036854775808', '-2147483649', '2147483648', '9007199254740993', '9223372036854775807'],
+    types: ['int', 'int', 'int', 'int', 'int'], maximum: '9223372036854775807', futureTimestamp: 2208988800,
+  }, 'PDO integer binding and fetching must preserve the full signed int64 range without JavaScript Number rounding.');
   for (const retained of [false, true]) {
     const retain = retained ? 'final class RetainedConnection { public static PDO $connection; } RetainedConnection::$connection = $db;' : '';
     await php(page, `<?php ${PDO} ${retain} $db->beginTransaction(); $db->exec('INSERT INTO playground_contract (id) VALUES (2)'); return;`);
@@ -906,7 +921,7 @@ for (const name of browserNames) {
             assert.equal(spreadsheet.text, 'JoomEngine browser spreadsheet');
             assert.equal(spreadsheet.number, 42);
             assert.ok(spreadsheet.bytes > 0);
-            assert.equal(spreadsheet.integerSize, 4, 'The official dependency solution must actually operate on upstream wasm32 PHP.');
+            assert.equal(spreadsheet.integerSize, 8, 'The unchanged JCB spreadsheet dependencies must operate on native 64-bit PHP integers.');
             if (item.id === 'jcb' && item.phpVersion === manifest.defaults.phpVersion) {
               proof.push({ id: 'jcb-compiler', ...(await assertJcbCompiler(page, { redirectProbe: syntheticRedirectProbe })) });
             }
