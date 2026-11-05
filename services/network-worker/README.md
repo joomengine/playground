@@ -196,6 +196,17 @@ rejection policy. The Pages publication gate checks the production manifest and
 configured endpoint before publishing an enabled client. Keep that production
 deployment protected and activate it only after reviewing the staging evidence.
 
+After Pages publishes, `scripts/pages-smoke.mjs` checks the tested artifact's
+canonical HTTPS URL (including its custom domain) against that artifact: the full manifest and source commit, normalized
+network configuration, build identity, shell and application entry bytes. It
+allows up to three minutes for CDN propagation, with bounded response sizes and
+20-second request deadlines. Enabled networking also repeats the public relay
+health and unapproved-origin rejection checks; disabled networking still checks
+the published application. This step uses no credentials or challenge bypass.
+A persistent mismatch or failed policy check fails the publication workflow;
+inspect the smoke error and use the rollback procedure below. It does not roll
+back an already published deployment automatically.
+
 ## Limits and sessions
 
 Defaults are engineering starting points. Measure actual JCB compilation,
