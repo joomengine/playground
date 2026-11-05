@@ -186,9 +186,14 @@ test(`${browserName}: production entry and service worker start Joomla under cap
   const browser = await launchBrowser(server);
   const context = await withPinnedCatalog(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const page = await context.newPage();
-  const documents = [], runtimeAssets = [], pageErrors = [];
-  const evidence = { browser: browserName, version: browser.version(), documents, runtimeAssets, pageErrors };
+  const documents = [], runtimeAssets = [], pageErrors = [], siteDocuments = [];
+  const evidence = { browser: browserName, version: browser.version(), documents, runtimeAssets, pageErrors, siteDocuments };
   page.on('pageerror', error => pageErrors.push(error.message));
+  page.on('response', response => {
+    if (response.url().includes('/__site/') && response.request().resourceType() === 'document') {
+      siteDocuments.push({ url: response.url(), status: response.status() });
+    }
+  });
   try {
     await page.addInitScript(() => {
       if (new URL(location.href).searchParams.get('__je_coep')?.endsWith(':credentialless')) {
@@ -208,9 +213,20 @@ test(`${browserName}: production entry and service worker start Joomla under cap
     assert.equal(await page.locator('#error-view').isVisible(), false,
       `The actual application failed to start: ${await page.locator('#error-message').textContent()}`);
     await page.locator('#site-frame').waitFor({ timeout: 240_000 });
-    const frame = await page.locator('#site-frame').contentFrame();
-    await frame.locator('body').filter({ hasText: /Joomla/i }).waitFor({ timeout: 60_000 });
-    assert.match(await frame.locator('body').innerText(), /Joomla/i);
+    const element = await page.locator('#site-frame').elementHandle();
+    const expected = new URL(await element.getAttribute('src'));
+    assert.ok(expected.pathname.includes('/__site/'), 'The application must mount its real PHP site');
+    const frame = await element.contentFrame();
+    assert.ok(frame, 'The preview must have an attached browsing context');
+    await frame.waitForURL(url => url.origin === expected.origin && url.pathname.startsWith(expected.pathname),
+      { waitUntil: 'load', timeout: 60_000 });
+    await frame.locator('body.site').waitFor({ timeout: 60_000 });
+    // Cassiopeia's visible brand is an image, not a body-text Joomla label.
+    // Verify the actual rendered CMS document and its component container.
+    evidence.generator = await frame.locator('meta[name="generator"]').getAttribute('content');
+    assert.match(evidence.generator, /^Joomla!/i);
+    assert.equal(await frame.locator('main').count(), 1);
+    assert.equal(siteDocuments.at(-1)?.status, 200, 'The visible site document must be a successful PHP response');
     assert.match(new URL(page.url()).searchParams.get('__je_coep'), /:require-corp$/);
     assert.equal(await page.evaluate(() => crossOriginIsolated), true);
     assert.equal(documents.length, 3, 'Initial page plus credentialless takeover plus one require-corp fallback');
@@ -228,6 +244,9 @@ test(`${browserName}: production entry and service worker start Joomla under cap
       error: document.getElementById('error-message')?.textContent,
       loading: document.getElementById('loading-message')?.textContent,
       environment: document.documentElement.dataset.playgroundEnvironment,
+      frame: document.getElementById('site-frame')?.getAttribute('src'),
+      frameTitle: document.getElementById('site-frame')?.contentDocument?.title,
+      frameBody: document.getElementById('site-frame')?.contentDocument?.body?.innerText?.slice(0, 1000),
     })).catch(() => null);
     throw error;
   } finally {

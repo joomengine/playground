@@ -2,7 +2,7 @@
 
 ## Baseline
 
-The implementation starts from `58b21b3d61c7415c231f8d180c388409b4910d74` on `main`. Previous PR #18 is closed and unmerged. Its component-specific mirror routing is not part of this branch. Useful regression coverage will be adapted to the shared transport.
+The implementation starts from `58b21b3d61c7415c231f8d180c388409b4910d74` on `main`. Previous PR #18 is closed and unmerged. Its component-specific mirror routing is not part of this branch. Useful regression coverage is adapted to the shared transport.
 
 The existing `src/php-network.mjs` wrapper is called by both the PHP worker and debugger worker. HTTP streams use the native cURL adapter in `native/http-stream.c`. The recursive request guard must remain in place.
 
@@ -20,8 +20,10 @@ The PR records the exact tested commit, workflow links and browser receipts. Sup
 
 Source checks, Worker security tests and actual workerd/SQLite tests run without deployment credentials. The CI candidate rebuilds the patched native extension, validates PHP cURL and streams, and exercises real browsers and Joomla/JCB workflows. The aggregate must pass for the final commit; an earlier successful run does not certify a later change.
 
+The static and demonstration-snapshot builds run with harmless, randomly generated server-credential canaries. Before publishing the candidate artifact, CI scans every public file and the expanded generated snapshots for raw and encoded canaries, rejects private Worker/configuration files, and verifies the normalized public network configuration. The retained security receipt identifies the source commit and inspected artifact counts without exposing canary values. Real deployment credentials are not available to this PR job.
+
 The relay uses opaque sessions held in a Durable Object, so no session-signing secret is required. The operator still needs a private Turnstile verification secret, public widget settings, reviewed destination policy and a configured Cloudflare deployment account. Automated hosted staging additionally requires a private staging-test credential; production rejects that test mode. Default public configuration keeps the relay disabled.
 
-No hosted Cloudflare endpoint or physical mobile-device result is claimed by this branch. Those release checks require provisioned infrastructure and actual devices. The protected staging workflow fails when required settings are missing; production activation requires successful hosted staging evidence from the same source commit.
+No hosted Cloudflare endpoint or physical mobile-device result is claimed by this branch. Those acceptance checks require provisioned infrastructure and actual devices. The protected staging workflow fails when required settings are missing. Hosted staging acceptance is required before merge, and production activation additionally requires successful hosted staging evidence from the same source commit. The repository owner must configure the required aggregate status and protected deployment environments; workflow YAML alone cannot enforce repository rules.
 
 Live testing on 5 November 2026 found that JCB's default package-repository request to `git.vdm.dev` returns a genuine upstream HTTP 403 even from a server. The shared transport preserves it. The entity test records this default attempt, then selects an available package repository from the live discovery API through JCB's supported explicit repository argument. It imports real remote bytes and verifies the stored entity. Receipts identify the selected repository; production transport performs no repository substitution.

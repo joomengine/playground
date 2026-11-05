@@ -183,7 +183,8 @@ export async function assertLiveFieldImport(page) {
       . '/' . ($defaultPath->repository ?? 'packages') . '/raw/index/field.json?ref=master';
     $curl = curl_init($defaultUrl);
     curl_setopt_array($curl, [CURLOPT_RETURNTRANSFER=>true, CURLOPT_TIMEOUT=>30]);
-    curl_exec($curl); $defaultStatus = curl_getinfo($curl, CURLINFO_RESPONSE_CODE); curl_close($curl);
+    curl_exec($curl); $defaultStatus = curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+    $defaultErrno = curl_errno($curl); $defaultError = curl_error($curl); curl_close($curl);
     $db->setQuery($sql); $defaultAfter = $db->loadAssoc();
     $discovery = json_decode(file_get_contents('${apiBase}community/jcb/packages'), true, 512, JSON_THROW_ON_ERROR);
     if (($discovery['target'] ?? null) !== 'packages') throw new RuntimeException('Live package discovery target is invalid.');
@@ -217,7 +218,8 @@ export async function assertLiveFieldImport(page) {
     }
     $proof = ['before'=>$before, 'imported'=>$imported, 'count'=>$count, 'after'=>$after,
       'fixture'=>['target'=>'packages', 'ref'=>'master', 'guid'=>$guid], 'repositories'=>$repositories,
-      'defaultProbe'=>['url'=>$defaultUrl, 'status'=>$defaultStatus, 'found'=>$default !== null, 'after'=>$defaultAfter],
+      'defaultProbe'=>['url'=>$defaultUrl, 'status'=>$defaultStatus, 'errno'=>$defaultErrno, 'error'=>$defaultError,
+        'found'=>$default !== null, 'after'=>$defaultAfter],
       'discovery'=>$discovery['network'],
       'selectedRepository'=>['base'=>$repository->base, 'organisation'=>$repository->organisation,
         'repository'=>$repository->repository, 'branch'=>$repository->read_branch]];
