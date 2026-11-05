@@ -65,7 +65,7 @@ function waitFor(promise, signal, deadline, now = Date.now) {
 
 /** In-memory relay sessions belong to the shell, outside the blocked PHP queue. */
 export function createNetworkSession(config, { fetcher = globalThis.fetch.bind(globalThis), verify, now = Date.now } = {}) {
-  let current, flight, disposed = false;
+  let current, flight, nextRenewalAt = 0, disposed = false;
   async function exchange(signal) {
     if (!config.enabled) throw sessionError('RELAY_SESSION_REQUIRED', 'The network service is disabled.');
     const previous = current;
@@ -91,12 +91,14 @@ export function createNetworkSession(config, { fetcher = globalThis.fetch.bind(g
     }
     if (signal.aborted || disposed) throw aborted();
     current = validateSession(value, now());
+    nextRenewalAt = now() + RENEW_BEFORE_MS;
     return current;
   }
   return {
     async getSession({ signal, deadline = Infinity } = {}) {
       if (disposed || signal?.aborted) throw aborted();
-      if (current && current.expiresAt - now() > RENEW_BEFORE_MS) return current;
+      if (current && current.expiresAt > now()
+        && (current.expiresAt - now() > RENEW_BEFORE_MS || now() < nextRenewalAt)) return current;
       if (!flight) {
         const controller = new AbortController();
         const pending = { controller, users: 0 };
@@ -173,7 +175,7 @@ export function createNetworkSessionHost(service, send) {
 /** Never include URLs, query strings, tokens, bodies or arbitrary error messages. */
 export function networkDiagnosticText(value) {
   const fields = [];
-  for (const key of ['code', 'route', 'method', 'hostname', 'status', 'durationMs', 'bytes']) {
+  for (const key of ['requestId', 'code', 'route', 'method', 'hostname', 'status', 'durationMs', 'bytes']) {
     const field = value?.[key];
     if (typeof field === 'number' && Number.isFinite(field)) fields.push(`${key}: ${field}`);
     else if (typeof field === 'string' && /^[a-zA-Z0-9_.:-]{1,253}$/.test(field)) fields.push(`${key}: ${field}`);

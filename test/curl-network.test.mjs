@@ -9,7 +9,11 @@ import test from 'node:test';
 const patch = await readFile(new URL('../native/curl-network.patch', import.meta.url), 'utf8');
 const additions = patch.split(/^@@.*@@.*\n/m).slice(1).map(hunk => hunk.split('\n')
   .filter(line => line.startsWith('+') && !line.startsWith('+++')).map(line => line.slice(1)).join('\n'));
-assert.equal(additions.length, 2, 'Review the executable bridge contract when native patch hunks change.');
+function addition(anchor) {
+  const matches = additions.filter(source => source.includes(anchor));
+  assert.equal(matches.length, 1, `Expected one native bridge patch hunk containing ${anchor}.`);
+  return matches[0];
+}
 
 function harness({ hook, fetcher = async () => new Response('direct') } = {}) {
   let clock = 100;
@@ -19,12 +23,12 @@ function harness({ hook, fetcher = async () => new Response('direct') } = {}) {
   });
   const dispatch = vm.runInContext(`(async (request, started, currentURL, init) => {
     let response;
-    ${additions[0]}
+    ${addition('__joomenginePhpFetch')}
     return response;
   })`, sandbox);
   const redirectCount = vm.runInContext(`((response, canStopAtRedirect, followed) => {
     const result = {};
-    ${additions[1]}
+    ${addition('result.redirected =')}
     return result.redirected;
   })`, sandbox);
   return { sandbox, dispatch, redirectCount, setClock: value => { clock = value; } };
@@ -95,9 +99,33 @@ test('native getinfo uses exact relay redirect counts and preserves native fallb
   const { redirectCount } = harness();
   assert.equal(redirectCount({ networkRedirectCount: 4, redirected: true }, false, 0), 4);
   assert.equal(redirectCount({ networkRedirectCount: 0, redirected: false }, true, 0), 0);
+  assert.equal(redirectCount({ networkRedirectCount: 0, redirected: false }, true, 3), 3);
+  assert.equal(redirectCount({ networkRedirectCount: 2, redirected: true }, true, 3), 5);
   assert.equal(redirectCount({ redirected: true }, true, 3), 3);
   assert.equal(redirectCount({ redirected: true }, false, 0), 1,
     'Browser direct Fetch only exposes whether a redirect occurred, not its exact count.');
   assert.equal(redirectCount({ redirected: false }, false, 0), 0);
   assert.equal(redirectCount({ networkRedirectCount: 1.5, redirected: true }, true, 2), 2);
+});
+
+test('native deadline abort carries TimeoutError and standalone error handling recognizes it', () => {
+  let callback, delay;
+  const controller = new AbortController();
+  const sandbox = vm.createContext({
+    request: { timeoutMs: 125 }, controller, DOMException,
+    setTimeout: (fn, value) => { callback = fn; delay = value; return 1; },
+  });
+  vm.runInContext(`let timer = null; ${addition('timer = setTimeout')}`, sandbox);
+  assert.equal(delay, 125);
+  assert.equal(controller.signal.aborted, false);
+  callback();
+  assert.equal(controller.signal.aborted, true);
+  assert.equal(controller.signal.reason.name, 'TimeoutError');
+  // Execute the changed condition too; the existing native branch maps this to
+  // CURLE_OPERATION_TIMEDOUT, including when no shared transport is installed.
+  const condition = addition("error.name === 'TimeoutError'").trim().replace(/^else /, '');
+  const isTimeout = vm.runInContext(`error => { ${condition} return true; return false; }`, sandbox);
+  assert.equal(isTimeout(controller.signal.reason), true);
+  assert.equal(isTimeout(new DOMException('Caller cancelled', 'AbortError')), true);
+  assert.equal(isTimeout(new TypeError('Connection failed')), false);
 });

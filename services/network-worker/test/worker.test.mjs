@@ -123,9 +123,9 @@ test('concurrent byte consumption cannot exceed session quota and renewal does n
   f.advance(61000);
   const renewal = await f.send('/v1/session', { headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ version: 1 }) });
   assert.equal(renewal.status, 200); assert.equal((await renewal.json()).token, token);
-  const third = await f.relay(token); await assert.rejects(third.arrayBuffer());
+  const before = f.calls.length; const third = await f.relay(token); assert.equal(third.status, 429); assert.equal(f.calls.length, before);
   const sessions = [...f.env.testStorage.values].filter(([key]) => key.startsWith('session:'));
-  assert.equal(sessions[0][1].bytes, 5);
+  assert.equal(sessions[0][1].bytes, 8);
 });
 test('expired, altered, policy-revoked, wrong-origin and individually revoked sessions fail', async () => {
   for (const kind of ['expired', 'altered', 'policy', 'origin', 'revoked']) {
@@ -155,4 +155,75 @@ test('malformed or oversized metadata and relay control headers fail closed', as
     const response = await f.relay(token, { headers: [[header, 'injected']] }); assert.equal(await errorCode(response), 'HEADER_NOT_ALLOWED');
   }
   assert.equal(f.calls.length, 0);
+});
+
+test('unknown API-key headers need grants and never survive cross-origin redirects', async () => {
+  const denied = fixture(); const session = await denied.session();
+  const response = await denied.relay(session.token, { headers: [['X-Api-Key', 'secret']] });
+  assert.equal(await errorCode(response), 'CREDENTIALS_NOT_ALLOWED'); assert.equal(denied.calls.length, 0);
+  const f = fixture({ credentialOrigins: ['https://first.example.com'], upstream: (_url, _init, call) => call === 1
+    ? new Response(null, { status: 302, headers: { Location: 'https://second.example.com/final' } }) : new Response('done') });
+  const approved = await f.session(); const next = await f.relay(approved.token, { headers: [['X-Api-Key', 'secret']], forwardCredentials: true });
+  await next.text(); assert.equal(f.calls[0].headers.get('x-api-key'), 'secret'); assert.equal(f.calls[1].headers.get('x-api-key'), null);
+});
+test('one header deadline and client abort cancel an upstream operation', async () => {
+  const f = fixture({ limits: { headerMs: 20 }, upstream: (_url, init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true })) });
+  const { token } = await f.session(); const timeout = await f.relay(token); assert.equal(await errorCode(timeout), 'UPSTREAM_TIMEOUT');
+  const g = fixture({ upstream: (_url, init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true })) });
+  const s = await g.session(); const controller = new AbortController();
+  const operation = g.relay(s.token, {}, { signal: controller.signal }); setTimeout(() => controller.abort(), 10);
+  assert.equal(await errorCode(await operation), 'REQUEST_ABORTED'); assert.equal(g.calls.length, 1);
+});
+test('an idle body times out and canceling download stops the upstream stream', async () => {
+  let cancelled = false;
+  const f = fixture({ limits: { idleMs: 20 }, upstream: () => new Response(new ReadableStream({ cancel() { cancelled = true; } })) });
+  const { token } = await f.session(); const response = await f.relay(token);
+  await assert.rejects(response.arrayBuffer(), { code: 'UPSTREAM_TIMEOUT' }); assert.equal(cancelled, true);
+  cancelled = false;
+  const g = fixture({ upstream: () => new Response(new ReadableStream({ cancel() { cancelled = true; } })) });
+  const s = await g.session(); const download = await g.relay(s.token); await download.body.cancel(); assert.equal(cancelled, true);
+});
+test('bounded session bodies reject slow clients and cleanup covers unsuccessful verification', async () => {
+  const f = fixture({ limits: { headerMs: 10 } });
+  const response = await f.send('/v1/session', { body: new ReadableStream(), duplex: 'half' });
+  assert.equal(response.status, 503);
+  const denied = fixture({ verification: { success: false } });
+  await denied.send('/v1/session', { body: JSON.stringify({ version: 1, turnstileToken: 'bad' }) });
+  assert.ok(denied.env.testStorage.alarm);
+});
+test('cleanup paginates beyond live first records without deleting active sessions', async () => {
+  const f = fixture();
+  const now = Date.now();
+  for (let i = 0; i < 11000; i++) await f.env.testStorage.put(`a${String(i).padStart(6, '0')}`, { cleanupAt: now + 100000 });
+  await f.env.testStorage.put('z-expired', { cleanupAt: 1 });
+  await f.env.testCoordinator.alarm(); assert.ok(await f.env.testStorage.get('z-expired'));
+  await f.env.testCoordinator.alarm(); assert.equal(await f.env.testStorage.get('z-expired'), undefined);
+  assert.ok(await f.env.testStorage.get('a000000'));
+});
+
+test('unknown and compound response encodings fail explicitly without exposing raw encoded bytes', async () => {
+  for (const encoding of ['zstd', 'gzip, br']) {
+    let cancelled = false;
+    const f = fixture({ upstream: () => new Response(new ReadableStream({ cancel() { cancelled = true; } }), { headers: { 'Content-Encoding': encoding } }) });
+    const { token } = await f.session(); const response = await f.relay(token);
+    assert.equal(response.status, 422); assert.equal(await errorCode(response), 'UNSUPPORTED_TRANSPORT_OPTION'); assert.equal(cancelled, true);
+  }
+});
+
+test('a repeated internal dispatch identity cannot replay an uncertain write', async () => {
+  const f = fixture({ upstream: () => { throw new TypeError('response lost after write'); } });
+  const { token } = await f.session();
+  const make = () => new Request('https://relay.example.com/v1/fetch', {
+    method: 'POST', body: 'write-once', headers: {
+      Origin: 'https://playground.example.com', Authorization: `Bearer ${token}`,
+      'X-Relay-Dispatch': '00000000-0000-4000-8000-000000000001', 'X-Relay-Started': String(Date.now()),
+      'X-Playground-Request': encodeMetadata({ version: 1, url: 'https://first.example.com/write', method: 'POST', headers: [], redirect: 'follow', maxRedirects: 5, timeoutMs: 1000 }),
+    },
+  });
+  // Freeze the same request start time used by the test coordinator clock.
+  const first = make(); first.headers.set('X-Relay-Started', String(f.env.testCoordinator.now()));
+  const retry = new Request(first.clone());
+  assert.equal((await f.env.testCoordinator.fetch(first)).status, 502);
+  const second = await f.env.testCoordinator.fetch(retry);
+  assert.equal(second.status, 409); assert.equal(await errorCode(second), 'REQUEST_ALREADY_DISPATCHED'); assert.equal(f.calls.length, 1);
 });

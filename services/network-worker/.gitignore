@@ -1,4 +1,4 @@
 node_modules/
 .wrangler/
-.build/
+.build*/
 .dev.vars*

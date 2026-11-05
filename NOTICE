@@ -78,6 +78,16 @@ and COPYING.curl notices accompany the compiled modules and their provenance.
 The local native/http-stream.c adapter and its initialization hook are recorded
 in that provenance. They route PHP HTTP/HTTPS streams through the same browser
 Fetch transport without modifying the upstream PHP WebAssembly binary.
+The local native/curl-network.patch adds a PHP-only transport hook and preserves
+the remaining deadline and relay response metadata. Its digest and changed source
+inventory are recorded with each rebuilt cURL extension.
+
+The separately deployed services/network-worker code is original Apache-2.0
+code. Its development tooling pins Cloudflare Wrangler 4.158.0 (MIT OR Apache-2.0)
+and Miniflare 4.20260730.0 (MIT);
+the service package-lock.json records transitive dependencies, which retain their
+own licenses. No WordPress or Joomla reference proxy source is incorporated into
+the shared networking service.
 
 The Sodium modules compile PHP's ext/sodium against the official libsodium
 1.0.22-RELEASE sources from https://github.com/jedisct1/libsodium . The libsodium

@@ -8,6 +8,7 @@ import { chromium, firefox } from 'playwright';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { createStaticServer, prepareBrowserEnvironment } from './server.mjs';
 import { withPinnedCatalog } from './dynamic-catalog-fixture.mjs';
+import { createNetworkFixture } from './network-fixture.mjs';
 import { assertBrowserRequestBodies } from './browser-request-contract.mjs';
 import { assertExternalAssets } from './external-assets-contract.mjs';
 import { assertStaticAssetValidation } from './static-assets-contract.mjs';
@@ -836,6 +837,15 @@ for (const name of browserNames) {
     });
     if (scenarios.includes('deploys')) await runScenario('repository and URL recipes install actual components, languages and prepared content', { timeout: 1_200_000 }, async () => {
       const context = await withPinnedCatalog(browser);
+      const server = await createNetworkFixture({ directory, prefix: '/nested/playground/', fixtures, isolation: true,
+        liveOrigins: ['api.joomlacomponentbuilder.com', 'codeberg.org', 'git.envs.net', 'tildegit.org', 'git.disroot.org', 'git.vdm.dev',
+          'api.github.com', 'raw.githubusercontent.com'].map(host => `https://${host}`) });
+      await server.attach(context);
+      const corsServer = await createStaticServer({ directory, prefix: '/cors/', corsOrigin: new URL(server.url).origin,
+        corsPaths: ['allowed.json'], fixtures: {
+          'allowed.json': request => JSON.stringify({ ...curlCorsProof, header: request.headers['x-playground-proof'] ?? null }),
+          'denied.json': JSON.stringify({ confidential: randomUUID() }),
+        } });
       // JCB's optional news feed is not part of the compiler/runtime contract.
       // Keep its two reviewed requests deterministic instead of depending on a
       // live social service finishing before the compiler form navigates away.
@@ -905,6 +915,7 @@ for (const name of browserNames) {
             assert.deepEqual(JSON.parse(cors.body), { ...curlCorsProof, header: 'cors-check' }, 'PHP cURL must honor a real CORS preflight and preserve its request headers.');
             const deniedHref = new URL('denied.json', corsServer.url).href;
             page.expectedConsoleURLs.add(deniedHref);
+            page.expectedConsoleURLs.add(`${server.relayOrigin}/v1/fetch`);
             const deniedURL = Buffer.from(deniedHref).toString('base64');
             const denied = await phpJSON(page, `
               $http = curl_init(base64_decode('${deniedURL}'));
@@ -913,6 +924,7 @@ for (const name of browserNames) {
               echo json_encode(['body'=>$body, 'error'=>curl_error($http), 'errno'=>curl_errno($http)], JSON_THROW_ON_ERROR);`);
             assert.equal(denied.body, false, 'A response without CORS permission must remain inaccessible to PHP.');
             assert.ok(denied.errno > 0 && denied.error.length > 0, 'CORS rejection must be a visible cURL transport error.');
+            page.expectedConsoleURLs.delete(`${server.relayOrigin}/v1/fetch`);
             const spreadsheet = await phpJSON(page, `
               require '/persist/www/libraries/phpspreadsheet/vendor/autoload.php';
               $book = new \\PhpOffice\\PhpSpreadsheet\\Spreadsheet();
@@ -1062,7 +1074,7 @@ for (const name of browserNames) {
         await assertCleanConsole(page, { contentImages: true });
         records.push({ ...defaultPair, deploys: proof, knownBrowserDiagnostics: page.knownBrowserDiagnostics, contentDiagnostics: page.contentDiagnostics });
       } catch (error) { await saveBrowserDiagnostics(page, `deploys-${name}`, error); throw error; }
-      finally { await close(page).catch(() => {}); await context.close(); }
+      finally { await close(page).catch(() => {}); await context.close(); await server.close(); await corsServer.close(); }
     });
     if (scenarios.includes('rocket')) await runScenario('failed installations and database startup retain recovery access', { timeout: 600_000 }, async () => {
       const context = await withPinnedCatalog(browser, { acceptDownloads: true });

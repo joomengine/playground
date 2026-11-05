@@ -252,6 +252,14 @@ binary bodies, status codes, redirects, timeouts, and streaming response
 callbacks. The native extension is exercised on every supported PHP build,
 including the HTTP patterns used by JCB’s file and API helpers.
 
+The shared transport supports direct requests and one controlled network-service
+fallback for eligible anonymous GET/HEAD failures. Writes choose their route
+before dispatch and are never automatically replayed. The optional Cloudflare
+Worker uses short-lived sessions, reviewed upstream origins, credential grants
+and server-enforced quotas. It ships disabled until an operator deploys and
+verifies it. See [network architecture and protocol](docs/network.md) and
+[Worker provisioning and rollback](services/network-worker/README.md).
+
 A small native HTTP stream adapter is compiled into the loadable cURL extension.
 It preserves `file_get_contents()`, `fopen()`, `get_headers()`, stream contexts,
 response-header metadata and caller-local `$http_response_header`, using the same
@@ -269,13 +277,14 @@ and installation. Custom template ZIPs use the same path. Installer errors remai
 visible while the site continues opening; required core packages must install
 successfully. PHP HTTP requests use the browser's Fetch transport.
 
-Only HTTP and HTTPS are supported. Browser requests still follow CORS and
-mixed-content rules. The browser controls certificate validation, cookies,
+Only HTTP and HTTPS are supported. Direct browser requests still follow CORS and
+mixed-content rules. The configured relay can carry permitted HTTP destinations
+without changing their scheme. The browser controls direct certificate validation, cookies,
 forbidden request headers, and connection behavior; options for disabling TLS
 verification cannot bypass browser security. Redirect responses are hidden from
 browser Fetch: enable following explicitly when a client needs redirects.
 PHP's cookie-file settings do not create a separate browser cookie store.
-HTTP proxies and Unix sockets are unsupported. Requests to PHP in the same
+PHP-configured HTTP proxies and Unix sockets are unsupported. Requests to PHP in the same
 playground instance cannot complete recursively while its worker is already
 executing a request; use a separate server or independent instance for HTTP
 service calls. See the
