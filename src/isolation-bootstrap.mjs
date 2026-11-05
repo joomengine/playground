@@ -27,8 +27,13 @@ export function readBootstrapState(storage, baseURL) {
 }
 
 function writeBootstrapState(storage, baseURL, value) {
-  try { storage.setItem(stateKey(baseURL), JSON.stringify(value)); }
-  catch { throw new Error('Session storage is unavailable. Browser isolation stopped before reloading; no saved site was changed.'); }
+  try {
+    const key = stateKey(baseURL), serialized = JSON.stringify(value);
+    storage.setItem(key, serialized);
+    // Some restricted storage implementations accept writes without retaining
+    // them. A successful setItem alone is not a durable navigation budget.
+    if (storage.getItem(key) !== serialized) throw new Error('Bootstrap state was not retained.');
+  } catch { throw new Error('Session storage cannot retain browser startup state. Browser isolation stopped before reloading; no saved site was changed.'); }
 }
 
 /** A bounded state machine: first controlled takeover, then at most one fallback. */
@@ -140,6 +145,10 @@ export async function prepareBrowserIsolation({ baseURL, global = globalThis, fe
   const navigator = global.navigator;
   if (!global.isSecureContext || !navigator?.serviceWorker) throw new Error('The playground needs HTTPS or localhost and service-worker support.');
   if (!navigator.locks?.request || !global.indexedDB) throw new Error('This browser does not provide IndexedDB and Web Locks required by the playground. No saved site was changed.');
+  let storage;
+  try { storage = global.sessionStorage; }
+  catch { throw new Error('Session storage is unavailable. Browser isolation stopped before reloading; no saved site was changed.'); }
+  const state = readBootstrapState(storage, baseURL);
   const identity = await establishServiceWorker(baseURL, navigator.serviceWorker);
   let configuration = DEFAULT_COMPATIBILITY_CONFIGURATION, configurationFailure;
   const controller = new AbortController();
@@ -150,11 +159,10 @@ export async function prepareBrowserIsolation({ baseURL, global = globalThis, fe
     configuration = validateCompatibilityConfiguration(await response.json());
   } catch (error) { configurationFailure = `Compatibility configuration is unavailable (${controller.signal.aborted ? 'request timed out' : error.message}); automatic browser compatibility defaults are in use.`; }
   finally { clearTimeout(configurationTimer); }
-  const state = readBootstrapState(global.sessionStorage, baseURL);
   const verified = await verifySharedMemoryEnvironment({ baseURL, ownerId: identity.clientId, global });
   const result = nextIsolationAttempt({ url: global.location.href, state, verified: verified.ok,
     failure: verified.reason || '', fallbackEnabled: configuration.fallbackEnabled, embedded: global.parent !== global });
-  writeBootstrapState(global.sessionStorage, baseURL, result.state);
+  writeBootstrapState(storage, baseURL, result.state);
   if (result.error) throw new Error([result.error, configurationFailure].filter(Boolean).join(' '));
   return Object.freeze({ ...result, clientId: identity.clientId, ownerId: identity.clientId,
     bootstrapVersion: ISOLATION_BOOTSTRAP_VERSION, configuration, diagnostic: configurationFailure });

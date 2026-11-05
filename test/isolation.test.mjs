@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { ISOLATION_BOOTSTRAP_VERSION as version, isolationMarker, isolationNavigationURL, isolationResponseHeaders,
-  ownedClientURL, runtimeResource, resolveRequestIsolation } from '../src/isolation.mjs';
-import { DEFAULT_COMPATIBILITY_CONFIGURATION, nextIsolationAttempt, readBootstrapState, validateCompatibilityConfiguration } from '../src/isolation-bootstrap.mjs';
+  ownedClientURL, runtimeResource, resolveRequestIsolation, isOwnerClient, isNetworkVerificationPage, networkVerificationHeaders } from '../src/isolation.mjs';
+import { DEFAULT_COMPATIBILITY_CONFIGURATION, nextIsolationAttempt, readBootstrapState, validateCompatibilityConfiguration, prepareBrowserIsolation } from '../src/isolation-bootstrap.mjs';
 import { createShareURL } from '../src/config.mjs';
 import { runtimeLocation } from '../src/ui-state.mjs';
 
@@ -111,4 +111,34 @@ test('headers replace cached policy and private bootstrap markers stay out of po
   const config = { persistence: false, siteName: 'Test', initialPath: '/', autoLogin: true, extensions: [], startupCommands: [] };
   assert.equal(isolationMarker(runtimeLocation(current, config)).policy, 'require-corp');
   assert.equal(isolationMarker(createShareURL(current, config)), null);
+});
+
+test('a blocked sessionStorage getter reports a stable startup error before registering or navigating', async () => {
+  let registered = false;
+  const global = { isSecureContext: true, indexedDB: {}, navigator: { locks: { request() {} },
+    serviceWorker: { register() { registered = true; } } },
+    get sessionStorage() { throw new DOMException('Storage is blocked', 'SecurityError'); } };
+  await assert.rejects(prepareBrowserIsolation({ baseURL, global }), /Session storage is unavailable.*stopped before reloading/);
+  assert.equal(registered, false);
+  assert.throws(() => readBootstrapState({ getItem() { throw new Error('Blocked'); } }, baseURL), /Session storage is unavailable/);
+});
+
+test('only the standalone verification page can leave isolation and it cannot own a PHP runtime', async () => {
+  const verificationURL = `${baseURL}network-verify.html#one-time-channel`;
+  assert.equal(isNetworkVerificationPage(verificationURL, baseURL), true);
+  for (const other of [`${baseURL}nested/network-verify.html`, `${baseURL}__site/owner/site/network-verify.html`,
+    `${baseURL}__runtime/owner/network-verify.html`, 'https://other.example/project/network-verify.html']) {
+    assert.equal(isNetworkVerificationPage(other, baseURL), false);
+  }
+  const headers = networkVerificationHeaders(isolationResponseHeaders({ 'Content-Type': 'text/html' }, 'require-corp'));
+  assert.equal(headers.get('Cross-Origin-Embedder-Policy'), 'unsafe-none');
+  assert.equal(headers.get('Cross-Origin-Opener-Policy'), 'unsafe-none');
+  assert.equal(headers.get('Cross-Origin-Resource-Policy'), 'same-origin');
+  assert.equal(headers.get('Cache-Control'), 'no-store');
+  assert.equal(headers.get('X-Frame-Options'), 'DENY');
+  assert.match(headers.get('Content-Security-Policy'), /frame-ancestors 'none'/);
+  const popup = { ...owner('verification', 'require-corp'), url: isolationNavigationURL(verificationURL, 'require-corp') };
+  assert.equal(isOwnerClient(popup, baseURL), false);
+  await assert.rejects(resolveRequestIsolation(request(`${baseURL}__runtime/verification/src/a.mjs`),
+    { baseURL, getClient: async () => popup }), /owner/);
 });

@@ -77,6 +77,9 @@ for (const version of pins.php) {
         $body = curl_exec($handle);
         $result = ['body' => $body === false ? false : base64_encode($body),
           'status' => curl_getinfo($handle, CURLINFO_HTTP_CODE), 'error' => curl_error($handle),
+          'url' => curl_getinfo($handle, CURLINFO_EFFECTIVE_URL),
+          'redirectCount' => curl_getinfo($handle, CURLINFO_REDIRECT_COUNT),
+          'redirectUrl' => curl_getinfo($handle, CURLINFO_REDIRECT_URL),
           'errno' => curl_errno($handle)];
         unset($handle);
         return $result;
@@ -101,7 +104,9 @@ for (const version of pins.php) {
       $head = executeCurl($base . '/binary', [CURLOPT_NOBODY => true, CURLOPT_HEADER => true]);
       $missing = executeCurl($base . '/missing', [CURLOPT_NOBODY => true]);
       $status = executeCurl($base . '/status');
-      $redirect = executeCurl($base . '/redirect', [CURLOPT_FOLLOWLOCATION => true]);
+      $redirect = executeCurl($base . '/redirect', [CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 3]);
+      $manual = executeCurl($base . '/redirect', [CURLOPT_FOLLOWLOCATION => false, CURLOPT_MAXREDIRS => 3]);
+      $relayMetadata = executeCurl($base . '/relay-metadata', [CURLOPT_FOLLOWLOCATION => true]);
       $custom = executeCurl($base . '/echo', [CURLOPT_CUSTOMREQUEST => 'PATCH', CURLOPT_POSTFIELDS => 'update',
         CURLOPT_USERPWD => 'fixture:password', CURLOPT_HTTPAUTH => CURLAUTH_BASIC,
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
@@ -124,17 +129,35 @@ for (const version of pins.php) {
         'largeContentLength' => $largeContentLength, 'authMaskAccepted' => $authMaskAccepted, 'overflowRejected' => $overflowRejected,
         'get' => $get, 'loopback' => $loopback, 'afterLoopback' => $afterLoopback,
         'post' => $post, 'head' => $head, 'missing' => $missing, 'status' => $status,
-        'redirect' => $redirect, 'custom' => $custom, 'timeout' => $timeout, 'unsupported' => $unsupported,
+        'redirect' => $redirect, 'manual' => $manual, 'relayMetadata' => $relayMetadata,
+        'custom' => $custom, 'timeout' => $timeout, 'unsupported' => $unsupported,
         'afterTimeout' => $afterTimeout, 'failStatus' => $failStatus, 'shortWrite' => $shortWrite,
         'wideWrite' => $wideWrite, 'wideHeader' => $wideHeader, 'events' => $events,
         'timeoutCode' => CURLE_OPERATION_TIMEDOUT, 'unsupportedCode' => CURLE_UNSUPPORTED_PROTOCOL,
         'statusCode' => CURLE_HTTP_RETURNED_ERROR, 'writeCode' => CURLE_WRITE_ERROR], JSON_THROW_ON_ERROR);
     `);
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = createPhpFetch(originalFetch, `${server.url}/site/`, () => true);
+    const previousHook = globalThis.__joomenginePhpFetch;
+    const receivedOptions = [];
+    const phpFetch = createPhpFetch(originalFetch, `${server.url}/site/`, () => true);
+    globalThis.__joomenginePhpFetch = async (url, init) => {
+      receivedOptions.push({ url, method: init.method, redirect: init.redirect, network: { ...init.network } });
+      if (url === `${server.url}/relay-metadata`) {
+        // A real binary response with the same metadata a verified relay decodes.
+        // The separate Worker suites prove the wire contract; this proves C getinfo.
+        const result = await originalFetch(`${server.url}/binary`, init);
+        Object.defineProperty(result, 'networkRedirectCount', { value: 2 });
+        return result;
+      }
+      return phpFetch(url, init);
+    };
     let response;
     try { response = await php.request({ url: '/index.php', method: 'GET', headers: { host: 'localhost' } }); }
-    finally { globalThis.fetch = originalFetch; }
+    finally {
+      if (previousHook === undefined) delete globalThis.__joomenginePhpFetch;
+      else globalThis.__joomenginePhpFetch = previousHook;
+    }
+    assert.equal(globalThis.fetch, originalFetch, 'PHP networking must not replace global asset Fetch.');
     const body = await response.text();
     assert.equal(response.status, 200, body);
     assert.doesNotMatch(body, /Deprecated|Warning|Fatal error/, body);
@@ -149,7 +172,7 @@ for (const version of pins.php) {
     assert.equal(result.largeContentLength, 5000000000, 'curl_off_t output must retain all 64 bits.');
     assert.equal(result.authMaskAccepted, true, 'Valid authentication flags must retain their unsigned C-long bit pattern.');
     assert.equal(result.overflowRejected, true, 'A PHP int64 option must never silently wrap at the C long boundary.');
-    for (const key of ['get', 'afterLoopback', 'post', 'head', 'missing', 'status', 'redirect', 'custom', 'afterTimeout']) {
+    for (const key of ['get', 'afterLoopback', 'post', 'head', 'missing', 'status', 'redirect', 'manual', 'relayMetadata', 'custom', 'afterTimeout']) {
       assert.equal(result[key].error, '', `${key}: ${result[key].error}`);
       assert.equal(result[key].errno, 0, key);
     }
@@ -172,7 +195,28 @@ for (const version of pins.php) {
     assert.equal(result.status.status, 418);
     assert.equal(Buffer.from(result.status.body, 'base64').toString(), 'Status fixture');
     assert.equal(result.redirect.status, 200);
+    assert.equal(result.redirect.url, `${server.url}/binary`);
+    assert.equal(result.redirect.redirectCount, 1);
     assert.deepEqual(Buffer.from(result.redirect.body, 'base64'), payload);
+    assert.equal(result.manual.status, 302);
+    assert.equal(result.manual.url, `${server.url}/redirect`);
+    assert.equal(result.manual.redirectUrl, `${server.url}/binary`);
+    assert.equal(result.manual.redirectCount, 0);
+    assert.equal(result.relayMetadata.url, `${server.url}/binary`);
+    assert.equal(result.relayMetadata.redirectCount, 2);
+    assert.deepEqual(Buffer.from(result.relayMetadata.body, 'base64'), payload);
+    assert.ok(receivedOptions.length > 0, 'The compiled cURL extension must call the dedicated hook.');
+    for (const request of receivedOptions) {
+      assert.equal(request.network.replayAllowed, ['GET', 'HEAD'].includes(request.method));
+      assert.equal(Number.isFinite(request.network.timeoutMs), true);
+      assert.ok(request.network.timeoutMs >= 0 && request.network.timeoutMs <= 5000);
+    }
+    assert.ok(receivedOptions.some(request => request.url.endsWith('/redirect')
+      && request.redirect === 'manual' && request.network.redirect === 'follow' && request.network.maxRedirects === 3));
+    assert.ok(receivedOptions.some(request => request.url.endsWith('/redirect')
+      && request.network.redirect === 'manual' && request.network.maxRedirects === 3));
+    assert.ok(receivedOptions.some(request => request.url.endsWith('/slow')
+      && request.network.timeoutMs > 0 && request.network.timeoutMs <= 150));
     assert.deepEqual(JSON.parse(Buffer.from(result.custom.body, 'base64').toString()), {
       method: 'PATCH', body: Buffer.from('update').toString('base64'), custom: 'custom-method',
       authorization: `Basic ${Buffer.from('fixture:password').toString('base64')}`,

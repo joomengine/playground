@@ -3,9 +3,10 @@ import { test } from 'node:test';
 import { nativeCacheKey, validationPlan } from '../scripts/ci-plan.mjs';
 import pins from '../versions.json' with { type: 'json' };
 
-test('documentation avoids native builds while presentation retains browser validation', () => {
-  assert.deepEqual(validationPlan(['README.md', 'docs/rocket-implementation.md']), { build: false, full: false, scenarios: 'matrix,deploys,ui,rocket' });
-  assert.deepEqual(validationPlan(['src/styles.css', 'src/locales/af.json']), { build: true, full: false, scenarios: 'matrix,deploys,ui,rocket' });
+test('every change builds the mandatory JCB gate while docs and presentation narrow other checks', () => {
+  for (const paths of [[], ['README.md', 'docs/rocket-implementation.md'], ['NOTICE', 'LICENSE', 'deploys/README.md'], ['src/styles.css', 'src/locales/af.json']]) {
+    assert.deepEqual(validationPlan(paths), { build: true, full: false, scenarios: 'matrix,deploys,ui,rocket' });
+  }
 });
 
 test('runtime, deployment and unknown changes always receive the complete matrix', () => {

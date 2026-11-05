@@ -1,11 +1,13 @@
 import { PhpDebugRuntime } from './debug-runtime.mjs';
 import { createPhpFetch } from '../php-network.mjs';
+import { createNetworkSessionClient, isLocalNetworkDevelopment } from '../network-session.mjs';
 import { runtimeRandomValue } from '../php-settings.mjs';
 
 let runtime;
 let running = false;
 let nextDatabaseId = 0;
 const databaseCalls = new Map();
+const networkSession = createNetworkSessionClient(message => self.postMessage(message));
 const errorMessage = error => error?.message || String(error);
 
 function databaseCall(payload) {
@@ -20,8 +22,11 @@ async function start(message) {
   if (running) throw new Error('The PHP debugger Worker owns one request only.');
   running = true;
   const options = message.options;
-  globalThis.fetch = createPhpFetch(globalThis.fetch.bind(globalThis), options.siteURL, () => running,
-    { ...options.publicAssets, policy: options.isolationPolicy });
+  globalThis.__joomenginePhpFetch = createPhpFetch(globalThis.fetch.bind(globalThis), options.siteURL, () => running,
+    { ...options.publicAssets, policy: options.isolationPolicy },
+    { config: options.network, getSession: networkSession.getSession,
+      onDiagnostic: value => self.postMessage({ type: 'network-diagnostic', value }),
+      allowInsecureLocalhost: isLocalNetworkDevelopment(self.location.href) });
   for (const field of ['moduleUrl', 'adapterUrl']) {
     const url = new URL(options[field], self.location.href);
     if (url.origin !== self.location.origin) throw new TypeError('Debugger code must be hosted with JoomEngine.');
@@ -48,6 +53,7 @@ async function start(message) {
 
 self.addEventListener('message', event => {
   const message = event.data;
+  if (networkSession.receive(message)) return;
   if (message?.type === 'database-result') {
     const pending = databaseCalls.get(message.id);
     if (!pending) return;

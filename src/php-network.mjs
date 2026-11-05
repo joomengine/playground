@@ -1,4 +1,5 @@
 import { resolvePublicAssetURL } from './public-assets.mjs';
+import { createNetworkTransport } from './network-transport.mjs';
 
 export const NESTED_PHP_REQUEST_ERROR = 'Nested HTTP requests to the same running PHP site are not supported by this runtime.';
 
@@ -35,7 +36,8 @@ export function publicImageFetchOptions(input, init, url, options) {
 }
 
 /** A recursive request cannot complete while its sole PHP/database session is busy. */
-export function createPhpFetch(fetcher, siteURL, isRequestActive, publicAssets = {}) {
+export function createPhpFetch(fetcher, siteURL, isRequestActive, publicAssets = {}, network) {
+  const transport = network ? createNetworkTransport(fetcher, network.config, network) : fetcher;
   const site = new URL(siteURL);
   const prefix = `${site.pathname.replace(/\/+$/, '')}/`;
   return async (input, init) => {
@@ -46,6 +48,6 @@ export function createPhpFetch(fetcher, siteURL, isRequestActive, publicAssets =
       throw new TypeError(NESTED_PHP_REQUEST_ERROR);
     }
     const mapped = publicImageFetchOptions(input, init, url, publicAssets);
-    return mapped ? fetcher(mapped.url, mapped.init) : fetcher(input, init);
+    return mapped ? fetcher(mapped.url, mapped.init) : transport(input, init);
   };
 }

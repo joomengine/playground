@@ -1,0 +1,15 @@
+{
+  "name": "@joomengine/network-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check src/index.mjs && node --check src/policy.mjs",
+    "build": "wrangler deploy --dry-run --env staging --outdir .build",
+    "deploy:staging": "wrangler deploy --env staging",
+    "deploy:production": "wrangler deploy --env production"
+  },
+  "devDependencies": { "wrangler": "4.158.0" }
+}

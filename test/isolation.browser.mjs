@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { chromium, webkit } from 'playwright';
 import { createStaticServer } from './server.mjs';
+import { withPinnedCatalog } from './dynamic-catalog-fixture.mjs';
 
 const directory = fileURLToPath(new URL('../', import.meta.url));
 const browserName = process.env.PLAYGROUND_ISOLATION_BROWSER || 'chromium';
@@ -103,6 +104,114 @@ test(`${browserName}: unavailable compatibility configuration retains automatic 
     assert.match(state.result.diagnostic, /automatic browser compatibility defaults/);
     assert.equal(await page.evaluate(() => crossOriginIsolated && new SharedArrayBuffer(8).byteLength === 8), true);
   } finally { await browser.close(); await server.close(); }
+});
+
+test(`${browserName}: the production entry stops before navigation when startup storage is blocked or discards writes`, { timeout: 120_000 }, async () => {
+  const server = await createStaticServer({ directory, isolation: false });
+  const browser = await launchBrowser(server);
+  try {
+    for (const mode of ['blocked', 'discarded']) {
+      const context = await browser.newContext();
+      try {
+        await context.addInitScript(mode => {
+          Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, get() {
+            if (mode === 'blocked') throw new DOMException('Storage is blocked', 'SecurityError');
+            return { getItem() { return null; }, setItem() {}, removeItem() {} };
+          } });
+        }, mode);
+        const page = await context.newPage();
+        const navigations = [];
+        page.on('framenavigated', frame => { if (frame === page.mainFrame()) navigations.push(frame.url()); });
+        await page.goto(`${server.url}?start=0`);
+        await page.locator('#error-view:not([hidden])').waitFor();
+        assert.match(await page.locator('#error-message').textContent(), /Session storage.*(?:unavailable|cannot retain)/);
+        // Observe the live application, including its timers, after the failure.
+        await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 1000)));
+        assert.equal(navigations.length, 1, `${mode} storage must stop before the first automatic navigation`);
+        assert.equal(await page.locator('#site-frame').count(), 0);
+      } finally { await context.close(); }
+    }
+  } finally { await browser.close(); await server.close(); }
+});
+
+test(`${browserName}: the production entry stops if an intervening host removes the isolation marker`, { timeout: 120_000 }, async () => {
+  const server = await createStaticServer({ directory, isolation: false });
+  const browser = await launchBrowser(server);
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript(() => {
+      const url = new URL(location.href);
+      if (url.searchParams.has('__je_coep')) {
+        url.searchParams.delete('__je_coep');
+        history.replaceState(null, '', url.href);
+      }
+    });
+    const navigations = [];
+    page.on('request', request => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) navigations.push(request.url()); });
+    await page.goto(`${server.url}?start=0`);
+    await page.locator('#error-view:not([hidden])').waitFor();
+    assert.match(await page.locator('#error-message').textContent(), /did not retain its bootstrap marker/);
+    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 1000)));
+    assert.equal(navigations.length, 2, 'The persisted takeover budget must stop a second automatic navigation');
+  } finally { await browser.close(); await server.close(); }
+});
+
+test(`${browserName}: verification popup leaves COEP while the production shell stays isolated`, { timeout: 120_000 }, async () => {
+  const server = await createStaticServer({ directory, isolation: true, fixtures: {
+    'network-verify.html': '<!doctype html><title>Verification header proof</title><p>Verification</p>',
+  } });
+  const browser = await launchBrowser(server);
+  try {
+    const page = await browser.newPage();
+    const state = await prepare(page, `${server.url}__test__.html`, { simulateUnsupportedCredentialless: true });
+    assert.equal(state.result.policy, 'require-corp');
+    const popupPromise = page.waitForEvent('popup');
+    await page.evaluate(() => window.open('./network-verify.html'));
+    const popup = await popupPromise;
+    await popup.waitForLoadState();
+    assert.equal(await popup.evaluate(() => crossOriginIsolated), false);
+    assert.equal(await page.evaluate(() => crossOriginIsolated), true);
+    const headers = await page.evaluate(async () => Object.fromEntries((await fetch('./network-verify.html')).headers));
+    assert.equal(headers['cross-origin-embedder-policy'], 'unsafe-none');
+    assert.equal(headers['x-frame-options'], 'DENY');
+    await popup.close();
+  } finally { await browser.close(); await server.close(); }
+});
+
+test(`${browserName}: production entry and service worker start Joomla under capability fallback`, {
+  timeout: 300_000, skip: !process.env.PLAYGROUND_ISOLATION_RUNTIME_DIST,
+}, async () => {
+  const server = await createStaticServer({ directory: path.resolve(process.env.PLAYGROUND_ISOLATION_RUNTIME_DIST), isolation: false });
+  const browser = await launchBrowser(server);
+  const context = await withPinnedCatalog(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  try {
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      if (new URL(location.href).searchParams.get('__je_coep')?.endsWith(':credentialless')) {
+        Object.defineProperty(globalThis, 'crossOriginIsolated', { value: false });
+      }
+    });
+    const documents = [], runtimeAssets = [];
+    page.on('request', request => {
+      if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents.push(request.url());
+      if (/\.(?:wasm|so)(?:\?|$)/.test(request.url())) runtimeAssets.push(request.url());
+    });
+    await page.goto(`${server.url}?deploy=joomla&php=8.4&jcb=none&persist=0&start=1&immediate=1`);
+    await page.locator('html[data-playground-environment="ready"]').waitFor({ timeout: 60_000 });
+    await page.locator('#site-frame').waitFor({ timeout: 240_000 });
+    const frame = await page.locator('#site-frame').contentFrame();
+    await frame.locator('body').waitFor({ timeout: 60_000 });
+    assert.match(await frame.locator('body').innerText(), /Joomla/i);
+    assert.match(new URL(page.url()).searchParams.get('__je_coep'), /:require-corp$/);
+    assert.equal(await page.evaluate(() => crossOriginIsolated), true);
+    assert.equal(documents.length, 3, 'Initial page plus credentialless takeover plus one require-corp fallback');
+    assert.ok(runtimeAssets.length > 0, 'The production page must load the real PHP/MariaDB runtime');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 1000)));
+    assert.equal(documents.length, 3, 'Resuming the application must not restart isolation navigation');
+    assert.equal(await page.locator('#error-view').isVisible(), false);
+  } finally { await context.close(); await browser.close(); await server.close(); }
 });
 
 test(`${browserName}: mobile-sized compatibility mode runs PHP, MariaDB and Joomla without an image relay`, {

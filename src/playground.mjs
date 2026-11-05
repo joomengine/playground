@@ -8,6 +8,7 @@ import { createPackageFetcher } from './dynamic-packages.mjs';
 import { prepareBrowserIsolation } from './isolation-bootstrap.mjs';
 import { ownedClientURL } from './isolation.mjs';
 import { loadPublicAssetConfiguration } from './public-assets.mjs';
+import { loadNetworkConfiguration, createNetworkSession, createNetworkSessionHost, requestNetworkVerification, showNetworkDiagnostic } from './network-session.mjs';
 import { deploymentImages, deploymentImageFingerprint, deploymentSnapshotSource, completedDeploymentImageConfiguration } from './deployment-images.mjs';
 import { catalogForRestoredSite } from './site-import.mjs';
 import { deploymentConfigurationChanges } from './deployment-changes.mjs';
@@ -54,7 +55,7 @@ async function clientIdentity() {
 }
 
 export class PhpSession {
-  constructor(database, onFailure, onDiagnostic, isolation) {
+  constructor(database, onFailure, onDiagnostic, isolation, networkService) {
     this.database = database;
     this.onFailure = onFailure;
     this.onDiagnostic = onDiagnostic;
@@ -71,11 +72,14 @@ export class PhpSession {
     this.requestProgress = new Set();
     this.debugState = 'idle';
     this.debugPauseGeneration = 0;
+    this.networkHost = networkService ? createNetworkSessionHost(networkService, message => { if (!this.failure) this.worker.postMessage(message); }) : null;
     this.worker.addEventListener('error', event => this.fail(new Error(event.message || 'The PHP worker failed.')));
     this.worker.addEventListener('messageerror', () => this.fail(new Error('The PHP worker sent an unreadable message.')));
     this.worker.addEventListener('message', event => this.receive(event.data));
   }
   async receive(message) {
+    if (this.networkHost?.receive(message)) return;
+    if (message?.type === 'network-diagnostic') { showNetworkDiagnostic(message.value); return; }
     if (message?.type === 'debug-state' || message?.type === 'debug-event') {
       if (message.type === 'debug-state') {
         this.debugState = message.state;
@@ -281,6 +285,7 @@ export class PhpSession {
   fail(error) {
     if (this.failure) return this.recovery;
     this.failure = error;
+    this.networkHost?.dispose();
     this.worker.terminate();
     try { this.onFailure?.(error); } catch { /* Cleanup still completes if a UI callback fails. */ }
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
@@ -293,6 +298,7 @@ export class PhpSession {
     try { if (!this.failure) { await this.debugCommand('stop').catch(() => {}); await this.send('close'); } }
     finally {
       this.workspaceListeners.clear(); this.debugListeners.clear(); this.requestProgress.clear();
+      this.networkHost?.dispose();
       this.worker.terminate(); this.failure ??= new Error('This PHP session is closed.');
       for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(this.failure); }
       this.pending.clear();
@@ -353,6 +359,9 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   if (!response.ok) throw new Error(`Cannot load the runtime catalog: HTTP ${response.status}.`);
   const manifest = await response.json();
   const publishedCatalog = parseCatalog(manifest, { baseURL: manifestUrl });
+  // Only the deployment-owned file can select a relay. Site imports, blueprints,
+  // URL parameters and saved configuration never supply this service.
+  const network = await loadNetworkConfiguration(base.href);
   const selectedCatalog = input.restoredSite ? catalogForRestoredSite(publishedCatalog, input)
     : catalogWithSelectedJoomlaPackage(publishedCatalog, input, base.href);
   if (input.joomlaPackage !== undefined) {
@@ -378,6 +387,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   const release = config.persistence ? await acquireSiteLock(identity) : async () => {};
   const instanceId = crypto.randomUUID();
   let database, session, closePromise, changing = false, databaseError = null, adminerOpened = false;
+  const networkService = createNetworkSession(network, { verify: options => requestNetworkVerification(base.href, options) });
   const workspaceListeners = new Set();
   const debugListeners = new Set();
   let debugState = 'idle';
@@ -394,6 +404,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   });
   const finish = erase => closePromise ??= (async () => {
     instances.delete(instanceId);
+    networkService.dispose();
     workspaceEvent({ type: 'workspace-closed', erased: Boolean(erase) });
     workspaceListeners.clear();
     debugListeners.clear();
@@ -430,7 +441,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     const createSession = () => {
       const created = new PhpSession(database,
         error => { workspaceEvent({ type: 'workspace-failed', message: error.message }); progress({ phase: 'failed', message: error.message }); },
-        message => progress({ phase: 'warning', message }), isolation);
+        message => progress({ phase: 'warning', message }), isolation, networkService);
       created.workspaceListeners.add(workspaceEvent);
       created.debugListeners.add(message => {
         if (message.type === 'debug-state') { debugState = message.state; workspaceEvent(message); }
@@ -443,7 +454,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     const initializeSession = (target, settings = config.phpSettings) => target.send('initialize', {
       moduleUrl: resolveAsset(phpEntry.moduleUrl), adapterUrl: resolveAsset(manifest.bridge.adapterUrl),
       phpVersion: config.phpVersion, prefix, persistence: config.persistence, mountPath: `/joomengine-${identity}`, readOnly: filesOnly,
-      phpSettings: settings, isolationPolicy: isolation.policy, publicAssets,
+      phpSettings: settings, isolationPolicy: isolation.policy, publicAssets, network,
       sharedLibs: phpEntry.sharedLibs.map(lib => ({ ...lib, url: resolveAsset(lib.url) })),
       files: (phpEntry.files ?? []).map(file => ({ ...file, url: resolveAsset(file.url) })),
       debugger: phpEntry.debugger ? { moduleUrl: resolveAsset(phpEntry.debugger.moduleUrl),

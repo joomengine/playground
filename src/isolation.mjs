@@ -3,6 +3,24 @@ export const ISOLATION_BOOTSTRAP_VERSION = '20261101-1';
 export const ISOLATION_PARAMETER = '__je_coep';
 export const ISOLATION_POLICIES = Object.freeze(['credentialless', 'require-corp']);
 export const RUNTIME_ROUTE = '__runtime/';
+export const NETWORK_VERIFICATION_PAGE = 'network-verify.html';
+
+/** The interactive verification popup must not inherit the PHP page's COEP. */
+export function isNetworkVerificationPage(value, baseURL) {
+  const url = new URL(value), scope = new URL(baseURL);
+  return url.origin === scope.origin && url.pathname === `${scope.pathname}${NETWORK_VERIFICATION_PAGE}`;
+}
+
+export function networkVerificationHeaders(headers) {
+  const result = new Headers(headers);
+  result.set('Cross-Origin-Opener-Policy', 'unsafe-none');
+  result.set('Cross-Origin-Embedder-Policy', 'unsafe-none');
+  result.set('Cross-Origin-Resource-Policy', 'same-origin');
+  result.set('Cache-Control', 'no-store');
+  result.set('X-Frame-Options', 'DENY');
+  result.append('Content-Security-Policy', "frame-ancestors 'none'");
+  return result;
+}
 
 export function isolationMarker(value) {
   const url = new URL(value);
@@ -37,6 +55,7 @@ export function isOwnerClient(client, baseURL) {
   if (!client || client.type !== 'window') return false;
   const scope = new URL(baseURL), url = new URL(client.url);
   if (!withinScope(url, scope)) return false;
+  if (isNetworkVerificationPage(url, baseURL)) return false;
   // Embedded Playground is still supported when its parent supplies compatible
   // isolation. It needs its own controlled document marker and must pass the
   // same real shared-memory probe before creating a runtime. Virtual Joomla and
