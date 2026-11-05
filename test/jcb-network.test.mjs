@@ -87,6 +87,53 @@ test('Joomla Power index selects item.json paths and verifies the returned GUID'
   assert.deepEqual(await (await fetcher(raw('git.envs.net', 'joomla-powers', `src/${guid}/item.json`))).json(), { guid });
 });
 
+test('portable entity indices use packages discovery and retain separate mirror selections', async () => {
+  const calls = [], ref = 'feature%2Fentities';
+  const entityIndex = name => JSON.stringify({ [guid]: { guid, path: `src/${name}/${guid}`, settings: `src/${name}/${guid}/item.json` } });
+  const fetcher = createJcbRepositoryFetch(async (url, options) => {
+    calls.push(url);
+    if (url.startsWith(api)) {
+      assert.equal(url, `${api}packages`);
+      return network([['tildegit.org', 1], ['codeberg.org', 0]], 'packages');
+    }
+    const entity = url.includes('admin-view') || url.includes('admin_view') ? 'admin_view' : 'field';
+    const origin = entity === 'field' ? 'https://codeberg.org/' : 'https://tildegit.org/';
+    if (!url.startsWith(origin)) return failed();
+    assert.equal(options.credentials, 'omit');
+    assert.equal(options.redirect, 'error');
+    return new Response(url.includes('/index/') ? entityIndex(entity) : JSON.stringify({ guid, entity }));
+  });
+  await fetcher(raw('git.vdm.dev', 'packages', 'index/field.json', ref));
+  await fetcher(raw('git.vdm.dev', 'packages', 'index/admin-view.json', ref));
+  for (const [entity, host] of [['field', 'codeberg.org'], ['admin_view', 'tildegit.org']]) {
+    const file = `src/${entity}/${guid}/item.json`;
+    assert.deepEqual(await (await fetcher(raw('git.vdm.dev', 'packages', file, ref))).json(), { guid, entity });
+    assert.equal(calls.at(-1), raw(host, 'packages', file, ref));
+  }
+  assert.equal(calls.filter(url => url.startsWith(api)).length, 1, 'Entity indices share only discovery, not their selected files.');
+});
+
+test('portable entity fallback rejects cross-entity paths and mismatched stored identities', async () => {
+  const makeIndex = (entity, settings = `src/${entity}/${guid}/item.json`) => JSON.stringify({ [guid]: {
+    guid, path: `src/${entity}/${guid}`, settings,
+  } });
+  for (const invalid of [makeIndex('admin_view'), makeIndex('field', `src/field/${guid}/code.php`),
+    makeIndex('field', '../private.json')]) {
+    const calls = [];
+    const fetcher = createJcbRepositoryFetch(async url => {
+      calls.push(url);
+      if (url.startsWith(api)) return network([['codeberg.org', 0]], 'packages');
+      return new Response(invalid);
+    });
+    await assert.rejects(fetcher(raw('git.vdm.dev', 'packages', 'index/field.json')), /could not be read/);
+    assert.equal(calls.length, 3);
+  }
+  const fetcher = createJcbRepositoryFetch(async url => new Response(url.includes('/index/')
+    ? makeIndex('field') : JSON.stringify({ guid: 'wrong' })));
+  await fetcher(raw('git.vdm.dev', 'packages', 'index/field.json'));
+  await assert.rejects(fetcher(raw('git.vdm.dev', 'packages', `src/field/${guid}/item.json`)), /GUID does not match/);
+});
+
 test('a failed selected file does not mix in another mirror or silently return HTML', async () => {
   const calls = [];
   const fetcher = createJcbRepositoryFetch(async url => {
@@ -172,6 +219,11 @@ test('credentials, custom requests and unindexed files keep their exact original
     [raw().replace('/super-powers/', '/custom/')], [`${raw()}&token=secret`], [`${raw()}&ref=other`],
     [raw().replace('https://', 'https://user:secret@')], [raw('git.envs.net', 'super-powers', 'README.md')],
     [raw('git.envs.net', 'super-powers', 'src/%2e%2e/private')],
+    [raw('git.vdm.dev', 'packages', 'index/field.json'), { headers: { Authorization: 'token secret' } }],
+    [raw('git.vdm.dev', 'packages', 'index/custom-code.json')],
+    [raw('git.vdm.dev', 'packages', 'index/admin-fields.json')],
+    [raw('git.vdm.dev', 'packages', `src/field/${guid}/unindexed.json`)],
+    [raw('git.vdm.dev', 'packages', 'src/field/not-a-guid/item.json')],
   ];
   for (const [input, init] of cases) {
     let calls = 0;

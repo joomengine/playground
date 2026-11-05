@@ -14,14 +14,13 @@ export function nativeCacheKey(pins) {
   })).digest('hex');
 }
 
-/** Unknown paths receive the full matrix; only presentation-only edits narrow it. */
+/** Every change builds the mandatory JCB gate; docs and presentation narrow the remaining matrix. */
 export function validationPlan(paths, { full = false } = {}) {
   const documentation = (name) => /^(?:README\.md|NOTICE|LICENSE|docs\/.*|deploys\/README\.md)$/.test(name);
   const presentation = (name) => /^(?:index\.html|src\/(?:app\.mjs|styles\.css|i18n\.mjs|frame-view\.mjs|locales\/.*|brand\/.*))$/.test(name);
   const changed = [...new Set(paths)].filter(Boolean);
-  const build = full || changed.some((name) => !documentation(name));
   const matrix = full || changed.some((name) => !documentation(name) && !presentation(name));
-  return { build, full: matrix, scenarios: matrix ? '' : 'matrix,deploys,ui,rocket' };
+  return { build: true, full: matrix, scenarios: matrix ? '' : 'matrix,deploys,ui,rocket' };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

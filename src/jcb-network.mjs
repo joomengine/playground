@@ -1,7 +1,12 @@
 // Network API health describes server access. A browser can reach a different
 // advertised mirror because its requests also require CORS permission.
 const hosts = new Set(['codeberg.org', 'git.disroot.org', 'git.envs.net', 'git.vdm.dev', 'tildegit.org']);
-const repositories = new Set(['super-powers', 'joomla-powers', 'gitea', 'phpseclib', 'openai', 'search']);
+const repositories = new Set(['super-powers', 'joomla-powers', 'gitea', 'phpseclib', 'openai', 'search', 'packages']);
+// These portable entities share JCB's GUID-indexed item.json contract. Child
+// records, named custom code and binary files have different identities/formats.
+const entities = new Map(['admin-view', 'class-extends', 'class-method', 'class-property', 'joomla-component',
+  'custom-admin-view', 'dynamic-get', 'field', 'joomla-module', 'joomla-plugin', 'joomla-plugin-group',
+  'layout', 'library', 'site-view', 'template'].map(name => [name, name.replaceAll('-', '_')]));
 const publicHeaders = new Set(['accept', 'accept-language', 'content-type', 'user-agent']);
 const guidPattern = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const maxBytes = 4 * 1024 * 1024;
@@ -24,8 +29,16 @@ function publicRead(input, init) {
   const ref = url.searchParams.get('ref');
   if (!ref || ref.length > 128 || !/^[a-zA-Z0-9_./-]+$/.test(ref) || ref.includes('..')) return null;
   const repository = match[1], file = match[2];
-  const index = repository === 'joomla-powers' ? 'index.json' : 'super-powers.json';
-  return { url, repository, file, index, key: `${repository}:${ref}`, signal: init?.signal ?? request?.signal };
+  let index = repository === 'joomla-powers' ? 'index.json' : 'super-powers.json', entity;
+  if (repository === 'packages') {
+    const indexMatch = /^index\/([a-z-]+)\.json$/.exec(file);
+    const itemMatch = /^src\/([a-z_]+)\/([a-f0-9-]+)\/item\.json$/.exec(file);
+    const name = indexMatch?.[1] ?? itemMatch?.[1].replaceAll('_', '-');
+    entity = entities.get(name);
+    if (!entity || itemMatch && !guidPattern.test(itemMatch[2])) return null;
+    index = `index/${name}.json`;
+  }
+  return { url, repository, file, index, entity, key: `${repository}:${ref}:${index}`, signal: init?.signal ?? request?.signal };
 }
 
 function safePath(value) {
@@ -65,17 +78,19 @@ async function readText(response, signal) {
   return text;
 }
 
-function indexFiles(text, repository) {
+function indexFiles(text, { repository, entity }) {
   const index = JSON.parse(text);
   if (!index || typeof index !== 'object' || Array.isArray(index)
-    || !Object.keys(index).length || Object.keys(index).length > 10000) throw new Error('Invalid Power index.');
+    || !Object.keys(index).length || Object.keys(index).length > 10000) throw new Error('Invalid repository index.');
   const files = new Map();
   for (const [guid, entry] of Object.entries(index)) {
-    if (!guidPattern.test(guid) || !entry || entry.guid !== guid || entry.path !== `src/${guid}`) throw new Error('Invalid Power index entry.');
-    const settings = `${entry.path}/${repository === 'joomla-powers' ? 'item' : 'settings'}.json`;
-    if (entry.settings !== settings) throw new Error('Invalid Power settings path.');
+    const item = repository === 'joomla-powers' || repository === 'packages';
+    const expectedPath = entity ? `src/${entity}/${guid}` : `src/${guid}`;
+    if (!guidPattern.test(guid) || !entry || entry.guid !== guid || entry.path !== expectedPath) throw new Error('Invalid repository index entry.');
+    const settings = `${entry.path}/${item ? 'item' : 'settings'}.json`;
+    if (entry.settings !== settings) throw new Error('Invalid repository settings path.');
     files.set(settings, { guid, json: true });
-    if (repository !== 'joomla-powers') {
+    if (!item) {
       if (entry.power !== `${entry.path}/code.power`) throw new Error('Invalid Power source path.');
       files.set(entry.power, { guid, json: false });
     }
@@ -112,7 +127,7 @@ function anonymousOptions(signal) {
     cache: 'no-store', headers: { Accept: 'application/json, text/plain, */*' }, signal };
 }
 
-/** Public core Power reads only. No relay, API rewriting, credentials or custom repositories. */
+/** Public core Power and GUID entity reads only. No relay, API rewriting or credentials. */
 export function createJcbRepositoryFetch(fetcher, { timeoutMs = 30000, attemptTimeoutMs = 10000, now = Date.now } = {}) {
   const selections = new Map(), discovery = new Map();
   const select = (key, value) => {
@@ -121,7 +136,7 @@ export function createJcbRepositoryFetch(fetcher, { timeoutMs = 30000, attemptTi
     selections.set(key, value);
   };
   async function validate(response, read, signal) {
-    try { return indexFiles(await readText(response, signal), read.repository); }
+    try { return indexFiles(await readText(response, signal), read); }
     catch (error) { void response.body?.cancel().catch(() => {}); throw error; }
   }
   return async (input, init) => {
@@ -139,7 +154,7 @@ export function createJcbRepositoryFetch(fetcher, { timeoutMs = 30000, attemptTi
           : await fetcher(new URL(read.url.pathname + read.url.search, selected.origin).href, anonymousOptions(signal));
         try {
           const text = await readText(response, signal);
-          if (file.json && JSON.parse(text)?.guid !== file.guid) throw new Error('Power settings GUID does not match the index.');
+          if (file.json && JSON.parse(text)?.guid !== file.guid) throw new Error('Repository settings GUID does not match the index.');
           return response;
         } catch (error) { void response.body?.cancel().catch(() => {}); throw error; }
       });

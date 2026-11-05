@@ -275,17 +275,21 @@ forbidden request headers, and connection behavior; options for disabling TLS
 verification cannot bypass browser security. Redirect responses are hidden from
 browser Fetch: enable following explicitly when a client needs redirects.
 PHP's cookie-file settings do not create a separate browser cookie store.
-For anonymous reads of the public JCB Power repositories, Playground also checks
+For anonymous reads of the public JCB Power repositories and the GUID-indexed
+entities in `joomla/packages`, Playground also checks
 the other mirrors advertised by JCB's network API when a repository index cannot
 be read. The API's availability status describes its own connectivity: a mirror
 marked unavailable there can still be readable by the browser. Active mirrors
 are tried first, followed by the remaining advertised, approved public mirrors.
-After an index succeeds, its Power files stay on that mirror for that index read;
+After an index succeeds, its indexed files stay on that mirror for that index read;
 a failed file does not silently switch to a different repository copy. HTML
 challenge pages are rejected instead of being accepted as repository data.
 This uses ordinary browser Fetch and requires a browser-readable mirror. It adds
 no server proxy and forwards no credentials to alternate mirrors. Authenticated
 requests, custom repositories and unrelated HTTP retain their original transport.
+Portable entity fallback covers the reviewed top-level `item.json` formats listed
+in `src/jcb-network.mjs`. Child records, named custom code and binary assets retain
+their original transport; they use different index and identity formats.
 HTTP proxies and Unix sockets are unsupported. Requests to PHP in the same
 playground instance cannot complete recursively while its worker is already
 executing a request; use a separate server or independent instance for HTTP
@@ -872,6 +876,7 @@ npm run test:provisioning
 npm run build:deploys
 npm run test:browser
 node --test test/version-catalog.browser.mjs
+node --test test/jcb-network.browser.mjs
 ```
 
 The browser suite uses real PHP, native PDO, MariaDB, and Joomla. It exercises
@@ -885,9 +890,12 @@ a database startup failure leaves the saved file and database stores unchanged.
 `PLAYGROUND_BROWSERS`, `PLAYGROUND_PHP_VERSIONS`, `PLAYGROUND_JOOMLA_VERSIONS` and
 `PLAYGROUND_SCENARIOS` narrow local investigations.
 
-CI runs source checks and unit tests first. Documentation-only pull requests skip
-native/browser jobs. Presentation-only changes run the default Joomla 6.2.0 / PHP
-8.4 combination with deployment, lifecycle and Rocket checks. Runtime, deployment,
+CI runs source checks and unit tests first. Every pull-request update builds the
+candidate artifact and runs the dedicated **JCB API and repositories** checks in
+Chromium and Firefox. These checks always cover Joomla 5 and 6 with PHP 8.4, including
+documentation-only and presentation-only changes. The remaining browser scenarios
+use the default Joomla 6.2.0 / PHP 8.4 combination for those narrower changes, with
+deployment, lifecycle and Rocket checks. Runtime, deployment,
 configuration and unclassified changes run the full supported matrix, as do
 `main` and manual builds. Chromium and Firefox validate in parallel jobs against
 the same built artifact. Native/compiler caches require exact source and toolchain
@@ -909,12 +917,25 @@ URLs and browser diagnostics retained. A controlled cross-origin PHP read also
 verifies that a denied request reports its error promptly and leaves PHP and the
 database usable. The playground does not replace artwork or hide production errors.
 
-The JCB compiler contract exercises both Joomla 5 and 6 with live repository
-retrieval. It rejects missing Powers and unresolved Power placeholders in the
-generated PHP, installs the compiled Demo, and opens its administrator dashboard.
-A successful ZIP download alone does not satisfy this contract. Focused network
-tests also cover mirror fallback, invalid responses, exhausted mirrors and the
-credential restrictions.
+The dedicated JCB gate verifies the live network API through PHP cURL and HTTP
+streams, then exercises actual repository retrieval in clean Joomla 5 and 6 sites.
+The compiler must acquire all eight required Demo Powers from the repositories;
+the test checks their database records and the generated PHP, installs the compiled
+Demo, and opens its administrator dashboard. It also imports a previously absent
+portable field entity through JCB's repository service and verifies its stored
+GUID and content. Successful HTTP status codes, repository index metadata, or a ZIP
+download alone do not satisfy these contracts. Positive live tests do not substitute
+repository responses. Separate controlled failures cover browser CORS rejection,
+mirror fallback and exhaustion; focused unit tests cover invalid responses and
+credential restrictions. Receipts and failure diagnostics are retained in
+`test-results/`.
+
+The **Validate playground** aggregate requires this dedicated gate to succeed;
+failed, cancelled, skipped or missing JCB checks fail validation. Main pushes and
+the daily scheduled Pages build run the same gate before publication. To also
+prevent merging an unvalidated pull request, configure GitHub's protection for
+`main` to require **Validate playground**. Workflow files enforce validation and
+deployment dependencies; they do not configure repository branch protection.
 
 Firefox 157 emits an empty-URL service-worker diagnostic for some successful native
 redirects, including a minimal `Response.redirect()` with no playground runtime.

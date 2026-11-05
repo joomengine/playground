@@ -266,6 +266,41 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  jcb-network:
+    name: JCB API and repositories (${{ matrix.browser }})
+    needs: [checks, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: '.node-version'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: playground-static
+          path: dist
+      - name: Install selected browser engine
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Verify live JCB discovery, repositories, dependencies and compiled Demo
+        env:
+          PLAYGROUND_BROWSERS: ${{ matrix.browser }}
+        run: node --test test/jcb-network.browser.mjs
+      - name: Retain JCB network receipts and diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playground-jcb-network-results-${{ matrix.browser }}
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 14
+
   compatibility:
     name: Isolation and approved images (${{ matrix.browser }})
     needs: [checks, build]
@@ -349,7 +384,7 @@ jobs:
 
   validate:
     name: Validate playground
-    needs: [checks, build, browser, interaction, compatibility, version-catalog]
+    needs: [checks, build, browser, interaction, compatibility, version-catalog, jcb-network]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -363,8 +398,10 @@ jobs:
           INTERACTIONS: ${{ needs.interaction.result }}
           COMPATIBILITY: ${{ needs.compatibility.result }}
           VERSION_CATALOG: ${{ needs.version-catalog.result }}
+          JCB_NETWORK: ${{ needs.jcb-network.result }}
         run: |
           test "$CHECKS" = success
+          test "$JCB_NETWORK" = success
           if [ "$BUILD_REQUIRED" = true ]; then
             test "$BUILD" = success
             test "$BROWSERS" = success
