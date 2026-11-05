@@ -7,6 +7,7 @@ import test from 'node:test';
 import { chromium, firefox } from 'playwright';
 import { createStaticServer, prepareBrowserEnvironment } from './server.mjs';
 import { assertJcbCompiler } from './jcb-compiler-contract.mjs';
+import { assertJcbDocumentAssets } from './jcb-document-contract.mjs';
 import { probeSyntheticRedirect } from './firefox-redirect-probe.mjs';
 import { assertLiveNetworkApi, assertLivePowerClient, assertLiveFieldImport,
   assertControlledFailures, createNetworkControls, powerGuid, fieldGuid } from './jcb-network-contract.mjs';
@@ -139,6 +140,8 @@ test('required JCB discovery, repositories, entity import and complete Demo work
         browser = await engines[name].launch({ headless: true,
           ...(executablePath ? { executablePath } : {}), ...(name === 'chromium' ? { args: ['--no-sandbox'] } : {}) });
         receipt.browserVersion = browser.version();
+        receipt.documentAssets = await assertJcbDocumentAssets(browser, { directory });
+        await persist();
         const redirectProbe = await probeSyntheticRedirect(browser);
         for (const pair of pairs) {
           // PHP/MariaDB WebAssembly contexts are deliberately sequential to

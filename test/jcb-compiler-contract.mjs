@@ -32,6 +32,43 @@ export function assertDemoDependencies(proof) {
   }
 }
 
+/** Do not navigate away from, or remove, a page whose required fonts are still loading. */
+export async function assertJcbPageAssets(frame, { timeoutMs = 30_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  await frame.waitForLoadState('load', { timeout: timeoutMs });
+  const key = await frame.evaluate(() => {
+    // Loading the stylesheets and forcing layout starts the fonts used by the
+    // actual page. Inspecting an empty FontFaceSet before layout is not proof.
+    document.documentElement.getBoundingClientRect();
+    const key = `__jcbFontsReady_${crypto.randomUUID()}`;
+    const state = { ready: false };
+    window[key] = state;
+    void document.fonts.ready.then(() => { state.ready = true; }, error => { state.error = String(error); });
+    return key;
+  });
+  try {
+    // A bare await of fonts.ready can hang forever after a lost request. The
+    // browser wait retains a deadline and leaves the failing document intact.
+    await frame.waitForFunction(key => window[key]?.error
+      || (window[key]?.ready && document.fonts.status === 'loaded'), key,
+    { timeout: Math.max(1, deadline - Date.now()) });
+    const proof = await frame.evaluate(key => ({
+      error: window[key]?.error,
+      fonts: [...document.fonts].map(face => ({ family: face.family, weight: face.weight, style: face.style, status: face.status })),
+      stylesheets: [...document.querySelectorAll('link[rel~="stylesheet"][href]')]
+        .filter(link => !link.disabled && new URL(link.href).origin === location.origin)
+        .map(link => ({ url: link.href, loaded: Boolean(link.sheet) })),
+    }), key);
+    assert.equal(proof.error, undefined, 'Document font readiness must complete successfully.');
+    assert.deepEqual(proof.fonts.filter(face => face.status === 'error'), [], 'Required document fonts must load successfully.');
+    assert.deepEqual(proof.fonts.filter(face => face.status === 'loading'), [], 'Navigation must not interrupt a loading font.');
+    assert.ok(proof.stylesheets.every(sheet => sheet.loaded), 'Required local stylesheets must load before checking fonts.');
+    return proof;
+  } finally {
+    await frame.evaluate(key => { delete window[key]; }, key).catch(() => {});
+  }
+}
+
 async function readDemoPowerRecords(page) {
   return page.evaluate(async encoded => {
     const source = String.raw`<?php
@@ -125,6 +162,7 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
     for (const type of Object.keys(requiredDemoPowers)) {
       assert.deepEqual(before[type], [], `The clean Demo fixture must require remote ${type} retrieval; cached records would hide a network regression.`);
     }
+    await assertJcbPageAssets(frame);
     const started = Date.now();
     page.testStep = `compile ${demo} through the administrator form`;
     const from = page.consoleErrors?.length ?? 0;
@@ -192,6 +230,7 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
     assert.ok(proof.manifest.version);
     proof.powers = await readDemoPowerRecords(page);
     assertDemoDependencies(proof);
+    await assertJcbPageAssets(frame);
     const durationMs = Date.now() - started;
     if (page.consoleErrors) await recordVerifiedRedirectDiagnostic(page, {
       probe, kind: 'post303', from, traceFrom,
@@ -209,6 +248,7 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
     assert.equal(installed.status(), 200, installedBody.slice(0, 3000));
     assertJcbCompilerMessages(installedBody);
     assert.match(installedBody, /Installation of the component was successful\./);
+    const installerAssets = await assertJcbPageAssets(frame);
     if (page.consoleErrors) await recordVerifiedRedirectDiagnostic(page, {
       probe, kind: 'post303', from: installFrom, traceFrom: installTraceFrom,
       sourceURL: new URL('service-worker.mjs', page.url()).href, step: page.testStep,
@@ -223,15 +263,19 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
     assert.doesNotMatch(dashboardBody, /Fatal error|Class .*not found|Call to undefined|(?:Super|Joomla)___[0-9a-f_-]+___Power|An error has occurred/i);
     assert.match(dashboardBody, /Demo Dashboard/);
     assert.equal(await frame.locator('input[name="passwd"]').count(), 0, 'The installed Demo must open in the authenticated administrator session.');
+    const dashboardAssets = await assertJcbPageAssets(frame);
     completed = true;
     return { demo, joomlaVersion, phpVersion, maxExecutionTime, compilerImage: true,
       durationMs, zipBytes: downloaded.length, entries: proof.entries,
       manifest: proof.manifest, download: true, requiredPowers: proof.powers,
       actionsDefinitions: proof.actionsDefinitions, unresolvedPowers: proof.unresolved,
-      installed: true, dashboard: true };
+      installed: true, dashboard: true, installerAssets, dashboardAssets };
   } finally {
     // Preserve a failed form for the browser runner's diagnostic screenshot and HTML.
     if (completed && owned) await page.locator('#compiler-contract-frame').evaluate(element => element.remove());
-    else if (completed && initial.startsWith(site)) await frame.goto(initial, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs });
+    else if (completed && initial.startsWith(site)) {
+      await frame.goto(initial, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs });
+      await assertJcbPageAssets(frame);
+    }
   }
 }
