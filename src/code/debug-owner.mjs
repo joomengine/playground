@@ -1,4 +1,5 @@
 import { createDebugRequestMatcher } from './debug-request.mjs';
+import { createNetworkSessionHost } from '../network-session.mjs';
 import { captureDebugFilesystem, applyDebugFilesystem } from './debug-runtime.mjs';
 
 /** Resolve the same Joomla front controller and PATH_INFO used by the CGI owner. */
@@ -24,14 +25,15 @@ export function resolveDebugScript(php, fs, request) {
 }
 
 /** A disposable debugger worker owns only the selected request, never storage. */
-export function createPhpDebugOwner({ options, getPhp, getBinary, databaseCall, onState, onEvent, flush }) {
+export function createPhpDebugOwner({ options, getPhp, getBinary, databaseCall, onState, onEvent, flush, getNetworkSession, onNetworkDiagnostic }) {
   const breakpoints = new Map();
   const pending = new Map();
-  let selection, worker, requestReject, requestDone, sequence = 0, stopping, startupTimer;
+  let selection, worker, requestReject, requestDone, sequence = 0, stopping, startupTimer, networkHost;
   const siteURL = options.siteURL;
   const emit = (event, body = {}) => onEvent({ event, body });
   function cleanup() {
     clearTimeout(startupTimer);
+    networkHost?.dispose(); networkHost = undefined;
     worker?.terminate(); worker = undefined; stopping = undefined;
     for (const task of pending.values()) {
       clearTimeout(task.timer);
@@ -46,6 +48,8 @@ export function createPhpDebugOwner({ options, getPhp, getBinary, databaseCall, 
     const snapshot = captureDebugFilesystem(fs);
     worker = new Worker(new URL('./debug-worker.mjs', import.meta.url), { type: 'module', name: 'JoomEngine Code PHP debugger' });
     const activeWorker = worker;
+    if (getNetworkSession) networkHost = createNetworkSessionHost({ getSession: getNetworkSession },
+      message => { if (worker === activeWorker) activeWorker.postMessage(message); });
     onState('starting');
     requestDone = new Promise((resolve, reject) => {
       requestReject = reject;
@@ -55,6 +59,8 @@ export function createPhpDebugOwner({ options, getPhp, getBinary, databaseCall, 
       worker.onmessage = async event => {
         const message = event.data;
         if (worker !== activeWorker) return;
+        if (networkHost?.receive(message)) return;
+        if (message?.type === 'network-diagnostic') { onNetworkDiagnostic?.(message.value); return; }
         if (message?.type === 'database-call') {
           try {
             const value = await databaseCall(message.payload);

@@ -16,6 +16,7 @@ import { validateCompatibilityConfiguration } from '../src/isolation-bootstrap.m
 import { stagePhpDebugHttp, applyPhpDebugWorkerOverlay } from './phpdbg.mjs';
 import { loadPhpRuntime } from './php-runtime.mjs';
 import { matchesNativeRuntime } from './native-runtime.mjs';
+import { normalizeNetworkConfig } from '../src/network-config.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const versions = await loadPhpRuntime({ root });
@@ -24,6 +25,10 @@ const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'ut
 const approvedImages = validatePublicAssetRegistry(JSON.parse(await readFile(path.join(root, 'config/public-assets.json'), 'utf8')));
 const imageDelivery = validatePublicAssetConfiguration(JSON.parse(await readFile(path.join(root, 'config/public-assets-config.json'), 'utf8')));
 const browserCompatibility = validateCompatibilityConfiguration(JSON.parse(await readFile(path.join(root, 'config/browser-compatibility.json'), 'utf8')));
+const network = normalizeNetworkConfig(JSON.parse(await readFile(path.join(root, 'config/network.json'), 'utf8')));
+if (network.enabled && (!network.turnstileSiteKey || /^[123]x0{20}[A-Z]{2}$/.test(network.turnstileSiteKey))) {
+  throw new Error('An enabled published network service requires its own production Turnstile site key.');
+}
 if (!imageDelivery.registryVersions.includes(approvedImages.version)) throw new Error('The image relay configuration must support the staged registry version.');
 // Runtime isolation is independent of optional external-image delivery. The
 // same-origin PHP and MariaDB assets work with either verified COEP policy.
@@ -202,9 +207,11 @@ try {
   console.log('Staging current and forward Joomla/JCB packages…');
   const versionCatalog = await stageVersionCatalog({ assets, cache, pinnedJoomla: versions.joomla,
     stagedJoomla: joomla, deployPackages: deploys.packages });
-  for (const name of ['index.html', 'src', 'config', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
+  for (const name of ['index.html', 'network-verify.html', 'src', 'config', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
     await cp(path.join(root, name), path.join(staging, name), { recursive: true });
   }
+  // Serialize the validated public allowlist rather than copying unreviewed fields.
+  await writeFile(path.join(staging, 'config/network.json'), `${JSON.stringify(network, null, 2)}\n`);
   await writeFile(path.join(staging, '.nojekyll'), '');
   let sourceCommit;
   try { sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(); }
@@ -212,7 +219,7 @@ try {
   const manifest = {
     schemaVersion: 1, projectVersion: pkg.version, sourceCommit, code,
     deployment: { canonicalUrl, domain },
-    browserCompatibility, publicAssets: { registryVersion: approvedImages.version, enabled: imageDelivery.enabled },
+    browserCompatibility, publicAssets: { registryVersion: approvedImages.version, enabled: imageDelivery.enabled }, network,
     runtime: versions.runtime, upstream: versions.upstream, nativeDriver: versions.nativeDriver, packages, php, joomla, deploys, versionCatalog,
     bridge: {
       protocolVersion: versions.bridge.protocolVersion,

@@ -3,6 +3,7 @@ import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeHealthSource,
 import { checkpointSource, restoreCheckpointSource } from './checkpoint-program.mjs';
 import { configurePhpRouting } from './php-routing.mjs';
 import { createPhpFetch } from './php-network.mjs';
+import { createNetworkSessionClient, isLocalNetworkDevelopment } from './network-session.mjs';
 import { installPhpRecovery } from './php-recovery.mjs';
 import { applyJcbRuntimeCompatibility } from './jcb-compatibility.mjs';
 import { staticAssetResponse } from './static-assets.mjs';
@@ -33,11 +34,14 @@ let debugOptions;
 let debugOwner;
 let debugOwnerLoading;
 let activeOperationId;
+const networkSession = createNetworkSessionClient(message => self.postMessage(message));
+const networkDiagnostic = value => self.postMessage({ type: 'network-diagnostic', value });
 
 async function getDebugOwner() {
   if (!debugOptions) throw new Error('This distribution does not include PHP debugger assets.');
   return debugOwner ??= await (debugOwnerLoading ??= import('./code/debug-owner.mjs').then(({ createPhpDebugOwner }) => createPhpDebugOwner({
     options: debugOptions, getPhp: () => php, getBinary: () => binary, databaseCall, flush,
+    getNetworkSession: networkSession.getSession, onNetworkDiagnostic: networkDiagnostic,
     onState: state => self.postMessage({ type: 'debug-state', state, requestId: activeOperationId }),
     onEvent: event => self.postMessage({ type: 'debug-event', ...event }),
   })));
@@ -222,9 +226,13 @@ async function initialize(args) {
     throw new TypeError('The site route prefix must be an absolute URL path.');
   }
   routePrefix = `${args.prefix.replace(/\/+$/, '')}/`;
-  globalThis.fetch = createPhpFetch(globalThis.fetch.bind(globalThis),
+  // Native cURL alone calls this hook. Runtime assets and database networking
+  // retain the browser Fetch implementation.
+  globalThis.__joomenginePhpFetch = createPhpFetch(globalThis.fetch.bind(globalThis),
     new URL(routePrefix, self.location.origin), () => requestActive,
-    { ...args.publicAssets, policy: args.isolationPolicy });
+    { ...args.publicAssets, policy: args.isolationPolicy },
+    { config: args.network, getSession: networkSession.getSession, onDiagnostic: networkDiagnostic,
+      allowInsecureLocalhost: isLocalNetworkDevelopment(self.location.href) });
   phpSettings = normalizePhpSettings(args.phpSettings);
   requestBodyLimit = phpRequestBodyLimit(phpSettings);
   persistent = args.persistence === true;
@@ -241,7 +249,7 @@ async function initialize(args) {
   if (args.debugger) debugOptions = {
     moduleUrl: args.debugger.moduleUrl, adapterUrl: adapterURL.href, phpVersion: args.phpVersion,
     sharedLibs: args.debugger.sharedLibs, files: args.files || [],
-    isolationPolicy: args.isolationPolicy, publicAssets: args.publicAssets,
+    isolationPolicy: args.isolationPolicy, publicAssets: args.publicAssets, network: args.network,
     ini: `${adapter.ini}${phpIni(phpSettings)}`, siteURL: new URL(routePrefix, self.location.origin).href,
   };
   php = new PhpCgiWorker({
@@ -397,6 +405,7 @@ async function operation(name, args = {}) {
 
 self.addEventListener('message', (event) => {
   const message = event.data;
+  if (networkSession.receive(message)) return;
   if (message?.type === 'database-result') {
     const pending = databaseCalls.get(message.id);
     if (!pending) return;

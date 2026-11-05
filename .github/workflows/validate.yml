@@ -266,6 +266,100 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  network-worker:
+    name: Network Worker contract and security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: '.node-version'
+          cache: npm
+          cache-dependency-path: services/network-worker/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: services/network-worker
+      - run: npm test
+        working-directory: services/network-worker
+      - name: Validate both explicit deployment configurations without credentials
+        working-directory: services/network-worker
+        run: |
+          npx wrangler deploy --dry-run --env staging
+          npx wrangler deploy --dry-run --env production
+
+  php-network:
+    name: PHP networking (${{ matrix.browser }})
+    needs: [checks, build, network-worker]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: '.node-version'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts
+        working-directory: services/network-worker
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: playground-static
+          path: dist
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Exercise genuine CORS and the actual PHP cURL and stream bridge
+        env:
+          PLAYGROUND_BROWSERS: ${{ matrix.browser }}
+        run: node --test test/network-runtime.browser.mjs
+      - name: Retain PHP networking receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playground-network-results-${{ matrix.browser }}
+          path: test-results/network-*.json
+          if-no-files-found: error
+          retention-days: 14
+
+  jcb-network:
+    name: JCB API and repositories (${{ matrix.browser }})
+    needs: [checks, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: '.node-version'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts
+        working-directory: services/network-worker
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: playground-static
+          path: dist
+      - name: Install selected browser engine
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Verify live JCB discovery, repositories, dependencies and compiled Demo
+        env:
+          PLAYGROUND_BROWSERS: ${{ matrix.browser }}
+        run: node --test test/jcb-network.browser.mjs
+      - name: Retain JCB network receipts and diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playground-jcb-network-results-${{ matrix.browser }}
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 14
+
   compatibility:
     name: Isolation and approved images (${{ matrix.browser }})
     needs: [checks, build]
@@ -283,6 +377,8 @@ jobs:
           node-version-file: '.node-version'
           cache: npm
       - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts
+        working-directory: services/network-worker
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: playground-static
@@ -328,6 +424,8 @@ jobs:
           node-version-file: '.node-version'
           cache: npm
       - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts
+        working-directory: services/network-worker
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: playground-static
@@ -349,7 +447,7 @@ jobs:
 
   validate:
     name: Validate playground
-    needs: [checks, build, browser, interaction, compatibility, version-catalog]
+    needs: [checks, build, browser, interaction, compatibility, version-catalog, jcb-network, network-worker, php-network]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -363,8 +461,14 @@ jobs:
           INTERACTIONS: ${{ needs.interaction.result }}
           COMPATIBILITY: ${{ needs.compatibility.result }}
           VERSION_CATALOG: ${{ needs.version-catalog.result }}
+          JCB_NETWORK: ${{ needs.jcb-network.result }}
+          NETWORK_WORKER: ${{ needs.network-worker.result }}
+          PHP_NETWORK: ${{ needs.php-network.result }}
         run: |
           test "$CHECKS" = success
+          test "$JCB_NETWORK" = success
+          test "$NETWORK_WORKER" = success
+          test "$PHP_NETWORK" = success
           if [ "$BUILD_REQUIRED" = true ]; then
             test "$BUILD" = success
             test "$BROWSERS" = success

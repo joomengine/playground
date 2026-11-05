@@ -15,3 +15,9 @@ The relay remains disabled in the published default configuration until an opera
 ## Required evidence
 
 This document will be updated with the final commit's test results, supported PHP transport options, deployment state, and unresolved acceptance items. A successful unit test or archive creation does not establish a successful real Joomla/JCB workflow. Automated desktop WebKit is not physical mobile-device evidence. Hosted staging checks must not be reported as passed without executing against a deployed service.
+
+## Implementation checkpoint
+
+The first implementation checkpoint passes 529 source tests with zero failures or skips and JavaScript syntax checks under Node 26.12.1. The native cURL hook patch applies to its checksum-verified upstream source and its executable bridge checks pass. Compiled extension, real browser and JCB evidence must come from the candidate build, not these source checks.
+
+The relay uses opaque sessions held in a Durable Object, so no session-signing secret is required. The operator still needs a private Turnstile verification secret, public widget settings, reviewed destination policy and a configured Cloudflare deployment account. Default public configuration keeps the relay disabled.

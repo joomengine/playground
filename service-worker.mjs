@@ -1,6 +1,6 @@
 import { serializeRequest, restoreResponse } from './src/http.mjs';
 import { StaticAssetCache } from './src/static-assets.mjs';
-import { ISOLATION_BOOTSTRAP_VERSION, isolationMarker, isolationResponseHeaders, isOwnerClient, resolveRequestIsolation, runtimeResource } from './src/isolation.mjs';
+import { ISOLATION_BOOTSTRAP_VERSION, isolationMarker, isolationResponseHeaders, isOwnerClient, resolveRequestIsolation, runtimeResource, isNetworkVerificationPage, networkVerificationHeaders } from './src/isolation.mjs';
 import { createPublicAssetHandler } from './src/public-assets-worker.mjs';
 
 const scope = new URL(self.registration.scope);
@@ -93,6 +93,17 @@ self.addEventListener('fetch', event => {
   event.respondWith((async () => {
     let policy = 'credentialless';
     try {
+      if (isNetworkVerificationPage(url, scope.href)) {
+        if (!['GET', 'HEAD'].includes(event.request.method)) {
+          return new Response('Verification page supports GET and HEAD only.', { status: 405,
+            headers: networkVerificationHeaders({ Allow: 'GET, HEAD' }) });
+        }
+        // Only this exact standalone page can embed Turnstile without COEP.
+        // Joomla, owned runtime assets and the active shell keep isolation.
+        const response = await fetch(event.request, { cache: 'no-store', redirect: 'error' });
+        return new Response(response.body, { status: response.status, statusText: response.statusText,
+          headers: networkVerificationHeaders(response.headers) });
+      }
       const isolation = await resolveRequestIsolation(event, { baseURL: scope.href, getClient: id => self.clients.get(id) });
       policy = isolation.policy;
       const compatibleImage = await publicAssets(event.request, { policy, onDiagnostic: detail => {

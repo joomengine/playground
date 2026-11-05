@@ -34,6 +34,8 @@ test('curl staging verifies PHP and fetch transport identities, binary checksum 
     flags: ['-DZEND_WASM_INT64=1'],
     nativeHelperSha256: await hashFile(fileURLToPath(new URL('../scripts/native-runtime.mjs', import.meta.url))),
     nativePatchSha256: await hashFile(fileURLToPath(new URL('../native/curl-int64.patch', import.meta.url))),
+    networkPatchSha256: await hashFile(fileURLToPath(new URL('../native/curl-network.patch', import.meta.url))),
+    originalCurlSourceInventory: [{ path: 'src/fetch_js.c', sha256: 'e'.repeat(64) }],
     phpSourceInventory: [{ path: 'interface.c', sha256: 'c'.repeat(64) }],
     httpStreams: { sourceSha256: await hashFile(fileURLToPath(new URL('../native/http-stream.c', import.meta.url))),
       originalInterfaceSha256: 'f'.repeat(64), interfaceSha256: 'c'.repeat(64) },
@@ -50,6 +52,11 @@ test('curl staging verifies PHP and fetch transport identities, binary checksum 
   await save();
   await assert.rejects(stageCurl(options), /provenance differs/);
   provenance.nativePatchSha256 = patchSha256;
+  const networkPatchSha256 = provenance.networkPatchSha256;
+  provenance.networkPatchSha256 = '0'.repeat(64);
+  await save();
+  await assert.rejects(stageCurl(options), /provenance differs/);
+  provenance.networkPatchSha256 = networkPatchSha256;
   provenance.phpVersion = '8.5.2';
   await save();
   await assert.rejects(stageCurl(options), /provenance differs/);

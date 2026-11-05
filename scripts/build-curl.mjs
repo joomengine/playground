@@ -20,6 +20,11 @@ const scratch = await mkdtemp(path.join(cache, 'curl-source-'));
 try {
   execFileSync('tar', ['--extract', '--gzip', '--file', archive, '--directory', scratch, '--no-same-owner']);
   const librarySource = path.join(scratch, `php-wasm-curl-${curlSource.commit}`);
+  const originalCurlSourceInventory = await inventory(librarySource);
+  const networkPatch = path.join(root, 'native/curl-network.patch');
+  const networkPatchOptions = { cwd: librarySource, env: { ...process.env, GIT_CEILING_DIRECTORIES: scratch }, stdio: 'inherit' };
+  execFileSync('git', ['apply', '--check', networkPatch], networkPatchOptions);
+  execFileSync('git', ['apply', networkPatch], networkPatchOptions);
   const curlSourceInventory = await inventory(librarySource);
   const extensionSource = path.join(scratch, 'php-curl');
   await cp(path.join(source, 'ext/curl'), extensionSource, { recursive: true });
@@ -68,7 +73,8 @@ try {
   const provenance = {
     schemaVersion: 1, name: 'curl', ...nativeProvenance(context),
     curlSource, nativePatchSha256: await hashFile(nativePatch), buildScriptSha256: await hashFile(fileURLToPath(import.meta.url)),
-    sources, phpSourceInventory: await inventory(extensionSource), curlSourceInventory, httpStreams, flags,
+    sources, phpSourceInventory: await inventory(extensionSource), curlSourceInventory, originalCurlSourceInventory,
+    networkPatchSha256: await hashFile(networkPatch), httpStreams, flags,
     licenses, extension: { file: `${basename}.so`, sha256: await hashFile(path.join(output, `${basename}.so`)) },
   };
   await writeFile(path.join(output, `${basename}.json`), `${JSON.stringify(provenance, null, 2)}\n`);
