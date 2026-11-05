@@ -25,7 +25,7 @@
  				const responseURL = new URL(response.url || currentURL.href);
  				if(response.status === 401 && request.auth && responseURL.origin === parsed.origin && authAttempts < 2)
  				{
-@@ -291,7 +298,9 @@
+@@ -291,18 +298,22 @@
  			result.headersAt = performance.now();
  			result.status = response.status;
  			result.statusText = response.statusText;
@@ -35,8 +35,23 @@
 +				: (canStopAtRedirect ? followed : (response.redirected ? 1 : 0));
  			result.url = response.url || parsed.href;
  
- 			const decoded = response.headers.has('content-encoding');
-@@ -349,7 +358,7 @@
+-			const decoded = response.headers.has('content-encoding');
++			/* Bodyless responses describe the selected representation, not decoded bytes. */
++			const hasBody = init.method !== 'HEAD' && ![204, 205, 304].includes(response.status);
++			const decoded = hasBody && response.headers.has('content-encoding');
+ 			const lines = [];
+ 			for(const [name, value] of response.headers)
+ 			{
+ 				/* fetch() always decodes the body, so drop headers that describe the
+ 				   encoded bytes; clients would otherwise try to decode it again. */
+ 				if(decoded && name === 'content-encoding') continue;
+ 				/* CORS may hide Content-Encoding while exposing the encoded length. */
+-				if((decoded || response.type === 'cors') && name === 'content-length') continue;
++				if(hasBody && (decoded || response.type === 'cors') && name === 'content-length') continue;
+ 				if(name === 'set-cookie') continue;
+ 				lines.push(name + ': ' + value);
+ 			}
+@@ -349,7 +360,7 @@
  				result.code = error.curlCode;
  				result.error = error.message;
  			}

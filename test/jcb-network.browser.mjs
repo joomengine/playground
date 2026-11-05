@@ -181,6 +181,8 @@ test('required JCB discovery, repositories, entity import and complete Demo work
             from = activeCase.network.length;
             relayFrom = server.liveReads.length;
             activeCase.entity = await bounded(assertLiveFieldImport(page), 'Actual JCB field import');
+            activeCase.entity.defaultRelayResponse = server.liveReads.slice(relayFrom)
+              .findLast(event => event.url === activeCase.entity.defaultProbe.url) ?? null;
             activeCase.entity.resolvedReads = {
               index: successfulRead([...activeCase.network.slice(from), ...server.liveReads.slice(relayFrom)], '/index/field.json', 'The field index'),
               item: successfulRead([...activeCase.network.slice(from), ...server.liveReads.slice(relayFrom)], `/src/field/${fieldGuid}/item.json`, 'The field entity'),

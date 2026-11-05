@@ -326,3 +326,25 @@ test('test mode rejects production, weak credentials and unmarked Siteverify res
   const strict = await ordinary.send('/v1/session', { body: JSON.stringify({ version: 1, turnstileToken: 'XXXX.DUMMY.TOKEN.XXXX' }) });
   assert.equal(strict.status, 401);
 });
+
+test('default compression negotiation preserves upstream errors and explicit caller choices', async () => {
+  const f = fixture({ upstream: (_url, init) => {
+    const encoding = new Headers(init.headers).get('accept-encoding');
+    if (encoding === null || encoding === 'zstd') return new Response('unsupported-encoded-error', { status: 403, headers: { 'Content-Encoding': 'zstd' } });
+    return new Response('upstream denied', { status: 403 });
+  } });
+  const { token } = await f.session();
+  const response = await f.relay(token);
+  assert.equal(response.status, 200); assert.equal(decodeMetadata(response.headers.get('x-playground-response')).status, 403);
+  assert.equal(await response.text(), 'upstream denied'); assert.equal(f.calls[0].headers.get('accept-encoding'), 'gzip, br');
+  for (const encoding of ['', 'identity', 'gzip;q=0.8, br;q=1', 'zstd']) {
+    const explicit = await f.relay(token, { headers: [['Accept-Encoding', encoding]] });
+    assert.equal(f.calls.at(-1).headers.get('accept-encoding'), encoding);
+    if (encoding === 'zstd') {
+      assert.equal(explicit.status, 422); assert.equal(await errorCode(explicit), 'UNSUPPORTED_TRANSPORT_OPTION');
+    } else {
+      assert.equal(explicit.status, 200); assert.equal(decodeMetadata(explicit.headers.get('x-playground-response')).status, 403);
+      assert.equal(await explicit.text(), 'upstream denied');
+    }
+  }
+});

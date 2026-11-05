@@ -81,6 +81,10 @@ test('real browser COEP blocks restricted images; approved SW delivery renders s
         res.end(await readFile(new URL('service-worker.mjs', root)));
       } else if (url.pathname === '/config/browser-compatibility.json') {
         res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ schemaVersion: 1, fallbackEnabled: true }));
+      } else if (url.pathname === '/config/network.json') {
+        // The approved-image relay is the only relay in this fixture. The real
+        // Playground still loads its deployment-owned generic network settings.
+        res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ schemaVersion: 1, enabled: false }));
       } else if (url.pathname === '/config/public-assets.json' || url.pathname === '/config/public-assets-config.json') {
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify(url.pathname.endsWith('-config.json') ? config : registry));

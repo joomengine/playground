@@ -7,12 +7,20 @@ import test from 'node:test';
 // compiled extension is exercised by curl.integration.mjs; these deterministic
 // checks need neither a copied upstream implementation nor a network download.
 const patch = await readFile(new URL('../native/curl-network.patch', import.meta.url), 'utf8');
-const additions = patch.split(/^@@.*@@.*\n/m).slice(1).map(hunk => hunk.split('\n')
+const hunks = patch.split(/^@@.*@@.*\n/m).slice(1);
+const additions = hunks.map(hunk => hunk.split('\n')
   .filter(line => line.startsWith('+') && !line.startsWith('+++')).map(line => line.slice(1)).join('\n'));
 function addition(anchor) {
   const matches = additions.filter(source => source.includes(anchor));
   assert.equal(matches.length, 1, `Expected one native bridge patch hunk containing ${anchor}.`);
   return matches[0];
+}
+
+function postimage(anchor) {
+  const matches = hunks.filter(source => source.includes(anchor));
+  assert.equal(matches.length, 1, `Expected one native bridge patch hunk containing ${anchor}.`);
+  return matches[0].split('\n').filter(line => line.startsWith('+') || line.startsWith(' '))
+    .map(line => line.slice(1)).join('\n');
 }
 
 function harness({ hook, fetcher = async () => new Response('direct') } = {}) {
@@ -28,7 +36,7 @@ function harness({ hook, fetcher = async () => new Response('direct') } = {}) {
   })`, sandbox);
   const redirectCount = vm.runInContext(`((response, canStopAtRedirect, followed) => {
     const result = {};
-    ${addition('result.redirected =')}
+    ${addition('result.redirected =').match(/result\.redirected\s*=[\s\S]*?;/)[0]}
     return result.redirected;
   })`, sandbox);
   return { sandbox, dispatch, redirectCount, setClock: value => { clock = value; } };
@@ -128,4 +136,30 @@ test('native deadline abort carries TimeoutError and standalone error handling r
   assert.equal(isTimeout(controller.signal.reason), true);
   assert.equal(isTimeout(new DOMException('Caller cancelled', 'AbortError')), true);
   assert.equal(isTimeout(new TypeError('Connection failed')), false);
+});
+
+test('native preserves representation headers for HEAD and bodyless statuses, including CORS', () => {
+  // Include unchanged loop statements from the real patch hunk, not a separate
+  // implementation of the header projection. Compiled PHP verifies C callbacks.
+  const projection = postimage('const hasBody').slice(postimage('const hasBody').indexOf('const hasBody'));
+  const project = vm.runInNewContext(`(response, init) => { ${projection} return lines; }`);
+  for (const type of ['basic', 'cors']) {
+    for (const [method, status] of [['HEAD', 200], ['GET', 204], ['GET', 205], ['GET', 304]]) {
+      const headers = new Headers({ 'content-encoding': 'gzip', 'content-length': '1234', 'x-proof': 'kept' });
+      assert.deepEqual(Array.from(project({ headers, status, type }, { method })), [
+        'content-encoding: gzip', 'content-length: 1234', 'x-proof: kept',
+      ], `${method} ${status} ${type} must retain representation metadata.`);
+      headers.delete('content-encoding');
+      assert.deepEqual(Array.from(project({ headers, status, type }, { method })), [
+        'content-length: 1234', 'x-proof: kept',
+      ], `${method} ${status} ${type} must retain length even when CORS hides encoding.`);
+    }
+  }
+  for (const type of ['basic', 'cors']) {
+    const headers = new Headers({ 'content-encoding': 'gzip', 'content-length': '1234', 'x-proof': 'kept' });
+    assert.deepEqual(Array.from(project({ headers, status: 200, type }, { method: 'GET' })), ['x-proof: kept']);
+    headers.delete('content-encoding');
+    assert.deepEqual(Array.from(project({ headers, status: 200, type }, { method: 'GET' })),
+      type === 'cors' ? ['x-proof: kept'] : ['content-length: 1234', 'x-proof: kept']);
+  }
 });

@@ -122,6 +122,10 @@ export function requestHeaders(metadata, policy, url) {
     if (!ANONYMOUS_HEADERS.has(name) && (metadata.forwardCredentials !== true || !policy.credentialOrigins.has(url.origin))) throw new RelayError('CREDENTIALS_NOT_ALLOWED', 'Credential forwarding is not approved for this destination.', 403);
     try { headers.append(pair[0], pair[1]); } catch { throw new RelayError('INVALID_METADATA', 'Invalid upstream headers.'); }
   }
+  // Keep implicit negotiation within the relay's supported native HTTP codecs.
+  // A runtime update must not silently negotiate a new, unsupported encoding.
+  // An explicit caller choice (including an empty value) remains authoritative.
+  if (!headers.has('accept-encoding')) headers.set('Accept-Encoding', 'gzip, br');
   return headers;
 }
 export function responseHeaders(headers, decoded) {
