@@ -1,6 +1,60 @@
 import assert from 'node:assert/strict';
 import { probeSyntheticRedirect, startRedirectTrace, recordVerifiedRedirectDiagnostic } from './firefox-redirect-probe.mjs';
 
+// These dependencies are absent from the pinned clean JCB images. The compiler
+// must retrieve them from the real repository network for both Demo targets.
+const requiredDemoPowers = Object.freeze({
+  power: ['7d95ce74-53dc-4672-bd8a-3b71cdacabea'],
+  joomla_power: [
+    'ca5456e1-552c-45fb-bf4c-b751ba6e9fa1',
+    'a87c432d-b5b4-428e-b7ff-14b51664c624',
+    '193deb3e-0c3e-4610-8e55-450e463095b4',
+    '46ba6c12-361e-4f7d-b6d9-70450e7cd7c2',
+    'a6ee04f5-33c7-4a9b-aa6d-6a03f3715a88',
+    '47ee1f2b-9902-4f26-a856-04930ac9ddc3',
+    'f5a65880-6185-4f43-8d55-770616692a40',
+  ],
+});
+
+export function assertJcbCompilerMessages(body) {
+  assert.doesNotMatch(body, /Undefined constant|Fatal error|Maximum execution time|SQLSTATE/i);
+  assert.doesNotMatch(body,
+    /(?:Super|Joomla)\s+Power\s+repository\b[\s\S]{0,250}?gave the following error|Power\s+guid:\s*[a-f0-9-]+\s+(?:not found|could not be found)|Failed to (?:fetch|connect to)\b/i,
+    'A downloadable ZIP must not conceal failed repository reads or missing Powers.');
+}
+
+export function assertDemoDependencies(proof) {
+  assert.ok(proof.phpEntries > 0, 'The compiled package must contain inspectable PHP files.');
+  assert.deepEqual(proof.unresolved, [], 'Every Super/Joomla Power placeholder must be resolved in the compiled PHP.');
+  assert.ok(proof.actionsDefinitions.length > 0, 'The generated package must include the required Permitted Actions class.');
+  for (const [type, guids] of Object.entries(requiredDemoPowers)) {
+    assert.deepEqual([...proof.powers[type]].sort(), [...guids].sort(), `The compiler must acquire every required ${type} record.`);
+  }
+}
+
+async function readDemoPowerRecords(page) {
+  return page.evaluate(async encoded => {
+    const source = String.raw`<?php
+      require '/persist/www/configuration.php';
+      $config = new JConfig();
+      $db = new PDO('mysql:dbname=' . $config->db . ';charset=utf8mb4', $config->user, $config->password,
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+      $required = json_decode(base64_decode('${encoded}'), true, 512, JSON_THROW_ON_ERROR);
+      $found = [];
+      foreach ($required as $type => $guids) {
+        $table = str_replace(chr(96), chr(96) . chr(96), $config->dbprefix . 'componentbuilder_' . $type);
+        $query = $db->prepare('SELECT guid FROM ' . chr(96) . $table . chr(96)
+          . ' WHERE guid IN (' . implode(',', array_fill(0, count($guids), '?')) . ') ORDER BY guid');
+        $query->execute($guids);
+        $found[$type] = $query->fetchAll(PDO::FETCH_COLUMN);
+      }
+      echo json_encode($found, JSON_THROW_ON_ERROR);`;
+    const result = await window.playground.runPhp(source);
+    if (result.status !== 200) throw new Error(result.text);
+    return JSON.parse(result.text);
+  }, Buffer.from(JSON.stringify(requiredDemoPowers)).toString('base64'));
+}
+
 /** Component selection loads details and applies its preferred Joomla version asynchronously. */
 export async function selectJcbCompilerComponent(page, frame, { joomlaVersion, timeoutMs = 30_000 } = {}) {
   const major = String(joomlaVersion ?? await page.evaluate(() => window.playground.configuration.joomlaVersion)).split('.')[0];
@@ -31,8 +85,8 @@ export async function selectJcbCompilerComponent(page, frame, { joomlaVersion, t
   }, { id, version: String(details.preferred_joomla_version) }, { timeout: timeoutMs });
 }
 
-/** Exercise the real compiler form and its downloadable, independently readable package. */
-export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, compileTimeoutMs = 180_000, redirectProbe } = {}) {
+/** Retrieve real dependencies, compile, inspect, install and open the generated Demo. */
+export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, compileTimeoutMs = 180_000, installTimeoutMs = 180_000, redirectProbe } = {}) {
   const probe = redirectProbe ?? await probeSyntheticRedirect(page.context().browser());
   const { site, joomlaVersion, phpVersion, maxExecutionTime } = await page.evaluate(async () => {
     const result = await window.playground.runPhp('<?php echo ini_get("max_execution_time");');
@@ -67,6 +121,10 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
       return image?.complete && image.naturalWidth > 0;
     }, null, { timeout: Math.min(navigationTimeoutMs, 30_000) });
     await selectJcbCompilerComponent(page, frame, { joomlaVersion });
+    const before = await readDemoPowerRecords(page);
+    for (const type of Object.keys(requiredDemoPowers)) {
+      assert.deepEqual(before[type], [], `The clean Demo fixture must require remote ${type} retrieval; cached records would hide a network regression.`);
+    }
     const started = Date.now();
     page.testStep = `compile ${demo} through the administrator form`;
     const from = page.consoleErrors?.length ?? 0;
@@ -75,8 +133,9 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
       frame.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: compileTimeoutMs }),
       frame.getByRole('button', { name: /Compile Component$/ }).click({ noWaitAfter: true }),
     ]);
-    assert.equal(compiled.status(), 200, (await frame.locator('body').innerText()).slice(0, 3000));
-    assert.doesNotMatch(await frame.locator('body').innerText(), /Undefined constant|Fatal error|Maximum execution time|SQLSTATE/);
+    const compilerBody = await frame.locator('body').innerText();
+    assert.equal(compiled.status(), 200, compilerBody.slice(0, 3000));
+    assertJcbCompilerMessages(compilerBody);
     const link = await frame.getByRole('link', { name: /Download Component$/ }).getAttribute('href');
     const url = new URL(link, site);
     assert.equal(url.origin, new URL(site).origin);
@@ -95,19 +154,32 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
     assert.ok(downloaded.length > 1000, 'The compiler must produce a real nonempty installation package.');
     assert.deepEqual(downloaded.signature, [80, 75, 3, 4]);
     const proof = await page.evaluate(async filename => {
-      const source = `<?php
+      const source = String.raw`<?php
         $file = '/persist/www/tmp/' . '${filename}';
         $zip = new ZipArchive();
         if ($zip->open($file) !== true) throw new RuntimeException('Cannot open the compiled component.');
         $manifest = null;
+        $phpEntries = 0;
+        $unresolved = [];
+        $actionsDefinitions = [];
         for ($i = 0; $i < $zip->numFiles; $i++) {
           $name = $zip->getNameIndex($i);
-          if (preg_match('~(^|/)demo\\.xml$~', $name)) {
+          if (preg_match('~(^|/)demo\.xml$~', $name)) {
             $xml = simplexml_load_string($zip->getFromIndex($i));
             $manifest = ['type' => (string) $xml['type'], 'name' => (string) $xml->name, 'version' => (string) $xml->version];
           }
+          if (str_ends_with($name, '.php')) {
+            $phpEntries++;
+            $contents = $zip->getFromIndex($i);
+            if (preg_match_all('~(?:Super|Joomla)___[0-9a-f_-]+___Power~i', $contents, $matches)) {
+              $unresolved[] = ['file' => $name, 'placeholders' => array_values(array_unique($matches[0]))];
+            }
+            if (preg_match('~\bclass\s+Actions\b~', $contents)
+              && str_contains($contents, '\\Utilities\\Permitted')) $actionsDefinitions[] = $name;
+          }
         }
-        echo json_encode(['hash' => hash_file('sha256', $file), 'entries' => $zip->numFiles, 'manifest' => $manifest], JSON_THROW_ON_ERROR);
+        echo json_encode(['hash' => hash_file('sha256', $file), 'entries' => $zip->numFiles, 'manifest' => $manifest,
+          'phpEntries' => $phpEntries, 'unresolved' => $unresolved, 'actionsDefinitions' => $actionsDefinitions], JSON_THROW_ON_ERROR);
         $zip->close();`;
       const result = await window.playground.runPhp(source);
       if (result.status !== 200) throw new Error(result.text);
@@ -118,15 +190,45 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
     assert.equal(proof.manifest?.type, 'component');
     assert.match(proof.manifest.name, /demo/i);
     assert.ok(proof.manifest.version);
+    proof.powers = await readDemoPowerRecords(page);
+    assertDemoDependencies(proof);
+    const durationMs = Date.now() - started;
     if (page.consoleErrors) await recordVerifiedRedirectDiagnostic(page, {
       probe, kind: 'post303', from, traceFrom,
       sourceURL: new URL('service-worker.mjs', page.url()).href, step: page.testStep,
       finalURL: frame.url(), responseStatus: compiled.status(), methodAfterRedirect: compiled.request().method(),
     });
+    page.testStep = `install the compiled ${demo} through JCB`;
+    const installFrom = page.consoleErrors?.length ?? 0;
+    const installTraceFrom = await startRedirectTrace(page);
+    const [installed] = await Promise.all([
+      frame.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: installTimeoutMs }),
+      frame.getByRole('button', { name: /Install com_demo.*component/ }).click({ noWaitAfter: true }),
+    ]);
+    const installedBody = await frame.locator('body').innerText();
+    assert.equal(installed.status(), 200, installedBody.slice(0, 3000));
+    assertJcbCompilerMessages(installedBody);
+    assert.match(installedBody, /Installation of the component was successful\./);
+    if (page.consoleErrors) await recordVerifiedRedirectDiagnostic(page, {
+      probe, kind: 'post303', from: installFrom, traceFrom: installTraceFrom,
+      sourceURL: new URL('service-worker.mjs', page.url()).href, step: page.testStep,
+      finalURL: frame.url(), responseStatus: installed.status(), methodAfterRedirect: installed.request().method(),
+    });
+
+    page.testStep = `open the installed ${demo} dashboard`;
+    const dashboard = await frame.goto(new URL('administrator/index.php?option=com_demo', site).href,
+      { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs });
+    const dashboardBody = await frame.locator('body').innerText();
+    assert.equal(dashboard.status(), 200, dashboardBody.slice(0, 3000));
+    assert.doesNotMatch(dashboardBody, /Fatal error|Class .*not found|Call to undefined|(?:Super|Joomla)___[0-9a-f_-]+___Power|An error has occurred/i);
+    assert.match(dashboardBody, /Demo Dashboard/);
+    assert.equal(await frame.locator('input[name="passwd"]').count(), 0, 'The installed Demo must open in the authenticated administrator session.');
     completed = true;
     return { demo, joomlaVersion, phpVersion, maxExecutionTime, compilerImage: true,
-      durationMs: Date.now() - started, zipBytes: downloaded.length, entries: proof.entries,
-      manifest: proof.manifest, download: true };
+      durationMs, zipBytes: downloaded.length, entries: proof.entries,
+      manifest: proof.manifest, download: true, requiredPowers: proof.powers,
+      actionsDefinitions: proof.actionsDefinitions, unresolvedPowers: proof.unresolved,
+      installed: true, dashboard: true };
   } finally {
     // Preserve a failed form for the browser runner's diagnostic screenshot and HTML.
     if (completed && owned) await page.locator('#compiler-contract-frame').evaluate(element => element.remove());

@@ -1,4 +1,5 @@
 import { resolvePublicAssetURL } from './public-assets.mjs';
+import { createJcbRepositoryFetch } from './jcb-network.mjs';
 
 export const NESTED_PHP_REQUEST_ERROR = 'Nested HTTP requests to the same running PHP site are not supported by this runtime.';
 
@@ -38,6 +39,7 @@ export function publicImageFetchOptions(input, init, url, options) {
 export function createPhpFetch(fetcher, siteURL, isRequestActive, publicAssets = {}) {
   const site = new URL(siteURL);
   const prefix = `${site.pathname.replace(/\/+$/, '')}/`;
+  const repositoryFetch = createJcbRepositoryFetch(fetcher);
   return async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input, site);
     if (isRequestActive() && url.origin === site.origin
@@ -46,6 +48,6 @@ export function createPhpFetch(fetcher, siteURL, isRequestActive, publicAssets =
       throw new TypeError(NESTED_PHP_REQUEST_ERROR);
     }
     const mapped = publicImageFetchOptions(input, init, url, publicAssets);
-    return mapped ? fetcher(mapped.url, mapped.init) : fetcher(input, init);
+    return mapped ? fetcher(mapped.url, mapped.init) : repositoryFetch(input, init);
   };
 }

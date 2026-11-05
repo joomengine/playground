@@ -275,6 +275,17 @@ forbidden request headers, and connection behavior; options for disabling TLS
 verification cannot bypass browser security. Redirect responses are hidden from
 browser Fetch: enable following explicitly when a client needs redirects.
 PHP's cookie-file settings do not create a separate browser cookie store.
+For anonymous reads of the public JCB Power repositories, Playground also checks
+the other mirrors advertised by JCB's network API when a repository index cannot
+be read. The API's availability status describes its own connectivity: a mirror
+marked unavailable there can still be readable by the browser. Active mirrors
+are tried first, followed by the remaining advertised, approved public mirrors.
+After an index succeeds, its Power files stay on that mirror for that index read;
+a failed file does not silently switch to a different repository copy. HTML
+challenge pages are rejected instead of being accepted as repository data.
+This uses ordinary browser Fetch and requires a browser-readable mirror. It adds
+no server proxy and forwards no credentials to alternate mirrors. Authenticated
+requests, custom repositories and unrelated HTTP retain their original transport.
 HTTP proxies and Unix sockets are unsupported. Requests to PHP in the same
 playground instance cannot complete recursively while its worker is already
 executing a request; use a separate server or independent instance for HTTP
@@ -897,6 +908,13 @@ queries. Missing images, scripts, styles and fonts fail validation, with their
 URLs and browser diagnostics retained. A controlled cross-origin PHP read also
 verifies that a denied request reports its error promptly and leaves PHP and the
 database usable. The playground does not replace artwork or hide production errors.
+
+The JCB compiler contract exercises both Joomla 5 and 6 with live repository
+retrieval. It rejects missing Powers and unresolved Power placeholders in the
+generated PHP, installs the compiled Demo, and opens its administrator dashboard.
+A successful ZIP download alone does not satisfy this contract. Focused network
+tests also cover mirror fallback, invalid responses, exhausted mirrors and the
+credential restrictions.
 
 Firefox 157 emits an empty-URL service-worker diagnostic for some successful native
 redirects, including a minimal `Response.redirect()` with no playground runtime.
