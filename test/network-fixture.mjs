@@ -2,12 +2,15 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { createStaticServer } from './server.mjs';
 
 export const fixtureOrigin = 'http://first.example.com';
 export const writeOrigin = 'http://second.example.com';
 export const binary = Buffer.from(Array.from({ length: 4096 }, (_, index) => index % 256));
 export const binaryHash = createHash('sha256').update(binary).digest('hex');
+const compressedBinary = gzipSync(binary);
+export const compressedLength = compressedBinary.length;
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}`)));
 const close = server => new Promise(resolve => { server.closeAllConnections?.(); server.close(resolve); });
 
@@ -49,6 +52,12 @@ export async function createNetworkFixture({ directory, liveOrigins = [], prefix
       res.setHeader('Content-Type', 'application/octet-stream'); res.end(body); return;
     }
     if (resource === '/html') { res.setHeader('Content-Type', 'text/html'); res.end('<!doctype html><title>Legitimate HTTP content</title>'); return; }
+    if (resource === '/compressed' || resource === '/compressed-not-modified') {
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Encoding', 'gzip'); res.setHeader('Content-Length', compressedLength);
+      if (resource === '/compressed-not-modified') res.statusCode = 304;
+      res.end(req.method === 'HEAD' || res.statusCode === 304 ? undefined : compressedBinary); return;
+    }
     if (resource === '/binary') {
       res.setHeader('Content-Type', 'application/octet-stream'); res.setHeader('Content-Length', binary.length);
       res.end(req.method === 'HEAD' ? undefined : binary); return;
@@ -68,7 +77,7 @@ export async function createNetworkFixture({ directory, liveOrigins = [], prefix
     const mapped = mapFixture(input);
     const response = await fetch(mapped || input, init);
     if (!mapped) liveReads.push({ event: 'response', url: original, status: response.status,
-      contentType: response.headers.get('content-type') || '', route: 'relay' });
+      contentType: response.headers.get('content-type') || '', contentEncoding: response.headers.get('content-encoding') || '', route: 'relay' });
     return response;
   };
   const worker = createRelayWorker({ fetcher });

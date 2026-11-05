@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { gzipSync } from 'node:zlib';
 import test from 'node:test';
 import { builtWrapper, runtimeConfiguration, releasedLibraries } from './runtime-artifacts.mjs';
 import { stageCurl } from '../scripts/curl.mjs';
@@ -13,6 +14,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const pins = await runtimeConfiguration();
 const directory = path.resolve(root, process.env.CURL_EXTENSION_DIR || '.cache/curl');
 const payload = Buffer.from([0, 65, 255, 66, 128, 10]);
+const compressedPayload = gzipSync(payload);
 
 async function fixture(t) {
   const requests = [];
@@ -30,6 +32,11 @@ async function fixture(t) {
     } else if (request.url === '/binary') {
       response.writeHead(200, { 'Content-Type': 'application/octet-stream' });
       response.end(payload);
+    } else if (request.url === '/compressed' || request.url === '/not-modified') {
+      const status = request.url === '/not-modified' ? 304 : 200;
+      response.writeHead(status, { 'Content-Type': 'application/octet-stream',
+        'Content-Encoding': 'gzip', 'Content-Length': String(compressedPayload.length) });
+      response.end(request.method === 'HEAD' || status === 304 ? undefined : compressedPayload);
     } else if (request.url === '/large-head') {
       assert.equal(request.method, 'HEAD', 'The large length fixture must never allocate or transfer its advertised body.');
       response.writeHead(200, { 'Content-Length': '5000000000' });
@@ -72,7 +79,12 @@ for (const version of pins.php) {
       $base = '${server.url}';
       function executeCurl(string $url, array $options = []): array {
         $handle = curl_init($url);
-        curl_setopt_array($handle, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
+        $headers = [];
+        curl_setopt_array($handle, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5,
+          CURLOPT_HEADERFUNCTION => static function ($handle, $line) use (&$headers) {
+            $headers[] = $line;
+            return strlen($line);
+          }]);
         curl_setopt_array($handle, $options);
         $body = curl_exec($handle);
         $result = ['body' => $body === false ? false : base64_encode($body),
@@ -80,6 +92,9 @@ for (const version of pins.php) {
           'url' => curl_getinfo($handle, CURLINFO_EFFECTIVE_URL),
           'redirectCount' => curl_getinfo($handle, CURLINFO_REDIRECT_COUNT),
           'redirectUrl' => curl_getinfo($handle, CURLINFO_REDIRECT_URL),
+          'headers' => $headers,
+          'contentLength' => curl_getinfo($handle, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T),
+          'downloaded' => curl_getinfo($handle, CURLINFO_SIZE_DOWNLOAD_T),
           'errno' => curl_errno($handle)];
         unset($handle);
         return $result;
@@ -102,6 +117,9 @@ for (const version of pins.php) {
         CURLOPT_POSTFIELDS => base64_decode('${payload.toString('base64')}'),
         CURLOPT_HTTPHEADER => ['Content-Type: application/octet-stream', 'X-Client-Proof: binary-post']]);
       $head = executeCurl($base . '/binary', [CURLOPT_NOBODY => true, CURLOPT_HEADER => true]);
+      $compressed = executeCurl($base . '/compressed');
+      $compressedHead = executeCurl($base . '/compressed', [CURLOPT_NOBODY => true, CURLOPT_HEADER => true]);
+      $notModified = executeCurl($base . '/not-modified', [CURLOPT_HEADER => true]);
       $missing = executeCurl($base . '/missing', [CURLOPT_NOBODY => true]);
       $status = executeCurl($base . '/status');
       $redirect = executeCurl($base . '/redirect', [CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 3]);
@@ -129,6 +147,7 @@ for (const version of pins.php) {
         'largeContentLength' => $largeContentLength, 'authMaskAccepted' => $authMaskAccepted, 'overflowRejected' => $overflowRejected,
         'get' => $get, 'loopback' => $loopback, 'afterLoopback' => $afterLoopback,
         'post' => $post, 'head' => $head, 'missing' => $missing, 'status' => $status,
+        'compressed' => $compressed, 'compressedHead' => $compressedHead, 'notModified' => $notModified,
         'redirect' => $redirect, 'manual' => $manual, 'relayMetadata' => $relayMetadata,
         'custom' => $custom, 'timeout' => $timeout, 'unsupported' => $unsupported,
         'afterTimeout' => $afterTimeout, 'failStatus' => $failStatus, 'shortWrite' => $shortWrite,
@@ -172,7 +191,8 @@ for (const version of pins.php) {
     assert.equal(result.largeContentLength, 5000000000, 'curl_off_t output must retain all 64 bits.');
     assert.equal(result.authMaskAccepted, true, 'Valid authentication flags must retain their unsigned C-long bit pattern.');
     assert.equal(result.overflowRejected, true, 'A PHP int64 option must never silently wrap at the C long boundary.');
-    for (const key of ['get', 'afterLoopback', 'post', 'head', 'missing', 'status', 'redirect', 'manual', 'relayMetadata', 'custom', 'afterTimeout']) {
+    for (const key of ['get', 'afterLoopback', 'post', 'head', 'compressed', 'compressedHead', 'notModified',
+      'missing', 'status', 'redirect', 'manual', 'relayMetadata', 'custom', 'afterTimeout']) {
       assert.equal(result[key].error, '', `${key}: ${result[key].error}`);
       assert.equal(result[key].errno, 0, key);
     }
@@ -190,6 +210,22 @@ for (const version of pins.php) {
     assert.match(head, /^HTTP\/\S+ 200\b/);
     assert.match(head, /x-playground-proof: native-curl-fetch/i);
     assert.ok(head.endsWith('\r\n\r\n'));
+    assert.equal(result.compressed.status, 200);
+    assert.deepEqual(Buffer.from(result.compressed.body, 'base64'), payload, 'Fetch must decode the real gzip response exactly once.');
+    assert.doesNotMatch(result.compressed.headers.join(''), /^content-(?:encoding|length):/im);
+    assert.equal(result.compressed.contentLength, -1, 'Decoded responses must not expose their encoded length.');
+    assert.equal(result.compressed.downloaded, payload.length);
+    for (const [key, status] of [['compressedHead', 200], ['notModified', 304]]) {
+      const record = result[key];
+      const headers = record.headers.join('');
+      assert.equal(record.status, status);
+      assert.match(headers, /^content-encoding: gzip\r?$/im, `${key}: encoding describes the representation.`);
+      assert.match(headers, new RegExp(`^content-length: ${compressedPayload.length}\\r?$`, 'im'));
+      assert.equal(record.headers.filter(line => /^HTTP\//.test(line)).length, 1, `${key}: one response header block.`);
+      assert.equal(record.contentLength, compressedPayload.length, `${key}: native getinfo retains the encoded representation length.`);
+      assert.equal(record.downloaded, 0, `${key}: a bodyless response must not report downloaded body bytes.`);
+      assert.equal(Buffer.from(record.body, 'base64').toString(), headers, `${key}: CURLOPT_HEADER returns headers and no body.`);
+    }
     assert.equal(result.missing.status, 404);
     assert.equal(result.missing.body, '');
     assert.equal(result.status.status, 418);
@@ -233,6 +269,8 @@ for (const version of pins.php) {
     assert.ok(result.events.slice(0, firstBody).every(event => event === 'header'));
     assert.ok(result.events.slice(firstBody).every(event => event === 'body'));
     assert.ok(server.requests.some(request => request.method === 'HEAD' && request.path === '/binary'));
+    assert.ok(server.requests.some(request => request.method === 'HEAD' && request.path === '/compressed'));
+    assert.ok(server.requests.some(request => request.method === 'GET' && request.path === '/not-modified'));
     assert.ok(server.requests.some(request => request.path === '/slow'));
     const received = server.requests.find(request => request.method === 'POST');
     assert.deepEqual(received.body, payload, 'The HTTP server must receive the exact uploaded bytes.');

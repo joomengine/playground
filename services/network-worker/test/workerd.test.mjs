@@ -56,10 +56,13 @@ test('actual workerd issues scoped sessions, streams binary uploads and decoded 
     const relay = (path, metadata = {}, body) => send('/v1/fetch', { body, headers: { Authorization: `Bearer ${session.token}`,
       'X-Playground-Request': encodeMetadata({ version: 1, url: `https://first.example.com${path}`, method: 'GET', headers: [], redirect: 'follow', maxRedirects: 5, timeoutMs: 1000, ...metadata }) } });
     const binary = await relay('/binary'); assert.equal(binary.status, 200, await binary.clone().text()); assert.deepEqual(Buffer.from(await binary.arrayBuffer()), original);
+    assert.equal(new Map(received.at(-1).headers).get('accept-encoding'), 'gzip, br');
     const upload = await relay('/upload', { method: 'POST', headers: [['Content-Type', 'application/octet-stream']] }, original);
     assert.equal(upload.status, 200); assert.deepEqual(Buffer.from(await upload.arrayBuffer()), original);
     assert.deepEqual(received.at(-1).body, original); assert.equal(received.at(-1).method, 'POST');
+    assert.equal(new Map(received.at(-1).headers).get('accept-encoding'), 'gzip, br');
     const gzip = await relay('/gzip', { headers: [['Accept-Encoding', 'gzip']] }); assert.equal(gzip.status, 200);
+    assert.equal(new Map(received.at(-1).headers).get('accept-encoding'), 'gzip');
     const gzipMetadata = decodeMetadata(gzip.headers.get('x-playground-response'));
     assert.equal(gzipMetadata.headers.some(([name]) => ['content-encoding', 'content-length'].includes(name)), false);
     assert.equal(gzip.headers.get('set-cookie'), null);
@@ -67,6 +70,7 @@ test('actual workerd issues scoped sessions, streams binary uploads and decoded 
     for (const encoding of ['br', 'deflate']) {
       const compressed = await relay(`/${encoding}`, { headers: [['Accept-Encoding', encoding]] });
       assert.equal(compressed.status, 200); assert.deepEqual(Buffer.from(await compressed.arrayBuffer()), original, encoding);
+      assert.equal(new Map(received.at(-1).headers).get('accept-encoding'), encoding);
     }
     const head = await relay('/gzip', { method: 'HEAD' });
     const headMetadata = decodeMetadata(head.headers.get('x-playground-response'));

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, firefox } from 'playwright';
 import { prepareBrowserEnvironment } from './server.mjs';
-import { createNetworkFixture, fixtureOrigin, writeOrigin, binaryHash } from './network-fixture.mjs';
+import { createNetworkFixture, fixtureOrigin, writeOrigin, binaryHash, compressedLength } from './network-fixture.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const directory = path.resolve(process.env.PLAYGROUND_DIST || path.join(root, 'dist'));
@@ -20,16 +20,18 @@ async function probe(page, url, { method = 'GET', body = null, headers = [], fol
     const source = `<?php
       $args = json_decode(base64_decode('${data}'), true, 512, JSON_THROW_ON_ERROR);
       $curl = curl_init($args['url']);
+      $responseHeaders = [];
       curl_setopt_array($curl, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 20,
         CURLOPT_CUSTOMREQUEST => $args['method'], CURLOPT_FOLLOWLOCATION => $args['follow'],
-        CURLOPT_HTTPHEADER => $args['headers']]);
+        CURLOPT_HTTPHEADER => $args['headers'],
+        CURLOPT_HEADERFUNCTION => static function ($handle, $line) use (&$responseHeaders) { $responseHeaders[] = $line; return strlen($line); }]);
       if ($args['method'] === 'HEAD') curl_setopt($curl, CURLOPT_NOBODY, true);
       if ($args['body'] !== null) curl_setopt($curl, CURLOPT_POSTFIELDS, base64_decode($args['body']));
       $body = curl_exec($curl);
       $result = ['transport'=>'curl', 'status'=>curl_getinfo($curl,CURLINFO_RESPONSE_CODE),
         'effectiveURL'=>curl_getinfo($curl,CURLINFO_EFFECTIVE_URL),
         'errno'=>curl_errno($curl), 'error'=>curl_error($curl), 'length'=>$body === false ? null : strlen($body),
-        'hash'=>$body === false ? null : hash('sha256',$body), 'failed'=>$body === false];
+        'hash'=>$body === false ? null : hash('sha256',$body), 'failed'=>$body === false, 'headers'=>$responseHeaders];
       curl_close($curl);
       echo json_encode($result, JSON_THROW_ON_ERROR);`;
     const response = await window.playground.runPhp(source);
@@ -110,6 +112,21 @@ for (const name of names) test(`${name}: actual PHP networking preserves binary 
     assert.equal(streamHead.status, 200); assert.equal(streamHead.length, 0); assert.equal(streamHead.failed, false);
     assert.ok(streamHead.headers.some(header => /^content-length:\s*4096$/i.test(header)), 'Stream HEAD must retain upstream metadata.');
     receipt.cases.push({ case: 'head', curl: head, stream: streamHead });
+
+    for (const transport of ['curl', 'stream']) {
+      const read = transport === 'curl' ? probe : streamProbe;
+      for (const [method, resource, status] of [['HEAD', 'compressed', 200], ['GET', 'compressed-not-modified', 304]]) {
+        const result = await read(page, `${writeOrigin}/denied/${resource}`, { method });
+        assert.equal(result.status, status); assert.equal(result.failed, false); assert.equal(result.length, 0);
+        assert.ok(result.headers.some(header => /^content-encoding:\s*gzip$/i.test(header.trim())), `${transport} ${status}/${method} must retain representation encoding.`);
+        assert.ok(result.headers.some(header => new RegExp(`^content-length:\\s*${compressedLength}$`, 'i').test(header.trim())), `${transport} ${status}/${method} must retain representation length.`);
+        receipt.cases.push({ case: `compressed-${transport}-${status}-${method}`, ...result });
+      }
+      const decoded = await read(page, `${writeOrigin}/denied/compressed`);
+      assert.equal(decoded.status, 200); assert.equal(decoded.hash, binaryHash); assert.equal(decoded.length, 4096);
+      assert.ok(decoded.headers.every(header => !/^content-(?:encoding|length):/i.test(header.trim())), 'A decoded GET must not retain stale compressed metadata.');
+      receipt.cases.push({ case: `compressed-${transport}-decoded-GET`, ...decoded });
+    }
 
     const payload = Buffer.from([0, 255, 10, 13, 128, 65, 0, 254]);
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) for (const transport of ['curl', 'stream']) {

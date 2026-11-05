@@ -267,6 +267,12 @@ outage. No automatic second relay bypasses a denial, rate limit or uncertain wri
 
 ### Compression and actual Worker runtime coverage
 
+When the caller omits `Accept-Encoding`, the Worker explicitly requests
+`gzip, br`. This keeps default negotiation stable across Fetch runtime upgrades
+and avoids implicitly requesting an unsupported encoding such as zstd. Explicit
+caller headers, including an empty value, remain unchanged. Unsupported response
+encodings still fail explicitly.
+
 The Worker delivers decoded HTTP entity bytes. workerd's native HTTP fetch
 performs gzip and Brotli decoding; `deflate` uses a streaming
 `DecompressionStream('deflate')` because workerd leaves that format encoded.

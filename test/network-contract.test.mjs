@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createNetworkTransport } from '../src/network-transport.mjs';
-import { createNetworkFixture, fixtureOrigin, writeOrigin, binaryHash } from './network-fixture.mjs';
+import { createNetworkFixture, fixtureOrigin, writeOrigin, binaryHash, compressedLength } from './network-fixture.mjs';
 
 test('client protocol interoperates with the actual Worker over HTTP for sessions, binary bodies and errors', async () => {
   const fixture = await createNetworkFixture({ directory: '.' });
@@ -42,6 +42,15 @@ test('client protocol interoperates with the actual Worker over HTTP for session
     const created = await transport(`${writeOrigin}/denied/status-text`);
     assert.equal(created.status, 201); assert.equal(created.statusText, 'Créé');
     assert.equal(await created.text(), 'created');
+    for (const [method, resource, status] of [['HEAD', 'compressed', 200], ['GET', 'compressed-not-modified', 304]]) {
+      const response = await transport(`${writeOrigin}/denied/${resource}`, { method });
+      assert.equal(response.status, status); assert.equal((await response.arrayBuffer()).byteLength, 0);
+      assert.equal(response.headers.get('content-encoding'), 'gzip');
+      assert.equal(response.headers.get('content-length'), String(compressedLength));
+    }
+    const decoded = await transport(`${writeOrigin}/denied/compressed`);
+    assert.equal(createHash('sha256').update(new Uint8Array(await decoded.arrayBuffer())).digest('hex'), binaryHash);
+    assert.equal(decoded.headers.get('content-encoding'), null); assert.equal(decoded.headers.get('content-length'), null);
     const before = fixture.relayRequests.length;
     await assert.rejects(transport(`${fixtureOrigin}/denied/echo`, { method: 'POST', body: 'once' }), { code: 'DIRECT_NETWORK_FAILED' });
     assert.equal(fixture.relayRequests.length, before);
