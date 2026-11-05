@@ -8,7 +8,7 @@ import { readURLConfiguration } from '../src/config.mjs';
 import { createStaticServer } from './server.mjs';
 
 const directory = fileURLToPath(new URL('../', import.meta.url));
-const archive = Buffer.from(zipSync({ 'selection-fixture.txt': strToU8('Selection and transfer fixture; installation is covered by the runtime suite.') }));
+const archive = Buffer.from(zipSync({ 'selection-fixture.txt': strToU8('Selection and transfer fixture; installation is covered by the runtime suite.') }, { mtime: new Date() }));
 const sha256 = createHash('sha256').update(archive).digest('hex');
 const sha512 = createHash('sha512').update(archive).digest('hex');
 const runtimeManifest = {

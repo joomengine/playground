@@ -15,7 +15,7 @@ const joomlaVersion = process.env.PLAYGROUND_JOOMLA_VERSIONS?.split(',')[0] || m
 const archive = zipSync({
   'mod_playground_url_contract.xml': strToU8('<?xml version="1.0" encoding="utf-8"?><extension type="module" client="site" method="upgrade"><name>mod_playground_url_contract</name><author>JoomEngine</author><version>1.0.0</version><description>Custom URL browser contract</description><files><filename module="mod_playground_url_contract">mod_playground_url_contract.php</filename></files></extension>'),
   'mod_playground_url_contract.php': strToU8("<?php defined('_JEXEC') or die; echo 'Custom URL browser contract';"),
-});
+}, { mtime: new Date() });
 
 function configuration(extensionURL, extra = {}) {
   const extension = { url: extensionURL, sha256: 'Custom URL checksums are ignored.' };
