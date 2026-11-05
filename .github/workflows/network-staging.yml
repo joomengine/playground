@@ -53,6 +53,7 @@ jobs:
           NETWORK_PLAYGROUND_URL: ${{ vars.NETWORK_PLAYGROUND_URL }}
           NETWORK_TEST_TARGET: ${{ vars.NETWORK_TEST_TARGET }}
           NETWORK_EXPECTED_SHA256: ${{ vars.NETWORK_EXPECTED_SHA256 }}
+          NETWORK_STAGING_TEST_SECRET: ${{ secrets.NETWORK_STAGING_TEST_SECRET }}
         run: node --test test/network-hosted.browser.mjs
       - name: Retain hosted staging evidence
         if: always()

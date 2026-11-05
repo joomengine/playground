@@ -227,3 +227,102 @@ test('a repeated internal dispatch identity cannot replay an uncertain write', a
   const second = await f.env.testCoordinator.fetch(retry);
   assert.equal(second.status, 409); assert.equal(await errorCode(second), 'REQUEST_ALREADY_DISPATCHED'); assert.equal(f.calls.length, 1);
 });
+
+test('forged well-formed tokens fail before an unfinished fetch envelope is read', { timeout: 1000 }, async () => {
+  const f = fixture(); let reads = 0;
+  const stream = new ReadableStream({ pull() { reads++; } }, { highWaterMark: 0 });
+  const request = new Request('https://relay.example.com/v1/fetch', { method: 'POST', body: stream, duplex: 'half', headers: {
+    Origin: 'https://playground.example.com', Authorization: `Bearer ${'A'.repeat(43)}`,
+    'X-Relay-Dispatch': crypto.randomUUID(), 'X-Relay-Started': String(f.env.testCoordinator.now()),
+    'X-Playground-Request': encodeMetadata({ version: 1, url: 'https://first.example.com/resource', method: 'GET', headers: [], redirect: 'follow', maxRedirects: 5, timeoutMs: 120000 }),
+  } });
+  const response = await f.env.testCoordinator.fetch(request);
+  assert.equal(response.status, 401); assert.equal(await errorCode(response), 'RELAY_SESSION_REQUIRED');
+  assert.equal(reads, 0); assert.equal(f.calls.length, 0);
+});
+test('unfinished fetch envelopes consume concurrency and invalid envelopes retain request accounting', { timeout: 1000 }, async () => {
+  const f = fixture({ limits: { concurrent: 1 } }); const { token } = await f.session();
+  let unblock; let started;
+  const reading = new Promise(resolve => { started = resolve; });
+  const stream = new ReadableStream({ start(controller) { unblock = () => controller.close(); }, pull() { started(); } }, { highWaterMark: 0 });
+  const pending = f.relay(token, {}, { body: stream, duplex: 'half' });
+  await reading;
+  const denied = await f.relay(token); assert.equal(denied.status, 429); assert.equal(f.calls.length, 0);
+  const sessionKey = [...f.env.testStorage.values.keys()].find(key => key.startsWith('session:'));
+  assert.equal(Object.keys((await f.env.testStorage.get(sessionKey)).active).length, 1);
+  unblock(); const success = await pending; assert.equal(await success.text(), 'response');
+  const malformed = await f.relay(token, {}, { body: 'not-empty' });
+  assert.equal(malformed.status, 400); assert.equal(await errorCode(malformed), 'INVALID_METADATA');
+  const session = await f.env.testStorage.get(sessionKey);
+  assert.equal(session.requests, 2); assert.equal(Object.keys(session.active).length, 0); assert.equal(f.calls.length, 1);
+});
+test('malformed and stalled session creation bodies consume issuance allowance before reading', { timeout: 1000 }, async () => {
+  for (const body of ['invalid-json', new ReadableStream({}, { highWaterMark: 0 })]) {
+    const f = fixture({ limits: { issuancePerHour: 1, headerMs: 10 } });
+    const response = await f.send('/v1/session', { body, ...(typeof body === 'string' ? {} : { duplex: 'half' }) });
+    assert.ok([400, 503].includes(response.status));
+    const next = await f.send('/v1/session', { body: JSON.stringify({ version: 1, turnstileToken: 'approved' }) });
+    assert.equal(next.status, 429); assert.equal(await errorCode(next), 'RATE_LIMITED'); assert.ok(f.env.testStorage.alarm);
+  }
+});
+test('renewal authenticates and reserves its attempt interval before reading an unfinished body', { timeout: 1000 }, async () => {
+  const f = fixture(); let reads = 0;
+  const forged = await f.env.testCoordinator.fetch(new Request('https://relay.example.com/v1/session', { method: 'POST',
+    headers: { Origin: 'https://playground.example.com', Authorization: `Bearer ${'A'.repeat(43)}` },
+    body: new ReadableStream({ pull() { reads++; } }, { highWaterMark: 0 }), duplex: 'half' }));
+  assert.equal(forged.status, 401); assert.equal(reads, 0);
+  const { token, expiresAt } = await f.session(); f.advance(61000);
+  const bad = await f.send('/v1/session', { headers: { Authorization: `Bearer ${token}` }, body: 'invalid-json' });
+  assert.equal(bad.status, 400);
+  const again = await f.send('/v1/session', { headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ version: 1 }) });
+  assert.equal(again.status, 429);
+  const session = [...f.env.testStorage.values].find(([key]) => key.startsWith('session:'))[1];
+  assert.equal(session.expiresAt, expiresAt);
+});
+test('redirects remain inside the originally issued destination and method scopes', async () => {
+  const f = fixture({ upstreamOrigins: ['https://first.example.com'], upstream: () => new Response(null, { status: 302, headers: { Location: 'https://second.example.com/next' } }) });
+  const { token } = await f.session();
+  f.env.UPSTREAM_ORIGINS = JSON.stringify(['https://first.example.com', 'https://second.example.com']);
+  const destination = await f.relay(token); assert.equal(destination.status, 403); assert.equal(await errorCode(destination), 'DESTINATION_NOT_ALLOWED'); assert.equal(f.calls.length, 1);
+  const g = fixture({ ALLOWED_METHODS: '["POST"]', upstream: () => new Response(null, { status: 303, headers: { Location: 'https://first.example.com/result' } }) });
+  const session = await g.session(); g.env.ALLOWED_METHODS = '["GET","POST"]';
+  const method = await g.relay(session.token, { method: 'POST' }, { body: 'write' });
+  assert.equal(method.status, 403); assert.equal(await errorCode(method), 'METHOD_NOT_ALLOWED'); assert.equal(g.calls.length, 1);
+});
+
+test('isolated staging dummy verification requires a separate CI credential before body reads', { timeout: 1000 }, async () => {
+  const secret = 'fixture-only-staging-credential-'.padEnd(48, 'x');
+  const f = fixture({ TURNSTILE_TEST_MODE: 'true', STAGING_TEST_SECRET: secret,
+    TURNSTILE_SECRET_KEY: '1x0000000000000000000000000000000AA',
+    verification: { success: true, hostname: 'example.com', metadata: { result_with_testing_key: true } } });
+  for (const headers of [{}, { 'X-Playground-Staging-Test': 'wrong-credential' }]) {
+    const response = await f.send('/v1/session', { headers, body: JSON.stringify({ version: 1, turnstileToken: 'XXXX.DUMMY.TOKEN.XXXX' }) });
+    assert.equal(response.status, 403); assert.equal(await errorCode(response), 'STAGING_TEST_AUTH_REQUIRED');
+  }
+  let reads = 0;
+  const unclosed = await f.env.testCoordinator.fetch(new Request('https://relay.example.com/v1/session', { method: 'POST', headers: { Origin: 'https://playground.example.com' },
+    body: new ReadableStream({ pull() { reads++; } }, { highWaterMark: 0 }), duplex: 'half' }));
+  assert.equal(unclosed.status, 403); assert.equal(reads, 0);
+  const headers = { 'X-Playground-Staging-Test': secret };
+  const wrongToken = await f.send('/v1/session', { headers, body: JSON.stringify({ version: 1, turnstileToken: 'ordinary-token' }) });
+  assert.equal(wrongToken.status, 401);
+  const accepted = await f.send('/v1/session', { headers, body: JSON.stringify({ version: 1, turnstileToken: 'XXXX.DUMMY.TOKEN.XXXX' }) });
+  assert.equal(accepted.status, 200); const session = await accepted.json();
+  const response = await f.relay(session.token); assert.equal(await response.text(), 'response');
+  assert.equal(f.calls[0].headers.get('x-playground-staging-test'), null);
+  f.advance(61000);
+  const renewal = await f.send('/v1/session', { headers: { Authorization: `Bearer ${session.token}` }, body: '{"version":1}' });
+  assert.equal(renewal.status, 403);
+});
+test('test mode rejects production, weak credentials and unmarked Siteverify responses; ordinary staging stays strict', async () => {
+  const settings = { TURNSTILE_TEST_MODE: 'true', STAGING_TEST_SECRET: 'x'.repeat(48), TURNSTILE_SECRET_KEY: '1x0000000000000000000000000000000AA' };
+  for (const overrides of [{ DEPLOYMENT_ENV: 'production' }, { STAGING_TEST_SECRET: '' }, { STAGING_TEST_SECRET: 'x'.repeat(31) }, { STAGING_TEST_SECRET: 'x'.repeat(257) }, { TURNSTILE_SECRET_KEY: 'ordinary-secret' }]) {
+    assert.throws(() => readPolicy({ ...fixture().env, ...settings, ...overrides }), { code: 'RELAY_CONFIGURATION_INVALID' });
+  }
+  const unmarked = fixture({ ...settings, verification: { success: true, hostname: 'playground.example.com', action: 'network-session' } });
+  const rejected = await unmarked.send('/v1/session', { headers: { 'X-Playground-Staging-Test': settings.STAGING_TEST_SECRET }, body: JSON.stringify({ version: 1, turnstileToken: 'XXXX.DUMMY.TOKEN.XXXX' }) });
+  assert.equal(rejected.status, 401);
+  const ordinary = fixture({ verification: { success: true, hostname: 'example.com', metadata: { result_with_testing_key: true } } });
+  const strict = await ordinary.send('/v1/session', { body: JSON.stringify({ version: 1, turnstileToken: 'XXXX.DUMMY.TOKEN.XXXX' }) });
+  assert.equal(strict.status, 401);
+});

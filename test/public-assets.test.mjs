@@ -7,6 +7,7 @@ import {
 } from '../src/public-assets.mjs';
 import { createPublicAssetHandler, handlePublicAssetRequest } from '../src/public-assets-worker.mjs';
 import { createPhpFetch, NESTED_PHP_REQUEST_ERROR } from '../src/php-network.mjs';
+import { encodeNetworkMetadata, decodeNetworkMetadata } from '../src/network-protocol.mjs';
 
 const bytes = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jH2kAAAAASUVORK5CYII=', 'base64'));
 const baseURL = 'https://playground.example/sub/';
@@ -161,4 +162,37 @@ test('cancelled PHP relay requests stay cancelled and return bounded diagnostics
     ...options, fetcher(url, init) { assert.equal(init.signal.aborted, true); throw init.signal.reason; },
   });
   assert.equal(result.status, 504);
+});
+
+test('enabled shared PHP transport takes precedence over legacy image routing and cannot bypass a relay denial', async () => {
+  const endpoint = 'https://network.example';
+  for (const denied of [false, true]) {
+    const seen = [];
+    const fetcher = createPhpFetch(async (input, init) => {
+      seen.push(input);
+      assert.notEqual(input, route, 'The legacy image route must never be used while shared networking is enabled.');
+      if (input === original) throw new TypeError('Controlled direct failure');
+      assert.equal(input, `${endpoint}/v1/fetch`);
+      const metadata = decodeNetworkMetadata(init.headers['X-Playground-Request']);
+      assert.equal(metadata.url, original); assert.equal(metadata.method, 'GET');
+      if (denied) return Response.json({ version: 1, error: { code: 'DESTINATION_NOT_ALLOWED', message: 'Denied' } }, { status: 403 });
+      return new Response(bytes, { headers: { 'X-Playground-Response': encodeNetworkMetadata({
+        version: 1, status: 200, statusText: 'OK', headers: [['Content-Type', 'image/png']],
+        url: original, redirected: false, redirectCount: 0,
+      }) } });
+    }, `${baseURL}__site/owner/instance/`, () => true, options, {
+      config: { enabled: true, endpoint }, getSession: async () => ({ token: 'fixture-session', expiresAt: Date.now() + 60000 }),
+    });
+    if (denied) await assert.rejects(fetcher(original), { code: 'DESTINATION_NOT_ALLOWED' });
+    else assert.deepEqual(new Uint8Array(await (await fetcher(original)).arrayBuffer()), bytes);
+    assert.deepEqual(seen, [original, `${endpoint}/v1/fetch`]);
+  }
+});
+
+test('disabled shared networking preserves existing PHP image compatibility', async () => {
+  const seen = [];
+  const fetcher = createPhpFetch(async input => { seen.push(input); return new Response(bytes); },
+    `${baseURL}__site/owner/instance/`, () => true, options, { config: { enabled: false } });
+  assert.deepEqual(new Uint8Array(await (await fetcher(original)).arrayBuffer()), bytes);
+  assert.deepEqual(seen, [route]);
 });

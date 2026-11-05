@@ -25,9 +25,10 @@ const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'ut
 const approvedImages = validatePublicAssetRegistry(JSON.parse(await readFile(path.join(root, 'config/public-assets.json'), 'utf8')));
 const imageDelivery = validatePublicAssetConfiguration(JSON.parse(await readFile(path.join(root, 'config/public-assets-config.json'), 'utf8')));
 const browserCompatibility = validateCompatibilityConfiguration(JSON.parse(await readFile(path.join(root, 'config/browser-compatibility.json'), 'utf8')));
-const network = normalizeNetworkConfig(JSON.parse(await readFile(path.join(root, 'config/network.json'), 'utf8')));
 const deploymentEnvironment = process.env.PLAYGROUND_DEPLOYMENT_ENV || 'production';
 if (!['production', 'staging'].includes(deploymentEnvironment)) throw new Error('Invalid Playground deployment environment.');
+const networkConfigurationPath = deploymentEnvironment === 'staging' ? 'config/network.staging.json' : 'config/network.json';
+const network = normalizeNetworkConfig(JSON.parse(await readFile(path.join(root, networkConfigurationPath), 'utf8')));
 if (network.enabled && (!network.turnstileSiteKey
   || (deploymentEnvironment === 'production' && /^[123]x0{20}[A-Z]{2}$/.test(network.turnstileSiteKey)))) {
   throw new Error('An enabled published network service requires a Turnstile site key; production rejects test keys.');
@@ -213,6 +214,8 @@ try {
   for (const name of ['index.html', 'network-verify.html', 'src', 'config', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
     await cp(path.join(root, name), path.join(staging, name), { recursive: true });
   }
+  // Each artifact includes only its chosen public environment configuration.
+  await rm(path.join(staging, 'config/network.staging.json'), { force: true });
   // Serialize the validated public allowlist rather than copying unreviewed fields.
   await writeFile(path.join(staging, 'config/network.json'), `${JSON.stringify(network, null, 2)}\n`);
   await writeFile(path.join(staging, '.nojekyll'), '');

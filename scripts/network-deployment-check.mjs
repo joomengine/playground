@@ -9,7 +9,11 @@ const config = JSON.parse(await readFile(new URL('../services/network-worker/wra
 const selected = config.env[environment];
 assert.ok(selected?.durable_objects?.bindings?.some(binding => binding.name === 'RELAY_STATE'), 'Explicit state binding required.');
 assert.equal(selected.vars?.ENABLED, 'true', 'Provision and review the disabled Worker first, then explicitly enable its environment before activation.');
-const policy = readPolicy({ ...selected.vars, TURNSTILE_SECRET_KEY: 'checked-by-separate-runtime-secret-binding' });
+if (environment === 'staging') assert.equal(selected.vars.TURNSTILE_TEST_MODE, 'true', 'Automated staging acceptance requires explicitly isolated test mode.');
+const policy = readPolicy({ ...selected.vars,
+  TURNSTILE_SECRET_KEY: environment === 'staging' ? '1x0000000000000000000000000000000AA' : 'checked-by-separate-runtime-secret-binding',
+  STAGING_TEST_SECRET: 'configuration-validation-only-not-a-server-secret',
+});
 assert.ok(policy.enabled && policy.upstreamOrigins.size && policy.allowedOrigins.size);
 assert.equal(new URL(policy.audience).protocol, 'https:', 'Hosted relay activation requires HTTPS.');
 assert.ok([...policy.allowedOrigins].every(origin => new URL(origin).protocol === 'https:'), 'Hosted browser origins must use HTTPS.');

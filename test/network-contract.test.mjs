@@ -39,6 +39,9 @@ test('client protocol interoperates with the actual Worker over HTTP for session
       const response = await transport(`${writeOrigin}/denied/status/${status}`);
       assert.equal(response.status, status); await response.arrayBuffer();
     }
+    const created = await transport(`${writeOrigin}/denied/status-text`);
+    assert.equal(created.status, 201); assert.equal(created.statusText, 'Créé');
+    assert.equal(await created.text(), 'created');
     const before = fixture.relayRequests.length;
     await assert.rejects(transport(`${fixtureOrigin}/denied/echo`, { method: 'POST', body: 'once' }), { code: 'DIRECT_NETWORK_FAILED' });
     assert.equal(fixture.relayRequests.length, before);

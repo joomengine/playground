@@ -1,6 +1,6 @@
 import {
   VERSION, REQUEST_HEADER, RESPONSE_HEADER, RelayError, readPolicy, validateDestination,
-  requestHeaders, responseHeaders, encodeMetadata, decodeMetadata, ANONYMOUS_HEADERS,
+  requestHeaders, responseHeaders, encodeMetadata, decodeMetadata, ANONYMOUS_HEADERS, TURNSTILE_TEST_TOKEN,
 } from './policy.mjs';
 
 const sessionTokenPattern = /^[A-Za-z0-9_-]{43}$/;
@@ -75,8 +75,8 @@ export function createRelayWorker({ now = clock } = {}) {
         if (!['/v1/session', '/v1/fetch'].includes(url.pathname)) throw new RelayError('NOT_FOUND', 'Unknown network service operation.', 404);
         if (request.method === 'OPTIONS') {
           const requested = (request.headers.get('access-control-request-headers') || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
-          if (request.headers.get('access-control-request-method') !== 'POST' || requested.some(name => !['authorization', 'content-type', 'x-playground-request'].includes(name))) throw new RelayError('METHOD_NOT_ALLOWED', 'Unsupported preflight request.', 405);
-          return cors(new Response(null, { status: 204 }), origin);
+          if (request.headers.get('access-control-request-method') !== 'POST' || requested.some(name => !['authorization', 'content-type', 'x-playground-request', ...(policy.testMode ? ['x-playground-staging-test'] : [])].includes(name))) throw new RelayError('METHOD_NOT_ALLOWED', 'Unsupported preflight request.', 405);
+          return cors(new Response(null, { status: 204 }), origin, policy.testMode);
         }
         if (request.method !== 'POST') throw new RelayError('METHOD_NOT_ALLOWED', 'Use POST for this network operation.', 405);
         if (!env.RELAY_STATE) throw new RelayError('RELAY_UNAVAILABLE', 'The network service state store is unavailable.', 503);
@@ -85,21 +85,21 @@ export function createRelayWorker({ now = clock } = {}) {
         // retain this dispatch identity; the coordinator will never repeat a write.
         headers.set('X-Relay-Dispatch', crypto.randomUUID());
         headers.set('X-Relay-Started', String(now()));
-        const forwarded = new Request(request, { headers });
+        const forwarded = new Request(request, { headers, signal: request.signal });
         const stub = env.RELAY_STATE.get(env.RELAY_STATE.idFromName('network-v1'));
-        return cors(await stub.fetch(forwarded), origin);
+        return cors(await stub.fetch(forwarded, { signal: request.signal }), origin, policy.testMode);
       } catch (error) {
         const response = errorResponse(error);
-        return origin && policy?.allowedOrigins.has(origin) ? cors(response, origin) : response;
+        return origin && policy?.allowedOrigins.has(origin) ? cors(response, origin, policy.testMode) : response;
       }
     },
   };
 }
-function cors(response, origin) {
+function cors(response, origin, testMode = false) {
   const headers = new Headers(response.headers);
   headers.set('Access-Control-Allow-Origin', origin);
   headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Playground-Request');
+  headers.set('Access-Control-Allow-Headers', `Authorization, Content-Type, X-Playground-Request${testMode ? ', X-Playground-Staging-Test' : ''}`);
   headers.set('Access-Control-Expose-Headers', 'X-Playground-Response, Retry-After');
   headers.set('Access-Control-Max-Age', '300');
   headers.set('Vary', 'Origin');
@@ -125,7 +125,10 @@ export class RelayCoordinator {
       if (url.pathname === '/v1/session') return await this.session(request, policy);
       if (url.pathname === '/v1/fetch') return await this.relay(request, policy);
       throw new RelayError('NOT_FOUND', 'Unknown network service operation.', 404);
-    } catch (error) { return errorResponse(error); }
+    } catch (error) {
+      if (request.body && !request.body.locked) request.body.cancel(error).catch(() => {});
+      return errorResponse(error);
+    }
   }
   async transaction(callback) { return this.state.storage.transaction(callback); }
   async sessionRecord(storage, key, request, policy, now = this.now()) {
@@ -137,36 +140,57 @@ export class RelayCoordinator {
   }
   async session(request, policy) {
     const sessionSignal = AbortSignal.any([request.signal, AbortSignal.timeout(Math.min(policy.limits.headerMs, 10000))]);
-    const payload = await boundedJSON(request, 4096, sessionSignal);
-    if (payload?.version !== VERSION) throw new RelayError('UNSUPPORTED_PROTOCOL_VERSION', 'Unsupported relay protocol version.');
     const now = this.now();
+    if (policy.testMode) {
+      const credential = request.headers.get('X-Playground-Staging-Test');
+      if (!credential || credential.length > 256 || await digest(credential) !== await digest(this.env.STAGING_TEST_SECRET)) {
+        throw new RelayError('STAGING_TEST_AUTH_REQUIRED', 'The isolated staging test requires its CI credential.', 403);
+      }
+    }
+    let renewal; let ip;
     if (request.headers.has('authorization')) {
       const token = tokenValue(request); const key = `session:${await digest(token)}`;
-      const expiresAt = await this.transaction(async storage => {
+      // Authenticate and reserve the renewal interval before reading a possibly
+      // unfinished body. Failed renewal attempts must not bypass admission.
+      await this.transaction(async storage => {
         const session = await this.sessionRecord(storage, key, request, policy, now);
-        if (now - session.renewedAt < policy.limits.renewalMs) throw new RelayError('RATE_LIMITED', 'Please wait before renewing this network session.', 429, Math.ceil((policy.limits.renewalMs - (now - session.renewedAt)) / 1000));
-        session.expiresAt = Math.min(now + policy.limits.sessionMs, session.createdAt + policy.limits.maxSessionMs);
-        session.renewedAt = now;
+        const previousAttempt = session.renewalAttemptAt ?? session.renewedAt;
+        if (now - previousAttempt < policy.limits.renewalMs) throw new RelayError('RATE_LIMITED', 'Please wait before renewing this network session.', 429, Math.ceil((policy.limits.renewalMs - (now - previousAttempt)) / 1000));
+        session.renewalAttemptAt = now;
         await storage.put(key, session);
+      });
+      renewal = { token, key };
+    } else {
+      ip = request.headers.get('CF-Connecting-IP');
+      if (!ip) throw new RelayError('RELAY_UNAVAILABLE', 'The network service could not identify this request.', 503);
+      const hour = Math.floor(now / 3600000);
+      const issuanceKey = `issuance:${hour}:${await digest(ip)}`;
+      const globalKey = `issuance:${hour}:global`;
+      // Count every admitted creation attempt before JSON reads, including
+      // malformed, oversized or stalled bodies and unsuccessful verification.
+      await this.transaction(async storage => {
+        const local = await storage.get(issuanceKey) || { count: 0, cleanupAt: (hour + 2) * 3600000 };
+        const global = await storage.get(globalKey) || { count: 0, cleanupAt: (hour + 2) * 3600000 };
+        if (local.count >= policy.limits.issuancePerHour || global.count >= policy.limits.issuanceGlobalPerHour) throw new RelayError('RATE_LIMITED', 'Network session creation is temporarily limited.', 429, Math.ceil(((hour + 1) * 3600000 - now) / 1000));
+        local.count++; global.count++;
+        await storage.put({ [issuanceKey]: local, [globalKey]: global });
+      });
+      await this.scheduleCleanup(now);
+    }
+    const payload = await boundedJSON(request, 4096, sessionSignal);
+    if (payload?.version !== VERSION) throw new RelayError('UNSUPPORTED_PROTOCOL_VERSION', 'Unsupported relay protocol version.');
+    if (renewal) {
+      const expiresAt = await this.transaction(async storage => {
+        const session = await this.sessionRecord(storage, renewal.key, request, policy);
+        session.expiresAt = Math.min(this.now() + policy.limits.sessionMs, session.createdAt + policy.limits.maxSessionMs);
+        session.renewedAt = this.now();
+        await storage.put(renewal.key, session);
         return session.expiresAt;
       });
-      return Response.json({ version: VERSION, token, expiresAt });
+      return Response.json({ version: VERSION, token: renewal.token, expiresAt });
     }
     if (typeof payload.turnstileToken !== 'string' || !payload.turnstileToken || payload.turnstileToken.length > 2048) throw new RelayError('VERIFICATION_REQUIRED', 'Browser verification is required.', 401);
-    const ip = request.headers.get('CF-Connecting-IP');
-    if (!ip) throw new RelayError('RELAY_UNAVAILABLE', 'The network service could not identify this request.', 503);
-    const hour = Math.floor(now / 3600000);
-    const issuanceKey = `issuance:${hour}:${await digest(ip)}`;
-    const globalKey = `issuance:${hour}:global`;
-    // Count attempted verifications too: invalid tokens must not create unlimited Siteverify work.
-    await this.transaction(async storage => {
-      const local = await storage.get(issuanceKey) || { count: 0, cleanupAt: (hour + 2) * 3600000 };
-      const global = await storage.get(globalKey) || { count: 0, cleanupAt: (hour + 2) * 3600000 };
-      if (local.count >= policy.limits.issuancePerHour || global.count >= policy.limits.issuanceGlobalPerHour) throw new RelayError('RATE_LIMITED', 'Network session creation is temporarily limited.', 429, Math.ceil(((hour + 1) * 3600000 - now) / 1000));
-      local.count++; global.count++;
-      await storage.put({ [issuanceKey]: local, [globalKey]: global });
-    });
-    await this.scheduleCleanup(now);
+    if (policy.testMode && payload.turnstileToken !== TURNSTILE_TEST_TOKEN) throw new RelayError('VERIFICATION_FAILED', 'The isolated staging test requires the official dummy token.', 401);
     const verification = await guarded(this.fetcher('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ secret: this.env.TURNSTILE_SECRET_KEY, response: payload.turnstileToken, remoteip: ip }),
@@ -174,7 +198,10 @@ export class RelayCoordinator {
     }), sessionSignal);
     let result; try { result = await boundedJSON(verification, 8192, sessionSignal); } catch { throw new RelayError('VERIFICATION_FAILED', 'Browser verification failed.', 401); }
     const origin = request.headers.get('origin');
-    if (!verification.ok || result.success !== true || result.hostname !== new URL(origin).hostname || result.action !== policy.action) throw new RelayError('VERIFICATION_FAILED', 'Browser verification failed.', 401);
+    const verifiedScope = policy.testMode
+      ? result.metadata?.result_with_testing_key === true
+      : result.hostname === new URL(origin).hostname && result.action === policy.action;
+    if (!verification.ok || result.success !== true || !verifiedScope) throw new RelayError('VERIFICATION_FAILED', 'Browser verification failed.', 401);
     const token = randomToken(this.bytes); const id = crypto.randomUUID();
     const expiresAt = now + policy.limits.sessionMs;
     await this.state.storage.put(`session:${await digest(token)}`, {
@@ -204,7 +231,7 @@ export class RelayCoordinator {
       session.active[dispatchId] = started + policy.limits.totalMs;
       session.dispatches[dispatchId] = started + policy.limits.totalMs;
       await storage.put({ [key]: session, [globalKey]: global });
-      return { globalKey, sessionId: session.id };
+      return { globalKey, sessionId: session.id, methods: session.methods, destinations: session.destinations };
     });
   }
   async charge(key, globalKey, count, policy) {
@@ -238,20 +265,6 @@ export class RelayCoordinator {
     const headers = requestHeaders(metadata, policy, url);
     const dispatchId = request.headers.get('X-Relay-Dispatch'); const started = Number(request.headers.get('X-Relay-Started'));
     if (!/^[a-f\d-]{36}$/.test(dispatchId || '') || !Number.isFinite(started) || started > this.now() || this.now() - started >= policy.limits.totalMs) throw timeoutError();
-    if (request.body && ['GET', 'HEAD'].includes(metadata.method)) {
-      // workerd may represent an empty POST envelope as an empty stream.
-      const reader = request.body.getReader();
-      try {
-        const emptySignal = AbortSignal.any([request.signal, AbortSignal.timeout(Math.max(1, Math.min(metadata.timeoutMs, policy.limits.totalMs)))]);
-        for (;;) {
-          const first = await guarded(reader.read(), emptySignal);
-          if (first.done) break;
-          if (first.value.byteLength) throw new RelayError('INVALID_METADATA', 'GET and HEAD requests cannot contain an upload body.');
-        }
-      } finally { await reader.cancel().catch(() => {}); }
-    }
-    const contentLength = request.headers.get('Content-Length');
-    if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > policy.limits.uploadBytes)) throw new RelayError('REQUEST_TOO_LARGE', 'The upload exceeds the network service limit.', 413);
     const reservation = await this.reserve(key, request, policy, metadata, dispatchId, started);
     const controller = new AbortController();
     const abort = () => controller.abort(abortedError());
@@ -267,10 +280,24 @@ export class RelayCoordinator {
       this.logger({ requestId: dispatchId, route: 'relay', method: metadata.method, hostname: url.hostname,
         durationMs: this.now() - started, bytes, status, error: error?.code || (error ? 'RESPONSE_INCOMPLETE' : null) });
     };
-    let uploadBytes = 0;
-    const upload = request.body && !['GET', 'HEAD'].includes(metadata.method) ? this.limitedUpload(request.body, controller, policy, count => { uploadBytes += count; return uploadBytes; }) : null;
-    let method = metadata.method; let body = upload; let redirected = false; let redirectCount = 0;
     try {
+      if (request.body && ['GET', 'HEAD'].includes(metadata.method)) {
+        // workerd may represent an empty POST envelope as an empty stream.
+        // Authentication and request accounting have already completed.
+        const reader = request.body.getReader();
+        try {
+          for (;;) {
+            const first = await guarded(reader.read(), controller.signal);
+            if (first.done) break;
+            if (first.value.byteLength) throw new RelayError('INVALID_METADATA', 'GET and HEAD requests cannot contain an upload body.');
+          }
+        } finally { await reader.cancel().catch(() => {}); }
+      }
+      const contentLength = request.headers.get('Content-Length');
+      if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > policy.limits.uploadBytes)) throw new RelayError('REQUEST_TOO_LARGE', 'The upload exceeds the network service limit.', 413);
+      let uploadBytes = 0;
+      const upload = request.body && !['GET', 'HEAD'].includes(metadata.method) ? this.limitedUpload(request.body, controller, policy, count => { uploadBytes += count; return uploadBytes; }) : null;
+      let method = metadata.method; let body = upload; let redirected = false; let redirectCount = 0;
       let upstream;
       for (let hops = 0;; hops++) {
         const headerTimer = setTimeout(() => controller.abort(timeoutError()), Math.min(total, policy.limits.headerMs));
@@ -286,8 +313,11 @@ export class RelayCoordinator {
         if (metadata.redirect === 'error') { await upstream.body?.cancel(); throw new RelayError('UPSTREAM_REDIRECT', 'The upstream returned a redirect that the caller forbids.', 502); }
         if (hops >= metadata.maxRedirects) { await upstream.body?.cancel(); throw new RelayError('TOO_MANY_REDIRECTS', 'The upstream exceeded the redirect limit.', 502); }
         const location = new URL(upstream.headers.get('location'), url).href;
-        const next = validateDestination(location, policy, new URL(request.url).origin);
         await upstream.body?.cancel();
+        const next = validateDestination(location, policy, new URL(request.url).origin);
+        const nextMethod = (status === 303 && method !== 'HEAD') || ([301, 302].includes(status) && method === 'POST') ? 'GET' : method;
+        if (!reservation.destinations.includes(next.origin)) throw new RelayError('DESTINATION_NOT_ALLOWED', 'The redirect destination is outside this network session scope.', 403);
+        if (!policy.methods.includes(nextMethod) || !reservation.methods.includes(nextMethod)) throw new RelayError('METHOD_NOT_ALLOWED', 'The redirect method is outside this network session scope.', 403);
         if (next.origin !== url.origin) {
           for (const name of [...headers.keys()]) if (!ANONYMOUS_HEADERS.has(name)) headers.delete(name);
         }

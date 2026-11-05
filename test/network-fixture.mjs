@@ -4,15 +4,15 @@ import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { createStaticServer } from './server.mjs';
 
-export const fixtureOrigin = 'https://first.example.com';
-export const writeOrigin = 'https://second.example.com';
+export const fixtureOrigin = 'http://first.example.com';
+export const writeOrigin = 'http://second.example.com';
 export const binary = Buffer.from(Array.from({ length: 4096 }, (_, index) => index % 256));
 export const binaryHash = createHash('sha256').update(binary).digest('hex');
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}`)));
 const close = server => new Promise(resolve => { server.closeAllConnections?.(); server.close(resolve); });
 
 /** Test adapter only: real browser CORS, actual Worker policy and recorded upstream bytes.
- * The two example.com HTTPS origins are mapped to a local fixture; no TLS claim is made.
+ * The two example.com HTTP origins are mapped to a local fixture; no TLS claim is made.
  * All other upstream URLs retain normal TLS verification and are never substituted.
  */
 export async function createNetworkFixture({ directory, liveOrigins = [], prefix = '/playground/', fixtures = {}, isolation = false } = {}) {
@@ -36,6 +36,9 @@ export async function createNetworkFixture({ directory, liveOrigins = [], prefix
     if (req.method === 'OPTIONS') { res.writeHead(url.pathname.startsWith('/direct/') ? 204 : 403).end(); return; }
     res.setHeader('X-Proof', 'upstream');
     const resource = url.pathname.replace(/^\/(?:direct|denied)\//, '/');
+    if (resource === '/status-text') {
+      res.statusCode = 201; res.statusMessage = 'Créé'; res.end('created'); return;
+    }
     if (resource.startsWith('/status/')) {
       res.statusCode = Number(resource.split('/').at(-1));
       res.setHeader('Content-Type', 'text/plain'); res.end(`upstream:${res.statusCode}`); return;
@@ -76,6 +79,7 @@ export async function createNetworkFixture({ directory, liveOrigins = [], prefix
       if (!available) { res.writeHead(503, { 'Access-Control-Allow-Origin': appOrigin }).end('Unavailable'); return; }
       const controller = new AbortController();
       req.once('aborted', () => controller.abort());
+      res.once('close', () => { if (!res.writableEnded) controller.abort(); });
       const request = new Request(`${relayOrigin}${req.url}`, { method: req.method, headers: { ...req.headers, 'cf-connecting-ip': '198.51.100.2' },
         signal: controller.signal, ...(!['GET', 'HEAD'].includes(req.method) ? { body: Readable.toWeb(req), duplex: 'half' } : {}) });
       const response = await worker.fetch(request, env);
@@ -101,10 +105,10 @@ export async function createNetworkFixture({ directory, liveOrigins = [], prefix
       await context.addInitScript(() => {
         globalThis.turnstile = { render(_container, options) { queueMicrotask(() => options.callback('network-fixture-verification')); return 'fixture'; }, remove() {} };
       });
-      await context.route(/^https:\/\/(?:first|second)\.example\.com\//, async route => {
-        const response = await route.fetch({ url: mapFixture(route.request().url()) });
-        await route.fulfill({ response });
-      });
+      await context.route(/^http:\/\/(?:first|second)\.example\.com\//, route =>
+        // Continue a real browser request. Fulfilling through Playwright would
+        // bypass the browser's CORS checks and cannot prove this contract.
+        route.continue({ url: mapFixture(route.request().url()) }));
       context.on('page', page => {
         // Every independently created PHP site owns its own session. Drive each
         // real modal without assuming one verification covers later sites.

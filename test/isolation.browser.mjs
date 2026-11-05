@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -184,23 +185,31 @@ test(`${browserName}: production entry and service worker start Joomla under cap
   const server = await createStaticServer({ directory: path.resolve(process.env.PLAYGROUND_ISOLATION_RUNTIME_DIST), isolation: false });
   const browser = await launchBrowser(server);
   const context = await withPinnedCatalog(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await context.newPage();
+  const documents = [], runtimeAssets = [], pageErrors = [];
+  const evidence = { browser: browserName, version: browser.version(), documents, runtimeAssets, pageErrors };
+  page.on('pageerror', error => pageErrors.push(error.message));
   try {
-    const page = await context.newPage();
     await page.addInitScript(() => {
       if (new URL(location.href).searchParams.get('__je_coep')?.endsWith(':credentialless')) {
         Object.defineProperty(globalThis, 'crossOriginIsolated', { value: false });
       }
     });
-    const documents = [], runtimeAssets = [];
     page.on('request', request => {
       if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents.push(request.url());
+    });
+    context.on('request', request => {
       if (/\.(?:wasm|so)(?:\?|$)/.test(request.url())) runtimeAssets.push(request.url());
     });
-    await page.goto(`${server.url}?deploy=joomla&php=8.4&jcb=none&persist=0&start=1&immediate=1`);
+    await page.goto(`${server.url}?deploy=blank&php=8.4&jcb=none&persist=0&start=1&immediate=1`);
     await page.locator('html[data-playground-environment="ready"]').waitFor({ timeout: 60_000 });
+    await page.waitForFunction(() => document.querySelector('#site-frame') || !document.getElementById('error-view').hidden,
+      undefined, { timeout: 240_000 });
+    assert.equal(await page.locator('#error-view').isVisible(), false,
+      `The actual application failed to start: ${await page.locator('#error-message').textContent()}`);
     await page.locator('#site-frame').waitFor({ timeout: 240_000 });
     const frame = await page.locator('#site-frame').contentFrame();
-    await frame.locator('body').waitFor({ timeout: 60_000 });
+    await frame.locator('body').filter({ hasText: /Joomla/i }).waitFor({ timeout: 60_000 });
     assert.match(await frame.locator('body').innerText(), /Joomla/i);
     assert.match(new URL(page.url()).searchParams.get('__je_coep'), /:require-corp$/);
     assert.equal(await page.evaluate(() => crossOriginIsolated), true);
@@ -211,7 +220,21 @@ test(`${browserName}: production entry and service worker start Joomla under cap
     await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 1000)));
     assert.equal(documents.length, 3, 'Resuming the application must not restart isolation navigation');
     assert.equal(await page.locator('#error-view').isVisible(), false);
-  } finally { await context.close(); await browser.close(); await server.close(); }
+    evidence.passed = true;
+  } catch (error) {
+    evidence.passed = false;
+    evidence.failure = error.message;
+    evidence.ui = await page.evaluate(() => ({
+      error: document.getElementById('error-message')?.textContent,
+      loading: document.getElementById('loading-message')?.textContent,
+      environment: document.documentElement.dataset.playgroundEnvironment,
+    })).catch(() => null);
+    throw error;
+  } finally {
+    await mkdir(path.join(directory, 'test-results'), { recursive: true });
+    await writeFile(path.join(directory, 'test-results', `isolation-startup-${browserName}.json`), JSON.stringify(evidence, null, 2));
+    await context.close(); await browser.close(); await server.close();
+  }
 });
 
 test(`${browserName}: mobile-sized compatibility mode runs PHP, MariaDB and Joomla without an image relay`, {

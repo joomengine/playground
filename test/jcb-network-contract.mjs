@@ -65,6 +65,16 @@ export function assertPowerClientProof(proof) {
 
 export function assertEntityImportProof(proof) {
   assert.equal(proof.before, null, 'An existing field cannot prove a remote entity import.');
+  assert.equal(proof.defaultProbe.after, null, 'The default read-only probe must not seed the entity.');
+  if (proof.defaultProbe.status === 403) {
+    assert.equal(proof.defaultProbe.found, false, 'A real default repository HTTP 403 must remain a failed entity read.');
+  }
+  const selected = proof.selectedRepository;
+  assert.ok(proof.discovery.some(entry => entry.status === 1 && entry.url === `${selected.base}/${selected.organisation}/${selected.repository}`),
+    'The explicit JCB repository must be advertised as healthy by live package discovery.');
+  assert.equal(new URL(selected.base).protocol, 'https:');
+  assert.equal(selected.repository, 'packages');
+  assert.equal(selected.branch, 'master');
   assert.equal(proof.imported, true, 'JCB Remote.Get must report a completed import.');
   assert.equal(proof.count, 1);
   assert.equal(proof.after?.guid, fieldGuid);
@@ -162,12 +172,38 @@ export async function assertLiveFieldImport(page) {
     if ($before !== null) throw new RuntimeException('The Greeting fixture already exists before the remote import.');
     $grep = \VDM\Joomla\Componentbuilder\Package\Factory::_('Field.Grep');
     $grep->setBranchField('read_branch');
-    $imported = \VDM\Joomla\Componentbuilder\Package\Factory::_('Field.Remote.Get')->item($guid, ['remote']);
+    // JCB 5.2/6.2 requests the singular discovery target "package" for its
+    // default repository. Preserve that real failure, then use JCB's supported
+    // explicit repository argument with a healthy live "packages" entry.
+    $default = $grep->get($guid, ['remote']);
+    $defaultPaths = $grep->getPaths() ?? [];
+    $defaultPath = $defaultPaths[0] ?? null;
+    $defaultBase = rtrim($defaultPath->base ?? 'https://git.vdm.dev', '/');
+    $defaultUrl = $defaultBase . '/api/v1/repos/' . ($defaultPath->organisation ?? 'joomla')
+      . '/' . ($defaultPath->repository ?? 'packages') . '/raw/index/field.json?ref=master';
+    $curl = curl_init($defaultUrl);
+    curl_setopt_array($curl, [CURLOPT_RETURNTRANSFER=>true, CURLOPT_TIMEOUT=>30]);
+    curl_exec($curl); $defaultStatus = curl_getinfo($curl, CURLINFO_RESPONSE_CODE); curl_close($curl);
+    $db->setQuery($sql); $defaultAfter = $db->loadAssoc();
+    $discovery = json_decode(file_get_contents('${apiBase}community/jcb/packages'), true, 512, JSON_THROW_ON_ERROR);
+    if (($discovery['target'] ?? null) !== 'packages') throw new RuntimeException('Live package discovery target is invalid.');
+    $repository = null;
+    foreach ($discovery['network'] ?? [] as $entry) {
+      if (($entry['status'] ?? null) !== 1) continue;
+      $url = parse_url($entry['url']);
+      if (($url['scheme'] ?? '') !== 'https' || ($url['path'] ?? '') !== '/joomla/packages'
+        || isset($url['user']) || isset($url['pass']) || isset($url['port']) || isset($url['query']) || isset($url['fragment'])) continue;
+      $repository = (object) ['base'=>'https://' . $url['host'], 'organisation'=>'joomla',
+        'repository'=>'packages', 'read_branch'=>'master', 'target'=>'gitea'];
+      break;
+    }
+    if ($repository === null || !$grep->validRepo($repository, 'packages')) throw new RuntimeException('No healthy live package repository is available.');
+    $imported = \VDM\Joomla\Componentbuilder\Package\Factory::_('Field.Remote.Get')->item($guid, ['remote'], $repository);
     $db->setQuery($sql); $after = $db->loadAssoc();
     $db->setQuery('SELECT COUNT(*) FROM #__componentbuilder_field WHERE guid=' . $db->quote($guid));
     $count = (int) $db->loadResult();
     $repositories = [];
-    foreach ($grep->getPaths() ?? [] as $path) {
+    foreach ([$repository] as $path) {
       $entry = $path->index['field']->{$guid} ?? null;
       if ($entry !== null) $repositories[] = ['base'=>$path->base ?? null, 'organisation'=>$path->organisation,
         'repository'=>$path->repository, 'branch'=>$path->read_branch ?? null, 'target'=>$path->target ?? null, 'entry'=>$entry];
@@ -180,9 +216,14 @@ export async function assertLiveFieldImport(page) {
       unset($after['xml']); $after['xmlAttributes'] = $attributes;
     }
     $proof = ['before'=>$before, 'imported'=>$imported, 'count'=>$count, 'after'=>$after,
-      'fixture'=>['target'=>'packages', 'ref'=>'master', 'guid'=>$guid], 'repositories'=>$repositories];
+      'fixture'=>['target'=>'packages', 'ref'=>'master', 'guid'=>$guid], 'repositories'=>$repositories,
+      'defaultProbe'=>['url'=>$defaultUrl, 'status'=>$defaultStatus, 'found'=>$default !== null, 'after'=>$defaultAfter],
+      'discovery'=>$discovery['network'],
+      'selectedRepository'=>['base'=>$repository->base, 'organisation'=>$repository->organisation,
+        'repository'=>$repository->repository, 'branch'=>$repository->read_branch]];
   `);
-  assertEntityImportProof(proof);
+  try { assertEntityImportProof(proof); }
+  catch (error) { error.message += `\nEntity receipt: ${JSON.stringify(proof)}`; throw error; }
   return proof;
 }
 

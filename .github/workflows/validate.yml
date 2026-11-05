@@ -175,7 +175,7 @@ jobs:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
         run: |
           result=0
-          for suite in test/code-workbench.browser.mjs test/code-ai-browser.mjs test/code-host-lifecycle.browser.mjs test/language-selector.browser.mjs test/extension-inputs.browser.mjs test/dynamic-selection.browser.mjs test/deployment-images.browser.mjs test/deployment-editor.browser.mjs test/structured-inputs.browser.mjs test/credentials-login.browser.mjs; do
+          for suite in test/code-workbench.browser.mjs test/code-ai-browser.mjs test/code-host-lifecycle.browser.mjs test/language-selector.browser.mjs test/extension-inputs.browser.mjs test/dynamic-selection.browser.mjs test/deployment-images.browser.mjs test/deployment-editor.browser.mjs test/structured-inputs.browser.mjs test/credentials-login.browser.mjs test/network-transport.browser.mjs; do
             node --test "$suite" || result=1
           done
           exit "$result"
@@ -313,9 +313,7 @@ jobs:
       - name: Exercise genuine CORS and the actual PHP cURL and stream bridge
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
-        run: |
-          node --test test/network-transport.browser.mjs
-          node --test test/network-runtime.browser.mjs
+        run: node --test test/network-runtime.browser.mjs
       - name: Retain PHP networking receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

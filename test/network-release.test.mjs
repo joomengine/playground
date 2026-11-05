@@ -22,7 +22,7 @@ test('production requires a successful hosted staging step for the identical sou
 
 test('deployment credentials are restricted to explicit protected deployments and production Pages rejects staging builds', () => {
   const validation = readFileSync(new URL('../.github/workflows/validate.yml', import.meta.url), 'utf8');
-  assert.doesNotMatch(validation, /secrets\.(?:CLOUDFLARE|TURNSTILE|SESSION)/);
+  assert.doesNotMatch(validation, /secrets\.(?:CLOUDFLARE|TURNSTILE|SESSION|NETWORK_STAGING_TEST_SECRET)/);
   for (const environment of ['staging', 'production']) {
     const workflow = readFileSync(new URL(`../.github/workflows/network-${environment}.yml`, import.meta.url), 'utf8');
     assert.match(workflow, /^  workflow_dispatch:/m);
@@ -34,4 +34,12 @@ test('deployment credentials are restricted to explicit protected deployments an
   const pages = readFileSync(new URL('../.github/workflows/pages.yml', import.meta.url), 'utf8');
   assert.match(pages, /assert\.equal\(manifest\.deployment\.environment, 'production'/);
   assert.match(pages, /assert\.equal\(health\.enabled, true\)/);
+  const staging = readFileSync(new URL('../.github/workflows/network-staging.yml', import.meta.url), 'utf8');
+  const credentialUse = staging.indexOf('NETWORK_STAGING_TEST_SECRET:');
+  assert.ok(credentialUse > staging.indexOf('- name: Verify hosted candidate'));
+  assert.ok(credentialUse < staging.indexOf('- name: Retain hosted staging evidence'));
+  assert.equal(staging.match(/secrets\.NETWORK_STAGING_TEST_SECRET/g)?.length, 1);
+  const hosted = readFileSync(new URL('./network-hosted.browser.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(hosted, /setExtraHTTPHeaders|addInitScript|ignoreHTTPSErrors|route\.fulfill/);
+  assert.match(hosted, /route\.request\(\)\.url\(\) !== sessionURL \|\| route\.request\(\)\.method\(\) !== 'POST'/);
 });
