@@ -8,6 +8,9 @@ const REFERENCES = [
     connection: "$db = (new DatabaseFactory())->getDriver($settings['driver'], $settings);" },
   { kind: 'model', version: '6.2.0', sha256: '4c818d664dccb05f12a19930275cd7b3cc64ad54c7b1a98bfd1e7b6d9314abf3',
     connection: "$revisedDbo = (new DatabaseFactory())->getDriver($options['driver'], $options);" },
+  // Reviewed 2026-11-05: the Force SSL check skips CLI; database validation is unchanged.
+  { kind: 'model', version: '6.2.1-dev', sha256: '3158d8aed9c849f08a6affb8e9f7e3c698c6c0df18cd95764c3e5814c93e4fc9',
+    connection: "$revisedDbo = (new DatabaseFactory())->getDriver($options['driver'], $options);" },
 ];
 const marker = '// Rocket managed browser database validation.';
 const encoder = new TextEncoder();
@@ -62,7 +65,9 @@ ${original(reference)}`;
 /** Protect browser-owned connection settings while preserving Joomla's own connection validation. */
 export async function managedDatabaseSource(source, version, kind = 'model') {
   const reviewed = REFERENCES.filter(item => item.kind === kind);
-  const exact = reviewed.filter(item => item.version === version);
+  // Nightly labels are reused for different source snapshots. Keep accepting
+  // previously reviewed snapshots of a -dev label after reviewing a newer one.
+  const exact = String(version).endsWith('-dev') ? [] : reviewed.filter(item => item.version === version);
   // A new Joomla release can reuse an existing adapter only when the *entire*
   // source file is byte-for-byte identical to a reviewed reference. This lets
   // unchanged development snapshots use the guard without weakening it to a
