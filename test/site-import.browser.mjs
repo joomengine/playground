@@ -75,7 +75,9 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
     metadata.playground.configuration.addonExtensions = metadata.playground.configuration.extensions;
     metadata.playground.configuration.startupCommands = [['missing-command:never-replay']];
     files['export.json'] = strToU8(JSON.stringify(metadata));
-    const siteExport = await readSiteExport(zipSync(files));
+    // Capture one timestamp: fflate otherwise reads the clock separately for
+    // local and central headers, which can disagree during a large ZIP copy.
+    const siteExport = await readSiteExport(zipSync(files, { mtime: new Date() }));
     const catalog = parseCatalog(await (await fetch('./assets/manifest.json')).json());
     window.importConfig = configurationForSiteExport(siteExport, catalog, { baseURL: location.href });
     const requests = [];
@@ -130,19 +132,19 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
       files['site/roundtrip-proof.txt'] = strToU8('Changed after export');
       let mismatch;
       try {
-        const siteExport = await readSiteExport(zipSync(files));
+        const siteExport = await readSiteExport(zipSync(files, { mtime: new Date() }));
         await createPlayground(configurationForSiteExport(siteExport, catalog), { siteExport });
       } catch (error) { mismatch = error.message; }
       const metadata = JSON.parse(new TextDecoder().decode(files['export.json']));
       delete metadata.playground;
       files['export.json'] = strToU8(JSON.stringify(metadata));
-      const legacy = await readSiteExport(zipSync(files));
+      const legacy = await readSiteExport(zipSync(files, { mtime: new Date() }));
       const progress = [];
       const site = await createPlayground(configurationForSiteExport(legacy, catalog, { admin: window.sourceConfig.admin }), { siteExport: legacy, onProgress: event => progress.push(event) });
       const imported = site.installation.fromSiteExport;
       await site.close();
       let invalid;
-      try { await readSiteExport(zipSync({ 'extension.xml': strToU8('<extension/>') })); }
+      try { await readSiteExport(zipSync({ 'extension.xml': strToU8('<extension/>') }, { mtime: new Date() })); }
       catch (error) { invalid = error.message; }
       return { mismatch, imported, progress, invalid };
     });
@@ -164,7 +166,7 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
       metadata.playground.configuration.admin.password = 'Outdated-login-password-456!';
       metadata.playground.configuration.autoLogin = false;
       files['export.json'] = strToU8(JSON.stringify(metadata));
-      const siteExport = await readSiteExport(zipSync(files));
+      const siteExport = await readSiteExport(zipSync(files, { mtime: new Date() }));
       const catalog = parseCatalog(await (await fetch('./assets/manifest.json')).json());
       const configuration = configurationForSiteExport(siteExport, catalog);
       const site = await createPlayground(configuration, { siteExport });

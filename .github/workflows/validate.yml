@@ -390,6 +390,17 @@ jobs:
         with:
           name: playground-static
           path: dist
+      - name: Select official Ubuntu HTTPS mirrors for WebKit dependencies
+        if: matrix.browser == 'webkit'
+        # The runner's Azure mirror can deliver packages too slowly for this
+        # job. Keep its suites, components and signed Ubuntu sources intact.
+        # https://github.com/actions/runner-images/blob/ubuntu24/20261101.360/images/ubuntu/scripts/build/configure-apt-sources.sh
+        run: |
+          grep -Fq 'mirror+file:/etc/apt/apt-mirrors.txt' /etc/apt/sources.list.d/ubuntu.sources
+          printf '%s\tpriority:%s\n' \
+            'https://archive.ubuntu.com/ubuntu/' 1 \
+            'https://security.ubuntu.com/ubuntu/' 2 \
+            | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
       - run: npx playwright install --with-deps ${{ matrix.browser }}
       - name: Verify isolation and original image bytes through real PHP
         env:
