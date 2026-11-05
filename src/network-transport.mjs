@@ -160,7 +160,10 @@ function wrapResponse(response, ctx, metadata, method, report) {
   Object.defineProperties(result, {
     url: { value: metadata?.url ?? response.url },
     redirected: { value: metadata?.redirected ?? response.redirected },
-    networkRedirectCount: { value: metadata?.redirectCount ?? ((metadata?.redirected ?? response.redirected) ? undefined : 0) },
+    // Native cURL knows how to handle hidden CORS compression headers. Relay
+    // metadata already describes the bytes delivered by its explicit envelope.
+    type: { value: metadata ? 'basic' : response.type },
+    networkRedirectCount: { value: metadata ? metadata.redirectCount ?? (metadata.redirected ? undefined : 0) : undefined },
   });
   return result;
 }
@@ -191,6 +194,11 @@ export function createNetworkTransport(fetcher, rawConfig = {}, {
         try {
           const response = await cancellable(() => fetcher(input, {
             ...directInit, signal: ctx.signal, credentials: 'omit', referrerPolicy: 'no-referrer',
+            // Fetch only strips standard authentication on cross-origin redirects;
+            // custom API-key headers would otherwise follow to the new origin.
+            // Without a preselected trusted relay, fail a credentialed redirect
+            // before forwarding it. Manual requests remain manual for PHP.
+            ...(request.forwardCredentials ? { redirect: request.redirect === 'manual' ? 'manual' : 'error' } : {}),
           }), ctx);
           ctx.check();
           if (response.status === 0 || response.type === 'opaque' || response.type === 'opaqueredirect') {

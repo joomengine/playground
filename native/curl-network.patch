@@ -1,5 +1,14 @@
 --- a/src/fetch_js.c
 +++ b/src/fetch_js.c
+@@ -214,7 +214,7 @@
+ 			init.credentials = policy;
+ 		}
+ 		let timer = null;
+-		if(request.timeoutMs > 0) timer = setTimeout(() => controller.abort(), request.timeoutMs);
++		if(request.timeoutMs > 0) timer = setTimeout(() => controller.abort(new DOMException('HTTP request deadline exceeded', 'TimeoutError')), request.timeoutMs);
+ 
+ 		try
+ 		{
 @@ -224,7 +224,14 @@
  			let authAttempts = 0;
  			for(;;)
@@ -16,13 +25,23 @@
  				const responseURL = new URL(response.url || currentURL.href);
  				if(response.status === 401 && request.auth && responseURL.origin === parsed.origin && authAttempts < 2)
  				{
-@@ -291,7 +298,8 @@
+@@ -291,7 +298,9 @@
  			result.headersAt = performance.now();
  			result.status = response.status;
  			result.statusText = response.statusText;
 -			result.redirected = canStopAtRedirect ? followed : (response.redirected ? 1 : 0);
 +			result.redirected = Number.isSafeInteger(response.networkRedirectCount)
-+				? response.networkRedirectCount : (canStopAtRedirect ? followed : (response.redirected ? 1 : 0));
++				? response.networkRedirectCount + (canStopAtRedirect ? followed : 0)
++				: (canStopAtRedirect ? followed : (response.redirected ? 1 : 0));
  			result.url = response.url || parsed.href;
  
  			const decoded = response.headers.has('content-encoding');
+@@ -349,7 +358,7 @@
+ 				result.code = error.curlCode;
+ 				result.error = error.message;
+ 			}
+-			else if(error && error.name === 'AbortError')
++			else if(error && (error.name === 'AbortError' || error.name === 'TimeoutError'))
+ 			{
+ 				result.code = CURLE_OPERATION_TIMEDOUT;
+ 				result.error = 'Operation timed out after ' + request.timeoutMs + ' milliseconds';

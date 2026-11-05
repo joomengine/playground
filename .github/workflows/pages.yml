@@ -34,6 +34,27 @@ jobs:
         with:
           name: playground-static
           path: dist
+      - name: Check the configured network endpoint before publication
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { readFile } from 'node:fs/promises';
+          const manifest = JSON.parse(await readFile('dist/assets/manifest.json', 'utf8'));
+          assert.equal(manifest.deployment.environment, 'production', 'Staging builds must never publish to production Pages.');
+          const config = JSON.parse(await readFile('dist/config/network.json', 'utf8'));
+          if (config.enabled) {
+            const endpoint = new URL(config.endpoint);
+            assert.equal(endpoint.protocol, 'https:');
+            const response = await fetch(new URL('healthz', `${config.endpoint.replace(/\/+$/, '')}/`), {
+              redirect: 'error', signal: AbortSignal.timeout(20000),
+            });
+            assert.equal(response.status, 200);
+            const health = await response.json();
+            assert.equal(health.version, config.protocolVersion);
+            assert.equal(health.enabled, true);
+            assert.equal(health.mode, 'controlled-origins');
+          }
+          JS
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: dist

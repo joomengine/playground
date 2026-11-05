@@ -170,7 +170,7 @@ export class RelayCoordinator {
     const verification = await guarded(this.fetcher('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ secret: this.env.TURNSTILE_SECRET_KEY, response: payload.turnstileToken, remoteip: ip }),
-      signal: sessionSignal, redirect: 'error',
+      signal: sessionSignal, redirect: 'manual',
     }), sessionSignal);
     let result; try { result = await boundedJSON(verification, 8192, sessionSignal); } catch { throw new RelayError('VERIFICATION_FAILED', 'Browser verification failed.', 401); }
     const origin = request.headers.get('origin');
@@ -208,12 +208,18 @@ export class RelayCoordinator {
     });
   }
   async charge(key, globalKey, count, policy) {
-    await this.transaction(async storage => {
+    const exceeded = await this.transaction(async storage => {
       const session = await storage.get(key); const global = await storage.get(globalKey);
-      if (!session || !global || session.bytes + count > policy.limits.sessionBytes || global.bytes + count > policy.limits.globalBytesPerDay) throw new RelayError('RATE_LIMITED', 'The network byte quota has been reached.', 429, 60);
-      session.bytes += count; global.bytes += count;
+      if (!session || !global) return true;
+      const denied = session.bytes + count > policy.limits.sessionBytes || global.bytes + count > policy.limits.globalBytesPerDay;
+      // Charge received bytes even when the chunk crosses a boundary. Saturating
+      // counters prevent repeated over-budget transfers from contacting upstream.
+      session.bytes = Math.min(policy.limits.sessionBytes, session.bytes + count);
+      global.bytes = Math.min(policy.limits.globalBytesPerDay, global.bytes + count);
       await storage.put({ [key]: session, [globalKey]: global });
+      return denied;
     });
+    if (exceeded) throw new RelayError('RATE_LIMITED', 'The network byte quota has been reached.', 429, 60);
   }
   async release(key, dispatchId) {
     await this.transaction(async storage => {
@@ -232,7 +238,18 @@ export class RelayCoordinator {
     const headers = requestHeaders(metadata, policy, url);
     const dispatchId = request.headers.get('X-Relay-Dispatch'); const started = Number(request.headers.get('X-Relay-Started'));
     if (!/^[a-f\d-]{36}$/.test(dispatchId || '') || !Number.isFinite(started) || started > this.now() || this.now() - started >= policy.limits.totalMs) throw timeoutError();
-    if (request.body && ['GET', 'HEAD'].includes(metadata.method)) throw new RelayError('INVALID_METADATA', 'GET and HEAD requests cannot contain an upload body.');
+    if (request.body && ['GET', 'HEAD'].includes(metadata.method)) {
+      // workerd may represent an empty POST envelope as an empty stream.
+      const reader = request.body.getReader();
+      try {
+        const emptySignal = AbortSignal.any([request.signal, AbortSignal.timeout(Math.max(1, Math.min(metadata.timeoutMs, policy.limits.totalMs)))]);
+        for (;;) {
+          const first = await guarded(reader.read(), emptySignal);
+          if (first.done) break;
+          if (first.value.byteLength) throw new RelayError('INVALID_METADATA', 'GET and HEAD requests cannot contain an upload body.');
+        }
+      } finally { await reader.cancel().catch(() => {}); }
+    }
     const contentLength = request.headers.get('Content-Length');
     if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > policy.limits.uploadBytes)) throw new RelayError('REQUEST_TOO_LARGE', 'The upload exceeds the network service limit.', 413);
     const reservation = await this.reserve(key, request, policy, metadata, dispatchId, started);
@@ -251,7 +268,7 @@ export class RelayCoordinator {
         durationMs: this.now() - started, bytes, status, error: error?.code || (error ? 'RESPONSE_INCOMPLETE' : null) });
     };
     let uploadBytes = 0;
-    const upload = request.body ? this.limitedUpload(request.body, controller, policy, count => { uploadBytes += count; return uploadBytes; }) : null;
+    const upload = request.body && !['GET', 'HEAD'].includes(metadata.method) ? this.limitedUpload(request.body, controller, policy, count => { uploadBytes += count; return uploadBytes; }) : null;
     let method = metadata.method; let body = upload; let redirected = false; let redirectCount = 0;
     try {
       let upstream;
@@ -275,12 +292,19 @@ export class RelayCoordinator {
           for (const name of [...headers.keys()]) if (!ANONYMOUS_HEADERS.has(name)) headers.delete(name);
         }
         if ((status === 303 && method !== 'HEAD') || ([301, 302].includes(status) && method === 'POST')) {
-          method = 'GET'; body = null; headers.delete('content-type'); headers.delete('content-encoding');
+          method = 'GET'; body = null; for (const name of ['content-type', 'content-encoding', 'content-language', 'content-location']) headers.delete(name);
         } else if (body) throw new RelayError('UNSUPPORTED_TRANSPORT_OPTION', 'A streamed upload cannot be replayed through an upstream redirect.', 422);
         url = next; redirected = true; redirectCount++;
       }
       const hasBody = method !== 'HEAD' && ![204, 205, 304].includes(status) && upstream.body !== null;
-      const decoded = !!upstream.headers.get('content-encoding') && upstream.headers.get('content-encoding') !== 'identity';
+      const encoding = (upstream.headers.get('content-encoding') || '').toLowerCase();
+      if (hasBody && !['', 'identity', 'gzip', 'br', 'deflate'].includes(encoding)) {
+        await upstream.body.cancel();
+        throw new RelayError('UNSUPPORTED_TRANSPORT_OPTION', 'The upstream response uses an unsupported content encoding.', 422);
+      }
+      // workerd's HTTP fetch decodes gzip/br before JavaScript reads. Its deflate
+      // stream remains encoded; decode that supported format explicitly.
+      const decoded = hasBody && !!encoding && encoding !== 'identity';
       const expected = !decoded && hasBody && /^\d+$/.test(upstream.headers.get('content-length') || '') ? Number(upstream.headers.get('content-length')) : null;
       if (expected !== null && expected > policy.limits.responseBytes) { await upstream.body?.cancel(); throw new RelayError('RESPONSE_TOO_LARGE', 'The upstream response exceeds the network service limit.', 413); }
       const responseMetadata = encodeMetadata({ version: VERSION, status, statusText: upstream.statusText,
@@ -289,7 +313,8 @@ export class RelayCoordinator {
         await upstream.body?.cancel(); await finish();
         return new Response(null, { headers: { [RESPONSE_HEADER]: responseMetadata } });
       }
-      const reader = upstream.body.getReader(); const owner = this;
+      const decodedBody = encoding === 'deflate' ? upstream.body.pipeThrough(new DecompressionStream('deflate')) : upstream.body;
+      const reader = decodedBody.getReader(); const owner = this;
       let idleTimer; let streamController;
       const terminate = () => {
         clearTimeout(idleTimer);
@@ -310,9 +335,9 @@ export class RelayCoordinator {
               controller.signal.removeEventListener('abort', terminate);
               await finish(); target.close(); return;
             }
-            if (bytes + result.value.byteLength > policy.limits.responseBytes) throw new RelayError('RESPONSE_TOO_LARGE', 'The upstream response exceeds the network service limit.', 413);
-            await owner.charge(key, reservation.globalKey, result.value.byteLength, policy);
             bytes += result.value.byteLength;
+            await owner.charge(key, reservation.globalKey, result.value.byteLength, policy);
+            if (bytes > policy.limits.responseBytes) throw new RelayError('RESPONSE_TOO_LARGE', 'The upstream response exceeds the network service limit.', 413);
             target.enqueue(result.value);
           } catch (error) {
             clearTimeout(idleTimer); controller.signal.removeEventListener('abort', terminate);

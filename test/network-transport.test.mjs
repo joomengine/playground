@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { createNetworkTransport } from '../src/network-transport.mjs';
 import { createPhpFetch, NESTED_PHP_REQUEST_ERROR } from '../src/php-network.mjs';
 import { normalizeNetworkConfig } from '../src/network-config.mjs';
@@ -306,4 +307,84 @@ test('body failure diagnostics include byte count and a safe failure category', 
   assert.equal(diagnostics.length, 1); assert.equal(diagnostics[0].bytes, 2);
   assert.equal(diagnostics[0].code, 'RESPONSE_INCOMPLETE');
   assert.doesNotMatch(JSON.stringify(diagnostics), /private upstream detail/);
+});
+
+test('direct response type remains CORS and leaves native redirect accounting untouched', async () => {
+  const original = new Response('decoded content', { headers: { 'Content-Length': '9' } });
+  Object.defineProperties(original, { type: { value: 'cors' }, url: { value: destination }, redirected: { value: false } });
+  const transport = createNetworkTransport(async () => original, config, options);
+  const result = await transport(destination, { redirect: 'manual' });
+  assert.equal(result.type, 'cors'); assert.equal(result.networkRedirectCount, undefined);
+  assert.equal(await result.text(), 'decoded content');
+});
+
+test('native deadline aborts preserve timeout code 28 while caller cancellation stays code 42', async () => {
+  for (const [reason, code, curlCode] of [[new DOMException('deadline', 'TimeoutError'), 'UPSTREAM_TIMEOUT', 28],
+    [new DOMException('cancelled', 'AbortError'), 'REQUEST_ABORTED', 42]]) {
+    const controller = new AbortController(); controller.abort(reason);
+    const transport = createNetworkTransport(() => assert.fail('An aborted request must not dispatch.'), config, options);
+    await assert.rejects(transport(destination, { signal: controller.signal }), error => {
+      assert.equal(error.code, code); assert.equal(error.curlCode, curlCode); return true;
+    });
+  }
+});
+
+test('direct custom credentials cannot automatically follow redirects or trigger replay', async () => {
+  for (const inputKind of ['url', 'request']) {
+    for (const headers of [{ 'X-Api-Key': 'secret' }, { Authorization: 'Bearer secret' }, { Cookie: 'session=secret' }]) {
+      let calls = 0;
+      const transport = createNetworkTransport(async (_url, init) => {
+        calls++; assert.equal(init.redirect, 'error');
+        throw new TypeError('Fetch rejected upstream redirect');
+      }, config, { getSession() { assert.fail('Credentialed redirect failure must not initiate relay delivery.'); } });
+      const init = { headers, redirect: 'follow' };
+      await assert.rejects(inputKind === 'request'
+        ? transport(new Request(destination, init)) : transport(destination, init), fails('DIRECT_NETWORK_FAILED'));
+      assert.equal(calls, 1);
+    }
+  }
+});
+
+test('direct credential redirect protection covers native manual Fetch with logical following', async () => {
+  const transport = createNetworkTransport(async (_url, init) => {
+    assert.equal(init.redirect, 'error');
+    return new Response('authorized', { status: 200 });
+  }, config, options);
+  assert.equal(await (await transport(destination, { headers: { 'X-Api-Key': 'secret' },
+    redirect: 'manual', network: { redirect: 'follow' } })).text(), 'authorized');
+});
+
+test('credentialed explicit manual requests keep redirects and upstream errors visible when Fetch permits', async () => {
+  for (const status of [302, 401, 403, 500]) {
+    const transport = createNetworkTransport(async (_url, init) => {
+      assert.equal(init.redirect, 'manual');
+      return new Response('upstream', { status, headers: { Location: '/next' } });
+    }, config, options);
+    const result = await transport(destination, { headers: { 'X-Api-Key': 'secret' }, redirect: 'manual' });
+    assert.equal(result.status, status); assert.equal(await result.text(), 'upstream');
+  }
+});
+
+test('real direct HTTP redirect cannot leak a custom API key or repeat a write on a second origin', async t => {
+  const received = [];
+  async function server(handler) {
+    const instance = createServer(handler);
+    await new Promise(resolve => instance.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise(resolve => instance.close(resolve)));
+    return `http://127.0.0.1:${instance.address().port}`;
+  }
+  const redirected = await server((request, reply) => {
+    received.push({ origin: 'redirected', key: request.headers['x-api-key'] }); reply.end('must not arrive');
+  });
+  const original = await server(async (request, reply) => {
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    received.push({ origin: 'original', key: request.headers['x-api-key'], method: request.method, body });
+    reply.writeHead(307, { Location: `${redirected}/write` }); reply.end();
+  });
+  const transport = createNetworkTransport(fetch, { enabled: false });
+  await assert.rejects(transport(`${original}/write`, {
+    method: 'POST', body: 'one write', headers: { 'X-Api-Key': 'private-key' }, redirect: 'follow',
+  }), fails('DIRECT_NETWORK_FAILED'));
+  assert.deepEqual(received, [{ origin: 'original', key: 'private-key', method: 'POST', body: 'one write' }]);
 });

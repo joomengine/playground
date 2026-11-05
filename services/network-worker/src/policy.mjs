@@ -74,7 +74,7 @@ export function readPolicy(env) {
     for (const [key, value] of Object.entries(limits)) {
       if (!(key in DEFAULT_LIMITS) || !Number.isSafeInteger(value) || value < 1 || value > Number.MAX_SAFE_INTEGER / 4) throw new Error('Invalid relay limit.');
     }
-    if (limits.redirects > 20 || limits.totalMs > 120000 || limits.sessionMs > limits.maxSessionMs) throw new Error('Invalid relay deadline or session limit.');
+    if (limits.redirects > 20 || limits.totalMs > 120000 || limits.sessionMs > 1800000 || limits.maxSessionMs > 7200000 || limits.sessionMs > limits.maxSessionMs) throw new Error('Invalid relay deadline or session limit.');
     const audience = env.RELAY_AUDIENCE || '';
     if (audience && new URL(audience).origin !== audience) throw new Error('RELAY_AUDIENCE must be an exact origin.');
     const allowedOrigins = originList(env.ALLOWED_ORIGINS);

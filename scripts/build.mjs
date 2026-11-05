@@ -26,8 +26,11 @@ const approvedImages = validatePublicAssetRegistry(JSON.parse(await readFile(pat
 const imageDelivery = validatePublicAssetConfiguration(JSON.parse(await readFile(path.join(root, 'config/public-assets-config.json'), 'utf8')));
 const browserCompatibility = validateCompatibilityConfiguration(JSON.parse(await readFile(path.join(root, 'config/browser-compatibility.json'), 'utf8')));
 const network = normalizeNetworkConfig(JSON.parse(await readFile(path.join(root, 'config/network.json'), 'utf8')));
-if (network.enabled && (!network.turnstileSiteKey || /^[123]x0{20}[A-Z]{2}$/.test(network.turnstileSiteKey))) {
-  throw new Error('An enabled published network service requires its own production Turnstile site key.');
+const deploymentEnvironment = process.env.PLAYGROUND_DEPLOYMENT_ENV || 'production';
+if (!['production', 'staging'].includes(deploymentEnvironment)) throw new Error('Invalid Playground deployment environment.');
+if (network.enabled && (!network.turnstileSiteKey
+  || (deploymentEnvironment === 'production' && /^[123]x0{20}[A-Z]{2}$/.test(network.turnstileSiteKey)))) {
+  throw new Error('An enabled published network service requires a Turnstile site key; production rejects test keys.');
 }
 if (!imageDelivery.registryVersions.includes(approvedImages.version)) throw new Error('The image relay configuration must support the staged registry version.');
 // Runtime isolation is independent of optional external-image delivery. The
@@ -218,7 +221,7 @@ try {
   catch { throw new Error('Build requires a Git checkout to record source provenance'); }
   const manifest = {
     schemaVersion: 1, projectVersion: pkg.version, sourceCommit, code,
-    deployment: { canonicalUrl, domain },
+    deployment: { canonicalUrl, domain, environment: deploymentEnvironment },
     browserCompatibility, publicAssets: { registryVersion: approvedImages.version, enabled: imageDelivery.enabled }, network,
     runtime: versions.runtime, upstream: versions.upstream, nativeDriver: versions.nativeDriver, packages, php, joomla, deploys, versionCatalog,
     bridge: {

@@ -15,7 +15,7 @@ const close = server => new Promise(resolve => { server.closeAllConnections?.();
  * The two example.com HTTPS origins are mapped to a local fixture; no TLS claim is made.
  * All other upstream URLs retain normal TLS verification and are never substituted.
  */
-export async function createNetworkFixture({ directory, liveOrigins = [] } = {}) {
+export async function createNetworkFixture({ directory, liveOrigins = [], prefix = '/playground/', fixtures = {}, isolation = false } = {}) {
   const { createRelayWorker } = await import('../services/network-worker/src/index.mjs');
   const { createTestEnvironment } = await import('../services/network-worker/test/helpers.mjs');
   const requests = [], relayRequests = [], liveReads = [];
@@ -88,7 +88,8 @@ export async function createNetworkFixture({ directory, liveOrigins = [] } = {})
   const config = { schemaVersion: 1, enabled: true, endpoint: relayOrigin, protocolVersion: 1,
     turnstileSiteKey: '1x00000000000000000000AA', proxyOrigins: [writeOrigin], maxRedirects: 5,
     credentialGrants: [{ relayOrigin, destinationOrigin: writeOrigin }] };
-  app = await createStaticServer({ directory, isolation: false, fixtures: {
+  app = await createStaticServer({ directory, prefix, isolation, fixtures: {
+    ...fixtures,
     'config/network.json': JSON.stringify(config),
   } });
   appOrigin = new URL(app.url).origin;
@@ -105,9 +106,17 @@ export async function createNetworkFixture({ directory, liveOrigins = [] } = {})
         await route.fulfill({ response });
       });
       context.on('page', page => {
-        // The user gesture is explicit in production; this drives the real modal in tests.
-        void page.waitForSelector('button:has-text("Verify network access")', { timeout: 240_000 })
-          .then(button => button.click()).catch(() => {});
+        // Every independently created PHP site owns its own session. Drive each
+        // real modal without assuming one verification covers later sites.
+        void (async () => {
+          while (!page.isClosed()) {
+            try {
+              const button = await page.waitForSelector('button:has-text("Verify network access")', { timeout: 5000 });
+              await button.click();
+              await page.waitForSelector('button:has-text("Verify network access")', { state: 'hidden', timeout: 10000 });
+            } catch { if (page.isClosed()) return; }
+          }
+        })();
       });
     },
     async close() { await Promise.all([app.close(), close(relay), close(upstream)]); },

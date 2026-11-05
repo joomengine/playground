@@ -1,0 +1,2 @@
+# Unified patch context contains a control-space before source tabs or blank lines.
+native/*.patch whitespace=-blank-at-eol,-space-before-tab
