@@ -28,8 +28,12 @@ and `$http_response_header`; its ordinary `ignore_errors` handling still applies
 
 `src/php-network.mjs` retains the guard against synchronous requests back into the
 same busy PHP site. Such a request cannot complete while that site's only PHP and
-database session is executing its caller. The existing approved-image transport is
-separate compatibility functionality; it does not grant general network access.
+database session is executing its caller. When the shared network service is
+enabled, every PHP HTTP request—including images—uses this transport with the
+original URL. The legacy approved-image PHP route is used only while the shared
+service is disabled or unconfigured; a shared-service denial never falls back to
+that route. Browser image compatibility remains separate service-worker
+functionality and does not grant general network access.
 
 The baseline was `58b21b3d61c7415c231f8d180c388409b4910d74`. The earlier unmerged
 PR #18 was closed. Its component-specific mirror selection is not incorporated;
@@ -45,7 +49,8 @@ Playground commit caused the original network failure.
 | Anonymous replay-safe GET/HEAD fails before response delivery | At most one relay attempt, within the remaining deadline |
 | POST, PUT, PATCH, DELETE, authenticated or custom-credential request | Select direct/relay before dispatch; no fallback replay |
 | Origin appears in `proxyOrigins` | Select relay before dispatch |
-| Authorized HTTP URL with relay enabled | Use relay, preserving HTTP rather than rewriting to HTTPS |
+| Authorized HTTP URL from an HTTPS browser context, with relay enabled | Use relay, preserving HTTP rather than rewriting to HTTPS |
+| HTTP URL from an HTTP development context or native Node caller | Try direct first unless its origin requires relay; eligible failures can use the relay |
 | Abort, timeout, relay authorization/policy denial, rate limit | Stop; do not try another endpoint |
 | Body fails after headers or data delivery | Fail the transfer; never append bytes from a second route |
 
@@ -69,8 +74,14 @@ labelled a CORS failure.
 
 ## Public deployment configuration
 
-`config/network.json` belongs to the Playground deployment. Imported Joomla sites,
-deployment recipes, shared links and query parameters cannot choose a relay.
+`config/network.json` is the production configuration. A build with
+`PLAYGROUND_DEPLOYMENT_ENV=staging` selects `config/network.staging.json` instead.
+Both builds write the selected normalized configuration to
+`dist/config/network.json`; the staging source file is excluded from the static
+artifact. This keeps the same source commit available for separately configured
+staging and production builds. Configuration belongs to the Playground deployment.
+Imported Joomla sites, deployment recipes, shared links and query parameters
+cannot choose a relay.
 
 | Field | Meaning |
 | --- | --- |
@@ -146,6 +157,10 @@ framed or act as a PHP runtime owner. The popup loads the fixed deployment
 configuration; it does not accept a caller-supplied relay URL or widget site key.
 
 The shell exchanges the single-use Turnstile proof for an opaque relay session.
+Normal staging and production require Siteverify's expected hostname and action.
+The separately protected automated staging mode uses official test credentials
+and an additional CI-only authorization header; see the Worker guide. Public test
+credentials alone cannot obtain a session, and production rejects that mode.
 Concurrent requests share verification. Renewal preserves the same session identity
 and cumulative budget; an expired session does not silently obtain a fresh quota.
 Verification cancellation cancels the waiting request without restarting PHP.

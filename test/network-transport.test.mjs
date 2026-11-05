@@ -139,14 +139,14 @@ test('credential forwarding cannot be enabled by request data, a different relay
   }
 });
 
-test('HTTP URLs use the configured relay without a direct mixed-content attempt or HTTPS rewrite', async () => {
+test('HTTPS context sends HTTP URLs through the configured relay without mixed content or URL rewriting', async () => {
   const url = 'http://public.example/path?b=2&a=1';
   let calls = 0;
   const transport = createNetworkTransport(async (input, init) => {
     calls++; assert.equal(input, `${endpoint}/v1/fetch`);
     assert.equal(decodeNetworkMetadata(init.headers[NETWORK_REQUEST_HEADER]).url, url);
     return response('http content', { url });
-  }, config, options);
+  }, config, { ...options, contextProtocol: 'https:' });
   assert.equal(await (await transport(url)).text(), 'http content'); assert.equal(calls, 1);
 });
 
@@ -387,4 +387,51 @@ test('real direct HTTP redirect cannot leak a custom API key or repeat a write o
     method: 'POST', body: 'one write', headers: { 'X-Api-Key': 'private-key' }, redirect: 'follow',
   }), fails('DIRECT_NETWORK_FAILED'));
   assert.deepEqual(received, [{ origin: 'original', key: 'private-key', method: 'POST', body: 'one write' }]);
+});
+
+test('relay status text permits HTTP Latin-1 and horizontal tabs but rejects control injection and Unicode outside byte range', async () => {
+  for (const statusText of ['Créé', 'OK\tresponse', '', 'ÿ']) {
+    const transport = createNetworkTransport(async () => response('body', { status: 201, statusText }),
+      { ...config, proxyOrigins: [destination] }, options);
+    const result = await transport(destination); assert.equal(result.statusText, statusText); await result.text();
+  }
+  for (const statusText of ['OK\r\nInjected: value', 'bad\x00value', 'bad\x1fvalue', 'bad\x7fvalue', '🦁']) {
+    const transport = createNetworkTransport(async () => response('body', { statusText }),
+      { ...config, proxyOrigins: [destination] }, options);
+    await assert.rejects(transport(destination), { code: 'RELAY_PROTOCOL_ERROR' });
+  }
+});
+
+test('HTTP contexts and Node callers attempt HTTP directly before eligible relay fallback', async () => {
+  const url = 'http://public.example/path?b=2&a=1';
+  for (const contextProtocol of ['http:', undefined]) {
+    for (const directFails of [false, true]) {
+      const calls = [];
+      const transport = createNetworkTransport(async (input, init) => {
+        calls.push(input);
+        if (input === url) {
+          if (directFails) throw new TypeError('Controlled CORS failure');
+          return new Response('direct HTTP');
+        }
+        assert.equal(input, `${endpoint}/v1/fetch`);
+        assert.equal(decodeNetworkMetadata(init.headers[NETWORK_REQUEST_HEADER]).url, url);
+        return response('relayed HTTP', { url });
+      }, config, { ...options, contextProtocol });
+      assert.equal(await (await transport(url)).text(), directFails ? 'relayed HTTP' : 'direct HTTP');
+      assert.deepEqual(calls, directFails ? [url, `${endpoint}/v1/fetch`] : [url]);
+    }
+  }
+});
+
+test('forced HTTP origin routes before dispatch even in an HTTP development context', async () => {
+  const origin = 'http://public.example';
+  let calls = 0;
+  const transport = createNetworkTransport(async (input, init) => {
+    calls++; assert.equal(input, `${endpoint}/v1/fetch`);
+    const metadata = decodeNetworkMetadata(init.headers[NETWORK_REQUEST_HEADER]);
+    assert.equal(metadata.url, `${origin}/write`); assert.equal(metadata.method, 'POST');
+    return response('written', { url: `${origin}/write` });
+  }, { ...config, proxyOrigins: [origin] }, { ...options, contextProtocol: 'http:' });
+  assert.equal(await (await transport(`${origin}/write`, { method: 'POST', body: 'one write' })).text(), 'written');
+  assert.equal(calls, 1);
 });

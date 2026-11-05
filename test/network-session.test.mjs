@@ -97,6 +97,30 @@ test('worker-to-shell verification travels outside the PHP operation queue and c
   host.dispose(); client.dispose();
 });
 
+test('disposing a worker session client cancels each host verification exactly once and prevents new work', async () => {
+  const signals = [], outbound = [];
+  let client;
+  const host = createNetworkSessionHost({ getSession: ({ signal }) => {
+    signals.push(signal);
+    return new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  } }, message => client.receive(message));
+  client = createNetworkSessionClient(message => { outbound.push(message); host.receive(message); });
+  const requests = [client.getSession(), client.getSession()];
+  const settled = Promise.all(requests.map(request => assert.rejects(request, { code: 'REQUEST_ABORTED' })));
+  await tick();
+  assert.equal(signals.length, 2);
+  client.dispose();
+  await settled;
+  assert.ok(signals.every(signal => signal.aborted));
+  const cancellations = outbound.filter(message => message.type === 'network-session-cancel');
+  assert.equal(cancellations.length, 2);
+  assert.equal(new Set(cancellations.map(message => message.id)).size, 2);
+  client.dispose();
+  await assert.rejects(client.getSession(), { code: 'REQUEST_ABORTED' });
+  assert.equal(outbound.length, 4, 'Disposal must not send duplicate cancellation or start another request.');
+  host.dispose();
+});
+
 test('worker RPC validates returned sessions and ignores stale reply IDs', async () => {
   const outbound = [];
   const client = createNetworkSessionClient(message => outbound.push(message));

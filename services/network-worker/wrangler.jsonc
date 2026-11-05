@@ -3,16 +3,18 @@
   "name": "joomengine-network-unconfigured",
   "main": "src/index.mjs",
   "compatibility_date": "2026-07-30",
+  "compatibility_flags": ["enable_request_signal"],
   "workers_dev": false,
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayCoordinator"] }],
   "env": {
     "staging": {
       "name": "joomengine-network-staging",
+      "compatibility_flags": ["enable_request_signal"],
       "workers_dev": true,
       "durable_objects": { "bindings": [{ "name": "RELAY_STATE", "class_name": "RelayCoordinator" }] },
       "vars": {
-        "ENABLED": "false", "DEPLOYMENT_ENV": "staging", "RELAY_AUDIENCE": "",
+        "ENABLED": "false", "DEPLOYMENT_ENV": "staging", "TURNSTILE_TEST_MODE": "false", "RELAY_AUDIENCE": "",
         "ALLOWED_ORIGINS": "[]", "UPSTREAM_ORIGINS": "[]", "CREDENTIAL_ORIGINS": "[]",
         "ALLOWED_PORTS": "[80,443]", "ALLOWED_METHODS": "[\"GET\",\"HEAD\",\"POST\",\"PUT\",\"PATCH\",\"DELETE\",\"OPTIONS\"]",
         "POLICY_VERSION": "1", "REVOKED_SESSION_IDS": "[]", "TURNSTILE_ACTION": "network-session",
@@ -21,10 +23,11 @@
     },
     "production": {
       "name": "joomengine-network",
+      "compatibility_flags": ["enable_request_signal"],
       "workers_dev": true,
       "durable_objects": { "bindings": [{ "name": "RELAY_STATE", "class_name": "RelayCoordinator" }] },
       "vars": {
-        "ENABLED": "false", "DEPLOYMENT_ENV": "production", "RELAY_AUDIENCE": "",
+        "ENABLED": "false", "DEPLOYMENT_ENV": "production", "TURNSTILE_TEST_MODE": "false", "RELAY_AUDIENCE": "",
         "ALLOWED_ORIGINS": "[]", "UPSTREAM_ORIGINS": "[]", "CREDENTIAL_ORIGINS": "[]",
         "ALLOWED_PORTS": "[80,443]", "ALLOWED_METHODS": "[\"GET\",\"HEAD\",\"POST\",\"PUT\",\"PATCH\",\"DELETE\",\"OPTIONS\"]",
         "POLICY_VERSION": "1", "REVOKED_SESSION_IDS": "[]", "TURNSTILE_ACTION": "network-session",

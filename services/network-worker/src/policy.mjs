@@ -5,6 +5,8 @@ export class RelayError extends Error {
   }
 }
 export const VERSION = 1;
+export const TURNSTILE_TEST_SECRET = '1x0000000000000000000000000000000AA';
+export const TURNSTILE_TEST_TOKEN = 'XXXX.DUMMY.TOKEN.XXXX';
 export const METADATA_LIMIT = 32768;
 export const REQUEST_HEADER = 'X-Playground-Request';
 export const RESPONSE_HEADER = 'X-Playground-Response';
@@ -88,9 +90,14 @@ export function readPolicy(env) {
     const revoked = jsonSetting(env.REVOKED_SESSION_IDS, []);
     if (!Array.isArray(revoked)) throw new Error('Invalid revocation list.');
     const enabled = env.ENABLED === 'true';
+    const testMode = env.TURNSTILE_TEST_MODE === 'true';
+    if (testMode && (env.DEPLOYMENT_ENV !== 'staging' || env.TURNSTILE_SECRET_KEY !== TURNSTILE_TEST_SECRET
+      || typeof env.STAGING_TEST_SECRET !== 'string' || env.STAGING_TEST_SECRET.length < 32 || env.STAGING_TEST_SECRET.length > 256)) {
+      throw new Error('Isolated staging test mode requires its dedicated server secret and official Turnstile test key.');
+    }
     if (enabled && (!audience || !allowedOrigins.size || !upstreamOrigins.size || !env.TURNSTILE_SECRET_KEY || !env.TURNSTILE_ACTION || !env.POLICY_VERSION)) throw new Error('Enabled relay configuration is incomplete.');
     if (env.DEPLOYMENT_ENV === 'production' && /^[123]x0{20,}/.test(env.TURNSTILE_SECRET_KEY || '')) throw new Error('Turnstile test credentials are forbidden in production.');
-    return { enabled, audience, allowedOrigins, upstreamOrigins, credentialOrigins, ports, methods, revoked: new Set(revoked), limits, policyVersion: String(env.POLICY_VERSION || ''), action: env.TURNSTILE_ACTION };
+    return { enabled, testMode, audience, allowedOrigins, upstreamOrigins, credentialOrigins, ports, methods, revoked: new Set(revoked), limits, policyVersion: String(env.POLICY_VERSION || ''), action: env.TURNSTILE_ACTION };
   } catch {
     throw new RelayError('RELAY_CONFIGURATION_INVALID', 'The network service configuration is invalid.', 503);
   }

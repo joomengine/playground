@@ -14,10 +14,14 @@ The relay remains disabled in the published default configuration until an opera
 
 ## Required evidence
 
-This document will be updated with the final commit's test results, supported PHP transport options, deployment state, and unresolved acceptance items. A successful unit test or archive creation does not establish a successful real Joomla/JCB workflow. Automated desktop WebKit is not physical mobile-device evidence. Hosted staging checks must not be reported as passed without executing against a deployed service.
+The PR records the exact tested commit, workflow links and browser receipts. Supported transport options and limitations are documented in [network.md](network.md). A successful unit test or archive creation does not establish a successful real Joomla/JCB workflow. Automated desktop WebKit is not physical mobile-device evidence. Hosted staging checks must not be reported as passed without executing against a deployed service.
 
-## Implementation checkpoint
+## Validation and deployment boundary
 
-The first implementation checkpoint passes 529 source tests with zero failures or skips and JavaScript syntax checks under Node 26.12.1. The native cURL hook patch applies to its checksum-verified upstream source and its executable bridge checks pass. Compiled extension, real browser and JCB evidence must come from the candidate build, not these source checks.
+Source checks, Worker security tests and actual workerd/SQLite tests run without deployment credentials. The CI candidate rebuilds the patched native extension, validates PHP cURL and streams, and exercises real browsers and Joomla/JCB workflows. The aggregate must pass for the final commit; an earlier successful run does not certify a later change.
 
-The relay uses opaque sessions held in a Durable Object, so no session-signing secret is required. The operator still needs a private Turnstile verification secret, public widget settings, reviewed destination policy and a configured Cloudflare deployment account. Default public configuration keeps the relay disabled.
+The relay uses opaque sessions held in a Durable Object, so no session-signing secret is required. The operator still needs a private Turnstile verification secret, public widget settings, reviewed destination policy and a configured Cloudflare deployment account. Automated hosted staging additionally requires a private staging-test credential; production rejects that test mode. Default public configuration keeps the relay disabled.
+
+No hosted Cloudflare endpoint or physical mobile-device result is claimed by this branch. Those release checks require provisioned infrastructure and actual devices. The protected staging workflow fails when required settings are missing; production activation requires successful hosted staging evidence from the same source commit.
+
+Live testing on 5 November 2026 found that JCB's default package-repository request to `git.vdm.dev` returns a genuine upstream HTTP 403 even from a server. The shared transport preserves it. The entity test records this default attempt, then selects an available package repository from the live discovery API through JCB's supported explicit repository argument. It imports real remote bytes and verifies the stored entity. Receipts identify the selected repository; production transport performs no repository substitution.

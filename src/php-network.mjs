@@ -38,6 +38,7 @@ export function publicImageFetchOptions(input, init, url, options) {
 /** A recursive request cannot complete while its sole PHP/database session is busy. */
 export function createPhpFetch(fetcher, siteURL, isRequestActive, publicAssets = {}, network) {
   const transport = network ? createNetworkTransport(fetcher, network.config, network) : fetcher;
+  const sharedNetworkEnabled = network?.config?.enabled === true;
   const site = new URL(siteURL);
   const prefix = `${site.pathname.replace(/\/+$/, '')}/`;
   return async (input, init) => {
@@ -47,6 +48,11 @@ export function createPhpFetch(fetcher, siteURL, isRequestActive, publicAssets =
       // Reject through native cURL's normal error path, keeping PHP alive.
       throw new TypeError(NESTED_PHP_REQUEST_ERROR);
     }
+    // Once enabled, every PHP request uses the same original-URL transport and
+    // policy. The legacy image route remains only for disabled/unconfigured
+    // deployments; it must never bypass a general relay rejection. Browser image
+    // compatibility continues independently in the service worker.
+    if (sharedNetworkEnabled) return transport(input, init);
     const mapped = publicImageFetchOptions(input, init, url, publicAssets);
     return mapped ? fetcher(mapped.url, mapped.init) : transport(input, init);
   };

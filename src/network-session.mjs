@@ -119,9 +119,10 @@ export function createNetworkSession(config, { fetcher = globalThis.fetch.bind(g
 /** RPC uses a separate message lane so verification cannot deadlock behind PHP. */
 export function createNetworkSessionClient(send, { now = Date.now } = {}) {
   const pending = new Map();
+  let disposed = false;
   return {
     getSession({ signal, deadline = Infinity } = {}) {
-      if (signal?.aborted) return Promise.reject(aborted());
+      if (disposed || signal?.aborted) return Promise.reject(aborted());
       const id = crypto.randomUUID();
       let resolve, reject;
       const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -143,7 +144,17 @@ export function createNetworkSessionClient(send, { now = Date.now } = {}) {
       }
       return true;
     },
-    dispose() { for (const entry of pending.values()) entry.reject(aborted()); pending.clear(); },
+    dispose() {
+      disposed = true;
+      const outstanding = [...pending];
+      pending.clear();
+      for (const [id, entry] of outstanding) {
+        entry.reject(aborted());
+        // Clear before sending: a synchronous peer reply must not revive a
+        // disposed request, and its finally handler must not send twice.
+        try { send({ type: 'network-session-cancel', id }); } catch { /* The owning worker may already be closed. */ }
+      }
+    },
   };
 }
 

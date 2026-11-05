@@ -84,7 +84,7 @@ function describe(input, init = {}) {
 function responseMetadata(raw) {
   const value = decodeNetworkMetadata(raw);
   if (!Number.isInteger(value.status) || value.status < 200 || value.status > 599
-    || typeof value.statusText !== 'string' || /[^\x20-\x7e]/.test(value.statusText)
+    || typeof value.statusText !== 'string' || /[^\x09\x20-\x7e\x80-\xff]/.test(value.statusText)
     || typeof value.url !== 'string' || typeof value.redirected !== 'boolean'
     || (value.redirectCount !== undefined && (!Number.isInteger(value.redirectCount) || value.redirectCount < 0 || value.redirectCount > 20))
     || !Array.isArray(value.headers) || value.headers.some(pair => !Array.isArray(pair) || pair.length !== 2 || pair.some(item => typeof item !== 'string'))) {
@@ -171,6 +171,7 @@ function wrapResponse(response, ctx, metadata, method, report) {
 /** Shared component-neutral routing; only call this from the PHP HTTP bridge. */
 export function createNetworkTransport(fetcher, rawConfig = {}, {
   getSession, onDiagnostic, now = Date.now, allowInsecureLocalhost = false,
+  contextProtocol = globalThis.location?.protocol,
 } = {}) {
   const config = normalizeNetworkConfig(rawConfig, { allowInsecureLocalhost });
   return async (input, init = {}) => {
@@ -183,7 +184,11 @@ export function createNetworkTransport(fetcher, rawConfig = {}, {
     const deadline = Math.min(timeout > 0 ? started + timeout : Infinity, explicitDeadline ?? Infinity);
     const ctx = context(request.signal, deadline, now);
     const requestId = crypto.randomUUID();
-    let route = config.enabled && (request.url.protocol === 'http:' || config.proxyOrigins.includes(request.url.origin)) ? 'relay' : 'direct';
+    // Only an HTTPS browser context creates mixed content for HTTP targets.
+    // HTTP loopback development and native Node callers can try HTTP directly.
+    // This trusted runtime option is never read from public/site configuration.
+    const mixedContent = contextProtocol === 'https:' && request.url.protocol === 'http:';
+    let route = config.enabled && (mixedContent || config.proxyOrigins.includes(request.url.origin)) ? 'relay' : 'direct';
     const diagnostic = (status, code, bytes) => {
       try { onDiagnostic?.({ requestId, route, method: request.method, hostname: request.url.hostname, durationMs: now() - started, status, code, bytes }); } catch { /* Logging must not alter transport outcomes. */ }
     };

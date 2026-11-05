@@ -16,7 +16,13 @@ test('deployed staging relay completes actual PHP and clean JCB workflows over v
   const target = new URL(required('NETWORK_TEST_TARGET'));
   const expectedHash = required('NETWORK_EXPECTED_SHA256');
   const sourceCommit = required('GITHUB_SHA');
-  for (const url of [appURL, endpoint, target]) assert.equal(url.protocol, 'https:', 'Hosted acceptance requires real HTTPS.');
+  const stagingSecret = required('NETWORK_STAGING_TEST_SECRET');
+  assert.ok(stagingSecret.length >= 32 && stagingSecret.length <= 256, 'A separate protected staging test credential is required.');
+  for (const url of [appURL, endpoint, target]) {
+    assert.equal(url.protocol, 'https:', 'Hosted acceptance requires real HTTPS.');
+    assert.equal(url.username + url.password, '', 'Hosted test URLs must not contain credentials.');
+  }
+  assert.equal(target.search + target.hash, '', 'Use an unsigned controlled test target; receipts must not contain signed query credentials.');
   assert.match(expectedHash, /^[a-f0-9]{64}$/);
   appURL.searchParams.set('start', '0');
   const receipt = { status: 'running', sourceCommit, endpoint: endpoint.origin, appOrigin: appURL.origin, hostedTLSValidated: true, cases: [] };
@@ -26,6 +32,23 @@ test('deployed staging relay completes actual PHP and clean JCB workflows over v
     browser = await chromium.launch({ headless: true });
     receipt.browserVersion = browser.version();
     const context = await browser.newContext(); // Never ignore certificate errors or disable CORS.
+    const sessionURL = new URL('/v1/session', endpoint).href;
+    // This secret remains in the trusted Node test process. It is injected only
+    // into the exact HTTPS verification exchange, never into page JS or an
+    // upstream request. The client uses redirect:error for this operation.
+    await context.route(sessionURL, async route => {
+      if (route.request().url() !== sessionURL || route.request().method() !== 'POST') return route.continue();
+      await route.continue({ headers: { ...route.request().headers(), 'x-playground-staging-test': stagingSecret } });
+    });
+    for (const value of [null, 'incorrect-staging-test-credential']) {
+      const response = await fetch(sessionURL, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(20000),
+        headers: { Origin: appURL.origin, 'Content-Type': 'application/json', ...(value ? { 'X-Playground-Staging-Test': value } : {}) },
+        body: JSON.stringify({ version: 1, turnstileToken: 'XXXX.DUMMY.TOKEN.XXXX' }),
+      });
+      assert.equal(response.status, 403, 'Public test keys must not authorize an unprotected staging caller.');
+      await response.arrayBuffer();
+    }
+    receipt.unprotectedTestSessionsRejected = true;
     const page = await context.newPage();
     await page.goto(appURL.href, { waitUntil: 'domcontentloaded' });
     // Exercise the real entry point and service-worker-controlled navigation.

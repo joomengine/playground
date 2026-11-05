@@ -24,6 +24,9 @@ function discoveryProof() {
 function entityProof() {
   return {
     before: null, imported: true, count: 1,
+    defaultProbe: { status: 403, found: false, after: null },
+    selectedRepository: { base: 'https://tildegit.org', organisation: 'joomla', repository: 'packages', branch: 'master' },
+    discovery: [{ status: 1, url: 'https://tildegit.org/joomla/packages' }],
     after: {
       guid: fieldGuid, name: 'Greeting', fieldtype: textFieldtypeGuid, datatype: 'VARCHAR', datalenght: '255',
       xmlAttributes: { name: 'greeting', label: 'Greeting', default: 'Some text', filter: 'STRING' },
@@ -108,4 +111,15 @@ test('the imported entity must retain its identity, field type and XML settings'
     delete proof.after.xmlAttributes[name];
     assert.throws(() => assertEntityImportProof(proof), `Missing field XML ${name} must fail.`);
   }
+});
+
+test('explicit entity repository selection retains default denial and requires live healthy discovery', () => {
+  for (const failure of [
+    { defaultProbe: { status: 403, found: true, after: null } },
+    { defaultProbe: { status: 200, found: true, after: { guid: fieldGuid } } },
+    { discovery: [] },
+    { discovery: [{ status: 0, url: 'https://tildegit.org/joomla/packages' }] },
+  ]) assert.throws(() => assertEntityImportProof({ ...entityProof(), ...failure }));
+  // Upstream recovery is allowed; an HTTP 403 is not hardcoded forever.
+  assertEntityImportProof({ ...entityProof(), defaultProbe: { status: 200, found: true, after: null } });
 });

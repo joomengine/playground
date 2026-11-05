@@ -50,10 +50,17 @@ must not depend on accidental inheritance.
 | `POLICY_VERSION` | Worker variable | Changing this invalidates existing sessions |
 | `REVOKED_SESSION_IDS` | Worker variable | JSON stable-session-ID revocation list |
 | `TURNSTILE_ACTION` | Worker variable | Expected widget action; must match the verification page |
+| `TURNSTILE_TEST_MODE` | Worker variable | `false` normally; `true` only for separately protected automated staging |
 | `LIMITS` | Worker variable | JSON overrides of the named limits in `src/policy.mjs` |
 | `TURNSTILE_SECRET_KEY` | Worker **secret** | Siteverify secret for that environment's widget |
+| `STAGING_TEST_SECRET` | Staging Worker **secret** | Additional high-entropy 32–256 character credential, required only in automated staging mode |
 | `CLOUDFLARE_API_TOKEN` | Protected GitHub environment **secret** | Wrangler deployment authorization |
 | `CLOUDFLARE_ACCOUNT_ID` | GitHub environment variable | Owning account identifier |
+| `NETWORK_CLOUDFLARE_PLAN` | GitHub environment variable | Recorded Workers plan used by the deployment |
+| `NETWORK_PLAYGROUND_URL` | `network-staging` GitHub variable | HTTPS URL of the actual staging client built from the workflow's exact commit |
+| `NETWORK_TEST_TARGET` | `network-staging` GitHub variable | Reviewed CORS-denied binary target used for actual PHP relay verification |
+| `NETWORK_EXPECTED_SHA256` | `network-staging` GitHub variable | Expected SHA-256 of the target's body |
+| `NETWORK_STAGING_TEST_SECRET` | `network-staging` GitHub **secret** | Same value as staging Worker's `STAGING_TEST_SECRET`, used only by hosted CI |
 | Relay endpoint / Turnstile site key | Public `config/network.json` | Browser configuration; not secrets |
 
 There is no `SESSION_SIGNING_KEY`: sessions use random opaque bearer tokens and
@@ -107,6 +114,9 @@ metadata; they cannot become cookies for this service's domain.
    browser→Worker→upstream checks. Use official Turnstile test credentials only
    in isolated automated test deployments; production rejects test credentials.
 6. Build the candidate Playground with staging's public endpoint and site key.
+   Configure these in `config/network.staging.json`; the production configuration
+   remains in `config/network.json`. Publish the staging build at the exact HTTPS
+   URL recorded as `NETWORK_PLAYGROUND_URL`.
    For an isolated staging build that uses official Turnstile test keys, set
    `PLAYGROUND_DEPLOYMENT_ENV=staging` when running the build. The normal/default
    production build rejects test site keys; the Worker independently rejects
@@ -135,6 +145,56 @@ production. Fork PRs must never receive deployment credentials or execute
 untrusted code with those credentials. Validation must succeed independently of
 production secrets, while a hosted acceptance gate must report missing staging
 access as blocked/failing rather than passed.
+
+## Hosted CI acceptance and isolated test mode
+
+Use protected GitHub environments named `network-staging` and `network-production`.
+The manually dispatched `network-staging.yml` first runs all source/runtime
+validation, then requires reviewed, enabled staging configuration. It deploys the
+Worker, verifies its real HTTPS endpoint and tests the hosted candidate's real PHP
+cURL/stream binary hash and CORS behavior plus clean Joomla 5/6 JCB workflows.
+The hosted page's build manifest must report this workflow's exact commit and
+`deployment.environment=staging`. Missing variables, test secrets or evidence
+fail the job; none is treated as a passing skipped test.
+
+Automated hosted staging uses official Turnstile always-pass test credentials.
+A live Siteverify check during this implementation returned the testing marker
+`metadata.result_with_testing_key=true`, hostname `example.com` and no action for
+the official dummy token. Its test response cannot satisfy the production
+hostname/action checks. Those checks remain strict in normal staging and
+production. The explicit automated mode therefore requires **all** of:
+
+- `DEPLOYMENT_ENV=staging` and `TURNSTILE_TEST_MODE=true` on the Worker.
+- The exact official always-pass Turnstile test secret and test token.
+- A successful live Siteverify response bearing its testing-key marker.
+- A separate random high-entropy `STAGING_TEST_SECRET` server secret, 32–256
+  characters, on every `/v1/session` request, including renewals.
+
+Provision the additional secret interactively with:
+
+```bash
+cd services/network-worker
+npx wrangler secret put STAGING_TEST_SECRET --env staging
+```
+
+Store the same value as GitHub environment secret `NETWORK_STAGING_TEST_SECRET`.
+The protected Playwright runner attaches it as `X-Playground-Staging-Test` only
+to the configured relay's exact HTTPS `/v1/session` URL. It is never embedded in
+JavaScript, browser configuration, exports, traces, upstream requests or logs.
+Missing or incorrect credentials are explicitly tested to return 403 before
+session issuance. Production rejects this mode and official test credentials.
+
+Use normal staging with a real widget separately when evaluating the actual human
+challenge experience. The test-mode run verifies real public networking,
+Siteverify transport and session enforcement; it does not prove that a real user
+passes a production challenge on every browser/device.
+
+`network-production.yml` accepts `staging_run_id` and checks via GitHub's API that
+the corresponding hosted staging workflow and acceptance step succeeded for the
+**same commit**. It then deploys the production Worker and verifies health and
+rejection policy. The Pages publication gate checks the production manifest and
+configured endpoint before publishing an enabled client. Keep that production
+deployment protected and activate it only after reviewing the staging evidence.
 
 ## Limits and sessions
 
@@ -229,3 +289,23 @@ boundary; subsequent dispatches stop. Streaming limits cannot retract bytes
 already in flight from an upstream server, and concurrent transfers can have
 bounded in-flight data when a limit is reached. No crossing chunk is delivered
 as a successful complete response. Session renewal preserves these counters.
+
+### Client disconnect propagation
+
+The pinned `2026-07-30` compatibility date requires the explicit
+`enable_request_signal` compatibility flag, configured for staging and production.
+The Worker passes `request.signal` explicitly when constructing the forwarded
+request and calling the Durable Object stub; the coordinator links it to the
+upstream request and its cleanup. This does not depend on the separate
+`request_signal_passthrough` flag. Cloudflare makes incoming signals the default
+only from compatibility date `2026-11-17` onward.
+
+The actual workerd regression opens an HTTP connection directly to the Worker,
+waits for an upstream request that has not returned headers, confirms its
+concurrency reservation, then resets the client TCP connection. It requires the
+upstream HTTP connection to close promptly and the same session to admit its next
+request. A TCP FIN alone is a half-close and does not unambiguously mean the client
+has abandoned reading its response; the test uses a reset to exercise cancellation.
+
+References: [Cloudflare request-signal announcement](https://developers.cloudflare.com/changelog/post/2026-11-02-request-signal-default/)
+and [compatibility flags](https://developers.cloudflare.com/workers/configuration/compatibility-flags/#enable-requestsignal-for-incoming-requests).
