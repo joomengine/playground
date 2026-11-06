@@ -54,8 +54,8 @@ must not depend on accidental inheritance.
 | `LIMITS` | Worker variable | JSON overrides of the named limits in `src/policy.mjs` |
 | `TURNSTILE_SECRET_KEY` | Worker **secret** | Siteverify secret for that environment's widget |
 | `STAGING_TEST_SECRET` | Staging Worker **secret** | Additional high-entropy 32–256 character credential, required only in automated staging mode |
-| `CLOUDFLARE_API_TOKEN` | Protected GitHub environment **secret** | Wrangler deployment authorization |
-| `CLOUDFLARE_ACCOUNT_ID` | GitHub environment variable | Owning account identifier |
+| `CLOUDFLARE_API_TOKEN` | GitHub repository or protected environment **secret** | Cloudflare deployment authorization |
+| `CLOUDFLARE_ACCOUNT_ID` | GitHub repository or environment variable | Owning account identifier; setup also accepts a secret with this name |
 | `NETWORK_CLOUDFLARE_PLAN` | GitHub environment variable | Recorded Workers plan used by the deployment |
 | `NETWORK_PLAYGROUND_URL` | `network-staging` GitHub variable | HTTPS URL of the actual staging client built from the workflow's exact commit |
 | `NETWORK_TEST_TARGET` | `network-staging` GitHub variable | Reviewed CORS-denied binary target used for actual PHP relay verification |
@@ -73,7 +73,60 @@ Relay control headers never reach upstreams. Custom credential headers need the
 same grant as Authorization/Cookie. Cookies returned by targets remain HTTP
 metadata; they cannot become cookies for this service's domain.
 
-## Initial provisioning
+## Set up production from GitHub Actions
+
+The **Set up Cloudflare proxy** workflow (`.github/workflows/network-setup.yml`)
+provisions one production proxy for `https://playground.joomengine.org`.
+The site stays on GitHub Pages. This workflow does not create a staging website,
+change DNS, upgrade a Cloudflare plan or publish a new Playground build.
+
+1. In repository **Settings → Secrets and variables → Actions**, add secret
+   `CLOUDFLARE_API_TOKEN` and variable `CLOUDFLARE_ACCOUNT_ID`. The setup workflow
+   also accepts the account ID as a secret if no variable is set. The account-ID
+   variable takes precedence over the secret.
+2. Scope the token to the owning Cloudflare account, with permission to create
+   Workers and their Durable Object bindings, deploy code/secrets, and read/create
+   Turnstile widgets. Widget automation requires **Account → Turnstile → Edit**
+   (the API's **Turnstile Sites Write** permission) in addition
+   to Workers permissions. See the current
+   [Worker permissions](https://developers.cloudflare.com/workers/authorization/workers/)
+   and [Turnstile API](https://developers.cloudflare.com/api/resources/turnstile/).
+   If the account has never used Workers, register its `workers.dev` subdomain in
+   Cloudflare first; the workflow reports this prerequisite if it is missing.
+3. Merge the workflow into the default branch so GitHub displays its manual
+   trigger. Open **Actions → Set up Cloudflare proxy → Run workflow**, select
+   the reviewed branch and run it. It uses the `network-production` environment;
+   any configured environment approval/branch rules still apply. No local
+   Wrangler installation or additional GitHub Turnstile secret is needed.
+4. The workflow runs repository validation before using deployment credentials.
+   It creates or reuses the production Turnstile widget restricted to the
+   Playground hostname, deploys `joomengine-network` with its SQLite Durable
+   Object and private widget secret, and checks the disabled endpoint.
+5. Read the run summary and download **cloudflare-proxy-public-settings**.
+   These contain public configuration for the actual endpoint and widget site
+   key. The API token and widget secret are never included in the artifact.
+
+| Artifact file | Purpose |
+| --- | --- |
+| `network.production.candidate.json` | Public settings for `config/network.json`, with `enabled:false` |
+| `worker-policy.candidate.json` | Production Worker name and public policy variables for review |
+| `setup-summary.json` | Created/reused resources, endpoint, public site key and disabled status |
+
+Setup deliberately leaves both the deployed Worker and the generated client
+configuration **disabled**. Review the permitted upstream origins and limits,
+then complete the activation and hosted verification steps below before enabling
+`config/network.json` in a Pages release. A successful setup run proves
+provisioning and disabled-endpoint checks, not successful live PHP fallback.
+The existing production release workflow still requires hosted staging evidence;
+the setup workflow does not bypass that activation requirement.
+
+The workflow is manual, so merging a change does not deploy Cloudflare resources.
+Rerunning it updates only a disabled Worker previously created by this setup and
+reuses its widget without rotating the secret. It refuses to overwrite an active
+Worker or an unrelated existing Worker. Use the release workflow for later
+enabled deployments. No unused staging Worker is provisioned by this workflow.
+
+## Manual provisioning and activation
 
 1. Select the owning Cloudflare account and record its Workers plan, CPU,
    request, subrequest, Durable Object storage and billing limits. Compare current
