@@ -1,0 +1,27 @@
+name: Install Playwright browser
+description: Install one browser and its signed Ubuntu dependencies through official HTTPS mirrors.
+inputs:
+  browser:
+    description: Browser engine (chromium, firefox, or webkit).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install browser and dependencies
+      shell: bash
+      env:
+        PLAYGROUND_BROWSER: ${{ inputs.browser }}
+      run: |
+        case "$PLAYGROUND_BROWSER" in
+          chromium|firefox|webkit) ;;
+          *) echo '::error::browser must be chromium, firefox, or webkit.' >&2; exit 1 ;;
+        esac
+        # Ubuntu 24.04 runners use this mirror list. Keep their suites,
+        # components and signature verification; avoid the slow Azure mirror.
+        # https://github.com/actions/runner-images/blob/ubuntu24/20261101.360/images/ubuntu/scripts/build/configure-apt-sources.sh
+        grep -Fq 'mirror+file:/etc/apt/apt-mirrors.txt' /etc/apt/sources.list.d/ubuntu.sources
+        printf '%s\tpriority:%s\n' \
+          'https://archive.ubuntu.com/ubuntu/' 1 \
+          'https://security.ubuntu.com/ubuntu/' 2 \
+          | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+        npx playwright install --with-deps "$PLAYGROUND_BROWSER"

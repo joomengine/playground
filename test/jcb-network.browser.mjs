@@ -16,7 +16,7 @@ import { assertLiveNetworkApi, assertLivePowerClient, assertLiveFieldImport,
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const directory = path.resolve(process.env.PLAYGROUND_DIST || path.join(root, 'dist'));
-const receipts = path.join(root, 'test-results');
+const receipts = path.resolve(process.env.PLAYGROUND_JCB_RECEIPTS || path.join(root, 'test-results'));
 const browserNames = (process.env.PLAYGROUND_BROWSERS ?? 'chromium,firefox').split(',').map(name => name.trim());
 const engines = { chromium, firefox };
 const phpVersion = '8.4';

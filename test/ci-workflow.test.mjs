@@ -22,15 +22,20 @@ function aggregateScript() {
   return scripts[0][1].split('\n').map(line => line.replace(/^          /, '')).join('\n');
 }
 
-test('JCB has a dedicated mandatory Chromium and Firefox job against the candidate build', () => {
+test('live JCB checks wait for other validation and run browsers sequentially against the candidate build', () => {
   const gate = job(validation, 'jcb-network');
   assert.match(gate, /^    name: JCB API and repositories \(\$\{\{ matrix\.browser \}\}\)$/m);
-  assert.match(gate, /^    needs: \[checks, build\]$/m);
+  const needs = /^    needs: \[([^\n]+)\]$/m.exec(gate)?.[1].split(',').map(value => value.trim());
+  const jobs = [...validation.slice(validation.indexOf('\njobs:\n')).matchAll(/^  ([\w-]+):$/gm)].map(match => match[1]);
+  assert.deepEqual(needs?.sort(), jobs.filter(id => !['jcb-network', 'validate'].includes(id)).sort(),
+    'Live JCB requests must not overlap other validation jobs.');
+  assert.match(gate, /^      max-parallel: 1$/m);
+  assert.match(gate, /^      fail-fast: false$/m);
   assert.match(gate, /^        browser: \[chromium, firefox\]$/m);
   assert.match(gate, /^          name: playground-static$/m);
   assert.match(gate, /^          path: dist$/m);
   assert.match(gate, /^          PLAYGROUND_BROWSERS: \$\{\{ matrix\.browser \}\}$/m);
-  assert.match(gate, /^        run: node --test test\/jcb-network\.browser\.mjs$/m);
+  assert.match(gate, /^        run: node scripts\/test-jcb-network\.mjs$/m);
   assert.doesNotMatch(gate, /^    if:|continue-on-error|PLAYGROUND_(?:SCENARIOS|PHP_VERSIONS|JOOMLA_VERSIONS)/m,
     'The dedicated gate must not inherit optional scenario or version filters.');
   assert.match(gate, /name: Retain JCB network receipts and diagnostics\n        if: always\(\)/);
