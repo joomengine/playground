@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { strToU8, unzipSync, zipSync } from 'fflate';
 import { joomlaPackagePhpMinimum, stageVersionCatalog } from '../scripts/version-catalog.mjs';
+import { discoverDynamicCatalog } from '../src/dynamic-catalog.mjs';
 import { compatibleDynamicPhp } from '../src/dynamic-selection.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -108,6 +109,90 @@ test('partial metadata cannot publish an apparently complete catalog', async t =
   await assert.rejects(stageVersionCatalog(f.configuration), /incomplete version catalog.*jcb-6.x/);
   assert.deepEqual(f.requests, []);
   await assert.rejects(f.catalog(), { code: 'ENOENT' });
+});
+
+const releasesURL = 'https://api.github.com/repos/joomla/joomla-cms/releases?per_page=100&page=1';
+const discoverPinnedCatalog = options => discoverDynamicCatalog({ ...options,
+  pinnedJoomla: [stable], pinnedJcb: [jcb], sources: { nightlyURLs: [], jcbURLs: [] } });
+
+test('catalog metadata retries transient gateway failures within the same request deadline', async t => {
+  for (const status of [502, 503, 504]) {
+    const attempts = [];
+    let cancelled = 0;
+    const f = await fixture(t, { discover: discoverPinnedCatalog, fetchImpl: async (url, init) => {
+      if (url !== releasesURL) return new Response(url === stable.url ? stableBytes : jcbBytes);
+      attempts.push(init);
+      return attempts.length === 1
+        ? new Response(new ReadableStream({ cancel() { cancelled++; } }), { status })
+        : Response.json([]);
+    } });
+    await stageVersionCatalog(f.configuration);
+    assert.equal(attempts.length, 2, `HTTP ${status} must retry once before succeeding.`);
+    assert.equal(cancelled, 1, 'The discarded response body must be cancelled.');
+    assert.ok(attempts[0].signal instanceof AbortSignal);
+    assert.equal(attempts[1].signal, attempts[0].signal, 'Retries must not extend the metadata deadline.');
+    assert.ok(attempts.every(init => init.credentials === 'omit' && init.cache === 'no-store'
+      && init.headers.get('User-Agent').includes('JoomEnginePlayground')));
+    assert.deepEqual((await f.catalog()).errors, []);
+  }
+});
+
+test('exhausted metadata retries preserve the previously published catalog', async t => {
+  const f = await fixture(t);
+  await stageVersionCatalog(f.configuration);
+  const previous = await f.catalog();
+  let attempts = 0;
+  await assert.rejects(stageVersionCatalog({ ...f.configuration, discover: discoverPinnedCatalog,
+    fetchImpl: async url => {
+      assert.equal(url, releasesURL, 'Packages must not download after incomplete discovery.');
+      attempts++;
+      return new Response('Gateway timeout', { status: 504 });
+    } }), /incomplete version catalog: joomla-releases: HTTP 504/);
+  assert.equal(attempts, 3);
+  assert.deepEqual(await f.catalog(), previous);
+});
+
+test('metadata retries do not mask permanent HTTP, parsing or connection errors', async t => {
+  for (const response of [
+    () => new Response('Not found', { status: 404 }),
+    () => new Response('Invalid JSON'),
+    () => { throw new TypeError('Connection failed'); },
+  ]) {
+    let attempts = 0;
+    const f = await fixture(t, { discover: discoverPinnedCatalog, fetchImpl: async () => { attempts++; return response(); } });
+    await assert.rejects(stageVersionCatalog(f.configuration), /incomplete version catalog/);
+    assert.equal(attempts, 1);
+    await assert.rejects(f.catalog(), { code: 'ENOENT' });
+  }
+});
+
+test('an expired metadata deadline interrupts backoff without another request', async t => {
+  let attempts = 0;
+  let signal;
+  const f = await fixture(t, {
+    discover: options => {
+      signal = AbortSignal.timeout(20);
+      return discoverPinnedCatalog({ ...options, signal });
+    },
+    fetchImpl: async () => { attempts++; return new Response('Gateway timeout', { status: 504 }); },
+  });
+  await assert.rejects(stageVersionCatalog(f.configuration), { name: 'AbortError' });
+  assert.equal(attempts, 1);
+  assert.equal(signal.aborted, true);
+  await assert.rejects(f.catalog(), { code: 'ENOENT' });
+});
+
+test('catalog metadata retry adapter never replays a non-GET request', async t => {
+  let attempts = 0;
+  const f = await fixture(t, {
+    discover: async ({ fetchImpl }) => {
+      const response = await fetchImpl(releasesURL, { method: 'POST' });
+      return { joomla: [], jcb: [], errors: [{ source: 'metadata', message: `HTTP ${response.status}` }] };
+    },
+    fetchImpl: async () => { attempts++; return new Response('Gateway timeout', { status: 504 }); },
+  });
+  await assert.rejects(stageVersionCatalog(f.configuration), /incomplete version catalog: metadata: HTTP 504/);
+  assert.equal(attempts, 1);
 });
 
 test('non-ZIP, oversized declared responses and oversized streams are rejected before catalog publication', async t => {

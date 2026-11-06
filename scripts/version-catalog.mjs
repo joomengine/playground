@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { unzipSync } from 'fflate';
 import { discoverDynamicCatalog } from '../src/dynamic-catalog.mjs';
 
@@ -96,7 +97,19 @@ export async function stageVersionCatalog({ assets, cache, pinnedJoomla = [], st
     if (!headers.has('User-Agent')) headers.set('User-Agent', USER_AGENT);
     return fetchImpl(url, { ...init, headers });
   };
-  const discovered = await discover({ fetchImpl: upstreamFetch, pinnedJoomla, cacheStorage: null, forceRefresh: true });
+  // A transient gateway failure should not force another full build. Keep each
+  // metadata GET within its original deadline and never replay other methods.
+  const metadataFetch = async (url, init = {}) => {
+    const attempts = (init.method || 'GET').toUpperCase() === 'GET' ? 3 : 1;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      init.signal?.throwIfAborted();
+      const response = await upstreamFetch(url, init);
+      if (attempt === attempts || ![502, 503, 504].includes(response.status)) return response;
+      await response.body?.cancel().catch(() => {});
+      await delay(500 * attempt, undefined, { signal: init.signal });
+    }
+  };
+  const discovered = await discover({ fetchImpl: metadataFetch, pinnedJoomla, cacheStorage: null, forceRefresh: true });
   if (!Array.isArray(discovered?.joomla) || !Array.isArray(discovered.jcb) || !Array.isArray(discovered.errors)) throw new Error('Invalid discovered version catalog.');
   if (discovered.errors.length) throw new Error(`Cannot publish an incomplete version catalog: ${discovered.errors.map(error => `${error.source}: ${error.message}`).join('; ')}`);
   if (!discovered.joomla.length || !discovered.jcb.length) throw new Error('The version catalog must contain Joomla and JCB packages.');

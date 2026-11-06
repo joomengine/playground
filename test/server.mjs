@@ -35,7 +35,7 @@ export async function prepareBrowserEnvironment(page) {
   }
 }
 
-/** Serve the built artifact exactly as static hosting would, beneath a project path. */
+/** Serve static artifacts with test-owned networking, beneath a project path. */
 export async function createStaticServer({ directory, prefix = '/playground/', isolation = true, fixtures = {}, corsOrigin, corsPaths } = {}) {
   if (!prefix.startsWith('/') || !prefix.endsWith('/') || prefix.includes('..')) {
     throw new TypeError('A static test prefix must start and end with a slash.');
@@ -70,6 +70,14 @@ export async function createStaticServer({ directory, prefix = '/playground/', i
       if (Object.hasOwn(fixtures, relative)) {
         response.setHeader('Content-Type', contentTypes[path.extname(relative || 'index.html')] || 'application/octet-stream');
         response.end(typeof fixtures[relative] === 'function' ? await fixtures[relative](request) : fixtures[relative]);
+        return;
+      }
+      if (relative === 'config/network.json') {
+        // Generic browser suites must not request human verification from the
+        // production relay. Network suites supply their own enabled fixture
+        // above; the built artifact and its production configuration stay intact.
+        response.setHeader('Content-Type', contentTypes['.json']);
+        response.end(JSON.stringify({ schemaVersion: 1, enabled: false }));
         return;
       }
       if (relative === '__test__.html') {

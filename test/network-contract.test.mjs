@@ -8,13 +8,16 @@ test('client protocol interoperates with the actual Worker over HTTP for session
   const fixture = await createNetworkFixture({ directory: '.' });
   try {
     const origin = new URL(fixture.url).origin;
+    const config = await (await fetch(new URL('config/network.json', fixture.url))).json();
+    assert.deepEqual(config, fixture.config, 'Network suites serve their enabled Worker configuration instead of the generic direct-only fixture.');
+    assert.equal(config.enabled, true);
     let sessions = 0;
     const dispatch = (url, init = {}) => {
       if (!String(url).startsWith(fixture.relayOrigin)) throw new TypeError('Controlled direct transport failure');
       return fetch(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), Origin: origin } });
     };
     let session;
-    const transport = createNetworkTransport(dispatch, fixture.config, { allowInsecureLocalhost: true,
+    const transport = createNetworkTransport(dispatch, config, { allowInsecureLocalhost: true,
       getSession: async () => {
         if (!session) {
           const response = await dispatch(`${fixture.relayOrigin}/v1/session`, { method: 'POST',
