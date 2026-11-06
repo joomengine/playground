@@ -9,6 +9,7 @@ import { prepareBrowserEnvironment } from './server.mjs';
 import { createNetworkFixture } from './network-fixture.mjs';
 import { assertJcbCompiler } from './jcb-compiler-contract.mjs';
 import { assertJcbDocumentAssets } from './jcb-document-contract.mjs';
+import { jcbDiagnosticText } from './jcb-network-diagnostics.mjs';
 import { probeSyntheticRedirect } from './firefox-redirect-probe.mjs';
 import { assertLiveNetworkApi, assertLivePowerClient, assertLiveFieldImport,
   powerGuid, fieldGuid } from './jcb-network-contract.mjs';
@@ -48,17 +49,68 @@ function publicNetworkURL(value) {
 }
 
 function observeNetwork(page, record) {
+  const consoleMessages = [];
   for (const event of ['request', 'response', 'requestfailed']) {
     page.on(event, item => {
       const url = publicNetworkURL(item.url());
       if (!url) return;
-      record.network.push({ event, url, phase: record.phase,
+      record.network.push({ event, url, phase: record.phase, at: new Date().toISOString(),
         ...(event === 'request' ? { method: item.method() } : {}),
         ...(event === 'response' ? { status: item.status(), contentType: item.headers()['content-type'] ?? '' } : {}),
         ...(event === 'requestfailed' ? { error: item.failure()?.errorText } : {}) });
     });
   }
   page.on('pageerror', error => record.pageErrors.push(error.message));
+  page.on('console', message => {
+    if (!['warning', 'error'].includes(message.type())) return;
+    consoleMessages.push({ type: message.type(), at: new Date().toISOString(), phase: record.phase,
+      message: message.text().slice(0, 16384) });
+    if (consoleMessages.length > 100) consoleMessages.shift();
+  });
+  return consoleMessages;
+}
+
+async function failureDiagnostics(page, consoleMessages) {
+  const state = await bounded(page.evaluate(() => ({
+    secrets: window.validationSecrets || [],
+    progress: (window.validationProgress || []).slice(-100).map(({ phase, message, at }) => ({ phase, message, at })),
+    networkNotice: document.getElementById('network-service-diagnostic')?.innerText || '',
+  })), 'Read PHP failure progress', 5000).catch(() => ({ progress: [], secrets: [] }));
+  const text = (value, maximum) => jcbDiagnosticText(value, state.secrets, maximum);
+  const result = {
+    capturedAt: new Date().toISOString(),
+    progress: state.progress.map(event => ({ ...event, message: text(event.message) })),
+    console: consoleMessages.map(event => ({ ...event, message: text(event.message) })),
+    networkNotice: text(state.networkNotice, 2048),
+  };
+  const frame = page.frames().find(frame => frame !== page.mainFrame()
+    && new URL(frame.url(), page.url()).pathname.includes('/administrator/'));
+  if (frame) result.compilerFrame = await bounded(frame.evaluate(() => ({
+    path: location.pathname, body: document.body?.innerText.slice(0, 16384) || '',
+  })), 'Read failed compiler document', 5000)
+    .then(value => ({ ...value, body: text(value.body, 16384) }))
+    .catch(error => ({ error: text(error.message) }));
+  result.joomlaLogs = await bounded(page.evaluate(async () => {
+    if (!window.playground) return [];
+    const logs = [];
+    for (const directory of ['/persist/www/administrator/logs', '/persist/www/logs']) {
+      let names;
+      try { names = await window.playground.fs.readdir(directory); } catch { continue; }
+      for (const name of names.filter(name => /^[a-zA-Z0-9_.-]+$/.test(name)
+        && /(?:error|exception|php)/i.test(name) && /\.(?:log|php)$/i.test(name)).sort().slice(0, 4)) {
+        const path = `${directory}/${name}`;
+        const stat = await window.playground.fs.stat(path);
+        if (!stat?.isFile) continue;
+        if (stat.size > 1024 * 1024) { logs.push({ path, size: stat.size, skipped: 'Log exceeds diagnostic read limit.' }); continue; }
+        const bytes = await window.playground.fs.readFile(path);
+        logs.push({ path, size: stat.size, tail: new TextDecoder().decode(bytes.slice(-16384)) });
+      }
+    }
+    return logs;
+  }), 'Read Joomla failure logs', 5000)
+    .then(logs => logs.map(log => ({ ...log, ...(log.tail === undefined ? {} : { tail: text(log.tail, 16384) }) })))
+    .catch(error => [{ error: text(error.message) }]);
+  return result;
 }
 
 function successfulRead(events, suffix, label) {
@@ -88,8 +140,12 @@ async function launchJcb(page, joomlaVersion) {
       admin: { username: 'networktester', password: `Network-${crypto.randomUUID()}!` },
     }, { catalog, deployCatalog, baseURL: location.href });
     window.validationProgress = [];
+    window.validationSecrets = [configuration.admin.password];
     window.playground = await createPlayground(configuration, {
-      onProgress(progress) { window.validationProgress.push(progress); },
+      onProgress(progress) {
+        window.validationProgress.push({ ...progress, at: new Date().toISOString() });
+        if (window.validationProgress.length > 200) window.validationProgress.shift();
+      },
     });
     return { joomlaVersion: window.playground.configuration.joomlaVersion,
       phpVersion: window.playground.configuration.phpVersion,
@@ -146,10 +202,23 @@ test('required JCB discovery, repositories, entity import and complete Demo work
         for (const pair of pairs) {
           // PHP/MariaDB WebAssembly contexts are deliberately sequential to
           // avoid RAM contention and to prove each target starts without data.
-          activeCase = { ...pair, phase: 'bootstrap', status: 'running', network: [], pageErrors: [] };
+          activeCase = { ...pair, phase: 'bootstrap', status: 'running', network: [], pageErrors: [],
+            phases: [{ name: 'bootstrap', startedAt: new Date().toISOString() }] };
           receipt.cases.push(activeCase);
+          let phaseRelayStart = server.liveReads.length;
+          let phaseOperationStart = server.relayOperations.length;
+          const finishPhase = () => {
+            const current = activeCase.phases.at(-1);
+            current.finishedAt = new Date().toISOString();
+            current.relayReads = server.liveReads.slice(phaseRelayStart).filter(event => publicNetworkURL(event.url));
+            current.relayOperations = server.relayOperations.slice(phaseOperationStart);
+            phaseRelayStart = server.liveReads.length;
+            phaseOperationStart = server.relayOperations.length;
+          };
           const phase = async name => {
+            finishPhase();
             activeCase.phase = name;
+            activeCase.phases.push({ name, startedAt: new Date().toISOString() });
             console.log(`${receipt.browser} Joomla ${pair.joomlaVersion}: ${name}`);
             await persist();
           };
@@ -158,7 +227,7 @@ test('required JCB discovery, repositories, entity import and complete Demo work
           page = await context.newPage();
           page.setDefaultTimeout(30_000);
           page.setDefaultNavigationTimeout(120_000);
-          observeNetwork(page, activeCase);
+          const consoleMessages = observeNetwork(page, activeCase);
           try {
             await page.goto(new URL('__test__.html', server.url).href);
             await prepareBrowserEnvironment(page);
@@ -192,11 +261,13 @@ test('required JCB discovery, repositories, entity import and complete Demo work
             await phase('complete');
           } catch (error) {
             activeCase.status = 'failed'; activeCase.error = error.stack || error.message;
+            activeCase.diagnostics = await failureDiagnostics(page, consoleMessages);
+            finishPhase();
             await persist();
             const prefix = path.join(receipts, `jcb-network-${name}-joomla-${pair.joomlaVersion}`);
             await Promise.allSettled([
               page.screenshot({ path: `${prefix}-failure.png`, timeout: 5000, fullPage: true }),
-              bounded(page.content(), 'Failure HTML', 5000).then(html => writeFile(`${prefix}-failure.html`, html)),
+              save(`${prefix}-failure.json`, activeCase.diagnostics),
             ]);
             throw error;
           } finally {

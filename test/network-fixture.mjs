@@ -21,7 +21,7 @@ const close = server => new Promise(resolve => { server.closeAllConnections?.();
 export async function createNetworkFixture({ directory, liveOrigins = [], prefix = '/playground/', fixtures = {}, isolation = false } = {}) {
   const { createRelayWorker } = await import('../services/network-worker/src/index.mjs');
   const { createTestEnvironment } = await import('../services/network-worker/test/helpers.mjs');
-  const requests = [], relayRequests = [], liveReads = [];
+  const requests = [], relayRequests = [], liveReads = [], relayOperations = [];
   let app, relay, appOrigin, relayOrigin;
   let available = true;
   const upstream = http.createServer(async (req, res) => {
@@ -75,10 +75,19 @@ export async function createNetworkFixture({ directory, liveOrigins = [], prefix
       return Response.json({ success: true, hostname: '127.0.0.1', action: 'network-session' });
     }
     const mapped = mapFixture(input);
-    const response = await fetch(mapped || input, init);
-    if (!mapped) liveReads.push({ event: 'response', url: original, status: response.status,
-      contentType: response.headers.get('content-type') || '', contentEncoding: response.headers.get('content-encoding') || '', route: 'relay' });
-    return response;
+    const startedAt = Date.now();
+    try {
+      const response = await fetch(mapped || input, init);
+      if (!mapped) liveReads.push({ event: 'response', url: original, status: response.status,
+        contentType: response.headers.get('content-type') || '', contentEncoding: response.headers.get('content-encoding') || '',
+        route: 'relay', startedAt, durationMs: Date.now() - startedAt });
+      return response;
+    } catch (error) {
+      if (!mapped) liveReads.push({ event: 'requestfailed', url: original, route: 'relay', startedAt,
+        durationMs: Date.now() - startedAt,
+        error: ['AbortError', 'TimeoutError'].includes(error?.name) ? error.name : 'UPSTREAM_FETCH_FAILED' });
+      throw error;
+    }
   };
   const worker = createRelayWorker({ fetcher });
   let env;
@@ -108,7 +117,10 @@ export async function createNetworkFixture({ directory, liveOrigins = [], prefix
   appOrigin = new URL(app.url).origin;
   env = createTestEnvironment({ fetcher, allowedOrigins: [appOrigin], upstreamOrigins: [fixtureOrigin, writeOrigin, ...liveOrigins],
     relayOrigin, credentialOrigins: [writeOrigin], turnstileHostname: '127.0.0.1' });
-  return { url: app.url, config, requests, relayRequests, liveReads, upstreamOrigin, relayOrigin,
+  // The production logger records only method/hostname/status/timing and byte
+  // counts. Retain its completion/error evidence without tokens or URL queries.
+  env.testCoordinator.logger = value => relayOperations.push({ ...value, finishedAt: Date.now() });
+  return { url: app.url, config, requests, relayRequests, liveReads, relayOperations, upstreamOrigin, relayOrigin,
     setAvailable(value) { available = Boolean(value); },
     async attach(context) {
       await context.addInitScript(() => {
