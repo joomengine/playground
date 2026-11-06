@@ -244,13 +244,24 @@ test('unfinished fetch envelopes consume concurrency and invalid envelopes retai
   const f = fixture({ limits: { concurrent: 1 } }); const { token } = await f.session();
   let unblock; let started;
   const reading = new Promise(resolve => { started = resolve; });
-  const stream = new ReadableStream({ start(controller) { unblock = () => controller.close(); }, pull() { started(); } }, { highWaterMark: 0 });
+  // Request forwarding can pull the source before authentication/reservation.
+  // Synchronize with the committed reservation, not speculative stream reads.
+  const reserve = f.env.testCoordinator.reserve.bind(f.env.testCoordinator);
+  f.env.testCoordinator.reserve = async (...args) => {
+    const reservation = await reserve(...args); started(); return reservation;
+  };
+  const stream = new ReadableStream({ start(controller) { unblock = () => controller.close(); } }, { highWaterMark: 0 });
   const pending = f.relay(token, {}, { body: stream, duplex: 'half' });
-  await reading;
-  const denied = await f.relay(token); assert.equal(denied.status, 429); assert.equal(f.calls.length, 0);
   const sessionKey = [...f.env.testStorage.values.keys()].find(key => key.startsWith('session:'));
-  assert.equal(Object.keys((await f.env.testStorage.get(sessionKey)).active).length, 1);
-  unblock(); const success = await pending; assert.equal(await success.text(), 'response');
+  let body;
+  try {
+    await Promise.race([reading, pending.then(() => { throw new Error('Request ended before reserving its concurrency slot.'); })]);
+    const denied = await f.relay(token); assert.equal(denied.status, 429); assert.equal(f.calls.length, 0);
+    assert.equal(Object.keys((await f.env.testStorage.get(sessionKey)).active).length, 1);
+  } finally {
+    unblock(); body = await (await pending).text();
+  }
+  assert.equal(body, 'response');
   const malformed = await f.relay(token, {}, { body: 'not-empty' });
   assert.equal(malformed.status, 400); assert.equal(await errorCode(malformed), 'INVALID_METADATA');
   const session = await f.env.testStorage.get(sessionKey);

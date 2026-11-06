@@ -15,12 +15,97 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  configuration:
+    name: Select publication path
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      reuse: ${{ steps.plan.outputs.reuse }}
+      source_run_id: ${{ steps.plan.outputs.source_run_id }}
+      source_commit: ${{ steps.plan.outputs.source_commit }}
+      artifact_id: ${{ steps.plan.outputs.artifact_id }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: '.node-version'
+      - name: Reuse the verified runtime only for network configuration changes
+        id: plan
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PAGES_CONFIG_SOURCE_RUN_ID: '42219564766'
+          PAGES_CONFIG_SOURCE_COMMIT: '40db41ad34e09d04d910d40dc358a20651098282'
+        run: node scripts/pages-config-release.mjs plan
+
   validate:
     if: github.ref == 'refs/heads/main'
     uses: ./.github/workflows/validate.yml
 
+  publish-configuration:
+    name: Publish network configuration with the verified runtime
+    needs: configuration
+    if: needs.configuration.outputs.reuse == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: '.node-version'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Check source and configuration helpers
+        run: |
+          npm run check
+          npm test
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: playground-static
+          path: dist
+          run-id: ${{ needs.configuration.outputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: Apply the public configuration and verify the existing runtime
+        env:
+          PAGES_CONFIG_SOURCE_RUN_ID: ${{ needs.configuration.outputs.source_run_id }}
+          PAGES_CONFIG_SOURCE_COMMIT: ${{ needs.configuration.outputs.source_commit }}
+          PAGES_CONFIG_ARTIFACT_ID: ${{ needs.configuration.outputs.artifact_id }}
+        run: node scripts/pages-config-release.mjs prepare
+      - name: Retain configuration publication evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playground-config-release
+          path: test-results/pages-config-release.json
+          if-no-files-found: error
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: dist
+      - name: Publish configured distribution
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+      - name: Smoke test the published production deployment
+        timeout-minutes: 4
+        env:
+          PAGES_URL: ${{ steps.deployment.outputs.page_url }}
+        run: node scripts/pages-smoke.mjs dist
+
   deploy:
-    needs: validate
+    needs: [validate, configuration]
+    if: needs.configuration.outputs.reuse != 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read

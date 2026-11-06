@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { assertHostedStagingEvidence } from '../scripts/network-release-evidence.mjs';
+import { validateNetworkDeployment } from '../scripts/network-deployment-check.mjs';
 
 const commit = 'a'.repeat(40);
 const run = { head_sha: commit, path: '.github/workflows/network-staging.yml', conclusion: 'success', event: 'workflow_dispatch' };
 const jobs = [{ conclusion: 'success', steps: [{ name: 'Verify hosted candidate', conclusion: 'success' }] }];
 
-test('production requires a successful hosted staging step for the identical source commit', () => {
+test('hosted staging evidence identifies the verified source commit when inspected', () => {
   assertHostedStagingEvidence(run, jobs, commit);
   for (const change of [{ head_sha: 'b'.repeat(40) }, { path: '.github/workflows/validate.yml' }, { event: 'pull_request' },
     { conclusion: 'failure' }, { conclusion: 'cancelled' }, { conclusion: null }]) {
@@ -18,6 +19,33 @@ test('production requires a successful hosted staging step for the identical sou
     assert.throws(() => assertHostedStagingEvidence(run, [{ ...jobs[0], conclusion: state }], commit));
   }
   assert.throws(() => assertHostedStagingEvidence(run, [], commit));
+});
+
+test('production deployment works without a staging service or plan label while requiring its own valid policy', () => {
+  const credentials = { CLOUDFLARE_ACCOUNT_ID: 'a'.repeat(32), CLOUDFLARE_API_TOKEN: 'deployment-test-token' };
+  const config = { env: { staging: { vars: { ENABLED: 'false' } }, production: {
+    durable_objects: { bindings: [{ name: 'RELAY_STATE', class_name: 'RelayCoordinator' }] },
+    vars: { ENABLED: 'true', DEPLOYMENT_ENV: 'production', TURNSTILE_TEST_MODE: 'false',
+      RELAY_AUDIENCE: 'https://relay.example.com', ALLOWED_ORIGINS: '["https://playground.example.com"]',
+      UPSTREAM_ORIGINS: '["https://upstream.example.com"]', TURNSTILE_ACTION: 'network-session', POLICY_VERSION: '1' },
+  } } };
+  const result = validateNetworkDeployment(config, 'production', credentials);
+  assert.equal(result.endpoint, 'https://relay.example.com');
+  assert.equal(result.upstreamOriginCount, 1);
+  for (const name of ['CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN']) {
+    assert.throws(() => validateNetworkDeployment(config, 'production', { ...credentials, [name]: '' }));
+  }
+  for (const change of [{ ENABLED: 'false' }, { DEPLOYMENT_ENV: 'staging' }, { TURNSTILE_TEST_MODE: 'true' },
+    { UPSTREAM_ORIGINS: '[]' }, { ALLOWED_ORIGINS: '[]' }]) {
+    const invalid = structuredClone(config);
+    Object.assign(invalid.env.production.vars, change);
+    assert.throws(() => validateNetworkDeployment(invalid, 'production', credentials));
+  }
+  const production = readFileSync(new URL('../.github/workflows/network-production.yml', import.meta.url), 'utf8');
+  assert.doesNotMatch(production, /staging_run_id|NETWORK_STAGING_RUN_ID|NETWORK_CLOUDFLARE_PLAN|actions: read/);
+  assert.match(production, /CLOUDFLARE_ACCOUNT_ID: \$\{\{ vars\.CLOUDFLARE_ACCOUNT_ID \|\| secrets\.CLOUDFLARE_ACCOUNT_ID \}\}/);
+  assert.match(production, /run: node scripts\/network-deployment-check\.mjs production/);
+  assert.match(production, /run: node scripts\/network-health\.mjs/);
 });
 
 test('deployment credentials are restricted to explicit protected deployments and production Pages rejects staging builds', () => {

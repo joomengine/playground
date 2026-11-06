@@ -19,6 +19,8 @@ async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'network-setup-test-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const config = JSON.parse(await readFile(new URL('../services/network-worker/wrangler.jsonc', import.meta.url), 'utf8'));
+  // Bootstrap tests exercise a new disabled service independently of live production policy.
+  config.env.production.vars.ENABLED = 'false';
   const configFile = path.join(root, 'services/network-worker/wrangler.jsonc');
   await mkdir(path.dirname(configFile), { recursive: true });
   await writeFile(configFile, JSON.stringify(config));

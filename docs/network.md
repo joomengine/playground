@@ -6,10 +6,11 @@ can make one attempt through the deployment's configured network service. Failur
 then stops the request. No component names, repository mirrors, Power GUIDs or
 expected response content participate in production routing.
 
-The checked-in relay configuration is disabled. Source and local test success do
-not establish that a public Worker is deployed. The operator must complete the
-staging and release procedure in [the Worker guide](../services/network-worker/README.md)
-before enabling `config/network.json`.
+The production configuration enables the provisioned Worker for
+`https://playground.joomengine.org`. Both its Worker policy and the Pages client
+configuration must be deployed. Follow the production activation procedure in
+[the Worker guide](../services/network-worker/README.md); staging is optional.
+Verify the live PHP/JCB request path after publication, not only Worker health.
 
 ## Request paths
 

@@ -2,8 +2,8 @@
 
 This is the separately deployed server-side service for
 [shared PHP networking](../../docs/network.md). GitHub Pages remains the static
-Playground host. Both checked-in Worker environments start disabled and with empty
-origin policies. No production endpoint or Cloudflare plan is assumed to exist.
+Playground host. Production uses the provisioned Worker and its explicit origin
+policy. Staging is optional and remains disabled until separately configured.
 
 ## Deployment model
 
@@ -56,7 +56,7 @@ must not depend on accidental inheritance.
 | `STAGING_TEST_SECRET` | Staging Worker **secret** | Additional high-entropy 32–256 character credential, required only in automated staging mode |
 | `CLOUDFLARE_API_TOKEN` | GitHub repository or protected environment **secret** | Cloudflare deployment authorization |
 | `CLOUDFLARE_ACCOUNT_ID` | GitHub repository or environment variable | Owning account identifier; setup also accepts a secret with this name |
-| `NETWORK_CLOUDFLARE_PLAN` | GitHub environment variable | Recorded Workers plan used by the deployment |
+| `NETWORK_CLOUDFLARE_PLAN` | Optional GitHub environment variable | Deployment metadata; not an activation prerequisite |
 | `NETWORK_PLAYGROUND_URL` | `network-staging` GitHub variable | HTTPS URL of the actual staging client built from the workflow's exact commit |
 | `NETWORK_TEST_TARGET` | `network-staging` GitHub variable | Reviewed CORS-denied binary target used for actual PHP relay verification |
 | `NETWORK_EXPECTED_SHA256` | `network-staging` GitHub variable | Expected SHA-256 of the target's body |
@@ -117,8 +117,8 @@ configuration **disabled**. Review the permitted upstream origins and limits,
 then complete the activation and hosted verification steps below before enabling
 `config/network.json` in a Pages release. A successful setup run proves
 provisioning and disabled-endpoint checks, not successful live PHP fallback.
-The existing production release workflow still requires hosted staging evidence;
-the setup workflow does not bypass that activation requirement.
+Production activation uses **Deploy network production**; it does not require a
+staging website, staging run ID or plan-label variable.
 
 The workflow is manual, so merging a change does not deploy Cloudflare resources.
 Rerunning it updates only a disabled Worker previously created by this setup and
@@ -126,7 +126,26 @@ reuses its widget without rotating the secret. It refuses to overwrite an active
 Worker or an unrelated existing Worker. Use the release workflow for later
 enabled deployments. No unused staging Worker is provisioned by this workflow.
 
-## Manual provisioning and activation
+## Activate the provisioned production Worker
+
+Set the actual endpoint, browser origin and approved upstream origins in
+`env.production.vars` in `wrangler.jsonc`, with `ENABLED="true"`,
+`DEPLOYMENT_ENV="production"` and `TURNSTILE_TEST_MODE="false"`. Setup has already
+installed the private `TURNSTILE_SECRET_KEY`; the production deployment reuses it.
+Set `config/network.json` to enabled with the same endpoint and the widget's
+public site key. Keep `proxyOrigins: []` for direct Fetch followed by eligible
+fallback; that field is not the Worker upstream allowlist.
+
+Run **Actions → Deploy network production → Run workflow** for the reviewed
+production revision. It validates the selected production policy and deployment
+credentials, deploys the Worker, and checks its live health and rejection policy.
+Publish the enabled Pages configuration after the Worker is healthy, then verify
+real browser session creation, missing-Power retrieval and Demo compile/install.
+The optional staging workflow remains available for independent hosted testing.
+Initial setup requires a disabled configuration and refuses an already active
+Worker; use the production deployment workflow for enabled updates.
+
+## Optional staging setup and manual verification
 
 1. Select the owning Cloudflare account and record its Workers plan, CPU,
    request, subrequest, Durable Object storage and billing limits. Compare current
@@ -178,10 +197,10 @@ enabled deployments. No unused staging Worker is provisioned by this workflow.
    Validate real PHP cURL and streams, both browser engines, the complete JCB
    workflow and startup/verification under both isolation modes. Keep the main
    published Playground unchanged while these checks run.
-7. Bootstrap production independently, provision its own secret with
-   `--env production`, and repeat the origin/limits review. Deploy a
-   backward-compatible production Worker before publishing the client that uses
-   it. Run production smoke checks after publication.
+7. Use the existing production Worker and activation procedure above for
+   production updates. Deploy the Worker before publishing its client settings,
+   then run production smoke checks. Staging resources and test credentials are
+   separate from production; a staging run is not a production prerequisite.
 
 For a custom domain, choose an unused hostname in an active Cloudflare zone.
 Use Workers & Pages → Worker → Settings → Domains & Routes → Add → Custom Domain.
@@ -242,12 +261,12 @@ challenge experience. The test-mode run verifies real public networking,
 Siteverify transport and session enforcement; it does not prove that a real user
 passes a production challenge on every browser/device.
 
-`network-production.yml` accepts `staging_run_id` and checks via GitHub's API that
-the corresponding hosted staging workflow and acceptance step succeeded for the
-**same commit**. It then deploys the production Worker and verifies health and
-rejection policy. The Pages publication gate checks the production manifest and
-configured endpoint before publishing an enabled client. Keep that production
-deployment protected and activate it only after reviewing the staging evidence.
+`network-production.yml` validates its own enabled production configuration and
+deployment credentials without requiring a staging run or plan-label variable.
+It deploys the production Worker and verifies health and rejection policy. The
+Pages publication gate checks the production manifest and configured endpoint
+before publishing an enabled client. A passing health check does not establish
+successful real JCB compilation; verify that workflow on the published site.
 
 After Pages publishes, `scripts/pages-smoke.mjs` checks the tested artifact's
 canonical HTTPS URL (including its custom domain) against that artifact: the full manifest and source commit, normalized

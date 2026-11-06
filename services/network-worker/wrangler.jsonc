@@ -27,8 +27,8 @@
       "workers_dev": true,
       "durable_objects": { "bindings": [{ "name": "RELAY_STATE", "class_name": "RelayCoordinator" }] },
       "vars": {
-        "ENABLED": "false", "DEPLOYMENT_ENV": "production", "TURNSTILE_TEST_MODE": "false", "RELAY_AUDIENCE": "",
-        "ALLOWED_ORIGINS": "[]", "UPSTREAM_ORIGINS": "[]", "CREDENTIAL_ORIGINS": "[]",
+        "ENABLED": "true", "DEPLOYMENT_ENV": "production", "TURNSTILE_TEST_MODE": "false", "RELAY_AUDIENCE": "https://joomengine-network.llewellyn-a59.workers.dev",
+        "ALLOWED_ORIGINS": "[\"https://playground.joomengine.org\"]", "UPSTREAM_ORIGINS": "[\"https://api.joomlacomponentbuilder.com\",\"https://git.vdm.dev\",\"https://api.github.com\",\"https://raw.githubusercontent.com\",\"https://codeberg.org\",\"https://git.envs.net\",\"https://tildegit.org\",\"https://git.disroot.org\"]", "CREDENTIAL_ORIGINS": "[]",
         "ALLOWED_PORTS": "[80,443]", "ALLOWED_METHODS": "[\"GET\",\"HEAD\",\"POST\",\"PUT\",\"PATCH\",\"DELETE\",\"OPTIONS\"]",
         "POLICY_VERSION": "1", "REVOKED_SESSION_IDS": "[]", "TURNSTILE_ACTION": "network-session",
         "LIMITS": "{}"

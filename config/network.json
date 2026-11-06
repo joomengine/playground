@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "enabled": false,
-  "endpoint": null,
+  "enabled": true,
+  "endpoint": "https://joomengine-network.llewellyn-a59.workers.dev",
   "protocolVersion": 1,
-  "turnstileSiteKey": null,
+  "turnstileSiteKey": "0x4AAAAAAF2QyGeyRSHT4y-G",
   "proxyOrigins": [],
   "credentialGrants": [],
   "maxRedirects": 5
