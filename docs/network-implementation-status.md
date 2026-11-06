@@ -24,6 +24,16 @@ The static and demonstration-snapshot builds run with harmless, randomly generat
 
 The relay uses opaque sessions held in a Durable Object, so no session-signing secret is required. The operator still needs a private Turnstile verification secret, public widget settings, reviewed destination policy and a configured Cloudflare deployment account. Automated hosted staging additionally requires a private staging-test credential; production rejects that test mode. Default public configuration keeps the relay disabled.
 
+The manually dispatched **Set up Cloudflare proxy** workflow automates initial
+production provisioning using the repository Cloudflare token and account ID.
+It creates or reuses the production widget, installs its private secret in the
+Worker, provisions the SQLite Durable Object, and returns public endpoint/widget
+settings. It creates no staging website and does not publish or enable the
+Playground client. Reruns refuse active or unrelated Workers. See the
+[GitHub setup instructions](../services/network-worker/README.md#set-up-production-from-github-actions).
+The workflow's deterministic tests and dry runs do not establish a successful
+deployment against the operator's account; that evidence comes from running it.
+
 No hosted Cloudflare endpoint or physical mobile-device result is claimed by this branch. Those acceptance checks require provisioned infrastructure and actual devices. The protected staging workflow fails when required settings are missing. Hosted staging acceptance is required before merge, and production activation additionally requires successful hosted staging evidence from the same source commit. The repository owner must configure the required aggregate status and protected deployment environments; workflow YAML alone cannot enforce repository rules.
 
 Live testing on 5 November 2026 found that JCB's default package-repository request to `git.vdm.dev` returns a genuine upstream HTTP 403 even from a server. The shared transport preserves it. The entity test records this default attempt, then selects an available package repository from the live discovery API through JCB's supported explicit repository argument. It imports real remote bytes and verifies the stored entity. Receipts identify the selected repository; production transport performs no repository substitution.

@@ -43,3 +43,52 @@ test('deployment credentials are restricted to explicit protected deployments an
   assert.doesNotMatch(hosted, /setExtraHTTPHeaders|addInitScript|ignoreHTTPSErrors|route\.fulfill/);
   assert.match(hosted, /route\.request\(\)\.url\(\) !== sessionURL \|\| route\.request\(\)\.method\(\) !== 'POST'/);
 });
+
+const setupWorkflow = () => readFileSync(new URL('../.github/workflows/network-setup.yml', import.meta.url), 'utf8');
+
+test('proxy setup is manual and waits for validation inside the protected production concurrency group', () => {
+  const workflow = setupWorkflow();
+  const trigger = /^on:\n((?:[ \t].*\n|\n)*)/m.exec(workflow)?.[1];
+  assert.equal(trigger?.trim(), 'workflow_dispatch:', 'Setup must have only an explicit manual trigger.');
+  const permissions = /^permissions:\n((?:[ \t].*\n|\n)*)/m.exec(workflow)?.[1];
+  assert.equal(permissions?.trim(), 'contents: read');
+  assert.equal(workflow.match(/^ *permissions:/gm)?.length, 1, 'Jobs cannot widen the read-only token permissions.');
+  assert.match(workflow, /^concurrency:\n  group: network-production\n  cancel-in-progress: false$/m);
+  assert.deepEqual([...workflow.slice(workflow.indexOf('\njobs:\n')).matchAll(/^  ([a-z][a-z0-9_-]*):$/gm)]
+    .map(match => match[1]), ['validate', 'setup']);
+  const validation = /^  validate:\n((?: {4}.*\n|\n)*)/m.exec(workflow)?.[1];
+  assert.equal(validation?.trim(), 'uses: ./.github/workflows/validate.yml');
+  assert.match(workflow, /^  setup:\n[\s\S]*?^    needs: validate$/m);
+  assert.match(workflow, /^    environment: network-production$/m);
+  assert.doesNotMatch(workflow, /^    if:|continue-on-error|secrets: inherit/m,
+    'Setup cannot bypass a failed validation job or inherit deployment credentials.');
+});
+
+test('Cloudflare setup credentials exist only in the bootstrap step and account ID supports a repository variable or secret', () => {
+  const workflow = setupWorkflow();
+  const steps = workflow.split(/^      - /m).slice(1);
+  const bootstrap = steps.filter(step => /^        run: node scripts\/network-setup\.mjs$/m.test(step));
+  assert.equal(bootstrap.length, 1, 'Exactly one bootstrap command must run.');
+  assert.match(bootstrap[0], /^        env:\n          CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}$/m);
+  assert.match(bootstrap[0], /^          CLOUDFLARE_ACCOUNT_ID: \$\{\{ vars\.CLOUDFLARE_ACCOUNT_ID \|\| secrets\.CLOUDFLARE_ACCOUNT_ID \}\}$/m);
+  assert.equal(workflow.match(/secrets\.CLOUDFLARE_API_TOKEN/g)?.length, 1);
+  assert.equal(workflow.match(/secrets\.CLOUDFLARE_ACCOUNT_ID/g)?.length, 1);
+  assert.doesNotMatch(steps.filter(step => step !== bootstrap[0]).join('\n'), /CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|secrets\./);
+  assert.match(workflow, /uses: actions\/checkout@[a-f0-9]{40}[^\n]*\n        with:\n          persist-credentials: false/);
+  assert.match(workflow, /run: npm ci --ignore-scripts\n        working-directory: services\/network-worker/);
+  assert.doesNotMatch(workflow, /secrets\.(?:TURNSTILE|SESSION|NETWORK_STAGING)|^    env:|^env:/m);
+});
+
+test('proxy setup retains only public settings and does not activate networking or publish a Pages build', () => {
+  const workflow = setupWorkflow();
+  const steps = workflow.split(/^      - /m).slice(1);
+  const uploads = steps.filter(step => /uses: actions\/upload-artifact@/.test(step));
+  assert.equal(uploads.length, 1);
+  assert.match(uploads[0], /^          path: test-results\/network-setup\/$/m);
+  assert.equal(uploads[0].match(/^          path:/gm)?.length, 1);
+  assert.match(uploads[0], /^          if-no-files-found: error$/m);
+  assert.doesNotMatch(uploads[0], /include-hidden-files: true|secrets\.|CLOUDFLARE_API_TOKEN/);
+  assert.doesNotMatch(workflow, /wrangler deploy|npm run build|scripts\/build(?:-deploys)?\.mjs|deploy-pages@|upload-pages-artifact@|network-(?:staging|production)\.yml|git push|gh workflow run/);
+  assert.deepEqual([...workflow.matchAll(/^        run: (.+)$/gm)].map(match => match[1]),
+    ['npm ci --ignore-scripts', 'node scripts/network-setup.mjs']);
+});
