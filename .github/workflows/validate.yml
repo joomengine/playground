@@ -178,7 +178,9 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - name: Install selected browser engine
-        run: npx playwright install --with-deps ${{ matrix.browser }}
+        uses: ./.github/actions/install-playwright
+        with:
+          browser: ${{ matrix.browser }}
       - name: Validate Code, isolated AI, layout and language interactions
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
@@ -221,7 +223,9 @@ jobs:
           path: dist
       - name: Install selected browser engine
         id: browser_install
-        run: npx playwright install --with-deps ${{ matrix.browser }}
+        uses: ./.github/actions/install-playwright
+        with:
+          browser: ${{ matrix.browser }}
       - name: Validate Code against the running Joomla runtime
         if: matrix.suite == 'code'
         env:
@@ -318,7 +322,10 @@ jobs:
         with:
           name: playground-static
           path: dist
-      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Install selected browser engine
+        uses: ./.github/actions/install-playwright
+        with:
+          browser: ${{ matrix.browser }}
       - name: Exercise genuine CORS and the actual PHP cURL and stream bridge
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
@@ -334,11 +341,15 @@ jobs:
 
   jcb-network:
     name: JCB API and repositories (${{ matrix.browser }})
-    needs: [checks, build]
+    # These checks use live community repositories. Avoid overlapping them with
+    # the other compiler/install suites or with the other browser's live check.
+    needs: [checks, build, browser, interaction, compatibility, version-catalog, network-worker, php-network]
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    # Each clean attempt keeps the existing 20-minute test deadline.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         browser: [chromium, firefox]
     steps:
@@ -355,11 +366,13 @@ jobs:
           name: playground-static
           path: dist
       - name: Install selected browser engine
-        run: npx playwright install --with-deps ${{ matrix.browser }}
+        uses: ./.github/actions/install-playwright
+        with:
+          browser: ${{ matrix.browser }}
       - name: Verify live JCB discovery, repositories, dependencies and compiled Demo
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
-        run: node --test test/jcb-network.browser.mjs
+        run: node scripts/test-jcb-network.mjs
       - name: Retain JCB network receipts and diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -390,18 +403,10 @@ jobs:
         with:
           name: playground-static
           path: dist
-      - name: Select official Ubuntu HTTPS mirrors for WebKit dependencies
-        if: matrix.browser == 'webkit'
-        # The runner's Azure mirror can deliver packages too slowly for this
-        # job. Keep its suites, components and signed Ubuntu sources intact.
-        # https://github.com/actions/runner-images/blob/ubuntu24/20261101.360/images/ubuntu/scripts/build/configure-apt-sources.sh
-        run: |
-          grep -Fq 'mirror+file:/etc/apt/apt-mirrors.txt' /etc/apt/sources.list.d/ubuntu.sources
-          printf '%s\tpriority:%s\n' \
-            'https://archive.ubuntu.com/ubuntu/' 1 \
-            'https://security.ubuntu.com/ubuntu/' 2 \
-            | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
-      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Install selected browser engine
+        uses: ./.github/actions/install-playwright
+        with:
+          browser: ${{ matrix.browser }}
       - name: Verify isolation and original image bytes through real PHP
         env:
           PLAYGROUND_ISOLATION_BROWSER: ${{ matrix.browser }}
@@ -448,7 +453,9 @@ jobs:
           name: playground-static
           path: dist
       - name: Install selected browser engine
-        run: npx playwright install --with-deps ${{ matrix.browser }}
+        uses: ./.github/actions/install-playwright
+        with:
+          browser: ${{ matrix.browser }}
       - name: Install the published version choices from the candidate build
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}

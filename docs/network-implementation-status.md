@@ -20,6 +20,29 @@ The PR records the exact tested commit, workflow links and browser receipts. Sup
 
 Source checks, Worker security tests and actual workerd/SQLite tests run without deployment credentials. The CI candidate rebuilds the patched native extension, validates PHP cURL and streams, and exercises real browsers and Joomla/JCB workflows. The aggregate must pass for the final commit; an earlier successful run does not certify a later change.
 
+The live JCB gate waits for the other validation jobs, then runs Chromium and
+Firefox sequentially to avoid overlapping their requests to community
+repositories. `scripts/test-jcb-network.mjs` permits at most two complete attempts
+for a failed live-integration phase, with a short backoff. Each attempt starts a
+new Node process, browser, Joomla installation and relay state; it never retries
+a compile POST in a partially modified installation. The normal PHP execution
+limit and all discovery, missing-Power, ZIP, installation and dashboard assertions
+remain unchanged. Setup failures, missing receipts and process interruptions do
+not qualify for a retry. A second failure fails the job and mandatory aggregate.
+Attempt-specific artifacts and `test-results/jcb-network-attempts.json` retain
+the first failure even when a later attempt succeeds. A recovered failure emits
+a visible workflow warning rather than disappearing from the evidence.
+
+Investigation on 6 November found an intermittent Firefox compiler HTTP 500 about
+77 seconds into the compile phase, while a subsequent instrumented first attempt
+passed in 18–19 seconds. The original receipt did not retain PHP stderr, so its
+exact exception cannot be established retrospectively. The job already waited
+for its completed build; a missing build dependency was not the cause. Receipts
+now retain redacted PHP warnings, compiler-page text, bounded Joomla log tails,
+and per-phase upstream/relay timings to diagnose any recurrence. Live integration
+retries are CI behavior only; production request routing and write replay rules
+are unchanged.
+
 The static and demonstration-snapshot builds run with harmless, randomly generated server-credential canaries. Before publishing the candidate artifact, CI scans every public file and the expanded generated snapshots for raw and encoded canaries, rejects private Worker/configuration files, and verifies the normalized public network configuration. The retained security receipt identifies the source commit and inspected artifact counts without exposing canary values. Real deployment credentials are not available to this PR job.
 
 The relay uses opaque sessions held in a Durable Object, so no session-signing secret is required. The operator still needs a private Turnstile verification secret, public widget settings, reviewed destination policy and a configured Cloudflare deployment account. Automated hosted staging additionally requires a private staging-test credential; production rejects that test mode. Default public configuration keeps the relay disabled.

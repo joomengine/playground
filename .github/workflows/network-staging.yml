@@ -46,7 +46,10 @@ jobs:
         env:
           NETWORK_ENDPOINT: ${{ steps.config.outputs.endpoint }}
         run: node scripts/network-health.mjs
-      - run: npx playwright install --with-deps chromium
+      - name: Install hosted verification browser
+        uses: ./.github/actions/install-playwright
+        with:
+          browser: chromium
       - name: Verify hosted candidate
         env:
           NETWORK_ENDPOINT: ${{ steps.config.outputs.endpoint }}
