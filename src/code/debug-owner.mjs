@@ -1,5 +1,5 @@
 import { createDebugRequestMatcher } from './debug-request.mjs';
-import { captureDebugFilesystem, applyDebugFilesystem } from './debug-runtime.mjs';
+import { capturePhpFilesystem, applyPhpFilesystem } from '../php-filesystem.mjs';
 
 /** Resolve the same Joomla front controller and PATH_INFO used by the CGI owner. */
 export function resolveDebugScript(php, fs, request) {
@@ -43,7 +43,7 @@ export function createPhpDebugOwner({ options, getPhp, getBinary, databaseCall, 
   async function execute(request) {
     const php = getPhp(), fs = getBinary().FS;
     const route = resolveDebugScript(php, fs, request);
-    const snapshot = captureDebugFilesystem(fs);
+    const snapshot = capturePhpFilesystem(fs);
     worker = new Worker(new URL('./debug-worker.mjs', import.meta.url), { type: 'module', name: 'JoomEngine Code PHP debugger' });
     const activeWorker = worker;
     onState('starting');
@@ -73,7 +73,7 @@ export function createPhpDebugOwner({ options, getPhp, getBinary, databaseCall, 
           if (message.error) task.reject(Object.assign(new Error(message.error), { code: message.code })); else task.resolve(message.value);
         } else if (message?.type === 'debug-result') {
           try {
-            if (message.snapshot) applyDebugFilesystem(fs, snapshot, message.snapshot);
+            if (message.snapshot) applyPhpFilesystem(fs, snapshot, message.snapshot);
             for (const [name, value] of message.value?.headers || []) {
               if (name.toLowerCase() === 'set-cookie') php.cookieJar.store(value);
             }

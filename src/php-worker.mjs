@@ -4,7 +4,7 @@ import { checkpointSource, restoreCheckpointSource } from './checkpoint-program.
 import { configurePhpRouting } from './php-routing.mjs';
 import { createNetworkTransport } from './network-transport.mjs';
 import { createPhpSelfRequestFetch, createPhpRequestWorker, configurePhpCallback } from './php-self-request.mjs';
-import { captureDebugFilesystem, applyDebugFilesystem } from './code/debug-runtime.mjs';
+import { capturePhpFilesystem, applyPhpFilesystem } from './php-filesystem.mjs';
 import { installPhpRecovery } from './php-recovery.mjs';
 import { applyJcbRuntimeCompatibility } from './jcb-compatibility.mjs';
 import { staticAssetResponse } from './static-assets.mjs';
@@ -287,7 +287,7 @@ async function initialize(args) {
   };
   binary = await php.binary;
   prepareFilesystem(binary);
-  if (args.snapshot) applyDebugFilesystem(binary.FS, captureDebugFilesystem(binary.FS), args.snapshot);
+  if (args.snapshot) applyPhpFilesystem(binary.FS, capturePhpFilesystem(binary.FS), args.snapshot);
   if (readOnly && exists('/config/.cookies')) {
     const { mode, atime, mtime } = binary.FS.stat('/config/.cookies');
     recoveryCookies = { bytes: binary.FS.readFile('/config/.cookies', { encoding: 'binary' }), mode, atime, mtime };
@@ -353,7 +353,7 @@ async function operation(name, args = {}) {
       php.cookieJar.toEnv = () => new Headers(args.headers).get('cookie') || '';
       try {
         const response = await request(args);
-        return { response, snapshot: captureDebugFilesystem(binary.FS) };
+        return { response, snapshot: capturePhpFilesystem(binary.FS) };
       } finally { php.cookieJar.toEnv = toEnv; }
     }
     case 'runPhp': return runPhp(args.source ?? args.code);
@@ -406,7 +406,7 @@ self.addEventListener('message', (event) => {
   const message = event.data;
   if (message?.type === 'cancel-self-request') {
     self.postMessage({ type: 'self-request-cancelling' });
-    self.postMessage({ type: 'self-request-cancelled', snapshot: binary ? captureDebugFilesystem(binary.FS) : null });
+    self.postMessage({ type: 'self-request-cancelled', snapshot: binary ? capturePhpFilesystem(binary.FS) : null });
     return;
   }
   if (message?.type === 'database-result') {
@@ -444,7 +444,7 @@ self.addEventListener('message', (event) => {
       const fatal = error?.fatal === true || message.operation === 'initialize';
       if (fatal) terminal = true;
       self.postMessage({ type: 'result', id: message.id, error: error instanceof Error ? error.message : String(error), code: error?.code, fatal,
-        ...(message.operation === 'selfRequest' && binary ? { snapshot: captureDebugFilesystem(binary.FS) } : {}) });
+        ...(message.operation === 'selfRequest' && binary ? { snapshot: capturePhpFilesystem(binary.FS) } : {}) });
     } finally { activeOperationId = undefined; queued--; }
   });
 });

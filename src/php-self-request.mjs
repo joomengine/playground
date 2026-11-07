@@ -1,6 +1,6 @@
 import { createNetworkTransport } from './network-transport.mjs';
 import { fetchHttpRedirects } from './http-redirects.mjs';
-import { captureDebugFilesystem, applyDebugFilesystem } from './code/debug-runtime.mjs';
+import { capturePhpFilesystem, applyPhpFilesystem } from './php-filesystem.mjs';
 import { restoreResponse, serializeRequest } from './http.mjs';
 
 /** Independent CGI processes must not wait on their caller's global Web Lock. */
@@ -59,7 +59,7 @@ export function createPhpRequestWorker({ options, getFilesystem, databaseCall,
   return async request => {
     request.signal.throwIfAborted();
     const fs = getFilesystem();
-    const snapshot = captureDebugFilesystem(fs);
+    const snapshot = capturePhpFilesystem(fs);
     const serialized = await serializeRequest(request);
     request.signal.throwIfAborted();
     const worker = new WorkerType(workerURL, { type: 'module', name: 'JoomEngine PHP HTTP callback', execArgv: [] });
@@ -69,7 +69,7 @@ export function createPhpRequestWorker({ options, getFilesystem, databaseCall,
       const next = new Map(entries);
       const cookies = new Map(snapshot).get('/config/.cookies');
       if (cookies) next.set('/config/.cookies', cookies); else next.delete('/config/.cookies');
-      applyDebugFilesystem(fs, snapshot, [...next]);
+      applyPhpFilesystem(fs, snapshot, [...next]);
     };
     const callDatabase = payload => {
       const task = (async () => {

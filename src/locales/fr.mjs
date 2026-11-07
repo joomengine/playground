@@ -321,7 +321,7 @@ export default Object.freeze({
   "code.layoutClosed": "Cette disposition de JoomEngine Code est fermée.",
   "code.actions": "Actions JoomEngine Code",
   "code.pausedRefresh": "Reprenez ou arrêtez la requête PHP en pause avant d’actualiser le site.",
-  "help.mcpPreview": "Aperçu MCP : connectez-vous et découvrez les outils dans ce navigateur. Les outils de modification de Joomla ne sont pas disponibles dans cette version.",
+  "help.mcpPreview": "Aperçu MCP : connectez-vous et découvrez les outils dans ce navigateur.",
   "app.name": "JoomEngine Rocket",
   "app.tagline": "Déploiements Joomla accélérés",
   "action.launch": "Lancer",

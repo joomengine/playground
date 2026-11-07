@@ -321,7 +321,7 @@ export default Object.freeze({
   "code.layoutClosed": "Hierdie JoomEngine Code-uitleg is gesluit.",
   "code.actions": "JoomEngine Code-aksies",
   "code.pausedRefresh": "Hervat of stop die onderbreekte PHP-versoek voordat jy die webwerf verfris.",
-  "help.mcpPreview": "MCP-voorskou: koppel en ontdek nutsgoed in hierdie blaaier. Joomla-redigeernutsgoed is nie in hierdie weergawe beskikbaar nie.",
+  "help.mcpPreview": "MCP-voorskou: koppel en ontdek nutsgoed in hierdie blaaier.",
   "app.name": "JoomEngine Rocket",
   "app.tagline": "Versnelde Joomla-ontplooiings",
   "action.launch": "Begin",
