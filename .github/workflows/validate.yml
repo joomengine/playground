@@ -326,7 +326,7 @@ jobs:
       - name: Exercise genuine CORS and the actual PHP cURL and stream bridge
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
-        run: node --test test/network-runtime.browser.mjs
+        run: node --test test/network-runtime.browser.mjs test/self-request.browser.mjs
       - name: Retain PHP networking receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

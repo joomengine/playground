@@ -136,12 +136,23 @@ test('shared HTTP transport renders cross-origin images in compatibility mode wi
     const normal = await context.newPage(); await normal.goto(isolationNavigationURL(`${appOrigin}/`, 'credentialless'));
     assert.equal(await loadImage(normal, `${assetURL}?mode=credentialless`), true);
     assert.equal(relayRequests.length, count, 'Credentialless mode loads images directly.');
+    assert.deepEqual(errors, [], 'Successful image delivery must not produce page errors.');
     relayAvailable = false;
-    assert.equal(await loadImage(page, `${assetURL}?unavailable=true`), false);
+    const unavailableURL = `${assetURL}?unavailable=true`;
+    assert.equal(await loadImage(page, unavailableURL), false);
     assert.deepEqual(await page.evaluate(() => ({ isolated: crossOriginIsolated, shared: new SharedArrayBuffer(8).byteLength })), { isolated: true, shared: 8 });
-    assert.deepEqual(errors, []);
+    // WebKit reports this deliberately failed subresource as page errors. Its
+    // Playwright error messages can omit the scheme and one slash. Accept only
+    // the observed resource/CORP diagnostics for this exact outage-test URL.
+    const expectedResourceErrors = new Set([unavailableURL, unavailableURL.replace(/^https?:\//, '')].flatMap(url => [
+      `${url}.`, `${url} because it violates the resource's Cross-Origin-Resource-Policy response header.`,
+    ]));
+    for (const error of errors) {
+      assert.ok(name === 'webkit' && expectedResourceErrors.has(error), `Unexpected page error during the deliberate image outage: ${error}`);
+    }
     const evidence = { browser: name, version: browser.version(), isolated: true, blockedBeforeServiceWorker: true,
-      results, cssPixel: [255, 0, 0], unregisteredImage: true, credentiallessProxyRequests: 0, upstreamRequests: restrictedRequests.length };
+      results, cssPixel: [255, 0, 0], unregisteredImage: true, credentiallessProxyRequests: 0,
+      unavailableImage: true, expectedResourceErrors: errors.length, upstreamRequests: restrictedRequests.length };
     t.diagnostic(JSON.stringify(evidence));
     if (process.env.NETWORK_IMAGES_BROWSER_EVIDENCE) await writeFile(process.env.NETWORK_IMAGES_BROWSER_EVIDENCE, `${JSON.stringify(evidence, null, 2)}\n`);
   } finally { await browser?.close(); await Promise.all([close(app), close(relay), close(restricted)]); }
