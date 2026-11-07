@@ -10,6 +10,8 @@ import { encodeMetadata, decodeMetadata } from '../src/index.mjs';
 function runtime(upstream, extra = {}) {
   return new Miniflare({
     modules: true, scriptPath: fileURLToPath(new URL('../src/index.mjs', import.meta.url)),
+    modulesRoot: fileURLToPath(new URL('../../../', import.meta.url)),
+    cf: false, // Use local Request.cf defaults; this fixture never needs Cloudflare metadata.
     compatibilityDate: '2026-07-30', compatibilityFlags: ['enable_request_signal'],
     outboundService: { external: { address: `127.0.0.1:${upstream.address().port}`, http: { style: 'PROXY' } } },
     ...extra,
