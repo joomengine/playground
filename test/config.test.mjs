@@ -156,16 +156,18 @@ test('a portable deploy round-trips Unicode names, menus, templates and PHP sett
   assert.throws(() => createDeploymentDocument({ initialPath: '/index.php?access_token=private' }), /credentials/);
 });
 
-test('deployment JSON downloads retain source metadata and parsing errors', async () => {
+test('deployment JSON links retain only the source URL and downloads preserve parsing errors', async () => {
   const { createDeploymentDocument, loadDeploymentDocument, createDeploymentSourceURL } = await import('../src/config.mjs');
   const source = new TextEncoder().encode(JSON.stringify(createDeploymentDocument({ deployId: 'blank', siteName: 'Public demonstration' })));
-  const sha256 = Buffer.from(await crypto.subtle.digest('SHA-256', source)).toString('hex');
   const fetcher = async () => new Response(source);
-  const link = createDeploymentSourceURL('https://playground.joomengine.org/?old=1', { url: 'https://example.test/deploy.json', sha256 });
+  const sourceURL = 'https://example.test/deploy.json';
+  const link = createDeploymentSourceURL('https://playground.joomengine.org/?old=1&sha256=obsolete', { url: sourceURL, sha256: 'obsolete' });
   const parsed = readURLConfiguration(link);
   assert.equal(parsed.autostart, true);
-  assert.equal(parsed.document.sha256, sha256);
-  assert.equal((await loadDeploymentDocument(parsed.document.url, { sha256, fetcher })).siteName, 'Public demonstration');
+  assert.deepEqual([...new URL(link).searchParams], [['config', sourceURL], ['start', '1']]);
+  assert.deepEqual(parsed.document, { url: sourceURL });
+  assert.deepEqual(readURLConfiguration(`${link}&sha256=obsolete`).document, { url: sourceURL });
+  assert.equal((await loadDeploymentDocument(parsed.document.url, { fetcher })).siteName, 'Public demonstration');
   await assert.rejects(loadDeploymentDocument(parsed.document.url, { fetcher: async () => new Response('x', { headers: { 'Content-Length': '1048577' } }) }), /exceeds/);
   assert.throws(() => createShareURL('https://example.test/', { content: { categories: [], articles: [{ introtext: 'x'.repeat(20_000) }] } }), /too large/);
 });

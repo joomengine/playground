@@ -1852,7 +1852,7 @@ async function initialize() {
     await initializeLocale();
     $('interface-language').value = getLocale();
     const parsed = readURLConfiguration(location.href);
-    if (parsed.document) parsed.config = { ...await loadDeploymentDocument(parsed.document.url, { ...parsed.document, baseURL: deploymentURL }), ...parsed.config };
+    if (parsed.document) parsed.config = { ...await loadDeploymentDocument(parsed.document.url, { baseURL: deploymentURL }), ...parsed.config };
     const params = new URL(location.href).searchParams;
     resumeLastRoute = !parsed.document && !new URL(location.href).hash.startsWith('#deploy=') && !params.has('path') && !params.has('initialPath') && !parsed.config.fresh;
     setFocusMode(parsed.config.hideToolbar);

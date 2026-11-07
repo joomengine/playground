@@ -35,6 +35,15 @@ Set the resulting public endpoint in `config/network.json`, or in
 normally. `null` selects direct Fetch only. Client startup does not probe Worker
 health or run a qualification process.
 
+Release the website and Worker from the same reviewed source revision. Updating
+the website alone does not update the separately deployed Worker. Once both are
+available, use the **Verify deployed networking** workflow to exercise the pair
+over HTTPS. Select the branch or tag at the deployed website's source commit,
+and provide its environment, website URL, Worker endpoint, a public test file
+that denies cross-origin browser Fetch, and that file's decoded SHA-256. The
+workflow runs ordinary PHP/JCB requests without deployment credentials and
+retains its evidence; it does not deploy or change the public Worker.
+
 ## Protocol
 
 A request targets `?url=<encoded-upstream-URL>` with the original HTTP method and
@@ -61,5 +70,8 @@ npx wrangler deploy --dry-run --env staging
 ```
 
 The local tests exercise the Worker implementation and workerd behavior. They
-require no deployment credentials. See [the shared transport](../../docs/network.md)
-for the browser and PHP integration.
+require no deployment credentials. The separate hosted verification workflow
+checks the deployed website and Worker together using actual PHP cURL/streams,
+Joomla 5/6 and JCB repository and compiler operations. See
+[the shared transport](../../docs/network.md#validation) for the inputs and
+retained evidence.

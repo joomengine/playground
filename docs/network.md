@@ -99,3 +99,20 @@ tests exercise the request flow, status handling, redirects, cancellation and
 binary bodies. Native cURL/stream integration and browser networking tests cover
 the PHP bridge. JCB integration checks fetch actual repositories and compile and
 install the Demo. These are CI tests, not runtime access requirements.
+
+Local browser fixtures and workerd tests validate the candidate implementation;
+they do not establish that an independently deployed website and Worker match.
+After both deployments, run **Verify deployed networking**
+(`.github/workflows/network-verify.yml`) from the branch or tag whose current
+commit matches the website's `assets/manifest.json` source commit. Supply the
+deployment environment, website URL, configured Worker endpoint, and a public
+HTTPS test file that denies cross-origin browser Fetch, together with the
+SHA-256 of its decoded response bytes. The test rejects a mismatched website
+commit, environment or endpoint.
+
+That workflow runs `test/network-hosted.browser.mjs` through the normal browser
+entry point and actual PHP cURL/streams, then checks JCB repositories and Demo
+compilation/installation on Joomla 5 and 6. It retains the result in the
+`playground-network-hosted-<environment>` artifact. It performs no deployment and
+needs no Cloudflare credentials. It is a release test invoked by maintainers or
+automation; users and application startup do not run it.

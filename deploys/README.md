@@ -153,6 +153,8 @@ Public share links continue using schema version 1 and exclude administrator set
 
 The share panel encodes advanced public configurations in a `#deploy=` fragment and shows the URL for copying. Generated links are limited to 16 KiB. Larger public documents can be hosted at a URL and opened with `?config=URL`; retrieval uses the shared HTTP transport. Full version 2 documents are exported and imported through the editor. Documents are limited to 1 MiB.
 
+`createDeploymentSourceURL(location, { url })` creates a hosted-document link containing `config` and `start=1`. Its source object contains only the document URL.
+
 Programmatic consumers can import `createFullDeploymentDocument`, `createDeploymentDocument`, `parseDeploymentDocument`, `loadDeploymentDocument`, `createShareURL` and `createDeploymentSourceURL` from `src/config.mjs`. `createFullDeploymentDocument(config, { name, requirements })` creates the version 2 document. Its requirements declare Joomla majors, optional PHP constraints, explicit Joomla fallbacks and whether JCB is required. Parsing version 2 returns a `deploymentRecipe` alongside the configuration; the resolver uses those complete lists without appending the original preset again. Public shares carry a standalone sanitized recipe for custom deployments, omitting administrator settings and local storage identities.
 
 ## Menus, templates and languages

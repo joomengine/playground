@@ -161,7 +161,7 @@ for (const name of names) test(`${name}: actual PHP networking preserves binary 
     assert.equal(exhausted.failed, true); assert.ok(exhausted.error);
     const health = await page.evaluate(async () => (await window.playground.runPhp('<?php echo 6 * 7;')).text);
     assert.equal(health, '42', 'Network failure must leave PHP alive.');
-    receipt.cases.push({ case: 'safe-failure', forbidden, exhausted, health });
+    receipt.cases.push({ case: 'safe-failure', exhausted, health });
     await page.evaluate(() => window.playground.close());
     receipt.status = 'passed';
   } catch (error) { receipt.status = 'failed'; receipt.error = error.stack || error.message; throw error; }
