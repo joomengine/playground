@@ -3,6 +3,8 @@ import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeRandomValue }
 import { checkpointSource, restoreCheckpointSource } from './checkpoint-program.mjs';
 import { configurePhpRouting } from './php-routing.mjs';
 import { createNetworkTransport } from './network-transport.mjs';
+import { createPhpSelfRequestFetch, createPhpRequestWorker, configurePhpCallback } from './php-self-request.mjs';
+import { captureDebugFilesystem, applyDebugFilesystem } from './code/debug-runtime.mjs';
 import { installPhpRecovery } from './php-recovery.mjs';
 import { applyJcbRuntimeCompatibility } from './jcb-compatibility.mjs';
 import { staticAssetResponse } from './static-assets.mjs';
@@ -219,7 +221,12 @@ async function initialize(args) {
   routePrefix = `${args.prefix.replace(/\/+$/, '')}/`;
   // Native cURL alone calls this hook. Runtime assets and database networking
   // retain the browser Fetch implementation.
-  globalThis.__joomenginePhpFetch = createNetworkTransport(globalThis.fetch.bind(globalThis), args.network);
+  const callbackOptions = { ...args, persistence: false, readOnly: false, debugger: undefined, snapshot: undefined };
+  globalThis.__joomenginePhpFetch = createPhpSelfRequestFetch({
+    siteURL: new URL(routePrefix, self.location.origin),
+    transport: createNetworkTransport(globalThis.fetch.bind(globalThis), args.network),
+    request: createPhpRequestWorker({ options: callbackOptions, getFilesystem: () => binary.FS, databaseCall }),
+  });
   phpSettings = normalizePhpSettings(args.phpSettings);
   requestBodyLimit = phpRequestBodyLimit(phpSettings);
   persistent = args.persistence === true;
@@ -237,10 +244,12 @@ async function initialize(args) {
     moduleUrl: args.debugger.moduleUrl, adapterUrl: adapterURL.href, phpVersion: args.phpVersion,
     sharedLibs: args.debugger.sharedLibs, files: args.files || [],
     network: args.network,
+    cgi: callbackOptions,
     ini: `${adapter.ini}${phpIni(phpSettings)}\nauto_prepend_file=/internal/rocket-http.php\n`, siteURL: new URL(routePrefix, self.location.origin).href,
   };
   php = new PhpCgiWorker({
     ...adapter,
+    ...(args.snapshot ? { requestLockName: `joomengine-php-callback-${crypto.randomUUID()}` } : {}),
     phpArgs: { ...adapter.phpArgs, getRandomValue: runtimeRandomValue },
     version: args.phpVersion,
     prefix: routePrefix,
@@ -278,6 +287,7 @@ async function initialize(args) {
   };
   binary = await php.binary;
   prepareFilesystem(binary);
+  if (args.snapshot) applyDebugFilesystem(binary.FS, captureDebugFilesystem(binary.FS), args.snapshot);
   if (readOnly && exists('/config/.cookies')) {
     const { mode, atime, mtime } = binary.FS.stat('/config/.cookies');
     recoveryCookies = { bytes: binary.FS.readFile('/config/.cookies', { encoding: 'binary' }), mode, atime, mtime };
@@ -292,6 +302,7 @@ async function initialize(args) {
     restored: next => { binary = next; configurePhpRouting(php, binary); },
   });
   if (exists('/config/.cookies')) php.cookieJar.load(binary.FS.readFile('/config/.cookies', { encoding: 'utf8' }));
+  if (args.snapshot) configurePhpCallback(php);
   php.initialized = true;
   php.staticCacheTime = 0;
   php.dynamicCacheTime = 0;
@@ -337,6 +348,14 @@ async function operation(name, args = {}) {
       return installAdminer({ fs: binary.FS, baseURL: new URL('../', import.meta.url) });
     }
     case 'request': return request(args);
+    case 'selfRequest': {
+      const toEnv = php.cookieJar.toEnv;
+      php.cookieJar.toEnv = () => new Headers(args.headers).get('cookie') || '';
+      try {
+        const response = await request(args);
+        return { response, snapshot: captureDebugFilesystem(binary.FS) };
+      } finally { php.cookieJar.toEnv = toEnv; }
+    }
     case 'runPhp': return runPhp(args.source ?? args.code);
     case 'flush': await flush(); return null;
     case 'enablePersistence': php.phpArgs.staticFS = !persistent || readOnly; return null;
@@ -385,6 +404,11 @@ async function operation(name, args = {}) {
 
 self.addEventListener('message', (event) => {
   const message = event.data;
+  if (message?.type === 'cancel-self-request') {
+    self.postMessage({ type: 'self-request-cancelling' });
+    self.postMessage({ type: 'self-request-cancelled', snapshot: binary ? captureDebugFilesystem(binary.FS) : null });
+    return;
+  }
   if (message?.type === 'database-result') {
     const pending = databaseCalls.get(message.id);
     if (!pending) return;
@@ -419,7 +443,8 @@ self.addEventListener('message', (event) => {
     } catch (error) {
       const fatal = error?.fatal === true || message.operation === 'initialize';
       if (fatal) terminal = true;
-      self.postMessage({ type: 'result', id: message.id, error: error instanceof Error ? error.message : String(error), code: error?.code, fatal });
+      self.postMessage({ type: 'result', id: message.id, error: error instanceof Error ? error.message : String(error), code: error?.code, fatal,
+        ...(message.operation === 'selfRequest' && binary ? { snapshot: captureDebugFilesystem(binary.FS) } : {}) });
     } finally { activeOperationId = undefined; queued--; }
   });
 });

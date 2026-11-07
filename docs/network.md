@@ -26,6 +26,22 @@ repository mirrors, substitute content or require a destination registration.
 and `src/php-http-stream.php`, then the same cURL implementation. The normal PHP
 worker, debugger worker and Node runtime install this shared transport.
 
+When PHP requests its own virtual site URL, a disposable CGI worker serves that
+request while the caller is suspended. It starts with the caller's filesystem
+snapshot and returns its changes before the caller resumes. It shares the
+database server through separate connections, so completing or cancelling the
+callback does not reset the caller's transaction. Explicit Cookie headers reach
+the callback; its Set-Cookie headers do not change the owner's browser cookie
+jar. Redirects use the same handling as the anonymous Worker.
+
+Cancellation collects completed filesystem writes from a responsive callback
+and closes only its database connections. Cleanup allows 250 ms for the worker
+to yield and then up to 30 seconds to copy its filesystem. An unresponsive
+callback is terminated; in that case, filesystem changes that were not returned
+are lost, while already committed database changes remain. This provides HTTP
+callbacks within the serialized site runtime, not general parallel filesystem
+execution.
+
 Browser application downloads use `networkFetch()`. In require-corp
 compatibility mode, the service worker also uses it for external images; image
 URLs remain unchanged in stored Joomla content. The image path has no separate
@@ -99,6 +115,10 @@ tests exercise the request flow, status handling, redirects, cancellation and
 binary bodies. Native cURL/stream integration and browser networking tests cover
 the PHP bridge. JCB integration checks fetch actual repositories and compile and
 install the Demo. These are CI tests, not runtime access requirements.
+
+The self-request integration and browser tests execute PHP cURL and streams
+against the active virtual site, including binary redirects, cookies,
+independent database transactions, filesystem changes and cancellation.
 
 Local browser fixtures and workerd tests validate the candidate implementation;
 they do not establish that an independently deployed website and Worker match.

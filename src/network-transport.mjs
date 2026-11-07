@@ -72,7 +72,7 @@ function wrapResponse(response, ctx, metadata, method, proxied = false) {
     url: { value: metadata?.url ?? response.url },
     redirected: { value: metadata?.redirected ?? response.redirected },
     type: { value: proxied ? 'basic' : response.type },
-    networkRedirectCount: { value: metadata?.redirectCount },
+    networkRedirectCount: { value: metadata?.redirectCount ?? response.networkRedirectCount },
   });
   return result;
 }

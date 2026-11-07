@@ -1,6 +1,7 @@
 import { PhpDebugRuntime } from './debug-runtime.mjs';
 import { createNetworkTransport } from '../network-transport.mjs';
 import { runtimeRandomValue } from '../php-settings.mjs';
+import { createPhpSelfRequestFetch, createPhpRequestWorker } from '../php-self-request.mjs';
 
 let runtime;
 let running = false;
@@ -20,7 +21,11 @@ async function start(message) {
   if (running) throw new Error('The PHP debugger Worker owns one request only.');
   running = true;
   const options = message.options;
-  globalThis.__joomenginePhpFetch = createNetworkTransport(globalThis.fetch.bind(globalThis), options.network);
+  const transport = createNetworkTransport(globalThis.fetch.bind(globalThis), options.network);
+  globalThis.__joomenginePhpFetch = options.cgi ? createPhpSelfRequestFetch({
+    siteURL: options.siteURL, transport,
+    request: createPhpRequestWorker({ options: options.cgi, getFilesystem: () => runtime.binary.FS, databaseCall }),
+  }) : transport;
   for (const field of ['moduleUrl', 'adapterUrl']) {
     const url = new URL(options[field], self.location.href);
     if (url.origin !== self.location.origin) throw new TypeError('Debugger code must be hosted with JoomEngine.');

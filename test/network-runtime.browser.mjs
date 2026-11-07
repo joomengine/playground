@@ -149,8 +149,15 @@ for (const name of names) test(`${name}: actual PHP networking preserves binary 
         headers: ['Content-Type: text/plain'] });
       assert.equal(ambiguous.failed, false);
       assert.equal(ambiguous.status, 200);
-      assert.equal(fixture.relayRequests.length, before + 1, 'A cross-origin POST uses the proxy once without a speculative direct submission.');
-      assert.equal(fixture.requests.filter(item => item.path === '/denied/echo' && item.method === 'POST').length - beforeWrites, 1);
+      // Browser CORS preflights do not deliver a write. Count actual proxy
+      // submissions separately so Firefox's OPTIONS does not look like replay.
+      const deliveries = fixture.relayRequests.slice(before).filter(item => item.method !== 'OPTIONS');
+      assert.equal(deliveries.length, 1, 'A cross-origin POST must have exactly one proxy delivery.');
+      assert.equal(deliveries[0].method, 'POST');
+      assert.equal(new URL(deliveries[0].path, fixture.relayOrigin).searchParams.get('url'), `${fixtureOrigin}/denied/echo`);
+      const received = fixture.requests.filter(item => item.path === '/denied/echo' && item.method === 'POST').slice(beforeWrites);
+      assert.equal(received.length, 1, 'The upstream must receive one POST without a speculative direct submission or replay.');
+      assert.deepEqual(received[0].body, Buffer.from('write-once'));
       receipt.cases.push({ case: `${transport}-write-once`, ...ambiguous });
     }
 

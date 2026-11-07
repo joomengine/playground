@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { observeFrameNavigation } from '../src/frame-view.mjs';
+import { observeFrameNavigation, skipFrameTransition } from '../src/frame-view.mjs';
 import { safeSavedRoute } from '../src/ui-state.mjs';
 
 function frameWindow() {
@@ -69,4 +69,38 @@ test('navigation notification errors never replace the successful native history
   const stop = observeFrameNavigation(win, () => { throw new Error('Observer failed'); });
   assert.equal(history.replaceState(null, '', '/site/'), 'native-result');
   stop();
+});
+
+test('host viewport changes skip an active transition without cancelling its document update', async () => {
+  let rejectReady, updates = 0, skips = 0;
+  const errors = [];
+  const transition = {
+    ready: new Promise((_resolve, reject) => { rejectReady = reject; }),
+    updateCallbackDone: Promise.resolve().then(() => { updates++; }),
+    skipTransition() { skips++; rejectReady(new DOMException('Transition skipped', 'AbortError')); },
+  };
+  skipFrameTransition({ activeViewTransition: transition, defaultView: { reportError: error => errors.push(error) } });
+  await new Promise(setImmediate);
+  assert.equal(skips, 1);
+  assert.equal(updates, 1, 'Skipping the animation must not skip the document update.');
+  assert.deepEqual(errors, [], 'The intentional animation cancellation is handled before resizing.');
+  assert.doesNotThrow(() => skipFrameTransition({}), 'Browsers without active transition support retain ordinary layout.');
+});
+
+test('host transition cancellation still reports invalid setup and update callback failures', async () => {
+  for (const [readyError, updateError] of [
+    [new DOMException('Duplicate transition names', 'InvalidStateError'), null],
+    [new DOMException('Transition skipped', 'AbortError'), new Error('Joomla update failed')],
+    [new DOMException('Transition skipped', 'AbortError'), new DOMException('Application request failed', 'AbortError')],
+  ]) {
+    const errors = [];
+    const transition = {
+      ready: Promise.reject(readyError),
+      updateCallbackDone: updateError ? Promise.reject(updateError) : Promise.resolve(),
+      skipTransition() {},
+    };
+    skipFrameTransition({ activeViewTransition: transition, defaultView: { reportError: error => errors.push(error) } });
+    await new Promise(setImmediate);
+    assert.deepEqual(errors, [updateError ?? readyError], 'Real transition or application errors must remain visible.');
+  }
 });

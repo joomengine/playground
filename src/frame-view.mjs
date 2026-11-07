@@ -1,5 +1,19 @@
 import { hasLayoutMutation } from './frame-mutations.mjs';
 
+/** End an active animation before the host changes the iframe's viewport. */
+export function skipFrameTransition(doc) {
+  const transition = doc?.activeViewTransition;
+  if (!transition) return;
+  // skipTransition rejects ready with AbortError, but still runs the update.
+  // Keep callback failures (including AbortError) and invalid transition setup
+  // visible through the document's normal error reporting.
+  const ready = transition.ready.catch(error => {
+    if (error?.name !== 'AbortError') throw error;
+  });
+  void Promise.all([ready, transition.updateCallbackDone]).catch(error => doc.defaultView.reportError(error));
+  transition.skipTransition();
+}
+
 /** Observe same-document navigation without changing native history behavior. */
 export function observeFrameNavigation(win, onNavigate) {
   const doc = win.document, history = win.history;
@@ -52,6 +66,7 @@ export function connectFrame(frame, { onNavigate = () => {} } = {}) {
     let doc;
     try { doc = frame.contentDocument; } catch { return; }
     if (!doc?.body || !doc.documentElement) return;
+    skipFrameTransition(doc);
     measuring = true;
     observer?.disconnect();
     const base = minimum(), scroll = window.scrollY;
@@ -75,6 +90,7 @@ export function connectFrame(frame, { onNavigate = () => {} } = {}) {
     let doc, win;
     try { doc = frame.contentDocument; win = frame.contentWindow; } catch { return; }
     if (!doc?.body || !win) return;
+    skipFrameTransition(doc);
     // Top-level Joomla extensions expect standalone parent behavior. Patch Tester's
     // popup-close callback reloads window.parent; keep that reload inside Joomla.
     // Nested modal frames retain their real Joomla parent browsing context.

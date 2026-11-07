@@ -7,7 +7,7 @@ import {
 } from '../../../src/network-protocol.mjs';
 
 export { encodeMetadata, decodeMetadata };
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+import { fetchHttpRedirects } from '../../../src/http-redirects.mjs';
 const TRANSPORT_HEADERS = new Set(['host', 'connection', 'content-length', 'transfer-encoding', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'upgrade']);
 
 function cors(response, request) {
@@ -40,55 +40,6 @@ function responseHeaders(headers, decoded) {
   return pairs;
 }
 
-/** Preserve redirect counts, upload semantics and cross-origin credentials consistently. */
-async function fetchUpstream(fetcher, target, request, options, signal) {
-  const mode = options.redirect ?? 'follow';
-  // Twenty is Fetch's normal redirect ceiling; PHP can provide its own limit
-  // or -1 for unlimited redirects.
-  const maxRedirects = options.maxRedirects === -1 ? Infinity
-    : Number.isInteger(options.maxRedirects) && options.maxRedirects >= 0 ? options.maxRedirects : 20;
-  let url = target;
-  let outgoing = new Request(url, {
-    method: request.method, headers: upstreamHeaders(request, options),
-    body: ['GET', 'HEAD'].includes(request.method) ? null : request.body,
-    signal, redirect: 'manual',
-    ...(request.body ? { duplex: 'half' } : {}),
-  });
-  let redirectCount = 0;
-  for (;;) {
-    // A cloned request lets a 307/308 repeat the original upload without first
-    // buffering it. No retry is made after a failed or uncertain request.
-    const replay = mode === 'follow' && outgoing.body ? outgoing.clone() : null;
-    let response;
-    try { response = await fetcher(outgoing); }
-    catch (error) { replay?.body?.cancel().catch(() => {}); throw error; }
-    const location = response.headers.get('location');
-    if (!REDIRECT_STATUSES.has(response.status) || !location || mode === 'manual') {
-      replay?.body?.cancel().catch(() => {});
-      return { response, url: response.url || url.href, redirectCount, redirected: redirectCount > 0 };
-    }
-    if (mode === 'error' || redirectCount >= maxRedirects) {
-      replay?.body?.cancel().catch(() => {});
-      await response.body?.cancel();
-      throw Object.assign(new Error(mode === 'error' ? 'The request forbids redirects.' : 'The request exceeded its redirect limit.'), { code: mode === 'error' ? 'UPSTREAM_REDIRECT' : 'TOO_MANY_REDIRECTS' });
-    }
-    const next = new URL(location, url);
-    const headers = new Headers(outgoing.headers);
-    if (next.origin !== url.origin) {
-      headers.delete('authorization'); headers.delete('cookie'); headers.delete('proxy-authorization');
-    }
-    const toGet = response.status === 303 && outgoing.method !== 'HEAD' || [301, 302].includes(response.status) && outgoing.method === 'POST';
-    if (toGet) {
-      for (const name of ['content-type', 'content-encoding', 'content-language', 'content-location']) headers.delete(name);
-      replay?.body?.cancel().catch(() => {});
-    }
-    await response.body?.cancel();
-    outgoing = new Request(next, { method: toGet ? 'GET' : outgoing.method, headers,
-      body: toGet ? null : replay?.body, signal, redirect: 'manual', ...(replay?.body && !toGet ? { duplex: 'half' } : {}) });
-    url = next; redirectCount++;
-  }
-}
-
 /** Anonymous HTTP proxy. PHP response metadata travels separately from its bytes. */
 export function createRelayWorker({ fetcher = globalThis.fetch.bind(globalThis) } = {}) {
   return {
@@ -103,7 +54,7 @@ export function createRelayWorker({ fetcher = globalThis.fetch.bind(globalThis) 
         const signal = options.timeoutMs > 0
           ? AbortSignal.any([request.signal, AbortSignal.timeout(Math.ceil(options.timeoutMs))])
           : request.signal;
-        const result = await fetchUpstream(fetcher, target, request, options, signal);
+        const result = await fetchHttpRedirects(fetcher, target, new Request(request, { headers: upstreamHeaders(request, options) }), options, signal);
         const upstream = result.response;
         if (!encoded) return cors(upstream, request);
         const hasBody = request.method !== 'HEAD' && ![204, 205, 304].includes(upstream.status) && upstream.body;
