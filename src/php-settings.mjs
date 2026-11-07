@@ -77,37 +77,8 @@ export function phpIni(settings = {}) {
     + 'expose_php=0\ndisplay_errors=0\ndisplay_startup_errors=0\nhtml_errors=0\nlog_errors=1\nerror_log=/dev/stderr\n';
 }
 
-/** Effective values come from PHP itself, not the requested configuration. */
-export function runtimeHealthSource() {
-  const names = PHP_SETTING_FIELDS.map(field => `'${field.name}'`).join(',');
-  return `<?php
-    header('Content-Type: application/json');
-    $settings = []; foreach ([${names}] as $name) { $settings[$name] = ini_get($name); }
-    $extensions = get_loaded_extensions(); sort($extensions);
-    $functions = []; foreach (['curl_init','finfo_open','mb_strlen','imagecreatefromstring','json_encode','openssl_encrypt','sodium_crypto_secretbox','proc_open','pcntl_fork','posix_setsid'] as $name) { $functions[$name] = function_exists($name); }
-    echo json_encode(['phpVersion' => PHP_VERSION, 'intSize' => PHP_INT_SIZE,
-      'extensions' => $extensions, 'pdoDrivers' => PDO::getAvailableDrivers(),
-      'effectivePhpSettings' => $settings, 'functions' => $functions,
-      'gd' => function_exists('gd_info') ? gd_info() : null], JSON_THROW_ON_ERROR);
-  `;
-}
-
 /** Supply libsodium's documented Emscripten RNG hook from Web Crypto in both hosts. */
 export function runtimeRandomValue() {
   if (typeof globalThis.crypto?.getRandomValues !== 'function') throw new Error('A cryptographically secure random generator is required.');
   return globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
-}
-
-export function assertRuntimeHealth(info, settings = {}) {
-  if (info?.intSize !== 8) throw new Error('The PHP runtime must support 64-bit integers. Rebuild with the matching int64 release.');
-  const requested = normalizePhpSettings(settings);
-  const loaded = new Set((info?.extensions || []).map(name => name.toLowerCase()));
-  const required = ['pdo_mariadb_wasm', 'curl', 'fileinfo', 'sodium', 'gd', 'intl', 'mbstring', 'openssl',
-    'dom', 'simplexml', 'xml', 'xmlreader', 'xmlwriter', 'json', 'zip', 'zlib'];
-  const missing = required.filter(name => !loaded.has(name));
-  if (missing.length || !info?.pdoDrivers?.includes('mysql')) throw new Error(`The PHP runtime is missing required Joomla capabilities: ${missing.join(', ') || 'PDO mysql'}.`);
-  for (const [name, value] of Object.entries(requested)) {
-    if (String(info.effectivePhpSettings?.[name]) !== String(value)) throw new Error(`PHP did not apply ${name}: expected ${value}, received ${info.effectivePhpSettings?.[name] ?? 'unknown'}.`);
-  }
-  return info;
 }

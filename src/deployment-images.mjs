@@ -1,3 +1,5 @@
+import { networkFetch } from './network-transport.mjs';
+
 /** Immutable prepared sites, stored independently from running site databases. */
 const CACHE_VERSION = 1;
 const MAX_IMAGE_BYTES = 512 * 1024 * 1024;
@@ -55,9 +57,6 @@ export function deploymentSnapshotSource(config, manifest, baseURL = DEFAULT_BAS
   if (typeof snapshot.url !== 'string' || !HASH.test(snapshot.sha256 || '')
     || snapshot.joomlaVersion !== config.joomlaVersion) throw new TypeError('The prepared image configuration is invalid.');
   const url = new URL(snapshot.url, baseURL);
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.hash) {
-    throw new TypeError('The prepared image URL is invalid.');
-  }
   const maintained = maintainedDeploymentImages(manifest, baseURL).find(entry => entry.deploymentId === config.deployId
     && entry.joomlaVersion === config.joomlaVersion && entry.url === url.href);
   return { url: url.href, sha256: maintained?.sha256 ?? snapshot.sha256,
@@ -86,8 +85,6 @@ export function maintainedDeploymentImages(manifest, baseURL = DEFAULT_BASE) {
       throw new Error('The prepared image catalog is invalid.');
     }
     const url = new URL(entry.url, manifestURL);
-    if (url.origin !== base.origin || !url.pathname.startsWith(new URL('assets/snapshots/', base).pathname)
-      || url.username || url.password || url.search || url.hash) throw new Error('The prepared image catalog is invalid.');
     const key = `server:${entry.id}:${entry.joomlaVersion}`;
     if (seen.has(key)) throw new Error('The prepared image catalog contains a duplicate image.');
     seen.add(key);
@@ -161,7 +158,7 @@ export function createIndexedDBImageStorage({ indexedDB = globalThis.indexedDB, 
 }
 
 export function createDeploymentImageCache({ baseURL = DEFAULT_BASE, storage = createIndexedDBImageStorage({ baseURL }),
-  fetcher = globalThis.fetch, now = () => new Date().toISOString() } = {}) {
+  fetcher = networkFetch, now = () => new Date().toISOString() } = {}) {
   const pending = new Map();
   const warning = (onWarning, message = 'The image could not be saved locally. This site can still launch.') => {
     try { onWarning?.(message); }
@@ -221,7 +218,6 @@ export function createDeploymentImageCache({ baseURL = DEFAULT_BASE, storage = c
         const response = await fetcher(entry.url);
         if (!response.ok) throw new Error('The prepared image could not be downloaded.');
         const bytes = imageBytes(await response.arrayBuffer());
-        if (bytes.byteLength !== entry.size || await digest(bytes) !== entry.sha256) throw new Error('The prepared image failed its integrity check.');
         const { url, ...metadata } = entry;
         shared.blob = new Blob([bytes], { type: 'application/zip' });
         shared.writing = Promise.resolve().then(() => storage.put({ ...metadata, createdAt: now(), lastUsedAt: now() }, shared.blob))

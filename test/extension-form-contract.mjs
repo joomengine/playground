@@ -11,13 +11,13 @@ export async function assertExtensionFormValidation(page) {
   if (!originallyOpen) await page.locator('#deploy-editor-button').click();
   if (advancedOriginallyOpen) await advanced.locator('summary').click();
 
-  await page.locator('#package-url').fill('example.org/missing-protocol.zip');
+  await page.locator('#package-url').fill('https://[');
   await dialog.locator('[data-close-dialog]').click();
   await page.locator('#launch-button').click();
   await page.locator('#deploy-dialog[open]').waitFor();
   assert.equal(await page.locator('#package-url').evaluate(input => document.activeElement === input), true,
     'Launch reveals and focuses an invalid URL after the deployment dialog has been closed.');
-  assert.equal(await page.locator('#package-url').inputValue(), 'example.org/missing-protocol.zip');
+  assert.equal(await page.locator('#package-url').inputValue(), 'https://[');
   assert.equal(await json.isVisible(), false, 'Correcting an ordinary URL does not require the JSON editor.');
 
   await page.locator('#package-url').fill('https://example.org/valid-package.zip');

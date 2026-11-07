@@ -6,7 +6,7 @@ import { parseCatalog } from '../src/config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
 import { exportSite } from '../src/export.mjs';
 import { managedDatabaseSource } from '../src/joomla/managed-database.mjs';
-import { applyJoomlaConfiguration, discoverJoomlaConfiguration, checkJoomla, importJoomlaSnapshot, inspectJoomla, installJoomla, requestJoomlaPage, runStartupCommand, sha256 } from '../src/joomla/index.mjs';
+import { applyJoomlaConfiguration, discoverJoomlaConfiguration, readJoomlaMetadata, importJoomlaSnapshot, inspectJoomla, installJoomla, requestJoomlaPage, runStartupCommand, sha256 } from '../src/joomla/index.mjs';
 
 const sourceLoader = (name) => readFile(new URL(`../src/joomla/php/${name}.php`, import.meta.url), 'utf8');
 const exportSource = () => readFile(new URL('../src/export/site.php', import.meta.url), 'utf8');
@@ -86,9 +86,9 @@ for (const major of ['5', '6']) {
       await assert.rejects(installJoomla(runtime, { ...configuration, joomlaVersion: major === '5' ? '6.2.0' : '5.4.10' }, options), /another Joomla release/);
 
       await runStartupCommand(runtime, ['config:set', 'sitename=Native configuration save'], options);
-      assert.equal((await checkJoomla(runtime, options)).siteName, 'Native configuration save');
+      assert.equal((await readJoomlaMetadata(runtime, options)).siteName, 'Native configuration save');
       await assert.rejects(runStartupCommand(runtime, ['config:set', 'db=external_database'], options), /browser manages the database/);
-      assert.equal((await checkJoomla(runtime, options)).siteName, 'Native configuration save');
+      assert.equal((await readJoomlaMetadata(runtime, options)).siteName, 'Native configuration save');
 
       const discovered = await discoverJoomlaConfiguration(runtime, options);
       assert.ok(discovered.menuTypes.some((item) => item.component === 'com_content' && item.view === 'featured'));
@@ -130,7 +130,7 @@ for (const major of ['5', '6']) {
       assert.equal(imported.siteName, 'Restored heritage');
       assert.equal(imported.administrator.username, 'restored');
       assert.equal(imported.administrator.password, restoredConfiguration.admin.password);
-      assert.equal((await checkJoomla(restored, { sourceLoader })).language, 'nl-NL');
+      assert.equal((await readJoomlaMetadata(restored, { sourceLoader })).language, 'nl-NL');
       assert.match(await page(restored, 'index.php?lang=nl'), /Verhalen verbinden generaties/);
       assert.doesNotMatch(await page(restored, 'administrator/index.php'), /name="passwd"/);
       await assert.rejects(importJoomlaSnapshot(restored, restoredConfiguration, {

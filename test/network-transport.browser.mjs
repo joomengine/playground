@@ -7,7 +7,7 @@ import { createNetworkFixture, fixtureOrigin, writeOrigin, binaryHash } from './
 const directory = fileURLToPath(new URL('../', import.meta.url));
 const engines = { chromium, firefox };
 const names = (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split(',');
-for (const name of names) test(`${name}: browser CORS and actual Worker agree on raw binary protocol`, { timeout: 90_000 }, async () => {
+for (const name of names) test(`${name}: direct CORS downloads and anonymous proxy fallback preserve bytes without user interaction`, { timeout: 90_000 }, async () => {
   assert.ok(engines[name], 'Select chromium and/or firefox.');
   const fixture = await createNetworkFixture({ directory });
   let browser;
@@ -17,45 +17,58 @@ for (const name of names) test(`${name}: browser CORS and actual Worker agree on
     await fixture.attach(context);
     const page = await context.newPage();
     await page.goto(new URL('__test__.html', fixture.url).href);
-    const results = await page.evaluate(async ({ config, fixtureOrigin, writeOrigin }) => {
+    const results = await page.evaluate(async ({ config, fixtureOrigin, writeOrigin, correctIntegrity }) => {
       const { createNetworkTransport } = await import('./src/network-transport.mjs');
-      let session, exchanges = 0;
-      const getSession = async ({ signal }) => {
-        if (!session) {
-          exchanges++;
-          const response = await fetch(`${config.endpoint}/v1/session`, { method: 'POST', signal,
-            headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: 1, turnstileToken: 'fixture' }) });
-          if (!response.ok) throw new Error(await response.text());
-          session = await response.json();
-        }
-        return session;
-      };
-      const transport = createNetworkTransport(fetch.bind(globalThis), config, { getSession, allowInsecureLocalhost: true });
+      const transport = createNetworkTransport(fetch.bind(globalThis), config);
       const hash = async response => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await response.arrayBuffer()))]
         .map(value => value.toString(16).padStart(2, '0')).join('');
       const direct = await hash(await transport(`${fixtureOrigin}/direct/binary`));
-      const directExchanges = exchanges;
+      const requestedHeaders = { Cookie: 'php_session=exact-cookie', Origin: 'https://caller.example', Referer: 'https://caller.example/source' };
+      const browserHeaders = await (await fetch(`${fixtureOrigin}/direct/headers`, { headers: requestedHeaders })).json();
+      const deliveredHeaders = await (await transport(`${fixtureOrigin}/direct/headers`, { headers: requestedHeaders })).json();
       let denied = false;
       try { await fetch(`${fixtureOrigin}/denied/binary`); } catch { denied = true; }
       const fallback = await hash(await transport(`${fixtureOrigin}/denied/binary`));
       const upload = await transport(`${writeOrigin}/denied/echo`, { method: 'PATCH', body: new Uint8Array([0, 255, 65, 128]),
-        headers: { Authorization: 'Bearer upstream-fixture', 'Content-Type': 'application/octet-stream' } });
+        headers: { Authorization: 'Bearer upstream-fixture', 'Content-Type': 'application/octet-stream', 'X-API-Key': 'custom' } });
+      const form = new FormData(); form.append('name', 'Joomla');
+      const requestUpload = await transport(new Request(`${writeOrigin}/denied/echo`, { method: 'POST', body: form }));
+      const formUpload = await transport(`${writeOrigin}/denied/echo`, { method: 'POST', body: form });
+      const incorrectIntegrity = `sha256-${btoa('\0'.repeat(32))}`;
+      let integrityRejected = false;
+      try { await transport(new Request(`${fixtureOrigin}/direct/binary`, { integrity: incorrectIntegrity })); }
+      catch { integrityRejected = true; }
+      const integrityFallback = await hash(await transport(new Request(`${fixtureOrigin}/denied/binary`, { integrity: correctIntegrity })));
+      const integrityOverride = await hash(await transport(new Request(`${fixtureOrigin}/denied/binary`, { integrity: incorrectIntegrity }), { integrity: correctIntegrity }));
+      const integrityCleared = await hash(await transport(new Request(`${fixtureOrigin}/denied/binary`, { integrity: incorrectIntegrity }), { integrity: '' }));
       const status = await transport(`${writeOrigin}/denied/status/500`);
-      let failure;
-      try { await transport(`${fixtureOrigin}/denied/echo`, { method: 'POST', body: 'write once', headers: { 'Content-Type': 'text/plain' } }); }
-      catch (error) { failure = error.code; }
-      return { direct, directExchanges, denied, fallback, upload: [...new Uint8Array(await upload.arrayBuffer())],
-        status: status.status, failure, exchanges };
-    }, { config: fixture.config, fixtureOrigin, writeOrigin });
-    assert.equal(results.direct, binaryHash); assert.equal(results.directExchanges, 0);
-    assert.equal(results.denied, true, 'The browser must enforce CORS before relay success is accepted.');
+      const post = await transport(`${fixtureOrigin}/denied/echo`, { method: 'POST', body: 'write once', headers: { 'Content-Type': 'text/plain' } });
+      return { direct, browserHeaders, deliveredHeaders, denied, fallback, upload: [...new Uint8Array(await upload.arrayBuffer())],
+        status: status.status, post: await post.text(), requestUpload: await requestUpload.text(), formUpload: await formUpload.text(),
+        integrityRejected, integrityFallback, integrityOverride, integrityCleared };
+    }, { config: fixture.config, fixtureOrigin, writeOrigin, correctIntegrity: `sha256-${Buffer.from(binaryHash, 'hex').toString('base64')}` });
+    assert.equal(results.direct, binaryHash);
+    assert.equal(results.browserHeaders.cookie, null, 'Native browser Fetch must demonstrate the header delivery limitation.');
+    assert.deepEqual(results.deliveredHeaders, { cookie: 'php_session=exact-cookie', origin: 'https://caller.example', referer: 'https://caller.example/source' });
+    assert.equal(fixture.requests.filter(item => item.headers.cookie === 'php_session=exact-cookie').length, 1);
+    assert.equal(results.denied, true, 'The browser must enforce CORS before fallback success is accepted.');
     assert.equal(results.fallback, binaryHash); assert.deepEqual(results.upload, [0, 255, 65, 128]);
-    assert.equal(results.status, 500); assert.equal(results.failure, 'DIRECT_NETWORK_FAILED'); assert.equal(results.exchanges, 1);
-    const writes = fixture.requests.filter(item => item.method === 'POST' && item.path === '/denied/echo');
-    assert.equal(writes.length, 1, 'The uncertain direct write must not replay.');
+    assert.equal(results.status, 500); assert.equal(results.post, 'write once');
+    assert.match(results.requestUpload, /name="name"[\s\S]*Joomla/);
+    assert.match(results.formUpload, /name="name"[\s\S]*Joomla/);
+    const multipart = fixture.requests.filter(item => item.method === 'POST' && item.body.toString().includes('name="name"'));
+    assert.equal(multipart.length, 2);
+    for (const request of multipart) {
+      assert.equal((await new Response(request.body, { headers: { 'Content-Type': request.headers['content-type'] } }).formData()).get('name'), 'Joomla',
+        'The upstream multipart boundary must match the exact uploaded body.');
+    }
+    assert.equal(results.integrityRejected, true, 'Proxy fallback must not bypass a caller integrity mismatch.');
+    for (const key of ['integrityFallback', 'integrityOverride', 'integrityCleared']) assert.equal(results[key], binaryHash, key);
+    assert.equal(fixture.requests.filter(item => item.method === 'POST' && item.body.toString() === 'write once').length, 1);
     const patch = fixture.requests.filter(item => item.method === 'PATCH');
     assert.equal(patch.length, 1); assert.equal(patch[0].headers.authorization, 'Bearer upstream-fixture');
-    assert.equal(patch[0].headers['x-playground-request'], undefined);
-  } catch (error) { console.error(error.stack || error); throw error; }
-  finally { await browser?.close(); await fixture.close(); }
+    assert.equal(patch[0].headers['x-api-key'], 'custom'); assert.equal(patch[0].headers['x-playground-request'], undefined);
+    assert.ok(fixture.relayRequests.every(item => item.method === 'OPTIONS' || new URL(item.path, fixture.relayOrigin).searchParams.has('url')));
+    assert.equal(context.pages().length, 1, 'Downloads never open verification pages.');
+  } finally { await browser?.close(); await fixture.close(); }
 });

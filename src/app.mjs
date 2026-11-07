@@ -27,6 +27,7 @@ import { dynamicJoomlaChoices, matchingJcbChoices } from './dynamic-selection.mj
 import { selectCatalogPackage } from './dynamic-packages.mjs';
 import { deploymentImages } from './deployment-images.mjs';
 import { readSiteExport, configurationForSiteExport, catalogForRestoredSite } from './site-import.mjs';
+import { networkFetch } from './network-transport.mjs';
 
 const $ = (id) => document.getElementById(id);
 const deploymentURL = new URL('../', import.meta.url).href;
@@ -184,22 +185,6 @@ function activity(message) {
   while (log.childElementCount > 150) log.firstElementChild.remove();
   log.scrollTop = log.scrollHeight;
 }
-const publicImageDiagnostics = new Set();
-navigator.serviceWorker?.addEventListener('message', event => {
-  if (event.source !== navigator.serviceWorker.controller
-    || event.source?.scriptURL !== new URL('service-worker.mjs', deploymentURL).href
-    || event.data?.type !== 'public-asset-failure') return;
-  const { assetId, cause } = event.data;
-  // Only bounded identifiers and the relay handler's sanitized failure reason
-  // enter the activity feed. Never display URLs, response bodies or headers.
-  if (typeof assetId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/.test(assetId)
-    || typeof cause !== 'string' || !cause || cause.length > 180
-    || /[\x00-\x1f\x7f]|https?:|[<>]/i.test(cause)) return;
-  const key = `${assetId}:${cause}`;
-  if (publicImageDiagnostics.has(key) || publicImageDiagnostics.size >= 32) return;
-  publicImageDiagnostics.add(key);
-  activity(`Public image ${assetId}: ${cause}.`);
-});
 function show(view) {
   for (const name of ['welcome', 'loading-view', 'error-view', 'site-mount']) $(name).hidden = name !== view;
   document.querySelector('.preview-panel').classList.toggle('launching', view === 'loading-view');
@@ -250,7 +235,7 @@ function updateLaunchReadiness() {
           const currentURL = descriptor && (descriptor.url ?? new URL(descriptor.file, deployCatalog.url).href);
           if (currentDeployRecipe?.schemaVersion === 1 && key === currentURL) return Response.json(currentDeployRecipe);
           if (!launchRecipeSources.has(key)) {
-            launchRecipeSources.set(key, fetch(url).then(async response => {
+            launchRecipeSources.set(key, networkFetch(url).then(async response => {
               if (!response.ok) throw new Error('Deployment metadata is unavailable.');
               return response.text();
             }).catch(error => { launchRecipeSources.delete(key); throw error; }));
@@ -530,7 +515,7 @@ async function openImages() {
   try {
     let manifest;
     try {
-      const response = await fetch(new URL('assets/manifest.json', deploymentURL), { cache: 'no-cache' });
+      const response = await networkFetch(new URL('assets/manifest.json', deploymentURL), { cache: 'no-cache' });
       if (response.ok) manifest = await response.json();
     } catch { /* Local images can still be managed offline. */ }
     const images = (await deploymentImages.list(manifest)).filter(entry => entry.available !== false);
@@ -1685,8 +1670,6 @@ async function applyDeployment() {
 function populatePhpSettings(settings = phpSettings) {
   const form = $('php-settings-form');
   for (const [name, value] of Object.entries(settings)) if (form.elements.namedItem(name)) form.elements.namedItem(name).value = value;
-  const effective = runtime?.runtimeInfo?.effectivePhpSettings;
-  $('php-effective').textContent = effective ? `${t('label.effectiveSettings')}: ${Object.entries(effective).map(([key, value]) => `${key}=${value}`).join(' · ')}` : '';
   $('php-error').hidden = true;
 }
 function syncThemeToggle() {
@@ -1869,7 +1852,7 @@ async function initialize() {
     await initializeLocale();
     $('interface-language').value = getLocale();
     const parsed = readURLConfiguration(location.href);
-    if (parsed.document) parsed.config = { ...await loadDeploymentDocument(parsed.document.url, { ...parsed.document, baseURL: deploymentURL }), ...parsed.config };
+    if (parsed.document) parsed.config = { ...await loadDeploymentDocument(parsed.document.url, { baseURL: deploymentURL }), ...parsed.config };
     const params = new URL(location.href).searchParams;
     resumeLastRoute = !parsed.document && !new URL(location.href).hash.startsWith('#deploy=') && !params.has('path') && !params.has('initialPath') && !parsed.config.fresh;
     setFocusMode(parsed.config.hideToolbar);
@@ -1887,7 +1870,7 @@ async function initialize() {
     if (await buildUpdates.check({ force: true })) return;
     $('admin-password').value = password();
     const [manifest, recipes] = await Promise.all([
-      fetch(new URL('../assets/manifest.json', import.meta.url), { cache: 'no-cache' }).then(async (response) => {
+      networkFetch(new URL('../assets/manifest.json', import.meta.url), { cache: 'no-cache' }).then(async (response) => {
         if (!response.ok) throw new Error(`The runtime catalog is unavailable (HTTP ${response.status}).`);
         return response.json();
       }), loadDeployCatalog(),

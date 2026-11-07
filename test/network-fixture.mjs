@@ -1,4 +1,3 @@
-import assert from 'node:assert/strict';
 import http from 'node:http';
 import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
@@ -14,13 +13,12 @@ export const compressedLength = compressedBinary.length;
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}`)));
 const close = server => new Promise(resolve => { server.closeAllConnections?.(); server.close(resolve); });
 
-/** Test adapter only: real browser CORS, actual Worker policy and recorded upstream bytes.
+/** Test adapter only: real browser CORS, actual anonymous Worker and recorded upstream bytes.
  * The two example.com HTTP origins are mapped to a local fixture; no TLS claim is made.
  * All other upstream URLs retain normal TLS verification and are never substituted.
  */
 export async function createNetworkFixture({ directory, liveOrigins = [], prefix = '/playground/', fixtures = {}, isolation = false } = {}) {
   const { createRelayWorker } = await import('../services/network-worker/src/index.mjs');
-  const { createTestEnvironment } = await import('../services/network-worker/test/helpers.mjs');
   const requests = [], relayRequests = [], liveReads = [], relayOperations = [];
   let app, relay, appOrigin, relayOrigin;
   let available = true;
@@ -46,8 +44,11 @@ export async function createNetworkFixture({ directory, liveOrigins = [], prefix
       res.statusCode = Number(resource.split('/').at(-1));
       res.setHeader('Content-Type', 'text/plain'); res.end(`upstream:${res.statusCode}`); return;
     }
-    if (resource === '/redirect') { res.writeHead(302, { Location: `${fixtureOrigin}/denied/binary` }).end(); return; }
-    if (resource === '/forbidden-redirect') { res.writeHead(302, { Location: 'http://169.254.169.254/latest/meta-data/' }).end(); return; }
+    if (resource === '/redirect') { res.writeHead(302, { Location: `${upstreamOrigin}/denied/binary` }).end(); return; }
+    if (resource === '/headers') {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ cookie: req.headers.cookie ?? null, origin: req.headers.origin ?? null, referer: req.headers.referer ?? null })); return;
+    }
     if (resource === '/echo') {
       res.setHeader('Content-Type', 'application/octet-stream'); res.end(body); return;
     }
@@ -71,13 +72,12 @@ export async function createNetworkFixture({ directory, liveOrigins = [], prefix
   };
   const fetcher = async (input, init) => {
     const original = input instanceof Request ? input.url : String(input);
-    if (original === 'https://challenges.cloudflare.com/turnstile/v0/siteverify') {
-      return Response.json({ success: true, hostname: '127.0.0.1', action: 'network-session' });
-    }
     const mapped = mapFixture(input);
     const startedAt = Date.now();
     try {
-      const response = await fetch(mapped || input, init);
+      const request = input instanceof Request && mapped ? new Request(mapped, input) : mapped || input;
+      const response = await fetch(request, init);
+      if (mapped) Object.defineProperty(response, 'url', { value: `${new URL(original).origin}${new URL(response.url).pathname}${new URL(response.url).search}` });
       if (!mapped) liveReads.push({ event: 'response', url: original, status: response.status,
         contentType: response.headers.get('content-type') || '', contentEncoding: response.headers.get('content-encoding') || '',
         route: 'relay', startedAt, durationMs: Date.now() - startedAt });
@@ -90,7 +90,6 @@ export async function createNetworkFixture({ directory, liveOrigins = [], prefix
     }
   };
   const worker = createRelayWorker({ fetcher });
-  let env;
   relay = http.createServer(async (req, res) => {
     try {
       relayRequests.push({ path: req.url, method: req.method });
@@ -100,49 +99,26 @@ export async function createNetworkFixture({ directory, liveOrigins = [], prefix
       res.once('close', () => { if (!res.writableEnded) controller.abort(); });
       const request = new Request(`${relayOrigin}${req.url}`, { method: req.method, headers: { ...req.headers, 'cf-connecting-ip': '198.51.100.2' },
         signal: controller.signal, ...(!['GET', 'HEAD'].includes(req.method) ? { body: Readable.toWeb(req), duplex: 'half' } : {}) });
-      const response = await worker.fetch(request, env);
+      const response = await worker.fetch(request);
       res.writeHead(response.status, Object.fromEntries(response.headers));
       if (response.body) Readable.fromWeb(response.body).on('error', () => res.destroy()).pipe(res);
       else res.end();
     } catch (error) { if (!res.headersSent) res.writeHead(500); res.end(error.message); }
   });
   relayOrigin = await listen(relay);
-  const config = { schemaVersion: 1, enabled: true, endpoint: relayOrigin, protocolVersion: 1,
-    turnstileSiteKey: '1x00000000000000000000AA', proxyOrigins: [writeOrigin], maxRedirects: 5,
-    credentialGrants: [{ relayOrigin, destinationOrigin: writeOrigin }] };
+  const config = { endpoint: relayOrigin };
   app = await createStaticServer({ directory, prefix, isolation, fixtures: {
     ...fixtures,
     'config/network.json': JSON.stringify(config),
   } });
   appOrigin = new URL(app.url).origin;
-  env = createTestEnvironment({ fetcher, allowedOrigins: [appOrigin], upstreamOrigins: [fixtureOrigin, writeOrigin, ...liveOrigins],
-    relayOrigin, credentialOrigins: [writeOrigin], turnstileHostname: '127.0.0.1' });
-  // The production logger records only method/hostname/status/timing and byte
-  // counts. Retain its completion/error evidence without tokens or URL queries.
-  env.testCoordinator.logger = value => relayOperations.push({ ...value, finishedAt: Date.now() });
   return { url: app.url, config, requests, relayRequests, liveReads, relayOperations, upstreamOrigin, relayOrigin,
     setAvailable(value) { available = Boolean(value); },
     async attach(context) {
-      await context.addInitScript(() => {
-        globalThis.turnstile = { render(_container, options) { queueMicrotask(() => options.callback('network-fixture-verification')); return 'fixture'; }, remove() {} };
-      });
       await context.route(/^http:\/\/(?:first|second)\.example\.com\//, route =>
         // Continue a real browser request. Fulfilling through Playwright would
         // bypass the browser's CORS checks and cannot prove this contract.
         route.continue({ url: mapFixture(route.request().url()) }));
-      context.on('page', page => {
-        // Every independently created PHP site owns its own session. Drive each
-        // real modal without assuming one verification covers later sites.
-        void (async () => {
-          while (!page.isClosed()) {
-            try {
-              const button = await page.waitForSelector('button:has-text("Verify network access")', { timeout: 5000 });
-              await button.click();
-              await page.waitForSelector('button:has-text("Verify network access")', { state: 'hidden', timeout: 10000 });
-            } catch { if (page.isClosed()) return; }
-          }
-        })();
-      });
     },
     async close() { await Promise.all([app.close(), close(relay), close(upstream)]); },
   };

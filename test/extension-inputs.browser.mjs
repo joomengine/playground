@@ -54,7 +54,7 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
         });
       });
 
-      const inputs = page.locator('#package-list input[type="url"]');
+      const inputs = page.locator('#package-list input');
       const inputValues = () => inputs.evaluateAll(nodes => nodes.map(node => node.value));
       const read = () => page.evaluate(() => window.extensionInputs.read());
       const json = page.locator('#extensions');
@@ -75,10 +75,10 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await inputs.first().press('Enter');
       assert.equal(await page.evaluate(() => window.extensionSubmissions), 0, 'Enter in a URL field must not launch or submit a deployment.');
 
-      for (const invalid of ['packages.example.test/missing-scheme.zip', 'ftp://packages.example.test/package.zip', 'https://']) {
+      for (const invalid of ['https://[', 'http://[invalid', 'https://']) {
         await inputs.first().fill(invalid);
         const invalidUrl = await page.evaluate(() => { try { window.extensionInputs.read(); return ''; } catch (error) { return error.message; } });
-        assert.ok(invalidUrl, 'Basic entry requires a complete HTTP or HTTPS address.');
+        assert.ok(invalidUrl, 'An invalid URL reports its parsing error.');
         assert.equal(await advanced.getAttribute('open'), null, 'An invalid ordinary URL must not force non-programmers into JSON.');
         assert.equal(await inputs.first().inputValue(), invalid);
         assert.equal(await page.locator('#extension-error').isVisible(), true);
@@ -123,16 +123,21 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       assert.equal(await add.isEnabled(), true);
       assert.equal(await inputs.count(), 1);
 
-      const limit = Array.from({ length: 30 }, (_, index) => ({ url: `https://packages.example.test/${index}.zip` }));
-      await json.fill(JSON.stringify([...limit, { url: 'https://packages.example.test/too-many.zip' }]));
-      assert.ok(await page.evaluate(() => { try { window.extensionInputs.read(); return false; } catch { return true; } }), 'Advanced JSON enforces the same maximum number of extensions.');
-      assert.equal(await add.isDisabled(), true);
-      await page.evaluate(entries => window.extensionInputs.setValue(entries), limit);
-      assert.equal(await inputs.count(), 30);
-      assert.equal(await add.isDisabled(), true);
-      await page.getByRole('button', { name: 'Remove extension URL 30', exact: true }).click();
+      const packages = Array.from({ length: 40 }, (_, index) => ({ url: `https://packages.example.test/${index}.zip` }));
+      await json.fill(JSON.stringify(packages));
+      assert.equal((await read()).length, 40);
       assert.equal(await add.isEnabled(), true);
-      assert.equal((await read()).length, 29);
+      await advanced.locator('summary').click();
+      await add.click();
+      assert.equal(await inputs.count(), 41);
+      const longUrl = `https://packages.example.test/package.zip?token=${'a'.repeat(9000)}#download`;
+      await inputs.last().fill(longUrl);
+      assert.equal((await read()).at(-1).url, longUrl, 'Long download URLs remain intact in the ordinary editor.');
+      assert.equal(await inputs.last().evaluate(input => input.checkValidity()), true);
+      assert.equal(await add.isEnabled(), true);
+      await page.getByRole('button', { name: 'Remove extension URL 41', exact: true }).click();
+      assert.equal(await add.isEnabled(), true);
+      assert.equal((await read()).length, 40);
 
       await page.evaluate(() => {
         window.extensionInputs.setValue([{ url: 'https://packages.example.test/a-long-package-name-for-a-narrow-screen.zip' }]);

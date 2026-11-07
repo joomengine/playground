@@ -30,12 +30,11 @@ left/right/bottom, floating, full-width and detached layouts. Adminer loads on
 demand and adds about 435 KiB of staged PHP/UI assets (about 246 KiB gzipped),
 without another PHP or database engine.
 
-[Browser compatibility](docs/browser-compatibility.md) verifies isolation before
+[Browser compatibility](docs/browser-compatibility.md) checks isolation before
 starting the runtime and automatically tries a controlled `require-corp` fallback
-when normal isolation is unavailable. Both modes run without a relay. The
-restricted [public-image relay](relay/README.md) is an optional facility for
-registered external images and remains unconfigured. Real-device mobile
-validation follows deployment.
+when normal isolation is unavailable. PHP requests, package downloads and
+compatibility-mode images use the [shared HTTP transport](docs/network.md).
+Browser isolation does not require a network verification step.
 
 For an agent-oriented introduction to configuring a site, working with JCB,
 testing extensions and exporting results, see the [Playground agent guide](docs/agent-guide.md).
@@ -102,7 +101,8 @@ included in that runtime and supplies MIME detection with its embedded magic dat
 cURL uses Sean Morris’s [php-wasm-curl](https://github.com/seanmorris/php-wasm-curl)
 to connect PHP’s `ext/curl` to the host’s Fetch API. The implementation
 is pinned to [6085917954da9682c32ebcbea27a626d2308381b](https://github.com/seanmorris/php-wasm-curl/tree/6085917954da9682c32ebcbea27a626d2308381b)
-and loaded alongside the matching int64 PHP runtime. Sodium uses the official
+with the local `native/curl-network.patch` connecting its Fetch calls to the shared
+HTTP transport, and loaded alongside the matching int64 PHP runtime. Sodium uses the official
 libsodium 1.0.22 release and Web Crypto for its random source. A checksum-verified
 JavaScript CGI adapter preserves binary request bodies, uses indexed input reads
 for large uploads, and waits for preloaded files before starting or restoring PHP.
@@ -131,8 +131,8 @@ selection; the generated runtime manifest records their exact released builds.
 Choose Joomla, JCB and PHP, then launch. The selected Joomla and JCB packages are
 fetched automatically from the Playground's own static assets and installed inside
 the browser. Choosing a version records the choice; it does not open a ZIP download
-or upload dialog. Custom extension URLs remain subject to their host's browser
-access rules.
+or upload dialog. Custom extension URLs use Joomla's downloader through the
+shared HTTP transport and its configured fallback.
 
 The selectors show **Current stable** first, **Nightly builds** next and
 **Upcoming releases** last. Joomla choices cover majors 5, 6 and 7: one latest
@@ -252,13 +252,14 @@ binary bodies, status codes, redirects, timeouts, and streaming response
 callbacks. The native extension is exercised on every supported PHP build,
 including the HTTP patterns used by JCB’s file and API helpers.
 
-The shared transport supports direct requests and one controlled network-service
-fallback for eligible anonymous GET/HEAD failures. Writes choose their route
-before dispatch and are never automatically replayed. The optional Cloudflare
-Worker uses short-lived sessions, reviewed upstream origins, credential grants
-and server-enforced quotas. It ships disabled until an operator deploys and
-verifies it. See [network architecture and protocol](docs/network.md) and
-[Worker provisioning and rollback](services/network-worker/README.md).
+The shared transport tries GET/HEAD requests directly and uses the configured
+Cloudflare Worker once if browser Fetch cannot read the response. Cross-origin
+writes use the Worker once when configured; same-origin writes use direct Fetch.
+The fallback accepts ordinary HTTP and HTTPS destinations without destination
+lists, user verification or session tokens. Set the endpoint in
+`config/network.json`; `null` uses direct Fetch only. See the
+[network implementation](docs/network.md) and
+[Worker deployment](services/network-worker/README.md).
 
 A small native HTTP stream adapter is compiled into the loadable cURL extension.
 It preserves `file_get_contents()`, `fopen()`, `get_headers()`, stream contexts,
@@ -278,11 +279,12 @@ visible while the site continues opening; required core packages must install
 successfully. PHP HTTP requests use the browser's Fetch transport.
 
 Only HTTP and HTTPS are supported. Direct browser requests still follow CORS and
-mixed-content rules. The configured relay can carry permitted HTTP destinations
+mixed-content rules. The configured fallback carries HTTP destinations
 without changing their scheme. The browser controls direct certificate validation, cookies,
 forbidden request headers, and connection behavior; options for disabling TLS
-verification cannot bypass browser security. Redirect responses are hidden from
-browser Fetch: enable following explicitly when a client needs redirects.
+verification cannot bypass browser security. Direct browser Fetch hides manual
+redirect responses; the configured Worker can expose them. Enable following
+explicitly when a PHP cURL client needs redirects.
 PHP's cookie-file settings do not create a separate browser cookie store.
 PHP-configured HTTP proxies and Unix sockets are unsupported. Requests to PHP in the same
 playground instance cannot complete recursively while its worker is already
@@ -431,14 +433,11 @@ and complete site downloads retain the known sandbox administrator. Browser stor
 evicted or cleared and is not a backup. A save reports completion only after both
 stores flush; closing a tab cannot guarantee an unfinished save completes.
 
-External packages must be public ZIP archives. Extension and template URLs accept
-HTTP or HTTPS.
-Prefer HTTPS for integrity in transit. HTTP package URLs remain subject to the
-browser's mixed-content rules.
-Managed packages are limited to 128 MiB and repository packages have verified
-pinned digests. Custom extension URLs use Joomla's installer directly; the
-wrapper ignores user-supplied checksum fields on that path. The URL must lead
-to a package ZIP.
+Extension and template URLs are passed to Joomla's installer. Downloads use the
+shared HTTP transport, including its fallback for browser CORS and mixed-content
+failures. Joomla decides whether the retrieved archive is an installable package.
+The Playground does not add a runtime package checksum or download-size gate.
+Maintained build recipes keep pinned digests for reproducible static builds.
 
 Each extension, template or language ZIP installed by the deployment helper gets
 180 seconds of PHP execution time and a 210-second host deadline. The allowance
@@ -565,10 +564,12 @@ Exports transfer large values in bounded chunks and report destination packet li
 Database-limit controls in Rocket are deferred; the bridge already exposes bounded
 startup options and MariaDB's supported settings for future integration.
 
-Runtime health checks require the real PDO MySQL bridge, cURL, fileinfo, Sodium,
+The PHP runtime includes the real PDO MySQL bridge, cURL, fileinfo, Sodium,
 GD, Intl, mbstring, OpenSSL, DOM, SimpleXML, XML/reader/writer, JSON, ZIP and zlib
-extensions. Provisioning checks exercise image decoding, Unicode/XML, archives,
-cryptography, database access and uploads. GD supports JPEG, PNG and WebP; AVIF
+extensions. CI integration tests exercise image decoding, Unicode/XML, archives,
+cryptography, database access and uploads. Those tests live in
+`test/runtime-profile.integration.mjs`, `test/native-pdo.runtime.mjs` and the
+native extension integration suites; startup does not run them. GD supports JPEG, PNG and WebP; AVIF
 and XPM are not built into this runtime. The [official Joomla Docker image](https://github.com/joomla/docker-joomla)
 is a setup reference, while browser limitations remain explicit below.
 
@@ -639,11 +640,11 @@ The interface recognizes these query parameters:
 | `login=no` | Start or reopen with the administrator logged out |
 | `fresh=1` | Create an independent site from the recipe |
 | `key=example` | Reopen a saved site in this browser |
-| `extensions=[...]` | Additional objects containing `url` and optional `sha256` |
+| `extensions=[...]` | Additional objects containing `url`; custom checksum fields are ignored |
 | `commands=[["cache:clean"]]` | Additional Joomla console argument arrays |
 | `start=0` | Show setup first; the default page offers a ten-second countdown |
 | `immediate=1` | Skip the countdown for automatic deployment; `start=0` still takes precedence |
-| `config=https://example.org/deploy.json` | Load a public deployment document, optionally verified with `sha256` |
+| `config=https://example.org/deploy.json` | Load a public deployment document through the shared HTTP transport |
 
 For a deployment hosted at `/playground/`, this same-origin iframe opens an
 administrator playground with the header and footer hidden:
@@ -822,9 +823,9 @@ other credentials. Fonts, JavaScript modules, and requests that read remote data
 still follow normal CORS rules; an explicit remote CORP restriction is respected.
 No extension-specific image URLs or artwork snapshots are maintained.
 
-When `credentialless` cannot establish shared memory and worker support, startup
-automatically tries `require-corp`. Chromium and WebKit have passed automatic
-fallback and real PHP/MariaDB/Joomla startup checks; device names and screen size
+When `credentialless` does not expose browser isolation and the required APIs,
+startup automatically tries `require-corp`. CI exercises automatic fallback and
+real PHP/MariaDB/Joomla startup in Chromium and WebKit; device names and screen size
 do not select a policy. See [browser compatibility](docs/browser-compatibility.md) for the tested
 engines and remaining physical-device checks.
 
@@ -889,7 +890,7 @@ native/browser jobs. Presentation-only changes run the default Joomla 6.2.0 / PH
 configuration and unclassified changes run the full supported matrix, as do
 `main` and manual builds. Chromium and Firefox validate in parallel jobs against
 the same built artifact. Native/compiler caches require exact source and toolchain
-identities; downloads retain checksum validation. Provisioning uses bounded
+identities; build-time source downloads retain checksum validation. Provisioning uses bounded
 concurrency and browser scenarios fail promptly. Pages publishes only the exact
 artifact whose selected checks passed, and CI retains diagnostic output.
 A separate Chromium/Firefox version-catalog job installs the actual staged
@@ -904,7 +905,7 @@ An installed fixture extension must render its own nested image, stylesheet and
 script; a separate fixture verifies external resources alongside native database
 queries. Missing images, scripts, styles and fonts fail validation, with their
 URLs and browser diagnostics retained. A controlled cross-origin PHP read also
-verifies that a denied request reports its error promptly and leaves PHP and the
+verifies that a transport failure reports its error promptly and leaves PHP and the
 database usable. The playground does not replace artwork or hide production errors.
 
 Firefox 157 emits an empty-URL service-worker diagnostic for some successful native
@@ -940,6 +941,6 @@ worker timeout, use the recovery controls or restart the instance.
 Host processes, system executables, arbitrary socket services, and a production
 mail server are not supplied by this static playground. Extensions that require
 those facilities need a different environment. Installing an extension and passing
-runtime health checks does not prove every workflow of every Joomla extension is
+the integration checks does not prove every workflow of every Joomla extension is
 browser-compatible; exercise the particular component operations you plan to
 demonstrate. Browser storage, WebAssembly memory and CORS still apply.

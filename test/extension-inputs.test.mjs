@@ -87,7 +87,7 @@ test('managed URL checksums are retained while custom checksum metadata is ignor
 
 test('malformed or unsupported JSON remains intact and cannot be overwritten through stale rows', () => {
   const editor = fixture(); editor.type(0, 'https://example.test/one.zip');
-  for (const malformed of ['[{"url":', '["https://example.test/string.zip"]', '{"url":"https://example.test/object.zip"}', '[{"url":"ftp://example.test/one.zip"}]']) {
+  for (const malformed of ['[{"url":', '["https://example.test/string.zip"]', '{"url":"https://example.test/object.zip"}', '[{"url":"https://["}]']) {
     editor.json(malformed);
     assert.equal(editor.textarea.value, malformed);
     assert.equal(editor.input(0).value, 'https://example.test/one.zip');
@@ -108,9 +108,9 @@ test('malformed or unsupported JSON remains intact and cannot be overwritten thr
   assert.equal(editor.read()[0].url, 'https://example.test/repaired.zip');
 });
 
-test('simple URLs require an explicit HTTP scheme and keep invalid entry errors in simple mode', () => {
+test('simple URL errors stay in the URL editor while relative URLs resolve normally', () => {
   const editor = fixture();
-  for (const value of ['example.test/package.zip', '/relative.zip', 'file:///tmp/package.zip', 'javascript:alert(1)', 'https://user:secret@example.test/package.zip']) {
+  for (const value of ['http://[', 'https://[invalid']) {
     editor.type(0, value);
     assert.throws(() => editor.read());
     assert.equal(editor.advanced.open, false);
@@ -123,15 +123,15 @@ test('simple URLs require an explicit HTTP scheme and keep invalid entry errors 
   assert.equal(editor.read().length, 1);
 });
 
-test('at most 30 rows are offered and Enter does not submit the deployment form', () => {
+test('URL rows have no package count cap and Enter does not submit the deployment form', () => {
   const editor = fixture();
   editor.setValue(Array.from({ length: 30 }, (_, index) => ({ url: `https://example.test/${index}.zip` })));
-  assert.equal(editor.addButton.disabled, true);
-  editor.addButton.dispatch('click'); assert.equal(editor.rows.children.length, 30);
+  assert.equal(editor.addButton.disabled, false);
+  editor.addButton.dispatch('click'); assert.equal(editor.rows.children.length, 31);
   assert.equal(editor.input(0).dispatch('keydown', { key: 'Enter' }).defaultPrevented, true);
   assert.equal(editor.input(0).dispatch('keydown', { key: 'Tab' }).defaultPrevented, false);
   editor.remove(29).dispatch('click'); assert.equal(editor.addButton.disabled, false);
   const previous = editor.textarea.value;
-  assert.throws(() => editor.setValue([{ url: 'data:text/plain,bad' }]));
+  assert.throws(() => editor.setValue([{ url: 'http://[' }]));
   assert.equal(editor.textarea.value, previous, 'Failed imports leave the previous form intact.');
 });

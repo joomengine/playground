@@ -23,6 +23,11 @@ function postimage(anchor) {
     .map(line => line.slice(1)).join('\n');
 }
 
+function headerProjection() {
+  const source = postimage('const hasBody');
+  return vm.runInNewContext(`(response, init) => { ${source.slice(source.indexOf('const hasBody'))} return lines; }`);
+}
+
 function harness({ hook, fetcher = async () => new Response('direct') } = {}) {
   let clock = 100;
   const sandbox = vm.createContext({
@@ -59,7 +64,7 @@ test('native HTTP boundary selects the scoped hook without changing asset Fetch'
   assert.equal(init.headers, headers);
   assert.equal(init.signal, signal);
   assert.equal(init.redirect, 'manual', 'Node native redirect handling must retain its direct Fetch mode.');
-  assert.deepEqual({ ...init.network }, { timeoutMs: 910, maxRedirects: 3, redirect: 'follow', replayAllowed: true });
+  assert.deepEqual({ ...init.network }, { timeoutMs: 910, maxRedirects: 3, redirect: 'follow' });
   assert.equal(bridge.sandbox.fetch, assetFetch);
   assert.equal(await (await bridge.sandbox.fetch('runtime.wasm')).text(), 'asset:runtime.wasm');
   assert.equal(received.length, 1, 'Loading a runtime asset must not reach the PHP networking hook.');
@@ -72,7 +77,7 @@ test('native standalone callers keep ordinary Fetch when no Playground hook exis
   assert.equal(await (await bridge.dispatch({ timeoutMs: 0, maxRedirs: -1, follow: false }, 0,
     new URL('https://example.org/'), init)).text(), 'standalone');
   assert.equal(received.length, 1);
-  assert.deepEqual({ ...init.network }, { timeoutMs: 0, maxRedirects: -1, redirect: 'manual', replayAllowed: true });
+  assert.deepEqual({ ...init.network }, { timeoutMs: 0, maxRedirects: -1, redirect: 'manual' });
 });
 
 test('native retries pass only the original deadline remaining', async () => {
@@ -88,7 +93,7 @@ test('native retries pass only the original deadline remaining', async () => {
   assert.equal(request.timeoutMs, 1000, 'The original native timer must not be reset by fallback or redirects.');
 });
 
-test('native write methods retain exact binary bodies and prohibit replay', async () => {
+test('native write methods retain exact binary bodies and PHP redirect options', async () => {
   const bridge = harness({ hook: async () => new Response(null) });
   const body = new Uint8Array([0, 255, 10, 128]);
   for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
@@ -97,7 +102,6 @@ test('native write methods retain exact binary bodies and prohibit replay', asyn
       new URL('https://example.org/write'), init);
     assert.equal(init.body, body);
     assert.equal(init.method, method);
-    assert.equal(init.network.replayAllowed, false);
     assert.equal(init.network.maxRedirects, 0);
     assert.equal(init.network.redirect, 'manual');
   }
@@ -141,8 +145,7 @@ test('native deadline abort carries TimeoutError and standalone error handling r
 test('native preserves representation headers for HEAD and bodyless statuses, including CORS', () => {
   // Include unchanged loop statements from the real patch hunk, not a separate
   // implementation of the header projection. Compiled PHP verifies C callbacks.
-  const projection = postimage('const hasBody').slice(postimage('const hasBody').indexOf('const hasBody'));
-  const project = vm.runInNewContext(`(response, init) => { ${projection} return lines; }`);
+  const project = headerProjection();
   for (const type of ['basic', 'cors']) {
     for (const [method, status] of [['HEAD', 200], ['GET', 204], ['GET', 205], ['GET', 304]]) {
       const headers = new Headers({ 'content-encoding': 'gzip', 'content-length': '1234', 'x-proof': 'kept' });
@@ -162,4 +165,17 @@ test('native preserves representation headers for HEAD and bodyless statuses, in
     assert.deepEqual(Array.from(project({ headers, status: 200, type }, { method: 'GET' })),
       type === 'cors' ? ['x-proof: kept'] : ['content-length: 1234', 'x-proof: kept']);
   }
+});
+
+test('native exposes proxy Set-Cookie headers once with or without getSetCookie', () => {
+  const project = headerProjection();
+  const cookies = ['first=one; Path=/', 'second=two; Expires=Wed, 21 Oct 2030 07:28:00 GMT; Path=/'];
+  for (const accessor of [true, false]) {
+    const headers = new Headers(cookies.map(value => ['set-cookie', value]));
+    if (!accessor) Object.defineProperty(headers, 'getSetCookie', { value: undefined });
+    assert.deepEqual(Array.from(project({ headers, status: 200, type: 'basic' }, { method: 'GET' })),
+      cookies.map(value => `set-cookie: ${value}`));
+  }
+  assert.deepEqual(Array.from(project({ headers: new Headers(), status: 200, type: 'cors' }, { method: 'GET' })), [],
+    'Direct browser Fetch keeps its normal hidden-cookie behavior.');
 });

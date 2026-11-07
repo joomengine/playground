@@ -181,7 +181,7 @@ test('required JCB discovery, repositories, entity import and complete Demo work
       const build = { sourceCommit: manifest.sourceCommit, manifestSha256: sha256(manifestBytes),
         assetInventorySha256: sha256(inventoryBytes),
         networkTransportSha256: sha256(await readFile(path.join(directory, 'src/network-transport.mjs'))),
-        phpFetchSha256: sha256(await readFile(path.join(directory, 'src/php-network.mjs'))) };
+        phpWorkerSha256: sha256(await readFile(path.join(directory, 'src/php-worker.mjs'))) };
       setup.status = 'ready'; setup.build = build; setup.requiredPairs = pairs;
       await save(setupFile, setup);
       // Static Pages hosting supplies no isolation headers. Exercise the real
@@ -190,7 +190,7 @@ test('required JCB discovery, repositories, entity import and complete Demo work
       for (const name of browserNames) {
         receiptFile = path.join(receipts, `jcb-network-${name}.json`);
         receipt = { browser: name, status: 'running', build, requiredPairs: pairs,
-          liveResponsesSubstituted: false, relayExecution: 'actual Worker with test-only in-memory state', hostedDeploymentValidated: false, cases: [], startedAt: new Date().toISOString() };
+          liveResponsesSubstituted: false, relayExecution: 'actual anonymous Worker', hostedDeploymentValidated: false, cases: [], startedAt: new Date().toISOString() };
         await persist();
         const executablePath = process.env[`PLAYGROUND_${name.toUpperCase()}_EXECUTABLE`];
         browser = await engines[name].launch({ headless: true,

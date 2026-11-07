@@ -1,4 +1,5 @@
 import { normalizePhpSettings } from './php-settings.mjs';
+import { networkFetch } from './network-transport.mjs';
 import {
   DEFAULTS, normalizeDeployId, normalizeConfiguration, normalizeInitialPath,
   normalizeLanguage, normalizeJcbVersion, normalizeJcbPackage, catalogWithSelectedJoomlaPackage, parseExtensions, parseUserExtensions, parseUserTemplate, normalizeDeploymentRecipe, parseStartupCommands, resolveJoomlaVersion, parseMenus, parseTemplate, parseLanguageTags, readDeploymentBytes,
@@ -40,12 +41,12 @@ function normalizeRequirements(value = {}, supported = []) {
     ...(Object.keys(fallbacks).length ? { joomlaFallbacks: { ...fallbacks } } : {}) };
 }
 
-function packageEntry(value, baseURL, requireIntegrity, allowHttp = true) {
+function packageEntry(value, baseURL, requireIntegrity) {
   object(value, 'Package');
   properties(value, ['url', 'sha256', 'sha512', 'sourceUrl', 'tag'], 'Package');
-  const result = parseExtensions([value], baseURL, { allowHttp })[0];
+  const result = parseExtensions([value], baseURL)[0];
   if (requireIntegrity && !PACKAGE_DIGEST.test(result.sha256 ?? '')) throw new TypeError('Repository deploy packages require a SHA-256 digest.');
-  if (value.sourceUrl !== undefined) result.sourceUrl = parseExtensions([{ url: value.sourceUrl }], baseURL, { allowHttp })[0].url;
+  if (value.sourceUrl !== undefined) result.sourceUrl = parseExtensions([{ url: value.sourceUrl }], baseURL)[0].url;
   return result;
 }
 
@@ -56,7 +57,7 @@ function languagePackages(value, baseURL, requireIntegrity) {
     const tag = normalizeLanguage(text(entry?.tag, 'Language package tag', 20));
     if (seen.has(tag)) throw new TypeError(`Duplicate language package: ${tag}.`);
     seen.add(tag);
-    return { ...packageEntry(entry, baseURL, requireIntegrity, false), tag };
+    return { ...packageEntry(entry, baseURL, requireIntegrity), tag };
   });
 }
 
@@ -67,7 +68,7 @@ function normalizeSnapshot(value, baseURL) {
     throw new TypeError('A snapshot must declare export format, schema version 1 and an exact Joomla version.');
   }
   const { url, sha256, sourceUrl } = value;
-  return { ...packageEntry({ url, sha256, ...(sourceUrl ? { sourceUrl } : {}) }, baseURL, true, false),
+  return { ...packageEntry({ url, sha256, ...(sourceUrl ? { sourceUrl } : {}) }, baseURL, true),
     format: value.format, schemaVersion: value.schemaVersion, joomlaVersion: value.joomlaVersion };
 }
 
@@ -131,7 +132,7 @@ function normalizeSetup(value = {}, baseURL, requireIntegrity) {
       result[name] = value[name];
     }
   }
-  if (!Array.isArray(value.extensions ?? []) || (value.extensions ?? []).length > 30) throw new TypeError('A deploy may list at most 30 extension packages.');
+  if (!Array.isArray(value.extensions ?? [])) throw new TypeError('Deployment extensions must be an array.');
   result.extensions = (value.extensions ?? []).map((entry) => packageEntry(entry, baseURL, requireIntegrity));
   result.languages = languagePackages(value.languages ?? [], baseURL, requireIntegrity);
   result.startupCommands = parseStartupCommands(value.startupCommands ?? []);
@@ -203,7 +204,7 @@ async function fetchJSON(url, fetcher) {
   try { return JSON.parse(source); } catch { throw new Error('The deployment configuration contains invalid JSON.'); }
 }
 
-export async function loadDeployCatalog({ url = defaultCatalogURL, fetcher = fetch } = {}) {
+export async function loadDeployCatalog({ url = defaultCatalogURL, fetcher = networkFetch } = {}) {
   const href = new URL(url, defaultCatalogURL).href;
   return normalizeDeployCatalog(await fetchJSON(href, fetcher), { baseURL: href });
 }
@@ -352,7 +353,7 @@ async function resolveMaterializedDeployment(input, { catalog, deployCatalog, ba
 
 /** Resolve repository recipe defaults followed by explicit caller settings. */
 export async function resolveDeployConfiguration(input = {}, {
-  catalog, deployCatalog, baseURL = globalThis.location?.href ?? 'https://playground.joomengine.org/', fetcher = fetch,
+  catalog, deployCatalog, baseURL = globalThis.location?.href ?? 'https://playground.joomengine.org/', fetcher = networkFetch,
 } = {}) {
   if (!catalog) throw new TypeError('A verified runtime catalog is required to resolve a deploy.');
   if (input.deploymentRecipe) return resolveMaterializedDeployment(input, { catalog, deployCatalog, baseURL, fetcher });

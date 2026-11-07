@@ -24,7 +24,6 @@
     "url": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 2048,
       "format": "uri-reference"
     },
     "sha256": {
@@ -525,7 +524,6 @@
         },
         "addonExtensions": {
           "type": "array",
-          "maxItems": 30,
           "items": {
             "$ref": "#/$defs/package"
           }
@@ -563,7 +561,6 @@
         },
         "addonExtensions": {
           "type": "array",
-          "maxItems": 30,
           "items": {
             "$ref": "#/$defs/package"
           }
@@ -702,7 +699,6 @@
         },
         "extensions": {
           "type": "array",
-          "maxItems": 30,
           "items": {
             "$ref": "#/$defs/package"
           }

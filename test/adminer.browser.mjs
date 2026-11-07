@@ -11,9 +11,8 @@ test('real Adminer shares Joomla database, survives PHP restart and keeps portab
   const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
   const context = await browser.newContext({ viewport: { width: 1500, height: 960 } });
   const page = await context.newPage();
-  const errors = [], relayRequests = [];
+  const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  page.on('request', request => { if (request.url().includes('/__public-assets/')) relayRequests.push(request.url()); });
   try {
     await page.goto(`${server.url}__test__.html`);
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -125,7 +124,7 @@ test('real Adminer shares Joomla database, survives PHP restart and keeps portab
     }, configuration);
     assert.equal(reopened.status, 200); assert.equal(reopened.value, true); assert.equal(reopened.resumed, true); assert.equal(reopened.authenticated, true);
     assert.equal(reopened.untouched, '0', 'Transferring a draft must never execute it.');
-    assert.deepEqual(relayRequests, []); assert.deepEqual(errors, []);
+    assert.deepEqual(errors, []);
     await page.evaluate(() => window.adminerSite.reset());
   } catch (error) {
     await mkdir('test-results', { recursive: true });

@@ -11,7 +11,7 @@ async function artifact(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'public-artifact-check-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const canaries = createBuildCanaries();
-  const config = normalizeNetworkConfig({ enabled: false });
+  const config = normalizeNetworkConfig({ endpoint: null });
   const manifest = { schemaVersion: 1, sourceCommit: 'a'.repeat(40), deployment: { environment: 'production' }, network: config };
   const put = async (name, bytes) => { await mkdir(path.dirname(path.join(directory, name)), { recursive: true }); await writeFile(path.join(directory, name), bytes); };
   await put('assets/manifest.json', JSON.stringify(manifest));
@@ -87,8 +87,7 @@ test('credential-derived filenames and ZIP entry names fail with redacted consta
 
 test('public manifest and network config must retain the normalized production schema', async t => {
   const fixture = await artifact(t);
-  for (const config of [{ ...fixture.config, privateSecret: 'not-public' }, { enabled: false },
-    { ...fixture.config, proxyOrigins: ['https://example.com', 'https://example.com'] }]) {
+  for (const config of [{ ...fixture.config, privateSecret: 'not-public' }, {}]) {
     await fixture.put('config/network.json', JSON.stringify(config));
     await assert.rejects(fixture.verify(), /unsupported or non-public|normalized public schema/);
   }
@@ -97,15 +96,12 @@ test('public manifest and network config must retain the normalized production s
     await fixture.put('assets/manifest.json', JSON.stringify(manifest));
     await assert.rejects(fixture.verify(), /normalized public schema|deployment identity/);
   }
-  const testConfig = normalizeNetworkConfig({ enabled: true, endpoint: 'https://relay.example.com', turnstileSiteKey: '1x00000000000000000000AA' });
-  await fixture.put('config/network.json', JSON.stringify(testConfig));
-  await fixture.put('assets/manifest.json', JSON.stringify({ ...fixture.manifest, network: testConfig }));
-  await assert.rejects(fixture.verify(), /Turnstile test key/);
+
 });
 
 test('the mandatory build injects harmless canaries and verifies final snapshots before publication', async () => {
   const workflow = await readFile(new URL('../.github/workflows/validate.yml', import.meta.url), 'utf8');
   for (const mode of ['build', 'snapshots', 'verify']) assert.match(workflow, new RegExp(`run: node scripts/build-public-artifact\\.mjs ${mode}`));
   assert.ok(workflow.indexOf('run: node scripts/build-public-artifact.mjs verify') < workflow.indexOf('name: Retain candidate static distribution'));
-  assert.doesNotMatch(workflow, /secrets\.(?:TURNSTILE_SECRET_KEY|STAGING_TEST_SECRET|NETWORK_STAGING_TEST_SECRET|SESSION_SIGNING_KEY)/);
+  assert.doesNotMatch(workflow, /secrets\./);
 });

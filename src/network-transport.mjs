@@ -1,50 +1,36 @@
-import { normalizeNetworkConfig } from './network-config.mjs';
+import { normalizeNetworkConfig, loadNetworkConfiguration } from './network-config.mjs';
 import {
   NETWORK_PROTOCOL_VERSION, NETWORK_REQUEST_HEADER, NETWORK_RESPONSE_HEADER,
-  MAX_NETWORK_METADATA_BYTES, NetworkError, encodeNetworkMetadata, decodeNetworkMetadata,
+  NetworkError, encodeNetworkMetadata, decodeNetworkMetadata,
 } from './network-protocol.mjs';
 
-// Unknown headers may contain credentials (including custom API keys). Their relay
-// delivery requires the same explicit trust grant as Authorization and Cookie.
-const anonymousHeaders = new Set([
-  'accept', 'accept-language', 'accept-encoding', 'cache-control', 'content-type',
-  'if-match', 'if-none-match', 'if-modified-since', 'if-unmodified-since', 'if-range',
-  'range', 'user-agent', 'pragma',
-]);
 const noBodyStatuses = new Set([204, 205, 304]);
-const safeMethods = new Set(['GET', 'HEAD']);
-// Symbolic error codes are extensible within protocol v1, but arbitrary remote
-// messages never enter diagnostics or PHP errors.
-const relayErrorCode = /^[A-Z][A-Z0-9_]{2,63}$/;
+const readMethods = new Set(['GET', 'HEAD']);
 
-function abortFailure(signal, timedOut) {
-  timedOut ||= signal.reason?.name === 'TimeoutError' || signal.reason?.code === 'UPSTREAM_TIMEOUT';
-  return new NetworkError(timedOut ? 'UPSTREAM_TIMEOUT' : 'REQUEST_ABORTED',
-    timedOut ? 'The HTTP request exceeded its deadline.' : 'The HTTP request was cancelled.', { cause: signal.reason });
-}
-
-function context(signal, deadline, now) {
+function requestContext(signal, deadline, now) {
   const controller = new AbortController();
-  let timedOut = false, timer;
+  let timer;
   const cancel = () => controller.abort(signal.reason);
   if (signal?.aborted) cancel();
   else signal?.addEventListener('abort', cancel, { once: true });
   if (Number.isFinite(deadline)) {
-    const expire = () => { timedOut = true; controller.abort(new DOMException('HTTP request deadline exceeded.', 'TimeoutError')); };
+    const expire = () => controller.abort(new DOMException('HTTP request deadline exceeded.', 'TimeoutError'));
     if (deadline <= now()) expire();
     else timer = setTimeout(expire, Math.min(deadline - now(), 2147483647));
   }
   return {
     signal: controller.signal,
-    check() { if (controller.signal.aborted) throw abortFailure(controller.signal, timedOut); },
-    failure() { return controller.signal.aborted ? abortFailure(controller.signal, timedOut) : null; },
+    check() { if (controller.signal.aborted) throw this.failure(); },
+    failure() {
+      const timeout = controller.signal.reason?.name === 'TimeoutError';
+      return new NetworkError(timeout ? 'UPSTREAM_TIMEOUT' : 'REQUEST_ABORTED',
+        timeout ? 'The HTTP request exceeded its deadline.' : 'The HTTP request was cancelled.', { cause: controller.signal.reason });
+    },
     close() { clearTimeout(timer); signal?.removeEventListener('abort', cancel); },
     stop(reason) { controller.abort(reason); },
   };
 }
 
-// Race injectable/session work as well as native Fetch: abort cannot depend on a
-// third-party session callback remembering to listen for cancellation itself.
 async function cancellable(operation, ctx) {
   ctx.check();
   let onAbort;
@@ -57,235 +43,160 @@ async function cancellable(operation, ctx) {
         if (ctx.signal.aborted) onAbort();
       }),
     ]);
-  } finally {
-    ctx.signal.removeEventListener('abort', onAbort);
-  }
+  } finally { ctx.signal.removeEventListener('abort', onAbort); }
 }
 
-function describe(input, init = {}) {
-  const request = input instanceof Request ? input : null;
-  const originalURL = request?.url ?? String(input);
-  const url = new URL(originalURL);
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
-    throw new NetworkError('UNSUPPORTED_TRANSPORT_OPTION', 'Only HTTP(S) URLs without embedded credentials are supported.');
-  }
-  const method = String(init.method ?? request?.method ?? 'GET').toUpperCase();
-  const headers = new Headers(init.headers ?? request?.headers);
-  const signal = init.signal ?? request?.signal;
-  const redirect = init.network?.redirect ?? init.redirect ?? request?.redirect ?? 'follow';
-  if (!['follow', 'manual', 'error'].includes(redirect)) throw new NetworkError('UNSUPPORTED_TRANSPORT_OPTION', 'Unsupported redirect mode.');
-  const body = init.body ?? request?.body ?? null;
-  const forwardCredentials = [...headers.keys()].some(name => !anonymousHeaders.has(name));
-  const replayAllowed = safeMethods.has(method) && body === null && !forwardCredentials
-    && (init.credentials ?? request?.credentials) !== 'include' && init.network?.replayAllowed !== false;
-  return { originalURL, url, method, headers, signal, redirect, body, forwardCredentials, replayAllowed };
-}
-
-function responseMetadata(raw) {
-  const value = decodeNetworkMetadata(raw);
-  if (!Number.isInteger(value.status) || value.status < 200 || value.status > 599
-    || typeof value.statusText !== 'string' || /[^\x09\x20-\x7e\x80-\xff]/.test(value.statusText)
-    || typeof value.url !== 'string' || typeof value.redirected !== 'boolean'
-    || (value.redirectCount !== undefined && (!Number.isInteger(value.redirectCount) || value.redirectCount < 0 || value.redirectCount > 20))
-    || !Array.isArray(value.headers) || value.headers.some(pair => !Array.isArray(pair) || pair.length !== 2 || pair.some(item => typeof item !== 'string'))) {
-    throw new NetworkError('RELAY_PROTOCOL_ERROR', 'The network service returned malformed response metadata.');
-  }
-  try {
-    const url = new URL(value.url);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('Invalid effective URL.');
-    value.headers = new Headers(value.headers);
-  } catch (cause) {
-    throw new NetworkError('RELAY_PROTOCOL_ERROR', 'The network service returned invalid HTTP metadata.', { cause });
-  }
-  return value;
-}
-
-async function relayFailure(response, ctx) {
-  const reader = response.body?.getReader();
-  const chunks = [];
-  let length = 0;
-  try {
-    if (reader) while (true) {
-      const item = await cancellable(() => reader.read(), ctx);
-      if (item.done) break;
-      length += item.value.byteLength;
-      if (length > MAX_NETWORK_METADATA_BYTES) throw new Error('Oversized relay error.');
-      chunks.push(item.value);
-    }
-    const data = new Uint8Array(length);
-    let offset = 0;
-    for (const chunk of chunks) { data.set(chunk, offset); offset += chunk.byteLength; }
-    const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(data));
-    if (value?.version !== NETWORK_PROTOCOL_VERSION || !relayErrorCode.test(value?.error?.code || '')) throw new Error('Invalid relay error.');
-    // The code, status and Retry-After are safe to expose. Never echo remote
-    // bodies/messages that may contain target query strings or credentials.
-    return new NetworkError(value.error.code, `The network service rejected the request (${value.error.code}).`, {
-      status: response.status, retryAfter: response.headers.get('Retry-After') ?? undefined,
-    });
-  } catch (cause) {
-    void reader?.cancel().catch(() => {});
-    return ctx.failure() ?? new NetworkError('RELAY_PROTOCOL_ERROR', 'The network service returned an invalid error response.', { status: response.status, cause });
-  } finally { reader?.releaseLock(); }
-}
-
-function wrapResponse(response, ctx, metadata, method, report) {
+function wrapResponse(response, ctx, metadata, method, proxied = false) {
   const status = metadata?.status ?? response.status;
-  const headers = metadata?.headers ?? response.headers;
   const reader = response.body?.getReader();
   const empty = method === 'HEAD' || noBodyStatuses.has(status) || !reader;
-  let done = false, bytes = 0;
-  const finish = error => { if (!done) { done = true; ctx.close(); report?.(bytes, error); } };
   const body = empty ? null : new ReadableStream({
     async pull(controller) {
       try {
         const item = await cancellable(() => reader.read(), ctx);
-        if (item.done) { finish(); controller.close(); reader.releaseLock(); }
-        else { bytes += item.value.byteLength; controller.enqueue(item.value); }
+        if (item.done) { ctx.close(); reader.releaseLock(); controller.close(); }
+        else controller.enqueue(item.value);
       } catch (cause) {
-        const error = ctx.failure() ?? new NetworkError('RESPONSE_INCOMPLETE', 'The HTTP response ended before delivery completed.', { cause });
-        finish(error);
-        void reader.cancel(error).catch(() => {});
-        controller.error(error);
+        const error = ctx.signal.aborted ? ctx.failure() : new NetworkError('RESPONSE_INCOMPLETE', 'The HTTP response could not be read completely.', { cause });
+        ctx.close(); void reader.cancel(error).catch(() => {}); controller.error(error);
       }
     },
-    async cancel(reason) {
-      ctx.stop(reason); finish(ctx.failure());
-      await reader.cancel(reason).catch(() => {});
-    },
+    async cancel(reason) { ctx.stop(reason); ctx.close(); await reader.cancel(reason).catch(() => {}); },
   });
-  if (empty) { void reader?.cancel().catch(() => {}); finish(); }
-  const result = new Response(body, { status, statusText: metadata?.statusText ?? response.statusText, headers });
-  // The cURL bridge consumes status/headers/body and Response.url. Native Fetch
-  // gives these getters read-only values, so preserve effective metadata here.
+  if (empty) { void reader?.cancel().catch(() => {}); ctx.close(); }
+  const result = new Response(body, {
+    status, statusText: metadata?.statusText ?? response.statusText,
+    headers: metadata?.headers ?? response.headers,
+  });
   Object.defineProperties(result, {
     url: { value: metadata?.url ?? response.url },
     redirected: { value: metadata?.redirected ?? response.redirected },
-    // Native cURL knows how to handle hidden CORS compression headers. Relay
-    // metadata already describes the bytes delivered by its explicit envelope.
-    type: { value: metadata ? 'basic' : response.type },
-    networkRedirectCount: { value: metadata ? metadata.redirectCount ?? (metadata.redirected ? undefined : 0) : undefined },
+    type: { value: proxied ? 'basic' : response.type },
+    networkRedirectCount: { value: metadata?.redirectCount ?? response.networkRedirectCount },
   });
   return result;
 }
 
-/** Shared component-neutral routing; only call this from the PHP HTTP bridge. */
-export function createNetworkTransport(fetcher, rawConfig = {}, {
-  getSession, onDiagnostic, now = Date.now, allowInsecureLocalhost = false,
-  contextProtocol = globalThis.location?.protocol,
+/** Direct Fetch for reads, with anonymous proxy fallback when the browser cannot expose a response. */
+export function createNetworkTransport(fetcher = globalThis.fetch.bind(globalThis), rawConfig = {}, {
+  now = Date.now, contextOrigin = globalThis.location?.origin,
 } = {}) {
-  const config = normalizeNetworkConfig(rawConfig, { allowInsecureLocalhost });
+  const configured = typeof rawConfig === 'function' ? null : normalizeNetworkConfig(rawConfig);
   return async (input, init = {}) => {
-    const request = describe(input, init);
-    const started = now();
-    const timeout = init.network?.timeoutMs;
-    const explicitDeadline = init.network?.deadline;
-    if (timeout !== undefined && (!Number.isFinite(timeout) || timeout < 0)) throw new NetworkError('UNSUPPORTED_TRANSPORT_OPTION', 'Invalid HTTP timeout.');
-    if (explicitDeadline !== undefined && (!Number.isFinite(explicitDeadline) || explicitDeadline < 0)) throw new NetworkError('UNSUPPORTED_TRANSPORT_OPTION', 'Invalid HTTP deadline.');
-    const deadline = Math.min(timeout > 0 ? started + timeout : Infinity, explicitDeadline ?? Infinity);
-    const ctx = context(request.signal, deadline, now);
-    const requestId = crypto.randomUUID();
-    // Only an HTTPS browser context creates mixed content for HTTP targets.
-    // HTTP loopback development and native Node callers can try HTTP directly.
-    // This trusted runtime option is never read from public/site configuration.
-    const mixedContent = contextProtocol === 'https:' && request.url.protocol === 'http:';
-    let route = config.enabled && (mixedContent || config.proxyOrigins.includes(request.url.origin)) ? 'relay' : 'direct';
-    const diagnostic = (status, code, bytes) => {
-      try { onDiagnostic?.({ requestId, route, method: request.method, hostname: request.url.hostname, durationMs: now() - started, status, code, bytes }); } catch { /* Logging must not alter transport outcomes. */ }
+    const original = input instanceof Request ? input : null;
+    const target = new URL(original?.url ?? String(input), globalThis.location?.href);
+    const method = String(init.method ?? original?.method ?? 'GET').toUpperCase();
+    const body = init.body ?? null;
+    const network = init.network ?? {};
+    const redirect = network.redirect ?? init.redirect ?? original?.redirect ?? 'follow';
+    const timeout = network.timeoutMs;
+    if (timeout !== undefined && (!Number.isFinite(timeout) || timeout < 0)) throw new TypeError('Invalid HTTP timeout.');
+    const deadline = Math.min(timeout > 0 ? now() + timeout : Infinity, network.deadline ?? Infinity);
+    const ctx = requestContext(init.signal ?? original?.signal, deadline, now);
+    const { network: _network, ...fetchInit } = init;
+    const directInit = { ...fetchInit, redirect: init.redirect ?? original?.redirect ?? redirect, signal: ctx.signal,
+      ...(init.body instanceof ReadableStream ? { duplex: 'half' } : {}) };
+    let endpoint = configured?.endpoint;
+    let resolved = configured !== null;
+    const resolveEndpoint = async () => {
+      if (!resolved) {
+        endpoint = normalizeNetworkConfig(await cancellable(rawConfig, ctx)).endpoint;
+        resolved = true;
+      }
+      return endpoint;
     };
     try {
       ctx.check();
-      if (route === 'direct') {
-        const { network: _network, ...directInit } = init;
+      // These explicit headers cannot be delivered unchanged by browser Fetch.
+      // Send them through the proxy once; ordinary read headers stay direct.
+      const headers = new Headers(init.headers ?? original?.headers);
+      const browserHeaderDelivery = /^https?:$/.test(globalThis.location?.protocol)
+        && ['cookie', 'origin', 'referer'].some(name => headers.has(name));
+      // An uncertain write cannot be retried, so choose its route up front.
+      const proxyFirst = (browserHeaderDelivery || !readMethods.has(method) && target.origin !== contextOrigin)
+        && await resolveEndpoint();
+      if (!proxyFirst) {
+        let response;
         try {
-          const response = await cancellable(() => fetcher(input, {
-            ...directInit, signal: ctx.signal, credentials: 'omit', referrerPolicy: 'no-referrer',
-            // Fetch only strips standard authentication on cross-origin redirects;
-            // custom API-key headers would otherwise follow to the new origin.
-            // Without a preselected trusted relay, fail a credentialed redirect
-            // before forwarding it. Manual requests remain manual for PHP.
-            ...(request.forwardCredentials ? { redirect: request.redirect === 'manual' ? 'manual' : 'error' } : {}),
-          }), ctx);
+          response = await cancellable(() => fetcher(original ?? target.href, directInit), ctx);
           ctx.check();
           if (response.status === 0 || response.type === 'opaque' || response.type === 'opaqueredirect') {
             void response.body?.cancel().catch(() => {});
-            throw new NetworkError('DIRECT_NETWORK_FAILED', 'The browser did not expose the HTTP response.');
+            throw new TypeError('The browser did not expose the HTTP response.');
           }
-          return wrapResponse(response, ctx, null, request.method, (bytes, error) => diagnostic(response.status, error?.code, bytes));
         } catch (cause) {
           ctx.check();
-          if (!config.enabled || !request.replayAllowed) throw new NetworkError('DIRECT_NETWORK_FAILED', 'The browser could not complete the HTTP request.', { cause });
-          route = 'relay';
+          if (!readMethods.has(method) || !await resolveEndpoint()) throw new NetworkError('DIRECT_NETWORK_FAILED', 'The HTTP request could not be completed.', { cause });
+          response = undefined;
         }
+        if (response) return wrapResponse(response, ctx, null, method);
       }
-      if (request.forwardCredentials && !config.credentialGrants.some(grant =>
-        grant.relayOrigin === new URL(config.endpoint).origin && grant.destinationOrigin === request.url.origin)) {
-        throw new NetworkError('CREDENTIAL_FORWARDING_DENIED', 'Forwarding credentials requires a grant for this relay and destination.');
-      }
-      if (typeof getSession !== 'function') throw new NetworkError('RELAY_SESSION_REQUIRED', 'Verification is required to use the network service.');
-      const session = await cancellable(() => getSession({ signal: ctx.signal, deadline }), ctx);
-      ctx.check();
-      if (!session || typeof session.token !== 'string' || !session.token || /[\r\n]/.test(session.token)
-        || !Number.isFinite(session.expiresAt) || session.expiresAt <= now()) {
-        throw new NetworkError('RELAY_SESSION_EXPIRED', 'The network session has expired.');
-      }
-      const requestedRedirects = init.network?.maxRedirects ?? config.maxRedirects;
-      if (!Number.isInteger(requestedRedirects) || requestedRedirects < -1) throw new NetworkError('UNSUPPORTED_TRANSPORT_OPTION', 'Invalid HTTP redirect limit.');
-      // The relay's independent policy ceiling also applies when PHP requests
-      // unlimited redirects (-1). It does not change a direct PHP request.
-      const maxRedirects = requestedRedirects === -1 ? config.maxRedirects : Math.min(requestedRedirects, config.maxRedirects);
-      // Keep existing binary/string/Blob bodies raw. FormData requires its exact
-      // generated boundary in upstream metadata. Buffer only bounded uploads
-      // which otherwise require browser request-streaming support (not portable
-      // across WebKit or HTTP/1). Downloaded ZIPs always remain streamed.
-      let body = request.body;
-      const upstreamHeaders = new Headers(request.headers);
-      if (body != null) {
-        const serialized = new Request(request.originalURL, { method: request.method, headers: upstreamHeaders, body,
+
+      const proxyURL = new URL(endpoint);
+      proxyURL.searchParams.set('url', target.href);
+      let proxyBody = body;
+      const upstreamHeaders = new Headers(init.headers ?? original?.headers);
+      if (body != null || original) {
+        const serialized = new Request(original ?? target, { method, headers: upstreamHeaders,
+          ...(body != null ? { body } : {}),
           ...(body instanceof ReadableStream ? { duplex: 'half' } : {}) });
         for (const [key, value] of serialized.headers) upstreamHeaders.set(key, value);
-        if (body instanceof ReadableStream || body instanceof FormData) {
-          const reader = serialized.body.getReader();
-          const chunks = []; let length = 0;
-          try {
-            while (true) {
-              const item = await cancellable(() => reader.read(), ctx);
-              if (item.done) break;
-              length += item.value.byteLength;
-              if (length > 8 * 1024 * 1024) throw new NetworkError('REQUEST_TOO_LARGE', 'The upload exceeds the relay body limit.');
-              chunks.push(item.value);
-            }
-            body = new Uint8Array(length);
-            let offset = 0;
-            for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
-          } catch (error) { void reader.cancel(error).catch(() => {}); throw error; }
-          finally { reader.releaseLock(); }
+        // Browser Fetch cannot upload streams in every supported engine or
+        // over HTTP/1. Serialize once, preserving the generated multipart
+        // boundary; downloaded responses continue to stream without buffering.
+        if (!readMethods.has(method) && (original || body instanceof ReadableStream || body instanceof FormData)) {
+          // Firefox versions without Request.body still retain the payload in
+          // the Request's Body methods. An absent stream does not mean no body.
+          const stream = serialized.body;
+          if (!stream) {
+            proxyBody = await cancellable(() => serialized.blob(), ctx);
+          } else {
+            const reader = stream.getReader();
+            const chunks = [];
+            try {
+              for (;;) {
+                const chunk = await cancellable(() => reader.read(), ctx);
+                if (chunk.done) break;
+                chunks.push(chunk.value);
+              }
+              proxyBody = new Blob(chunks, { type: serialized.headers.get('content-type') || '' });
+            } catch (error) { void reader.cancel(error).catch(() => {}); throw error; }
+            finally { reader.releaseLock(); }
+          }
         }
       }
-      const metadata = {
-        version: NETWORK_PROTOCOL_VERSION, url: request.originalURL, method: request.method,
-        headers: [...upstreamHeaders], redirect: request.redirect, maxRedirects,
-        timeoutMs: Number.isFinite(deadline) ? Math.max(1, Math.ceil(deadline - now())) : 120000,
-        forwardCredentials: request.forwardCredentials,
-      };
-      const relayInit = {
-        method: 'POST', headers: { Authorization: `Bearer ${session.token}`, [NETWORK_REQUEST_HEADER]: encodeNetworkMetadata(metadata) },
-        body, signal: ctx.signal, credentials: 'omit', mode: 'cors', cache: 'no-store',
-        redirect: 'error', referrerPolicy: 'no-referrer',
-        ...(body instanceof ReadableStream ? { duplex: 'half' } : {}),
-      };
-      let response;
-      try { response = await cancellable(() => fetcher(`${config.endpoint}/v1/fetch`, relayInit), ctx); }
-      catch (cause) { throw ctx.failure() ?? new NetworkError('RELAY_UNAVAILABLE', 'The network service could not be reached.', { cause }); }
+      const metadata = { version: NETWORK_PROTOCOL_VERSION, headers: [...upstreamHeaders], redirect,
+        ...(network.maxRedirects !== undefined ? { maxRedirects: network.maxRedirects } : {}),
+        ...(Number.isFinite(deadline) ? { timeoutMs: Math.max(1, deadline - now()) } : {}) };
+      const response = await cancellable(() => fetcher(proxyURL.href, {
+        method, headers: { [NETWORK_REQUEST_HEADER]: encodeNetworkMetadata(metadata) }, body: proxyBody,
+        signal: ctx.signal, credentials: 'omit', redirect: 'error',
+        // The proxy carries the same upstream bytes, so Fetch must enforce the
+        // caller's integrity requirement on this route as well as the direct one.
+        integrity: init.integrity === undefined ? original?.integrity : init.integrity,
+        ...(proxyBody instanceof ReadableStream ? { duplex: 'half' } : {}),
+      }), ctx);
       ctx.check();
-      if (response.status !== 200) throw await relayFailure(response, ctx);
-      let metadataResponse;
-      try { metadataResponse = responseMetadata(response.headers.get(NETWORK_RESPONSE_HEADER)); }
-      catch (error) { void response.body?.cancel(error).catch(() => {}); throw error; }
-      return wrapResponse(response, ctx, metadataResponse, request.method, (bytes, error) => diagnostic(metadataResponse.status, error?.code, bytes));
-    } catch (error) {
-      ctx.close();
-      diagnostic(error.status, error.code ?? 'DIRECT_NETWORK_FAILED');
-      throw error;
-    }
+      const encoded = response.headers.get(NETWORK_RESPONSE_HEADER);
+      if (!encoded) {
+        let error;
+        try { error = (await cancellable(() => response.json(), ctx)).error; } catch { /* Report the HTTP status if the proxy did not return JSON. */ }
+        throw new NetworkError(error?.code ?? 'RELAY_UNAVAILABLE', error?.message ?? `HTTP proxy returned ${response.status}.`, { status: response.status });
+      }
+      return wrapResponse(response, ctx, decodeNetworkMetadata(encoded), method, true);
+    } catch (error) { ctx.close(); throw ctx.signal.aborted ? ctx.failure() : error; }
   };
+}
+
+let sharedTransport;
+/** Configure once when the shell (or its worker) loads deployment configuration. */
+export function configureNetworkTransport(config) {
+  sharedTransport = createNetworkTransport(globalThis.fetch.bind(globalThis), config);
+}
+/** Successful direct requests never load or await optional proxy configuration. */
+export function networkFetch(input, init) {
+  sharedTransport ??= createNetworkTransport((...args) => globalThis.fetch(...args), () =>
+    /^https?:$/.test(globalThis.location?.protocol)
+      ? loadNetworkConfiguration(new URL('../', import.meta.url)) : {});
+  return sharedTransport(input, init);
 }

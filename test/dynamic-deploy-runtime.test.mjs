@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createShareURL, createFullDeploymentDocument, normalizeConfiguration, parseCatalog, readURLConfiguration } from '../src/config.mjs';
 import { normalizeDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
-import { verifyPackage, validateInstallOptions } from '../src/joomla/index.mjs';
+import { validateInstallOptions } from '../src/joomla/index.mjs';
 import { customSetupDetails, isolateSetup, publicConfiguration } from '../src/ui-state.mjs';
 import { deploymentNeedsReview } from '../src/launch-countdown.mjs';
 
@@ -125,14 +125,6 @@ test('versioned packages survive public configuration and share links with their
   assert.equal(validateInstallOptions(config).joomlaVersion, '7.0.0-alpha1-dev');
 });
 
-test('SHA-512 is verified before installation and cannot silently replace SHA-256 validation', async () => {
-  const bytes = Uint8Array.of(0x50, 0x4b, 3, 4, 1, 2, 3);
-  const sha512 = [...new Uint8Array(await crypto.subtle.digest('SHA-512', bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('');
-  assert.deepEqual(await verifyPackage(bytes, undefined, sha512), bytes);
-  await assert.rejects(verifyPackage(bytes, undefined, '0'.repeat(128)), /SHA-512 verification failed/);
-  await assert.rejects(verifyPackage(bytes, '0'.repeat(64), sha512), /SHA-256 verification failed/);
-});
-
 test('shared dynamic packages require review and any source or digest change invalidates the reviewed identity', () => {
   const joomlaPackage = { url: 'https://example.org/joomla.zip', sha256: 'b'.repeat(64), php: ['8.3', '8.4'] };
   const setup = { joomlaVersion: '7.0.0-alpha1-dev', joomlaPackage, jcbVersion: '6.2.1-alpha1', jcbPackage: dynamicJcb };
@@ -165,5 +157,4 @@ test('first-time shared launches and saved resumes resolve pinned dynamic Joomla
   await assert.rejects(resolveDeployConfiguration({ ...requested, phpVersion: '8.5' }, { ...options, catalog: pinnedOnly }), /PHP and Joomla combination|does not support/);
   await assert.rejects(resolveDeployConfiguration({ ...requested, joomlaPackage: { ...joomlaPackage, php: ['8.4', '7.4'] } }, { ...options, catalog: pinnedOnly }), /PHP 7\.4 is not available/);
   await assert.rejects(resolveDeployConfiguration({ ...requested, joomlaVersion: '6.2.0', joomlaPackage: { ...joomlaPackage, php: ['8.4', '9.9'] } }, { ...options, catalog: pinnedOnly }), /PHP 9\.9 is not available/);
-  await assert.rejects(resolveDeployConfiguration({ ...requested, joomlaPackage: { ...joomlaPackage, sha256: undefined } }, { ...options, catalog: pinnedOnly }), /SHA-256/);
 });

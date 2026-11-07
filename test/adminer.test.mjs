@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { installAdminer, withAdminerRequest } from '../src/database/runtime.mjs';
 
@@ -8,15 +7,19 @@ function memoryFS() {
   return { files, mkdirTree() {}, writeFile(path, bytes) { files.set(path, bytes); }, analyzePath(path) { return { exists: files.has(path) }; } };
 }
 
-test('Adminer mounts atomically after verifying every asset and rejects corrupted downloads', async () => {
+test('Adminer mounts all downloaded assets and leaves no partial tool after an HTTP failure', async () => {
   const fs = memoryFS();
   const entries = ['adminer.php', 'index.php', 'bridge.js', 'adminer.css'].map(name => ({
-    name, bytes: 2, sha256: createHash('sha256').update('ok').digest('hex'),
+    name,
   }));
-  const fetcher = async url => new Response(url.pathname.endsWith('manifest.json') ? JSON.stringify({ version: '6.2.0', files: entries })
-    : url.pathname.endsWith('bridge.js') ? 'no' : 'ok');
-  await assert.rejects(installAdminer({ fs, baseURL: 'https://playground.example/sub/', fetcher }), /integrity/);
-  assert.equal(fs.files.size, 0, 'A corrupted bundle must not install a partially executable tool.');
+  const fetcher = async url => url.pathname.endsWith('manifest.json') ? Response.json({ version: '6.2.0', files: entries })
+    : new Response('Unavailable', { status: 503 });
+  await assert.rejects(installAdminer({ fs, baseURL: 'https://playground.example/sub/', fetcher }), /503/);
+  assert.equal(fs.files.size, 0);
+  const result = await installAdminer({ fs, baseURL: 'https://playground.example/sub/', fetcher: async url =>
+    url.pathname.endsWith('manifest.json') ? Response.json({ version: '6.2.0', files: entries }) : new Response('ok') });
+  assert.equal(result.bytes, 8);
+  assert.equal(fs.files.size, 4);
 });
 
 test('private Adminer routing restores Joomla after failure and never exposes raw tool PHP', async () => {

@@ -8,13 +8,15 @@ import { gzipSync } from 'node:zlib';
 import test from 'node:test';
 import { builtWrapper, runtimeConfiguration, releasedLibraries } from './runtime-artifacts.mjs';
 import { stageCurl } from '../scripts/curl.mjs';
-import { createPhpFetch, NESTED_PHP_REQUEST_ERROR } from '../src/php-network.mjs';
+import { createNetworkTransport } from '../src/network-transport.mjs';
+import { NETWORK_PROTOCOL_VERSION, NETWORK_RESPONSE_HEADER, encodeNetworkMetadata } from '../src/network-protocol.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const pins = await runtimeConfiguration();
 const directory = path.resolve(root, process.env.CURL_EXTENSION_DIR || '.cache/curl');
 const payload = Buffer.from([0, 65, 255, 66, 128, 10]);
 const compressedPayload = gzipSync(payload);
+const responseCookies = ['first=one; Path=/', 'second=two; Expires=Wed, 21 Oct 2030 07:28:00 GMT; Path=/'];
 
 async function fixture(t) {
   const requests = [];
@@ -24,7 +26,19 @@ async function fixture(t) {
     const body = Buffer.concat(chunks);
     requests.push({ method: request.method, path: request.url, headers: request.headers, body });
     response.setHeader('X-Playground-Proof', 'native-curl-fetch');
-    if (request.url === '/redirect') {
+    if (request.url.startsWith('/proxy?')) {
+      const upstreamURL = new URL(request.url, `http://${request.headers.host}`).searchParams.get('url');
+      const upstream = await fetch(upstreamURL);
+      const headers = [...upstream.headers].filter(([name]) => name !== 'set-cookie');
+      headers.push(...upstream.headers.getSetCookie().map(value => ['set-cookie', value]));
+      response.setHeader(NETWORK_RESPONSE_HEADER, encodeNetworkMetadata({ version: NETWORK_PROTOCOL_VERSION,
+        status: upstream.status, statusText: upstream.statusText, headers, url: upstream.url,
+        redirected: false, redirectCount: 0 }));
+      response.end(Buffer.from(await upstream.arrayBuffer()));
+    } else if (request.url === '/relay-cookies' || request.url === '/relay-cookie-headers') {
+      response.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Set-Cookie': responseCookies });
+      response.end(payload);
+    } else if (request.url === '/redirect') {
       response.writeHead(302, { Location: '/binary' });
       response.end();
     } else if (request.url === '/slow') {
@@ -125,6 +139,8 @@ for (const version of pins.php) {
       $redirect = executeCurl($base . '/redirect', [CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 3]);
       $manual = executeCurl($base . '/redirect', [CURLOPT_FOLLOWLOCATION => false, CURLOPT_MAXREDIRS => 3]);
       $relayMetadata = executeCurl($base . '/relay-metadata', [CURLOPT_FOLLOWLOCATION => true]);
+      $relayCookies = executeCurl($base . '/relay-cookies');
+      $relayCookieHeaders = executeCurl($base . '/relay-cookie-headers');
       $custom = executeCurl($base . '/echo', [CURLOPT_CUSTOMREQUEST => 'PATCH', CURLOPT_POSTFIELDS => 'update',
         CURLOPT_USERPWD => 'fixture:password', CURLOPT_HTTPAUTH => CURLAUTH_BASIC,
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
@@ -149,6 +165,7 @@ for (const version of pins.php) {
         'post' => $post, 'head' => $head, 'missing' => $missing, 'status' => $status,
         'compressed' => $compressed, 'compressedHead' => $compressedHead, 'notModified' => $notModified,
         'redirect' => $redirect, 'manual' => $manual, 'relayMetadata' => $relayMetadata,
+        'relayCookies' => $relayCookies, 'relayCookieHeaders' => $relayCookieHeaders,
         'custom' => $custom, 'timeout' => $timeout, 'unsupported' => $unsupported,
         'afterTimeout' => $afterTimeout, 'failStatus' => $failStatus, 'shortWrite' => $shortWrite,
         'wideWrite' => $wideWrite, 'wideHeader' => $wideHeader, 'events' => $events,
@@ -158,14 +175,27 @@ for (const version of pins.php) {
     const originalFetch = globalThis.fetch;
     const previousHook = globalThis.__joomenginePhpFetch;
     const receivedOptions = [];
-    const phpFetch = createPhpFetch(originalFetch, `${server.url}/site/`, () => true);
+    const phpFetch = createNetworkTransport(originalFetch);
+    const cookieFetch = createNetworkTransport((url, init) => {
+      // Model a browser CORS failure, then use a real HTTP proxy response carrying
+      // the upstream headers through the shared transport's metadata decoder.
+      if (new URL(url).pathname !== '/proxy') throw new TypeError('The browser cannot expose this response.');
+      return originalFetch(url, init);
+    }, { endpoint: `${server.url}/proxy` });
     globalThis.__joomenginePhpFetch = async (url, init) => {
       receivedOptions.push({ url, method: init.method, redirect: init.redirect, network: { ...init.network } });
       if (url === `${server.url}/relay-metadata`) {
-        // A real binary response with the same metadata a verified relay decodes.
+        // A real binary response with the same metadata the proxy decodes.
         // The separate Worker suites prove the wire contract; this proves C getinfo.
         const result = await originalFetch(`${server.url}/binary`, init);
         Object.defineProperty(result, 'networkRedirectCount', { value: 2 });
+        return result;
+      }
+      if (url === `${server.url}/relay-cookies` || url === `${server.url}/relay-cookie-headers`) {
+        const result = await cookieFetch(url, init);
+        if (url.endsWith('/relay-cookie-headers')) {
+          Object.defineProperty(result.headers, 'getSetCookie', { value: undefined });
+        }
         return result;
       }
       return phpFetch(url, init);
@@ -191,16 +221,14 @@ for (const version of pins.php) {
     assert.equal(result.largeContentLength, 5000000000, 'curl_off_t output must retain all 64 bits.');
     assert.equal(result.authMaskAccepted, true, 'Valid authentication flags must retain their unsigned C-long bit pattern.');
     assert.equal(result.overflowRejected, true, 'A PHP int64 option must never silently wrap at the C long boundary.');
-    for (const key of ['get', 'afterLoopback', 'post', 'head', 'compressed', 'compressedHead', 'notModified',
-      'missing', 'status', 'redirect', 'manual', 'relayMetadata', 'custom', 'afterTimeout']) {
+    for (const key of ['get', 'loopback', 'afterLoopback', 'post', 'head', 'compressed', 'compressedHead', 'notModified',
+      'missing', 'status', 'redirect', 'manual', 'relayMetadata', 'relayCookies', 'relayCookieHeaders', 'custom', 'afterTimeout']) {
       assert.equal(result[key].error, '', `${key}: ${result[key].error}`);
       assert.equal(result[key].errno, 0, key);
     }
     assert.equal(result.get.status, 200);
-    assert.equal(result.loopback.body, false);
-    assert.notEqual(result.loopback.errno, 0);
-    assert.ok(result.loopback.error.includes(NESTED_PHP_REQUEST_ERROR), result.loopback.error);
-    assert.equal(server.requests.some(request => request.path === '/site/callback'), false);
+    assert.equal(result.loopback.status, 200);
+    assert.equal(server.requests.some(request => request.path === '/site/callback'), true);
     assert.deepEqual(Buffer.from(result.afterLoopback.body, 'base64'), payload);
     assert.deepEqual(Buffer.from(result.get.body, 'base64'), payload);
     assert.deepEqual(JSON.parse(Buffer.from(result.post.body, 'base64').toString()), {
@@ -241,9 +269,14 @@ for (const version of pins.php) {
     assert.equal(result.relayMetadata.url, `${server.url}/binary`);
     assert.equal(result.relayMetadata.redirectCount, 2);
     assert.deepEqual(Buffer.from(result.relayMetadata.body, 'base64'), payload);
+    for (const key of ['relayCookies', 'relayCookieHeaders']) {
+      assert.equal(result[key].status, 200);
+      assert.deepEqual(Buffer.from(result[key].body, 'base64'), payload);
+      assert.deepEqual(result[key].headers.filter(line => /^set-cookie:/i.test(line)).map(line => line.trim()),
+        responseCookies.map(value => `set-cookie: ${value}`), `${key}: HEADERFUNCTION receives every cookie exactly once.`);
+    }
     assert.ok(receivedOptions.length > 0, 'The compiled cURL extension must call the dedicated hook.');
     for (const request of receivedOptions) {
-      assert.equal(request.network.replayAllowed, ['GET', 'HEAD'].includes(request.method));
       assert.equal(Number.isFinite(request.network.timeoutMs), true);
       assert.ok(request.network.timeoutMs >= 0 && request.network.timeoutMs <= 5000);
     }

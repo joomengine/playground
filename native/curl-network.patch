@@ -9,7 +9,7 @@
  
  		try
  		{
-@@ -224,7 +224,14 @@
+@@ -224,7 +224,13 @@
  			let authAttempts = 0;
  			for(;;)
  			{
@@ -19,13 +19,12 @@
 +				const remaining = request.timeoutMs > 0
 +				    ? Math.max(1, request.timeoutMs - (performance.now() - started)) : 0;
 +				init.network = {timeoutMs: remaining, maxRedirects: request.maxRedirs,
-+				    redirect: request.follow ? 'follow' : 'manual',
-+				    replayAllowed: init.method === 'GET' || init.method === 'HEAD'};
++				    redirect: request.follow ? 'follow' : 'manual'};
 +				response = await (globalThis.__joomenginePhpFetch || globalThis.fetch)(currentURL.href, init);
  				const responseURL = new URL(response.url || currentURL.href);
  				if(response.status === 401 && request.auth && responseURL.origin === parsed.origin && authAttempts < 2)
  				{
-@@ -291,18 +298,22 @@
+@@ -291,23 +297,27 @@
  			result.headersAt = performance.now();
  			result.status = response.status;
  			result.statusText = response.statusText;
@@ -40,6 +39,7 @@
 +			const hasBody = init.method !== 'HEAD' && ![204, 205, 304].includes(response.status);
 +			const decoded = hasBody && response.headers.has('content-encoding');
  			const lines = [];
++			const cookies = response.headers.getSetCookie ? response.headers.getSetCookie() : [];
  			for(const [name, value] of response.headers)
  			{
  				/* fetch() always decodes the body, so drop headers that describe the
@@ -47,11 +47,17 @@
  				if(decoded && name === 'content-encoding') continue;
  				/* CORS may hide Content-Encoding while exposing the encoded length. */
 -				if((decoded || response.type === 'cors') && name === 'content-length') continue;
+-				if(name === 'set-cookie') continue;
 +				if(hasBody && (decoded || response.type === 'cors') && name === 'content-length') continue;
- 				if(name === 'set-cookie') continue;
++				if(name === 'set-cookie' && cookies.length) continue;
  				lines.push(name + ': ' + value);
  			}
-@@ -349,7 +360,7 @@
+-			const cookies = response.headers.getSetCookie ? response.headers.getSetCookie() : [];
+ 			for(const cookie of cookies)
+ 			{
+ 				lines.push('set-cookie: ' + cookie);
+ 			}
+@@ -349,7 +359,7 @@
  				result.code = error.curlCode;
  				result.error = error.message;
  			}

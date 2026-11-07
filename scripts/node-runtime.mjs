@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { phpRequestTimeoutMs } from '../src/php-settings.mjs';
 import { createNodeWorkerClient } from './node-runtime-client.mjs';
+import { networkFetch } from '../src/network-transport.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -42,7 +43,7 @@ export async function createNodeRuntime(options = {}) {
   };
   const fetchAsset = async (value, init) => {
     const url = new URL(value instanceof Request ? value.url : value, metadata.assetBaseUrl);
-    if (url.origin !== new URL(metadata.assetBaseUrl).origin) return fetch(value, init);
+    if (url.origin !== new URL(metadata.assetBaseUrl).origin) return networkFetch(value, init);
     const basePath = new URL(metadata.assetBaseUrl).pathname;
     if (!url.pathname.startsWith(basePath)) throw new Error('Build asset URL leaves the deployment path.');
     const filename = path.resolve(directory, decodeURIComponent(url.pathname.slice(basePath.length)));

@@ -5,10 +5,6 @@ try {
     if (!is_file($root . '/configuration.php')) {
         throw new RuntimeException('Install Joomla before running a command.');
     }
-    if (isset($playground['archive'])) {
-        $zip = playgroundValidateArchive($playground['archive']);
-        $zip->close();
-    }
     chdir($root);
     playgroundRuntimeConstants($root);
     define('_JEXEC', 1);

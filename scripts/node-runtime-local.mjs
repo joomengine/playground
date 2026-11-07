@@ -2,16 +2,19 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeHealthSource, runtimeRandomValue, assertRuntimeHealth } from '../src/php-settings.mjs';
+import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeRandomValue } from '../src/php-settings.mjs';
 import { configurePhpRouting } from '../src/php-routing.mjs';
 import { installPhpRecovery } from '../src/php-recovery.mjs';
 import { applyJcbRuntimeCompatibility } from '../src/jcb-compatibility.mjs';
-import { createPhpFetch } from '../src/php-network.mjs';
+import { createNetworkTransport } from '../src/network-transport.mjs';
+import { createPhpSelfRequestFetch, createPhpRequestWorker, configurePhpCallback } from '../src/php-self-request.mjs';
+import { captureDebugFilesystem, applyDebugFilesystem } from '../src/code/debug-runtime.mjs';
+import { Worker } from 'node:worker_threads';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
 /** Run the verified upstream PHP binary and staged CGI adapter for build tasks. */
-export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIST || path.join(root, 'dist'), phpVersion, database = 'joomla', phpSettings: requestedPhpSettings } = {}) {
+export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIST || path.join(root, 'dist'), phpVersion, database = 'joomla', phpSettings: requestedPhpSettings, requestContext } = {}) {
   const phpSettings = normalizePhpSettings(requestedPhpSettings);
   const bodyLimit = phpRequestBodyLimit(phpSettings);
   const distribution = path.resolve(directory);
@@ -24,7 +27,8 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
   const [{ PhpCgiNode }, { createMariaDB }, { createPhpWasmAdapter }] = await Promise.all([
     import(moduleURL.href), import(assetURL(manifest.bridge.moduleUrl).href), import(assetURL(manifest.bridge.adapterUrl).href),
   ]);
-  const databaseRuntime = await createMariaDB({ database, timeoutMs: 120_000 });
+  const databaseRuntime = requestContext ? { hostCalls: requestContext.hostCalls, reset: async () => {}, flush: async () => {}, close: async () => {} }
+    : await createMariaDB({ database, timeoutMs: 120_000 });
   let php;
   let binary;
   let queue = Promise.resolve();
@@ -32,11 +36,10 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
   let closing = false;
   let failed;
   let closePromise;
-  let requestActive = false;
-  const originalFetch = globalThis.fetch;
+  const previousPhpFetch = globalThis.__joomenginePhpFetch;
   const headersSet = new Set();
-  const prefix = `/__site/build/${randomUUID()}/`;
-  const baseUrl = `http://localhost${prefix}`;
+  const prefix = requestContext ? new URL(requestContext.siteURL).pathname : `/__site/build/${randomUUID()}/`;
+  const baseUrl = requestContext?.siteURL || `http://localhost${prefix}`;
   const assetBaseUrl = manifest.deployment?.canonicalUrl || 'https://playground.joomengine.org/';
   const enqueue = (operation) => {
     if (closing) return Promise.reject(new Error('The Node playground runtime is closing.'));
@@ -85,12 +88,12 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
       headersSet.add(environmentName);
     }
     const headers = new Map(input.headers);
+    if (requestContext) php.cookieJar.toEnv = () => input.headers.get('cookie') || '';
     headers.set('host', 'localhost');
     if (input.headers.has('content-type')) headers.set('Content-Type', input.headers.get('content-type'));
     php.error = [];
     const original = php.binary;
     applyJcbRuntimeCompatibility(binary, php.docroot);
-    requestActive = true;
     try {
       let response = await php.request({ url: `${url.pathname}${url.search}`, method: input.method, headers, body: inputBody ? new Blob([inputBody]).stream() : null });
       if (php.binary !== original) {
@@ -107,7 +110,6 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
       if (diagnostics) console.warn(`[PHP ${entry.version}] ${diagnostics.slice(0, 8000)}`);
       return response;
     } finally {
-      requestActive = false;
       await databaseRuntime.reset();
     }
   };
@@ -152,6 +154,7 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
   };
   const handle = {
     ...raw,
+    captureFilesystem: () => captureDebugFilesystem(binary.FS),
     fs: Object.fromEntries(Object.entries(fs).map(([name, operation]) => [name, (...args) => enqueue(() => operation(...args))])),
     request: (...args) => enqueue(() => request(...args)),
     runPhp: (...args) => enqueue(() => runPhp(...args)),
@@ -168,15 +171,23 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
         closed = true;
         try { await databaseRuntime.close(); } finally {
           php = null; binary = null;
-          globalThis.fetch = originalFetch;
+          if (previousPhpFetch === undefined) delete globalThis.__joomenginePhpFetch;
+          else globalThis.__joomenginePhpFetch = previousPhpFetch;
         }
       })();
     },
   };
   try {
-    // This runtime owns its worker's fetch function. Install the same recursive
-    // request guard as the browser here, where native cURL actually runs.
-    globalThis.fetch = createPhpFetch(originalFetch.bind(globalThis), baseUrl, () => requestActive);
+    // Node can reach upstream HTTP directly; use the same PHP boundary without
+    // changing Fetch for runtime assets or local package loading.
+    globalThis.__joomenginePhpFetch = createPhpSelfRequestFetch({
+      siteURL: baseUrl, transport: createNetworkTransport(globalThis.fetch.bind(globalThis)),
+      request: createPhpRequestWorker({
+        options: { directory: distribution, phpVersion: entry.version, phpSettings, siteURL: baseUrl },
+        getFilesystem: () => binary.FS, databaseCall: databaseRuntime.hostCalls['mariadb.v1'],
+        WorkerType: Worker, workerURL: new URL('./php-self-request-worker.mjs', import.meta.url),
+      }),
+    });
     const adapter = createPhpWasmAdapter(databaseRuntime.hostCalls, { shimUrl: new URL('./php-wasm.php', assetURL(manifest.bridge.adapterUrl)) });
     php = new PhpCgiNode({
       ...adapter, phpArgs: { ...adapter.phpArgs, getRandomValue: runtimeRandomValue }, version: entry.version, prefix, docroot: raw.documentRoot, persist: [], staticFS: true, autoTransaction: false,
@@ -186,8 +197,10 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
       ini: `${adapter.ini}${phpIni(phpSettings)}\nauto_prepend_file=/internal/rocket-http.php\n`,
     });
     binary = await php.binary;
+    if (requestContext) configurePhpCallback(php);
     configurePhpRouting(php, binary);
     for (const directory of ['/persist/www', '/persist/sessions', '/persist/meta', '/config', '/internal']) binary.FS.mkdirTree(directory);
+    if (requestContext?.snapshot) applyDebugFilesystem(binary.FS, captureDebugFilesystem(binary.FS), requestContext.snapshot);
     installPhpRecovery(php, {
       currentBinary: () => binary,
       prepare: next => {
@@ -198,10 +211,7 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
     php.initialized = true;
     php.staticCacheTime = 0;
     php.dynamicCacheTime = 0;
-    const result = await handle.runPhp(runtimeHealthSource());
-    const identity = JSON.parse(result.text);
-    if (!identity.extensions.includes('pdo_mariadb_wasm') || !identity.pdoDrivers.includes('mysql') || identity.phpVersion !== entry.patchVersion) throw new Error(`Build runtime identity differs from its manifest: ${result.text}`);
-    handle.runtimeInfo = assertRuntimeHealth(identity, phpSettings);
+    handle.runtimeInfo = { phpVersion: entry.patchVersion, phpSettings };
     return handle;
   } catch (error) {
     await handle.close();

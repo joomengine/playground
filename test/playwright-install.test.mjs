@@ -47,14 +47,12 @@ test('browser installation validates input and fails closed at each setup bounda
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('every validation and hosted staging browser install uses the shared Ubuntu action', () => {
-  for (const [file, expected] of [['validate.yml', 6], ['network-staging.yml', 1]]) {
-    const source = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), 'utf8');
-    assert.equal(source.match(/uses: \.\/\.github\/actions\/install-playwright/g)?.length, expected);
-    assert.doesNotMatch(source, /playwright install --with-deps|apt-mirrors/);
-    for (const block of source.split(/(?=^  [\w-]+:\n)/m).filter(block => block.includes('uses: ./.github/actions/install-playwright'))) {
-      assert.match(block, /^    runs-on: ubuntu-24\.04$/m);
-      assert.match(block, /uses: \.\/\.github\/actions\/install-playwright\n        with:\n          browser: (?:\$\{\{ matrix\.browser \}\}|chromium)\n/);
-    }
+test('every validation browser install uses the shared Ubuntu action', () => {
+  const source = readFileSync(new URL('../.github/workflows/validate.yml', import.meta.url), 'utf8');
+  assert.equal(source.match(/uses: \.\/\.github\/actions\/install-playwright/g)?.length, 6);
+  assert.doesNotMatch(source, /playwright install --with-deps|apt-mirrors/);
+  for (const block of source.split(/(?=^  [\w-]+:\n)/m).filter(block => block.includes('uses: ./.github/actions/install-playwright'))) {
+    assert.match(block, /^    runs-on: ubuntu-24\.04$/m);
+    assert.match(block, /uses: \.\/\.github\/actions\/install-playwright\n        with:\n          browser: (?:\$\{\{ matrix\.browser \}\}|chromium)\n/);
   }
 });

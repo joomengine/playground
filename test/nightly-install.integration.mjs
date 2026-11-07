@@ -5,7 +5,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { createNodeRuntime } from '../scripts/node-runtime.mjs';
 import { parseCatalog } from '../src/config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
-import { checkJoomla, installJoomla, requestJoomlaPage, sha256 } from '../src/joomla/index.mjs';
+import { readJoomlaMetadata, installJoomla, requestJoomlaPage, sha256 } from '../src/joomla/index.mjs';
 
 const sourceLoader = name => readFile(new URL(`../src/joomla/php/${name}.php`, import.meta.url), 'utf8');
 
@@ -53,7 +53,7 @@ test('development Joomla installs finish cleanup and open administrator and fron
     const installed = await installJoomla(runtime, configuration, { archiveBytes, sha256: await sha256(archiveBytes),
       sourceLoader, fetchPackage: runtime.fetchAsset });
     assert.equal(installed.version, fixtureVersion);
-    assert.equal((await checkJoomla(runtime, { sourceLoader })).version, fixtureVersion);
+    assert.equal((await readJoomlaMetadata(runtime, { sourceLoader })).version, fixtureVersion);
     assert.equal(await runtime.fs.stat(`${runtime.documentRoot}/installation`), null,
       'A successful development installation must remove its installer directory.');
     const marker = JSON.parse(new TextDecoder().decode(await runtime.fs.readFile('/persist/meta/joomla-install.json')));

@@ -841,10 +841,11 @@ for (const name of browserNames) {
         liveOrigins: ['api.joomlacomponentbuilder.com', 'codeberg.org', 'git.envs.net', 'tildegit.org', 'git.disroot.org', 'git.vdm.dev',
           'api.github.com', 'raw.githubusercontent.com'].map(host => `https://${host}`) });
       await server.attach(context);
+      const proxyProof = { proof: 'Native PHP cURL through anonymous proxy', nonce: randomUUID() };
       const corsServer = await createStaticServer({ directory, prefix: '/cors/', corsOrigin: new URL(server.url).origin,
         corsPaths: ['allowed.json'], fixtures: {
           'allowed.json': request => JSON.stringify({ ...curlCorsProof, header: request.headers['x-playground-proof'] ?? null }),
-          'denied.json': JSON.stringify({ confidential: randomUUID() }),
+          'denied.json': JSON.stringify(proxyProof),
         } });
       // JCB's optional news feed is not part of the compiler/runtime contract.
       // Keep its two reviewed requests deterministic instead of depending on a
@@ -915,16 +916,15 @@ for (const name of browserNames) {
             assert.deepEqual(JSON.parse(cors.body), { ...curlCorsProof, header: 'cors-check' }, 'PHP cURL must honor a real CORS preflight and preserve its request headers.');
             const deniedHref = new URL('denied.json', corsServer.url).href;
             page.expectedConsoleURLs.add(deniedHref);
-            page.expectedConsoleURLs.add(`${server.relayOrigin}/v1/fetch`);
             const deniedURL = Buffer.from(deniedHref).toString('base64');
             const denied = await phpJSON(page, `
               $http = curl_init(base64_decode('${deniedURL}'));
               curl_setopt_array($http, [CURLOPT_RETURNTRANSFER=>true, CURLOPT_TIMEOUT=>15]);
               $body = curl_exec($http);
               echo json_encode(['body'=>$body, 'error'=>curl_error($http), 'errno'=>curl_errno($http)], JSON_THROW_ON_ERROR);`);
-            assert.equal(denied.body, false, 'A response without CORS permission must remain inaccessible to PHP.');
-            assert.ok(denied.errno > 0 && denied.error.length > 0, 'CORS rejection must be a visible cURL transport error.');
-            page.expectedConsoleURLs.delete(`${server.relayOrigin}/v1/fetch`);
+            assert.deepEqual(JSON.parse(denied.body), proxyProof, 'A browser-blocked download must complete through the anonymous proxy.');
+            assert.equal(denied.errno, 0);
+            assert.equal(denied.error, '');
             const spreadsheet = await phpJSON(page, `
               require '/persist/www/libraries/phpspreadsheet/vendor/autoload.php';
               $book = new \\PhpOffice\\PhpSpreadsheet\\Spreadsheet();

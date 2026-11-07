@@ -86,7 +86,7 @@ for (const name of names) test(`${name}: actual PHP networking preserves binary 
     let before = fixture.relayRequests.length;
     const direct = await probe(page, `${fixtureOrigin}/direct/binary`);
     assert.equal(direct.hash, binaryHash); assert.equal(direct.status, 200); assert.equal(direct.errno, 0);
-    assert.equal(fixture.relayRequests.length, before, 'A readable direct response must not contact the relay or request verification.');
+    assert.equal(fixture.relayRequests.length, before, 'A readable direct response must not contact the relay.');
     receipt.cases.push({ case: 'direct-no-relay', ...direct });
 
     const fallback = await probe(page, `${fixtureOrigin}/denied/binary`);
@@ -147,22 +147,28 @@ for (const name of names) test(`${name}: actual PHP networking preserves binary 
       const beforeWrites = fixture.requests.filter(item => item.path === '/denied/echo' && item.method === 'POST').length;
       const ambiguous = await (transport === 'curl' ? probe : streamProbe)(page, `${fixtureOrigin}/denied/echo`, { method: 'POST', body: Buffer.from('write-once').toString('base64'),
         headers: ['Content-Type: text/plain'] });
-      assert.equal(ambiguous.failed, true);
-      assert.equal(fixture.relayRequests.length, before, 'An uncertain direct POST must not replay through the relay.');
-      assert.equal(fixture.requests.filter(item => item.path === '/denied/echo' && item.method === 'POST').length - beforeWrites, 1);
-      receipt.cases.push({ case: `ambiguous-${transport}-write-no-replay`, ...ambiguous });
+      assert.equal(ambiguous.failed, false);
+      assert.equal(ambiguous.status, 200);
+      // Browser CORS preflights do not deliver a write. Count actual proxy
+      // submissions separately so Firefox's OPTIONS does not look like replay.
+      const deliveries = fixture.relayRequests.slice(before).filter(item => item.method !== 'OPTIONS');
+      assert.equal(deliveries.length, 1, 'A cross-origin POST must have exactly one proxy delivery.');
+      assert.equal(deliveries[0].method, 'POST');
+      assert.equal(new URL(deliveries[0].path, fixture.relayOrigin).searchParams.get('url'), `${fixtureOrigin}/denied/echo`);
+      const received = fixture.requests.filter(item => item.path === '/denied/echo' && item.method === 'POST').slice(beforeWrites);
+      assert.equal(received.length, 1, 'The upstream must receive one POST without a speculative direct submission or replay.');
+      assert.deepEqual(received[0].body, Buffer.from('write-once'));
+      receipt.cases.push({ case: `${transport}-write-once`, ...ambiguous });
     }
 
     const html = await probe(page, `${writeOrigin}/denied/html`);
     assert.equal(html.status, 200); assert.equal(html.failed, false);
-    const forbidden = await probe(page, `${writeOrigin}/denied/forbidden-redirect`);
-    assert.equal(forbidden.failed, true);
     fixture.setAvailable(false);
     const exhausted = await probe(page, `${fixtureOrigin}/denied/binary`);
     assert.equal(exhausted.failed, true); assert.ok(exhausted.error);
     const health = await page.evaluate(async () => (await window.playground.runPhp('<?php echo 6 * 7;')).text);
     assert.equal(health, '42', 'Network failure must leave PHP alive.');
-    receipt.cases.push({ case: 'safe-failure', forbidden, exhausted, health });
+    receipt.cases.push({ case: 'safe-failure', exhausted, health });
     await page.evaluate(() => window.playground.close());
     receipt.status = 'passed';
   } catch (error) { receipt.status = 'failed'; receipt.error = error.stack || error.message; throw error; }

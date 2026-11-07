@@ -8,6 +8,7 @@ import { discoverDynamicCatalog } from '../src/dynamic-catalog.mjs';
 const MAX_BYTES = 128 * 1024 * 1024;
 const USER_AGENT = 'Mozilla/5.0 (compatible; JoomEnginePlayground/1.0)';
 const hash = (algorithm, bytes) => createHash(algorithm).update(bytes).digest('hex');
+const isZip = bytes => bytes.length >= 4 && bytes.readUInt32LE(0) === 0x04034b50;
 
 /** Read the runtime and installer requirements from the actual full package, without executing its PHP. */
 export function joomlaPackagePhpMinimum(bytes, feedMinimum) {
@@ -49,7 +50,7 @@ function sourceURL(value) {
 
 function verify(bytes, entry, limit) {
   if (bytes.length > limit) throw new Error('The catalog package exceeds 128 MiB.');
-  if (bytes.length < 4 || bytes.readUInt32LE(0) !== 0x04034b50) throw new Error('The catalog package is not a ZIP archive.');
+  if (!isZip(bytes)) throw new Error('The catalog package is not a ZIP archive.');
   const sha256 = hash('sha256', bytes);
   for (const [algorithm, length] of [['sha256', 64], ['sha512', 128]]) {
     if (entry[algorithm] == null) continue;
@@ -61,30 +62,71 @@ function verify(bytes, entry, limit) {
 }
 
 async function download(entry, fetchImpl, limit) {
-  const response = await fetchImpl(sourceURL(entry.url), {
-    credentials: 'omit', cache: 'no-store', redirect: 'follow', signal: AbortSignal.timeout(180_000),
-    headers: { 'User-Agent': USER_AGENT },
-  });
-  if (!response.ok) throw new Error(`Package download failed: HTTP ${response.status}.`);
-  if (Number(response.headers.get('Content-Length')) > limit) {
-    await response.body?.cancel();
-    throw new Error('The catalog package exceeds 128 MiB.');
-  }
-  if (!response.body) throw new Error('The catalog package response has no body.');
-  const reader = response.body.getReader();
-  const parts = [];
-  let length = 0;
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      length += value.byteLength;
-      if (length > limit) throw new Error('The catalog package exceeds 128 MiB.');
-      parts.push(Buffer.from(value));
+  const url = sourceURL(entry.url);
+  const signal = AbortSignal.timeout(180_000);
+  const failures = [];
+  // These build-time requests are GETs. Retry transient delivery failures within
+  // one deadline, without accepting a different checksum or publishing a partial catalog.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    let response;
+    let retryable = true;
+    let length = 0;
+    let prefix = Buffer.alloc(0);
+    try {
+      signal.throwIfAborted();
+      response = await fetchImpl(url, {
+        credentials: 'omit', cache: 'no-store', redirect: 'follow', signal,
+        headers: { 'User-Agent': USER_AGENT },
+      });
+      if (!response.ok) {
+        retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
+        throw new Error(`Package download failed: HTTP ${response.status}.`);
+      }
+      if (Number(response.headers.get('Content-Length')) > limit) {
+        retryable = false;
+        throw new Error('The catalog package exceeds 128 MiB.');
+      }
+      if (!response.body) throw new Error('The catalog package response has no body.');
+      const reader = response.body.getReader();
+      const parts = [];
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          length += value.byteLength;
+          if (prefix.length < 16) prefix = Buffer.concat([prefix, Buffer.from(value).subarray(0, 16 - prefix.length)]);
+          if (length > limit) {
+            retryable = false;
+            throw new Error('The catalog package exceeds 128 MiB.');
+          }
+          parts.push(Buffer.from(value));
+        }
+      } catch (error) { await reader.cancel().catch(() => {}); throw error; }
+      finally { reader.releaseLock(); }
+      const bytes = Buffer.concat(parts, length);
+      // A gateway can return an HTML error with HTTP 200. Retry that response,
+      // but never treat a published checksum mismatch as a temporary success.
+      retryable = !isZip(bytes);
+      return { bytes, sha256: verify(bytes, entry, limit) };
+    } catch (error) {
+      await response?.body?.cancel().catch(() => {});
+      // Redirected release URLs can contain signed query strings; retain the
+      // origin/path and response signature without logging temporary credentials.
+      const finalURL = response?.url ? new URL(response.url) : new URL(url);
+      const details = { attempt, source: url, finalURL: `${finalURL.origin}${finalURL.pathname}`,
+        status: response?.status ?? null, contentType: response?.headers.get('Content-Type') ?? null,
+        contentLength: response?.headers.get('Content-Length') ?? null, receivedBytes: length,
+        firstBytes: prefix.toString('hex') };
+      failures.push(`${error.message} ${JSON.stringify(details)}`);
+      if (!retryable || signal.aborted || attempt === 3) {
+        throw new Error(`Package retrieval failed after ${attempt} attempt${attempt === 1 ? '' : 's'}: ${failures.join('; ')}`, { cause: error });
+      }
+      try { await delay(500 * attempt, undefined, { signal }); }
+      catch (error) {
+        throw new Error(`Package retrieval deadline expired after ${attempt} attempt${attempt === 1 ? '' : 's'}: ${failures.join('; ')}`, { cause: error });
+      }
     }
-  } catch (error) { await reader.cancel().catch(() => {}); throw error; }
-  finally { reader.releaseLock(); }
-  return Buffer.concat(parts, length);
+  }
 }
 
 /** Publish only verified, automatically downloadable choices; a failed refresh never replaces the catalog. */
@@ -136,8 +178,9 @@ export async function stageVersionCatalog({ assets, cache, pinnedJoomla = [], st
       try {
         // Verify the exact already-staged file before referencing it, even when a valid cache also exists.
         if (pinnedJoomlaURL) bytes = await readFile(path.join(assets, pinnedJoomlaURL));
-        bytes ??= await download(entry, upstreamFetch, maxPackageBytes);
-        const sha256 = verify(bytes, entry, maxPackageBytes);
+        let sha256;
+        if (bytes) sha256 = verify(bytes, entry, maxPackageBytes);
+        else ({ bytes, sha256 } = await download(entry, upstreamFetch, maxPackageBytes));
         if (product === 'joomla') entry.phpMinimum = joomlaPackagePhpMinimum(bytes, entry.phpMinimum);
         const packageURL = pinnedJoomlaURL || `packages/${sha256}.zip`;
         if (!pinnedJoomlaURL) await writeFile(path.join(assets, packageURL), bytes);

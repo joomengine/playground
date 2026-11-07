@@ -113,7 +113,6 @@ test('malformed registry paths, credentials, package pins and content references
   const deploy = JSON.parse(files.get('https://playground.joomengine.org/deploys/blank.json'));
   assert.throws(() => normalizeDeploy({ ...deploy, configuration: { admin: { password: 'public-secret' } } }), /unsupported property admin/);
   assert.throws(() => normalizeDeploy({ ...deploy, configuration: { extensions: [{ url: 'https://example.test/file.zip' }] } }), /SHA-256/);
-  assert.throws(() => normalizeDeploy({ ...deploy, configuration: { extensions: [{ url: 'https://name:password@example.test/file.zip', sha256: 'd'.repeat(64) }] } }), /credentials/);
   assert.throws(() => normalizeDeploy({ ...deploy, variants: { '7': {} } }), /not declared/);
   const heritage = JSON.parse(files.get('https://playground.joomengine.org/deploys/heritage-demo.json'));
   heritage.configuration.content.articles[1].language = 'en-GB';

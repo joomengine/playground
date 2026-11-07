@@ -1,10 +1,3 @@
 {
-  "schemaVersion": 1,
-  "enabled": false,
-  "endpoint": null,
-  "protocolVersion": 1,
-  "turnstileSiteKey": null,
-  "proxyOrigins": [],
-  "credentialGrants": [],
-  "maxRedirects": 5
+  "endpoint": null
 }

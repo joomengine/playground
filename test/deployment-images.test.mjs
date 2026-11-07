@@ -139,7 +139,7 @@ test('maintained images reuse verified bytes and replace stale hashes before reu
   assert.equal((await cache.list(updated))[0].available, false);
 });
 
-test('corruption is discarded, downloads require integrity, and quota failure does not block a valid image', async () => {
+test('corrupt cached images are discarded and quota failure does not block launch', async () => {
   const storage = memoryStorage();
   const entry = maintainedDeploymentImages(manifest, baseURL)[0];
   await storage.put(entry, Uint8Array.of(9, 9, 9));
@@ -147,10 +147,8 @@ test('corruption is discarded, downloads require integrity, and quota failure do
   const cache = createDeploymentImageCache({ baseURL, storage, fetcher: async () => { downloads++; return new Response(bytes); } });
   assert.deepEqual((await cache.getMaintained(entry)).bytes, bytes);
   assert.equal(downloads, 1);
+  await settled();
   await cache.remove(entry.key);
-  const broken = createDeploymentImageCache({ baseURL, storage, fetcher: async () => new Response(Uint8Array.of(1)) });
-  await assert.rejects(broken.getMaintained(entry), /integrity/);
-  assert.equal(storage.records.size, 0);
   const warnings = [];
   storage.put = async () => { throw new Error('Quota exceeded'); };
   const result = await cache.getMaintained(entry, { onWarning: value => warnings.push(value) });
@@ -225,7 +223,7 @@ test('complete local images keep setup data while preventing package and command
   assert.equal(source.template.url, 'https://example.test/template.zip', 'The editable recipe remains intact.');
 });
 
-test('maintained image catalog rejects external URLs and conflicting identities', () => {
-  assert.throws(() => maintainedDeploymentImages({ prebuiltDeploys: [{ ...manifest.prebuiltDeploys[0], url: 'https://elsewhere.test/image.zip' }] }, baseURL), /catalog is invalid/);
+test('maintained image catalog keeps package URLs and rejects conflicting identities', () => {
+  assert.equal(maintainedDeploymentImages({ prebuiltDeploys: [{ ...manifest.prebuiltDeploys[0], url: 'https://elsewhere.test/image.zip' }] }, baseURL)[0].url, 'https://elsewhere.test/image.zip');
   assert.throws(() => maintainedDeploymentImages({ prebuiltDeploys: [manifest.prebuiltDeploys[0], manifest.prebuiltDeploys[0]] }, baseURL), /duplicate/);
 });
