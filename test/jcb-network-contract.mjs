@@ -106,18 +106,16 @@ export async function phpProbe(page, source) {
   }, source);
 }
 
-function transportProgram(urls) {
-  const encoded = Buffer.from(JSON.stringify(urls)).toString('base64');
-  return String.raw`
-    $proof = [];
-    foreach (json_decode(base64_decode('${encoded}'), true, 512, JSON_THROW_ON_ERROR) as $url) {
+function transportProgram(url, transport) {
+  const encoded = Buffer.from(url).toString('base64');
+  return `$url = base64_decode('${encoded}');\n` + (transport === 'curl' ? String.raw`
       $curl = curl_init($url);
       curl_setopt_array($curl, [CURLOPT_RETURNTRANSFER=>true, CURLOPT_TIMEOUT=>30,
         CURLOPT_HTTPHEADER=>['Content-Type: application/json']]);
       $body = curl_exec($curl);
-      $proof[] = ['transport'=>'curl', 'url'=>$url, 'status'=>curl_getinfo($curl, CURLINFO_RESPONSE_CODE),
+      $proof = ['transport'=>'curl', 'url'=>$url, 'status'=>curl_getinfo($curl, CURLINFO_RESPONSE_CODE),
         'body'=>$body, 'errno'=>curl_errno($curl), 'error'=>curl_error($curl)];
-      curl_close($curl);
+      curl_close($curl);` : String.raw`
       unset($http_response_header);
       error_clear_last();
       $context = stream_context_create(['http'=>['method'=>'GET', 'timeout'=>30, 'ignore_errors'=>true,
@@ -127,14 +125,20 @@ function transportProgram(urls) {
       foreach ($http_response_header ?? [] as $header) {
         if (preg_match('~^HTTP/\S+\s+(\d+)~', $header, $match)) $status = (int) $match[1];
       }
-      $proof[] = ['transport'=>'stream', 'url'=>$url, 'status'=>$status, 'body'=>$body,
-        'error'=>$body === false ? (error_get_last()['message'] ?? 'HTTP stream failed') : ''];
-    }`;
+      $proof = ['transport'=>'stream', 'url'=>$url, 'status'=>$status, 'body'=>$body,
+        'error'=>$body === false ? (error_get_last()['message'] ?? 'HTTP stream failed') : ''];`);
 }
 
 export async function assertLiveNetworkApi(page) {
-  return assertNetworkApiProof(await phpProbe(page,
-    transportProgram([apiBase, ...targets.map(target => apiBase + `community/jcb/${target}`)])));
+  const proof = [];
+  for (const url of [apiBase, ...targets.map(target => apiBase + `community/jcb/${target}`)]) {
+    for (const transport of ['curl', 'stream']) {
+      // Each HTTP operation keeps its own PHP execution budget. Combining eight
+      // valid requests can exceed max_execution_time despite individual timeouts.
+      proof.push(await phpProbe(page, transportProgram(url, transport)));
+    }
+  }
+  return assertNetworkApiProof(proof);
 }
 
 const bootstrapJcb = String.raw`
