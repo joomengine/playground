@@ -575,10 +575,11 @@ is a setup reference, while browser limitations remain explicit below.
 
 The Joomla 6 **JCB + MCP** deploy installs the unchanged MCP package and configures
 its native Joomla token-authenticated HTTP endpoint for clients in the same browser.
-Deployment verification exercises HTTP initialization, tool discovery and an action
-description. Executing actions that call Joomla's API again also requires nested
-PHP request support; discovery alone does not verify those operations. Native
-processes and stdio are outside this integration. See [the MCP integration notes](dependencies/mcp/README.md).
+Browser tests exercise HTTP initialization, tool discovery, an action
+description and a category read through Joomla's API. The read uses a nested
+same-site HTTP request and verifies the returned category data, followed by MCP
+and frontend health checks. Native processes and stdio are outside this
+integration. See [the MCP integration notes](dependencies/mcp/README.md).
 
 ## Embedding and URL configuration
 

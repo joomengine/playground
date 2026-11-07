@@ -8,7 +8,7 @@ import { installPhpRecovery } from '../src/php-recovery.mjs';
 import { applyJcbRuntimeCompatibility } from '../src/jcb-compatibility.mjs';
 import { createNetworkTransport } from '../src/network-transport.mjs';
 import { createPhpSelfRequestFetch, createPhpRequestWorker, configurePhpCallback } from '../src/php-self-request.mjs';
-import { captureDebugFilesystem, applyDebugFilesystem } from '../src/code/debug-runtime.mjs';
+import { capturePhpFilesystem, applyPhpFilesystem } from '../src/php-filesystem.mjs';
 import { Worker } from 'node:worker_threads';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -154,7 +154,7 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
   };
   const handle = {
     ...raw,
-    captureFilesystem: () => captureDebugFilesystem(binary.FS),
+    captureFilesystem: () => capturePhpFilesystem(binary.FS),
     fs: Object.fromEntries(Object.entries(fs).map(([name, operation]) => [name, (...args) => enqueue(() => operation(...args))])),
     request: (...args) => enqueue(() => request(...args)),
     runPhp: (...args) => enqueue(() => runPhp(...args)),
@@ -200,7 +200,7 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
     if (requestContext) configurePhpCallback(php);
     configurePhpRouting(php, binary);
     for (const directory of ['/persist/www', '/persist/sessions', '/persist/meta', '/config', '/internal']) binary.FS.mkdirTree(directory);
-    if (requestContext?.snapshot) applyDebugFilesystem(binary.FS, captureDebugFilesystem(binary.FS), requestContext.snapshot);
+    if (requestContext?.snapshot) applyPhpFilesystem(binary.FS, capturePhpFilesystem(binary.FS), requestContext.snapshot);
     installPhpRecovery(php, {
       currentBinary: () => binary,
       prepare: next => {

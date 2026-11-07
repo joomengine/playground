@@ -229,7 +229,7 @@ export default Object.freeze({
   "code.layoutClosed": "Tata letak JoomEngine Code ini ditutup.",
   "code.actions": "Tindakan JoomEngine Code",
   "code.pausedRefresh": "Lanjutkan atau hentikan permintaan PHP yang dijeda sebelum memuat ulang situs.",
-  "help.mcpPreview": "Pratinjau MCP: hubungkan dan temukan alat di browser ini. Alat penyuntingan Joomla belum tersedia dalam rilis ini.",
+  "help.mcpPreview": "Pratinjau MCP: hubungkan dan temukan alat di browser ini.",
   "app.name": "JoomEngine Rocket",
   "app.tagline": "Penerapan Joomla yang cepat",
   "action.launch": "Jalankan",

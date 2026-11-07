@@ -213,7 +213,7 @@ export default Object.freeze({
   "code.layoutClosed": "यह JoomEngine Code लेआउट बंद है।",
   "code.actions": "JoomEngine Code कार्रवाइयाँ",
   "code.pausedRefresh": "साइट रीफ़्रेश करने से पहले रुके हुए PHP अनुरोध को जारी रखें या रोकें।",
-  "help.mcpPreview": "MCP पूर्वावलोकन: इस ब्राउज़र में कनेक्ट करें और टूल खोजें। इस संस्करण में Joomla संपादन टूल उपलब्ध नहीं हैं।",
+  "help.mcpPreview": "MCP पूर्वावलोकन: इस ब्राउज़र में कनेक्ट करें और टूल खोजें।",
   "app.name": "JoomEngine Rocket",
   "app.tagline": "तेज़ Joomla परिनियोजन",
   "action.launch": "शुरू करें",
