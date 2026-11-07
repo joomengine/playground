@@ -1,7 +1,5 @@
 import { parseExtensions, parseUserExtensions } from './config.mjs';
 
-const MAX_EXTENSIONS = 30;
-
 /** URL rows and advanced JSON are two editors for the same extension list. */
 export function createExtensionInputs({ textarea, rows, addButton, advanced, errorElement,
   baseURL, t, onChange = () => {},
@@ -29,14 +27,13 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
       control.input.disabled = Boolean(error);
       control.remove.disabled = Boolean(error);
     }
-    addButton.disabled = Boolean(error) || entries.length >= MAX_EXTENSIONS;
+    addButton.disabled = Boolean(error);
   };
   const rowError = () => {
     for (const [index, entry] of entries.entries()) {
       const value = entry.url.trim();
       let error;
       try {
-        if (value && !/^https?:\/\//i.test(value)) throw new TypeError(t('error.extensionUrl', { number: index + 1 }));
         if (value) parse([{ ...entry, url: value }]);
       } catch (failure) { error = failure; }
       const control = controls[index];
@@ -48,7 +45,7 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
   };
   const refresh = () => {
     addButton.textContent = t('action.addExtensionUrl');
-    addButton.disabled = Boolean(jsonError) || entries.length >= MAX_EXTENSIONS;
+    addButton.disabled = Boolean(jsonError);
     for (const [index, control] of controls.entries()) {
       const number = index + 1;
       const id = index ? `extension-url-${number}` : 'package-url';
@@ -77,7 +74,7 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
       const field = document.createElement('div'); field.className = 'field';
       const label = document.createElement('label');
       const input = document.createElement('input');
-      input.type = 'url'; input.value = entry.url; input.maxLength = 2048;
+      input.type = 'text'; input.value = entry.url;
       input.autocomplete = 'off'; input.spellcheck = false;
       input.placeholder = 'https://example.org/extension.zip';
       input.setAttribute('aria-describedby', errorElement.id);
@@ -139,7 +136,6 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
 
   addButton.addEventListener('click', () => {
     if (jsonError) return;
-    if (entries.length >= MAX_EXTENSIONS) { showError(new TypeError(t('error.extensionLimit'))); return; }
     entries.push({ url: '' }); renderRows(); writeRows();
     controls.at(-1).input.focus();
   });

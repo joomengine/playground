@@ -1,4 +1,5 @@
-import { ISOLATION_BOOTSTRAP_VERSION, isolationMarker, isolationNavigationURL, ownedClientURL } from './isolation.mjs';
+import { ISOLATION_BOOTSTRAP_VERSION, isolationMarker, isolationNavigationURL } from './isolation.mjs';
+import { networkFetch } from './network-transport.mjs';
 
 const timeout = (message, milliseconds, reject) => setTimeout(() => reject(new Error(message)), milliseconds);
 const stateKey = baseURL => `joomengine:isolation-bootstrap:${new URL(baseURL).href}`;
@@ -37,7 +38,7 @@ function writeBootstrapState(storage, baseURL, value) {
 }
 
 /** A bounded state machine: first controlled takeover, then at most one fallback. */
-export function nextIsolationAttempt({ url, state, verified, failure, fallbackEnabled, embedded = false }) {
+export function nextIsolationAttempt({ url, state, ready, failure, fallbackEnabled, embedded = false }) {
   const marker = isolationMarker(url);
   const current = marker?.version === ISOLATION_BOOTSTRAP_VERSION ? marker.policy : null;
   const next = { ...state, attempted: [...state.attempted] };
@@ -57,7 +58,7 @@ export function nextIsolationAttempt({ url, state, verified, failure, fallbackEn
     return fail('This browser needs require-corp compatibility mode, but that fallback is disabled for this deployment. Normal credentialless mode is unchanged. No saved site was changed.');
   }
   if (!next.attempted.includes(current)) next.attempted.push(current);
-  if (verified) return { reloadRequired: false, policy: current, mode: current === 'require-corp' ? 'compatibility' : 'normal', state: { ...next, phase: 'ready' } };
+  if (ready) return { reloadRequired: false, policy: current, mode: current === 'require-corp' ? 'compatibility' : 'normal', state: { ...next, phase: 'ready' } };
   if (current === 'credentialless' && fallbackEnabled && !next.attempted.includes('require-corp')) {
     // Enabling the deployment fallback later must allow a tab that previously
     // stopped in normal-only mode to make its still-untried compatibility attempt.
@@ -119,29 +120,7 @@ export async function establishServiceWorker(baseURL, serviceWorker = navigator.
   throw last;
 }
 
-export async function verifySharedMemoryEnvironment({ baseURL, ownerId, global = globalThis }) {
-  if (global.crossOriginIsolated !== true) return { ok: false, reason: 'crossOriginIsolated is false.' };
-  if (typeof global.SharedArrayBuffer !== 'function' || typeof global.Atomics?.add !== 'function') return { ok: false, reason: 'SharedArrayBuffer or Atomics is unavailable.' };
-  if (typeof global.Worker !== 'function' || typeof global.WebAssembly?.Memory !== 'function') return { ok: false, reason: 'Dedicated workers or WebAssembly memory is unavailable.' };
-  let worker, timer;
-  try {
-    const memory = new global.WebAssembly.Memory({ initial: 1, maximum: 2, shared: true });
-    if (!(memory.buffer instanceof global.SharedArrayBuffer)) throw new Error('WebAssembly shared memory is not usable.');
-    worker = new global.Worker(ownedClientURL(new URL('src/isolation-probe.mjs', baseURL), { baseURL, ownerId }), { type: 'module', name: 'joomengine-isolation-probe' });
-    await new Promise((resolve, reject) => {
-      timer = timeout('Shared-memory module-worker verification timed out.', 12_000, reject);
-      worker.onmessage = event => event.data?.ok && event.data.value === 2 && Atomics.load(new Int32Array(memory.buffer), 0) === 2
-        ? resolve() : reject(new Error(event.data?.error || 'Workers could not exchange shared WebAssembly memory.'));
-      worker.onerror = event => reject(new Error(event.message || 'Module workers are blocked by the browser or hosting policy.'));
-      worker.onmessageerror = () => reject(new Error('The browser could not exchange shared memory with its worker.'));
-      worker.postMessage({ memory });
-    });
-    return { ok: true };
-  } catch (error) { return { ok: false, reason: error.message }; }
-  finally { clearTimeout(timer); worker?.terminate(); }
-}
-
-export async function prepareBrowserIsolation({ baseURL, global = globalThis, fetcher = fetch } = {}) {
+export async function prepareBrowserIsolation({ baseURL, global = globalThis, fetcher = networkFetch } = {}) {
   const navigator = global.navigator;
   if (!global.isSecureContext || !navigator?.serviceWorker) throw new Error('The playground needs HTTPS or localhost and service-worker support.');
   if (!navigator.locks?.request || !global.indexedDB) throw new Error('This browser does not provide IndexedDB and Web Locks required by the playground. No saved site was changed.');
@@ -159,9 +138,11 @@ export async function prepareBrowserIsolation({ baseURL, global = globalThis, fe
     configuration = validateCompatibilityConfiguration(await response.json());
   } catch (error) { configurationFailure = `Compatibility configuration is unavailable (${controller.signal.aborted ? 'request timed out' : error.message}); automatic browser compatibility defaults are in use.`; }
   finally { clearTimeout(configurationTimer); }
-  const verified = await verifySharedMemoryEnvironment({ baseURL, ownerId: identity.clientId, global });
-  const result = nextIsolationAttempt({ url: global.location.href, state, verified: verified.ok,
-    failure: verified.reason || '', fallbackEnabled: configuration.fallbackEnabled, embedded: global.parent !== global });
+  const ready = global.crossOriginIsolated === true
+    && typeof global.SharedArrayBuffer === 'function' && typeof global.Atomics?.add === 'function'
+    && typeof global.Worker === 'function' && typeof global.WebAssembly?.Memory === 'function';
+  const result = nextIsolationAttempt({ url: global.location.href, state, ready,
+    failure: global.crossOriginIsolated !== true ? 'crossOriginIsolated is false.' : 'The browser lacks shared memory, WebAssembly or dedicated-worker support.', fallbackEnabled: configuration.fallbackEnabled, embedded: global.parent !== global });
   writeBootstrapState(storage, baseURL, result.state);
   if (result.error) throw new Error([result.error, configurationFailure].filter(Boolean).join(' '));
   return Object.freeze({ ...result, clientId: identity.clientId, ownerId: identity.clientId,

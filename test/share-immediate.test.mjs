@@ -43,5 +43,8 @@ test('immediate links retain configuration validation and do not export the laun
   assert.throws(() => createShareURL('https://playground.test/', {
     startupCommands: [['user:add', '--password=private']],
   }, { immediate: true }), /secrets/);
-  assert.throws(() => readURLConfiguration('https://playground.test/?immediate=1&extension=javascript:alert(1)'), /HTTP/i);
+  const target = `https://packages.example.test/extension.zip?token=${'x'.repeat(4096)}`;
+  const link = new URL('https://playground.test/?immediate=1');
+  link.searchParams.set('extension', target);
+  assert.equal(readURLConfiguration(link.href).config.extensions[0].url, target);
 });

@@ -88,12 +88,11 @@ export function parseTemplate(value, baseURL = 'https://playground.invalid/') {
   for (const key of Object.keys(value)) if (!allowed.includes(key)) throw new TypeError(`Template contains unsupported property ${key}.`);
   const result = { params: siteParameters(value.params ?? {}, 'Template parameters'), menuKeys: [] };
   if (value.url !== undefined) {
-    const url = new URL(text(value.url, 'Template URL', 2048), baseURL);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) throw new TypeError('Template packages require HTTP or HTTPS without credentials or fragments.');
+    if (typeof value.url !== 'string' || !value.url.trim()) throw new TypeError('Template must provide a URL.');
+    const url = new URL(value.url, baseURL);
     result.url = url.href;
     if (value.sha256 !== undefined) {
-      if (typeof value.sha256 !== 'string' || !/^[a-f\d]{64}$/i.test(value.sha256)) throw new TypeError('Template SHA-256 must contain 64 hexadecimal characters.');
-      result.sha256 = value.sha256.toLowerCase();
+      result.sha256 = typeof value.sha256 === 'string' ? value.sha256.toLowerCase() : value.sha256;
     }
   } else if (value.sha256 !== undefined) throw new TypeError('A template checksum requires a package URL.');
   if (value.element !== undefined) result.element = identifier(value.element, 'Template element');

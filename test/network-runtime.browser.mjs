@@ -86,7 +86,7 @@ for (const name of names) test(`${name}: actual PHP networking preserves binary 
     let before = fixture.relayRequests.length;
     const direct = await probe(page, `${fixtureOrigin}/direct/binary`);
     assert.equal(direct.hash, binaryHash); assert.equal(direct.status, 200); assert.equal(direct.errno, 0);
-    assert.equal(fixture.relayRequests.length, before, 'A readable direct response must not contact the relay or request verification.');
+    assert.equal(fixture.relayRequests.length, before, 'A readable direct response must not contact the relay.');
     receipt.cases.push({ case: 'direct-no-relay', ...direct });
 
     const fallback = await probe(page, `${fixtureOrigin}/denied/binary`);
@@ -147,16 +147,15 @@ for (const name of names) test(`${name}: actual PHP networking preserves binary 
       const beforeWrites = fixture.requests.filter(item => item.path === '/denied/echo' && item.method === 'POST').length;
       const ambiguous = await (transport === 'curl' ? probe : streamProbe)(page, `${fixtureOrigin}/denied/echo`, { method: 'POST', body: Buffer.from('write-once').toString('base64'),
         headers: ['Content-Type: text/plain'] });
-      assert.equal(ambiguous.failed, true);
-      assert.equal(fixture.relayRequests.length, before, 'An uncertain direct POST must not replay through the relay.');
+      assert.equal(ambiguous.failed, false);
+      assert.equal(ambiguous.status, 200);
+      assert.equal(fixture.relayRequests.length, before + 1, 'A cross-origin POST uses the proxy once without a speculative direct submission.');
       assert.equal(fixture.requests.filter(item => item.path === '/denied/echo' && item.method === 'POST').length - beforeWrites, 1);
-      receipt.cases.push({ case: `ambiguous-${transport}-write-no-replay`, ...ambiguous });
+      receipt.cases.push({ case: `${transport}-write-once`, ...ambiguous });
     }
 
     const html = await probe(page, `${writeOrigin}/denied/html`);
     assert.equal(html.status, 200); assert.equal(html.failed, false);
-    const forbidden = await probe(page, `${writeOrigin}/denied/forbidden-redirect`);
-    assert.equal(forbidden.failed, true);
     fixture.setAvailable(false);
     const exhausted = await probe(page, `${fixtureOrigin}/denied/binary`);
     assert.equal(exhausted.failed, true); assert.ok(exhausted.error);

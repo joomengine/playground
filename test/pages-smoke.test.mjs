@@ -11,10 +11,10 @@ const buildId = 'b'.repeat(64);
 const canonicalURL = 'https://playground.example.com/site/';
 const relay = 'https://relay.example.com';
 
-async function fixture(t, { enabled = false } = {}) {
+async function fixture(t, { endpoint = null } = {}) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'pages-smoke-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const config = normalizeNetworkConfig({ enabled, endpoint: relay, turnstileSiteKey: 'public-site-key' });
+  const config = normalizeNetworkConfig({ endpoint });
   const manifest = { schemaVersion: 1, sourceCommit: commit, deployment: { environment: 'production', canonicalUrl: canonicalURL }, network: config };
   const files = new Map([
     ['assets/manifest.json', JSON.stringify(manifest)], ['config/network.json', JSON.stringify(config)],
@@ -35,14 +35,6 @@ async function fixture(t, { enabled = false } = {}) {
     const headers = new Headers(init.headers);
     assert.equal(headers.has('Authorization'), false);
     assert.equal(headers.has('Cookie'), false);
-    assert.equal(headers.has('X-Playground-Staging-Test'), false);
-    if (url.origin === relay) {
-      if (url.pathname === '/healthz') return Response.json({ version: 1, enabled: true, mode: 'controlled-origins' });
-      assert.equal(url.pathname, '/v1/fetch');
-      assert.equal(init.method, 'POST');
-      assert.equal(headers.get('Origin'), 'https://unapproved.example.com');
-      return Response.json({ version: 1, error: { code: 'ORIGIN_NOT_ALLOWED' } }, { status: 403 });
-    }
     assert.equal(url.origin, new URL(canonicalURL).origin);
     const file = url.pathname.slice('/site/'.length) || 'index.html';
     assert.ok(files.has(file), `Unexpected asset: ${url}`);
@@ -52,24 +44,23 @@ async function fixture(t, { enabled = false } = {}) {
     expectedCommit: commit, fetcher, timeoutMs: 1000, retryMs: 0, maxAttempts: 2 } };
 }
 
-test('post-publication smoke checks the canonical deployment even when networking is disabled', async t => {
+test('post-publication smoke checks the canonical deployment with direct-only networking', async t => {
   const f = await fixture(t);
   const result = await verifyPublishedPlayground(f.options);
   assert.equal(result.url, canonicalURL);
   assert.equal(result.sourceCommit, commit);
   assert.equal(result.buildId, buildId);
-  assert.equal(result.networkEnabled, false);
-  assert.equal(result.relay, null);
+  assert.equal(result.networkEndpoint, null);
   assert.equal(result.attempts, 1);
   assert.equal(f.calls.length, 5);
   assert.ok(f.calls.every(call => call.url.startsWith(canonicalURL)));
 });
 
-test('enabled publication smoke repeats real health and unapproved-origin rejection checks', async t => {
-  const f = await fixture(t, { enabled: true });
+test('a configured fallback endpoint does not add a live proxy prerequisite to publication', async t => {
+  const f = await fixture(t, { endpoint: relay });
   const result = await verifyPublishedPlayground(f.options);
-  assert.equal(result.relay.unauthorizedOriginRejected, true);
-  assert.equal(f.calls.length, 7);
+  assert.equal(result.networkEndpoint, relay);
+  assert.equal(f.calls.length, 5);
 });
 
 test('stale CDN manifest is retried and the entire current publication is then verified', async t => {
@@ -89,7 +80,7 @@ test('persistent stale manifest, configuration, shell and app content fail the p
   for (const file of ['assets/manifest.json', 'config/network.json', 'build.json', 'index.html', 'src/app.mjs']) {
     const f = await fixture(t);
     if (file === 'assets/manifest.json') f.files.set(file, JSON.stringify({ ...f.manifest, sourceCommit: 'c'.repeat(40) }));
-    else if (file === 'config/network.json') f.files.set(file, JSON.stringify({ ...f.config, maxRedirects: 4 }));
+    else if (file === 'config/network.json') f.files.set(file, JSON.stringify({ ...f.config, endpoint: 'https://other.example.com' }));
     else f.files.set(file, 'stale content');
     await assert.rejects(verifyPublishedPlayground(f.options), /after 2 attempt\(s\): Published .* differs/);
   }
@@ -97,9 +88,9 @@ test('persistent stale manifest, configuration, shell and app content fail the p
 
 test('public config must be complete, normalized and free of unsupported settings', async t => {
   const f = await fixture(t);
-  for (const invalid of [{ enabled: false }, { ...f.config, privateSetting: 'not-public' }]) {
+  for (const invalid of [{}, { ...f.config, privateSetting: 'not-public' }]) {
     f.files.set('config/network.json', JSON.stringify(invalid));
-    await assert.rejects(verifyPublishedPlayground({ ...f.options, maxAttempts: 1 }), /normalized configuration|non-public setting/);
+    await assert.rejects(verifyPublishedPlayground({ ...f.options, maxAttempts: 1 }), /normalized configuration/);
   }
 });
 
@@ -131,20 +122,6 @@ test('an unfinished public response is canceled by the bounded overall deadline'
   }));
   await assert.rejects(verifyPublishedPlayground({ ...f.options, fetcher, timeoutMs: 25 }), /overall deadline/);
   assert.equal(aborted, true);
-});
-
-test('unhealthy enabled relay or accepted unapproved origin fails the publication smoke', async t => {
-  const f = await fixture(t, { enabled: true });
-  for (const failure of ['health', 'origin']) {
-    const fetcher = async (input, init) => {
-      const url = new URL(input);
-      if (url.origin === relay && url.pathname === (failure === 'health' ? '/healthz' : '/v1/fetch')) {
-        return failure === 'health' ? Response.json({ version: 1, enabled: false, mode: 'controlled-origins' }) : new Response('accepted');
-      }
-      return f.fetcher(input, init);
-    };
-    await assert.rejects(verifyPublishedPlayground({ ...f.options, fetcher, maxAttempts: 1 }), /did not match the tested deployment/);
-  }
 });
 
 test('Pages preserves the downloaded candidate and runs smoke only after deployment, with failure propagation', async () => {

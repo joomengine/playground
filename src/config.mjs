@@ -1,4 +1,5 @@
 import { normalizePhpSettings } from './php-settings.mjs';
+import { networkFetch } from './network-transport.mjs';
 import { parseMenus, parseTemplate, parseLanguageTags } from './site-configuration.mjs';
 export { parseMenus, parseTemplate, parseLanguageTags } from './site-configuration.mjs';
 
@@ -79,38 +80,26 @@ function parseJSONList(value, name) {
   }
 }
 
-export function parseExtensions(value = [], baseURL = 'https://playground.invalid/', { allowHttp = true } = {}) {
+export function parseExtensions(value = [], baseURL = 'https://playground.invalid/') {
   const entries = parseJSONList(value, 'Extensions');
-  if (entries.length > 30) throw new TypeError('Choose at most 30 extension packages.');
   return entries.map((entry, index) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new TypeError(`Extension ${index + 1} must be an object containing a url, for example {"url":"https://example.org/extension.zip"}.`);
-    const raw = requireText(entry.url, `Extension ${index + 1} URL`, 2048);
-    let url;
-    try { url = new URL(raw, baseURL); } catch { throw new TypeError(`Extension ${index + 1} has an invalid URL.`); }
-    const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-    if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && (allowHttp || local))) || url.username || url.password || url.hash) {
-      throw new TypeError(`Extension ${index + 1} needs ${allowHttp ? 'an HTTP or HTTPS' : 'an HTTPS'} URL without credentials or a fragment.`);
-    }
-    if (entry.sha256 !== undefined && (typeof entry.sha256 !== 'string' || !SHA256.test(entry.sha256))) {
-      throw new TypeError(`Extension ${index + 1} SHA-256 must contain 64 hexadecimal characters.`);
-    }
-    if (entry.sha512 !== undefined && (typeof entry.sha512 !== 'string' || !SHA512.test(entry.sha512))) {
-      throw new TypeError(`Extension ${index + 1} SHA-512 must contain 128 hexadecimal characters.`);
-    }
-    return { url: url.href, ...(entry.sha256 ? { sha256: entry.sha256.toLowerCase() } : {}),
-      ...(entry.sha512 ? { sha512: entry.sha512.toLowerCase() } : {}) };
+    if (typeof entry.url !== 'string' || !entry.url.trim()) throw new TypeError(`Extension ${index + 1} must provide a URL.`);
+    const url = new URL(entry.url, baseURL);
+    return { url: url.href, ...(typeof entry.sha256 === 'string' ? { sha256: entry.sha256.toLowerCase() } : {}),
+      ...(typeof entry.sha512 === 'string' ? { sha512: entry.sha512.toLowerCase() } : {}) };
   });
 }
 
 /** User URLs are installed by Joomla's normal installer; only managed packages
  * use the reviewed integrity metadata supplied by the deployment catalog. */
-export function parseUserExtensions(value = [], baseURL = 'https://playground.invalid/', options = {}) {
+export function parseUserExtensions(value = [], baseURL = 'https://playground.invalid/') {
   const entries = parseJSONList(value, 'Extensions').map(entry => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
     const { sha256, sha512, ...packageEntry } = entry;
     return packageEntry;
   });
-  return parseExtensions(entries, baseURL, options);
+  return parseExtensions(entries, baseURL);
 }
 
 export function parseUserTemplate(value, baseURL = 'https://playground.invalid/') {
@@ -131,7 +120,7 @@ export function parseStartupCommands(value = []) {
     if (!Array.isArray(argv) || argv.length === 0 || argv.length > 64) {
       throw new TypeError(`Startup command ${index + 1} must be a nonempty array of arguments.`);
     }
-    const result = argv.map((argument, argumentIndex) => requireText(argument, argumentIndex === 0 ? 'Command name' : 'Command argument', 4096, { empty: argumentIndex > 0 }));
+    const result = argv.map((argument, argumentIndex) => requireText(argument, argumentIndex === 0 ? 'Command name' : 'Command argument', Infinity, { empty: argumentIndex > 0 }));
     if (!/^[a-z][a-z0-9:_-]*$/i.test(result[0])) throw new TypeError('Use a Joomla command name without a PHP or shell prefix.');
     return result;
   });
@@ -245,7 +234,7 @@ export function normalizeConfiguration(input = {}, { catalog, baseURL = 'https:/
   config.extensions = parseExtensions(extensions, baseURL);
   config.startupCommands = parseStartupCommands(config.startupCommands ?? []);
   if (!Array.isArray(config.languages ?? []) || (config.languages ?? []).length > 30) throw new TypeError('Language packages must be an array of at most 30 entries.');
-  config.languages = (config.languages ?? []).map((entry) => ({ ...parseExtensions([entry], baseURL, { allowHttp: false })[0], tag: normalizeLanguage(requireText(entry.tag, 'Language package tag', 20)) }));
+  config.languages = (config.languages ?? []).map((entry) => ({ ...parseExtensions([entry], baseURL)[0], tag: normalizeLanguage(requireText(entry.tag, 'Language package tag', 20)) }));
   return config;
 }
 
@@ -256,14 +245,12 @@ export function normalizeJcbVersion(value) {
 }
 
 export function normalizeJcbPackage(value, baseURL = 'https://playground.invalid/') {
-  const result = parseExtensions([value], baseURL, { allowHttp: false })[0];
-  if (!result.sha256 && !result.sha512) throw new TypeError('The JCB package requires a SHA-256 or SHA-512 checksum.');
+  const result = parseExtensions([value], baseURL)[0];
   return result;
 }
 
 export function normalizeJoomlaPackage(value, baseURL = 'https://playground.invalid/', published) {
-  const result = parseExtensions([value], baseURL, { allowHttp: false })[0];
-  if (!result.sha256) throw new TypeError('The Joomla package requires a SHA-256 checksum.');
+  const result = parseExtensions([value], baseURL)[0];
   if (!Array.isArray(value.php) || !value.php.length || value.php.length > 30 || value.php.some(version => typeof version !== 'string' || !/^\d+\.\d+$/.test(version))) {
     throw new TypeError('The Joomla package must list its available PHP versions.');
   }
@@ -336,7 +323,7 @@ export function readURLConfiguration(url) {
   if (params.has('extension')) config.extensions = parseUserExtensions([...(config.extensions ?? []), ...params.getAll('extension').map((value) => ({ url: value }))], location.href);
   if (params.has('commands') || params.has('startupCommands')) config.startupCommands = parseStartupCommands(params.get('commands') ?? params.get('startupCommands'));
   const deploymentOptions = ['name', 'deploy', 'php', 'joomla', 'jcb', 'language', 'login', 'fresh', 'extensions', 'extension', 'commands', 'startupCommands'];
-  const document = params.has('config') ? parseExtensions([{ url: params.get('config'), ...(params.has('sha256') ? { sha256: params.get('sha256') } : {}) }], location.href, { allowHttp: false })[0] : null;
+  const document = params.has('config') ? parseExtensions([{ url: params.get('config'), ...(params.has('sha256') ? { sha256: params.get('sha256') } : {}) }], location.href)[0] : null;
   const immediate = params.has('immediate') ? boolean('immediate') : false;
   return { config, immediate, autostart: params.has('start') ? boolean('start') : immediate || !!document || fragment.has('deploy') || deploymentOptions.some((name) => params.has(name)), ...(document ? { document } : {}) };
 }
@@ -523,19 +510,18 @@ function parseDocumentConfiguration(value, { baseURL, full, publicOnly }) {
         ...(typeof entry.sha256 === 'string' && SHA256.test(entry.sha256) ? { sha256: entry.sha256.toLowerCase() } : {}),
         ...(typeof entry.sha512 === 'string' && SHA512.test(entry.sha512) ? { sha512: entry.sha512.toLowerCase() } : {}) };
     });
-    if (result.extensions.length > 30) throw new TypeError('Choose at most 30 extension packages.');
     result.addonStartupCommands = parseStartupCommands(value.addonStartupCommands ?? value.startupCommands ?? []);
     if (value.addonTemplate !== undefined) result.addonTemplate = parseUserTemplate(value.addonTemplate, baseURL);
   } else if (value.extensions !== undefined) result.extensions = parseUserExtensions(value.extensions, baseURL);
   if (value.startupCommands !== undefined) result.startupCommands = parseStartupCommands(value.startupCommands);
   if (value.languages !== undefined) {
     if (!Array.isArray(value.languages) || value.languages.length > 30) throw new TypeError('Language packages must be an array of at most 30 entries.');
-    result.languages = value.languages.map((entry) => ({ ...parseExtensions([entry], baseURL, { allowHttp: false })[0], tag: normalizeLanguage(entry.tag) }));
+    result.languages = value.languages.map((entry) => ({ ...parseExtensions([entry], baseURL)[0], tag: normalizeLanguage(entry.tag) }));
   }
   if (full) {
     const languages = value.addonLanguages ?? value.languages ?? [];
     if (!Array.isArray(languages) || languages.length > 30) throw new TypeError('Language packages must be an array of at most 30 entries.');
-    result.addonLanguages = languages.map(entry => ({ ...parseExtensions([entry], baseURL, { allowHttp: false })[0], tag: normalizeLanguage(entry.tag) }));
+    result.addonLanguages = languages.map(entry => ({ ...parseExtensions([entry], baseURL)[0], tag: normalizeLanguage(entry.tag) }));
     result.startupCommands ??= [];
     result.languages ??= [];
   }
@@ -580,21 +566,17 @@ function decodeDocument(encoded) {
 }
 
 /** Fetch public setup JSON when it is too large to place directly in a link. */
-export async function loadDeploymentDocument(url, { sha256, fetcher = fetch, baseURL = 'https://playground.joomengine.org/' } = {}) {
-  const source = parseExtensions([{ url, ...(sha256 ? { sha256 } : {}) }], baseURL, { allowHttp: false })[0];
-  const response = await fetcher(source.url, { credentials: 'omit', redirect: 'follow', signal: AbortSignal.timeout(30_000) });
+export async function loadDeploymentDocument(url, { fetcher = networkFetch, baseURL = 'https://playground.joomengine.org/' } = {}) {
+  const source = parseExtensions([{ url }], baseURL)[0];
+  const response = await fetcher(source.url);
   if (!response.ok) throw new Error(`Deployment configuration download failed: HTTP ${response.status}.`);
   if (Number(response.headers.get('Content-Length')) > MAX_DEPLOYMENT_BYTES) throw new RangeError('Deployment JSON exceeds 1 MiB.');
   const bytes = await readDeploymentBytes(response);
-  if (source.sha256) {
-    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (byte) => byte.toString(16).padStart(2, '0')).join('');
-    if (digest !== source.sha256) throw new Error('Deployment configuration checksum does not match.');
-  }
   return parseDeploymentDocument(new TextDecoder('utf-8', { fatal: true }).decode(bytes), { baseURL: source.url, publicOnly: true });
 }
 
 export function createDeploymentSourceURL(location, source) {
-  const url = new URL(location); const item = parseExtensions([source], url.href, { allowHttp: false })[0];
+  const url = new URL(location); const item = parseExtensions([source], url.href)[0];
   assertPublic(item);
   url.search = ''; url.hash = ''; url.searchParams.set('config', item.url);
   if (item.sha256) url.searchParams.set('sha256', item.sha256);

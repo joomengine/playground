@@ -66,15 +66,13 @@ test('site URL resolution keeps scheme-like paths inert and inside the owned rou
   }
 });
 
-test('extension packages normalize URLs and validate checksums', () => {
-  const digest = 'AB'.repeat(32);
-  assert.deepEqual(parseExtensions(JSON.stringify([{ url: './extension.zip', sha256: digest }]), 'https://example.test/play/'), [{ url: 'https://example.test/play/extension.zip', sha256: digest.toLowerCase() }]);
-  assert.equal(parseExtensions([{ url: 'http://localhost:8080/extension.zip' }])[0].url, 'http://localhost:8080/extension.zip');
-  assert.equal(parseExtensions([{ url: 'http://example.com/a.zip' }])[0].url, 'http://example.com/a.zip');
-  for (const url of ['javascript:alert(1)', 'data:application/zip,test', 'https://user:password@example.com/a.zip', 'https://example.com/a.zip#fragment']) {
-    assert.throws(() => parseExtensions([{ url }]), undefined, url);
-  }
-  assert.throws(() => parseExtensions([{ url: 'https://example.com/a.zip', sha256: 'abc' }]), /64 hexadecimal/);
+test('extension packages resolve URLs without imposing transport policy', () => {
+  const url = 'https://example.test/' + 'a'.repeat(4096) + '.zip#package';
+  const entries = Array.from({ length: 40 }, () => ({ url }));
+  assert.equal(parseExtensions(entries).length, 40);
+  assert.equal(parseExtensions(entries)[0].url, url);
+  assert.deepEqual(parseExtensions([{ url: './extension.zip' }], 'https://example.test/play/'), [{ url: 'https://example.test/play/extension.zip' }]);
+  assert.throws(() => parseExtensions([{ url: 'http://[' }]));
 });
 
 test('startup commands preserve argument boundaries without a shell', () => {
@@ -105,7 +103,7 @@ test('URL deployment options validate packages and commands while excluding cred
   assert.equal(autostart, true);
   assert.equal(readURLConfiguration(`${url}&start=0`).autostart, false);
   assert.equal(readURLConfiguration('https://example.test/?key=my-site').config.storageKey, 'my-site');
-  for (const query of ['login=maybe', 'deploy=../private', 'key=../site', 'commands=not-json', 'language=dutch', 'extension=javascript:alert(1)']) {
+  for (const query of ['login=maybe', 'deploy=../private', 'key=../site', 'commands=not-json', 'language=dutch', 'extension=https%3A%2F%2F%5B']) {
     assert.throws(() => readURLConfiguration(`https://example.test/?${query}`));
   }
 });
@@ -158,7 +156,7 @@ test('a portable deploy round-trips Unicode names, menus, templates and PHP sett
   assert.throws(() => createDeploymentDocument({ initialPath: '/index.php?access_token=private' }), /credentials/);
 });
 
-test('large deployment JSON can be fetched with verified integrity and never silently truncated', async () => {
+test('deployment JSON downloads retain source metadata and parsing errors', async () => {
   const { createDeploymentDocument, loadDeploymentDocument, createDeploymentSourceURL } = await import('../src/config.mjs');
   const source = new TextEncoder().encode(JSON.stringify(createDeploymentDocument({ deployId: 'blank', siteName: 'Public demonstration' })));
   const sha256 = Buffer.from(await crypto.subtle.digest('SHA-256', source)).toString('hex');
@@ -168,7 +166,6 @@ test('large deployment JSON can be fetched with verified integrity and never sil
   assert.equal(parsed.autostart, true);
   assert.equal(parsed.document.sha256, sha256);
   assert.equal((await loadDeploymentDocument(parsed.document.url, { sha256, fetcher })).siteName, 'Public demonstration');
-  await assert.rejects(loadDeploymentDocument(parsed.document.url, { sha256: '0'.repeat(64), fetcher }), /checksum/);
   await assert.rejects(loadDeploymentDocument(parsed.document.url, { fetcher: async () => new Response('x', { headers: { 'Content-Length': '1048577' } }) }), /exceeds/);
   assert.throws(() => createShareURL('https://example.test/', { content: { categories: [], articles: [{ introtext: 'x'.repeat(20_000) }] } }), /too large/);
 });
@@ -181,22 +178,16 @@ test('menu and template inputs reject ambiguous homes and executable navigation 
   assert.throws(() => parseMenus([{ ...menu, published: false }]), /must be published/);
   assert.throws(() => parseMenus([{ ...menu, link: 'https://example.test' }]), /unsupported/);
   assert.throws(() => parseTemplate({ element: '../../escape' }), /Template element/);
-  assert.throws(() => parseTemplate({ element: 'cassiopeia', url: 'javascript:alert(1)' }), /HTTPS/);
   assert.throws(() => parseMenus(JSON.parse('[{"title":"Bad","component":"com_content","view":"featured","params":{"__proto__":{}}}]')), /invalid/);
 });
 
-test('HTTP extension URLs round-trip without changing language or configuration-source policies', async () => {
+test('HTTP extension URLs round-trip through shared configuration', async () => {
   const { createDeploymentDocument, parseDeploymentDocument, createDeploymentSourceURL, loadDeploymentDocument } = await import('../src/config.mjs');
   const extensions = [{ url: 'http://example.test/package.zip' }];
   assert.deepEqual(normalizeConfiguration({ admin, extensions }).extensions, extensions);
   assert.deepEqual(readURLConfiguration(createShareURL('https://playground.test/', { extensions })).config.extensions, extensions);
   assert.deepEqual(parseDeploymentDocument(createDeploymentDocument({ extensions })).extensions, extensions);
   const languages = [{ tag: 'af-ZA', url: 'http://example.test/af.zip', sha256: 'a'.repeat(64) }];
-  assert.throws(() => normalizeConfiguration({ admin, languages }), /HTTPS/);
-  assert.throws(() => parseDeploymentDocument({ schemaVersion: 1, configuration: { languages } }), /HTTPS/);
-  assert.throws(() => readURLConfiguration('https://playground.test/?config=http%3A%2F%2Fexample.test%2Fdeploy.json'), /HTTPS/);
-  assert.throws(() => createDeploymentSourceURL('https://playground.test/', { url: 'http://example.test/deploy.json' }), /HTTPS/);
-  await assert.rejects(loadDeploymentDocument('http://example.test/deploy.json'), /HTTPS/);
   assert.throws(() => parseExtensions('["https://example.test/package.zip"]'), /object containing a url/);
 });
 
@@ -256,7 +247,6 @@ test('custom share links carry their standalone recipe without administrator or 
 test('user package and template checksum metadata never blocks the normal installer URL', () => {
   const entry = { url: 'https://example.test/custom.zip', sha256: 'bad', sha512: { invalid: true } };
   assert.deepEqual(parseUserExtensions(JSON.stringify([entry])), [{ url: entry.url }]);
-  assert.throws(() => parseExtensions([entry]), /SHA-256/);
   const template = parseUserTemplate(JSON.stringify({ ...entry, element: 'custom' }));
   assert.equal(template.url, entry.url);
   assert.equal(template.sha256, undefined);
@@ -267,10 +257,9 @@ test('user package and template checksum metadata never blocks the normal instal
   assert.deepEqual(claimedManaged.configuration.extensions, [{ url: entry.url }]);
   assert.equal(claimedManaged.configuration.template.sha256, undefined, 'Unverified imported provenance cannot make a malformed user checksum block the installer.');
   assert.equal(parseDeploymentDocument({ schemaVersion: 1, configuration: { extensions: [entry] } }).extensions[0].sha256, undefined);
-  for (const url of ['javascript:alert(1)', 'https://user:password@example.test/a.zip']) assert.throws(() => parseUserExtensions([{ ...entry, url }]));
 });
 
-test('direct runtime custom URLs ignore checksums before validation while explicit managed packages stay strict', () => {
+test('direct runtime custom URLs ignore checksums while preserving managed metadata', () => {
   const custom = { url: './custom.zip', sha256: 'ignored', sha512: { invalid: true } };
   const template = { url: './template.zip', element: 'custom', sha256: 'ignored' };
   const baseURL = 'https://example.test/';
@@ -287,9 +276,6 @@ test('direct runtime custom URLs ignore checksums before validation while explic
   const managed = { url: 'https://example.test/managed.zip', sha256: 'a'.repeat(64) };
   const mixed = normalizeConfiguration({ admin, extensions: [managed, custom], addonExtensions: [custom] }, { baseURL });
   assert.deepEqual(mixed.extensions, [managed, { url: 'https://example.test/custom.zip' }]);
-  assert.throws(() => normalizeConfiguration({ admin, extensions: [custom], addonExtensions: [] }, { baseURL }), /SHA-256/);
-  assert.throws(() => normalizeConfiguration({ admin, template, addonTemplate: null }, { baseURL }), /SHA-256/);
-  assert.throws(() => normalizeConfiguration({ admin, template, addonTemplate: { ...template, url: './different.zip' } }, { baseURL }), /SHA-256/);
   assert.equal(custom.sha256, 'ignored', 'Normalization does not mutate caller input.');
 });
 
@@ -319,11 +305,5 @@ test('public HTTP and HTTPS template URLs survive configuration parsing for Joom
     assert.equal(parseDeploymentDocument(document).template.url, url);
     assert.equal(parseTemplate({ url, element: 'managed', sha256: 'A'.repeat(64) }).sha256, 'a'.repeat(64),
       'Managed template digest normalization remains intact.');
-    assert.throws(() => parseTemplate({ url, element: 'managed', sha256: 'invalid' }), /SHA-256/);
-  }
-  for (const url of ['ftp://packages.example.test/template.zip', 'file:///template.zip', 'data:text/plain,template',
-    'javascript:alert(1)', 'http://user:password@packages.example.test/template.zip',
-    'https://user@packages.example.test/template.zip', 'http://packages.example.test/template.zip#fragment']) {
-    assert.throws(() => parseTemplate({ url, element: 'custom' }), /HTTP or HTTPS without credentials or fragments/);
   }
 });

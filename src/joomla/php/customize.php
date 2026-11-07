@@ -151,7 +151,7 @@ try {
             }
         }
     }
-    playgroundFinish(['ok' => true, 'language' => $selected, 'content' => $created]);
+    playgroundFinish(['ok' => true, 'version' => JVERSION, 'siteName' => $application->get('sitename'), 'language' => $selected, 'content' => $created]);
 } catch (Throwable $error) {
     playgroundFinish(['ok' => false, 'error' => $error->getMessage()]);
 }

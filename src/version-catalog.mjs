@@ -1,7 +1,8 @@
-/** Read the small, verified catalog published with this Playground build. */
+import { networkFetch } from './network-transport.mjs';
+
+/** Read the catalog published with this Playground build. */
 const DEFAULT_URL = new URL('../assets/version-catalog.json', import.meta.url);
 const VERSION = /^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\d*(?:-dev)?|-dev)?$/i;
-const MAX_BYTES = 1024 * 1024;
 
 export function normalizeVersionCatalog(value, { url = DEFAULT_URL } = {}) {
   const base = new URL(url);
@@ -18,11 +19,7 @@ export function normalizeVersionCatalog(value, { url = DEFAULT_URL } = {}) {
         throw new TypeError('The published version catalog contains an invalid or duplicate package.');
       }
       const sha256 = entry.sha256.toLowerCase();
-      const pinnedJoomla = product === 'joomla' && entry.channel === 'stable'
-        && entry.url === `joomla/Joomla_${entry.version}.zip`;
-      if (entry.url !== `packages/${sha256}.zip` && !pinnedJoomla) throw new TypeError('Published packages must use their verified local ZIP.');
       const packageURL = new URL(entry.url, base);
-      if (packageURL.origin !== base.origin) throw new TypeError('Published packages must remain on the Playground origin.');
       if (entry.sha512 != null && !/^[a-f0-9]{128}$/i.test(entry.sha512)) throw new TypeError('The published package SHA-512 is invalid.');
       if (entry.phpMinimum !== undefined && !/^\d+\.\d+\.\d+$/.test(entry.phpMinimum)) throw new TypeError('The published PHP minimum is invalid.');
       if (entry.php !== undefined && (!Array.isArray(entry.php) || !entry.php.length || entry.php.some(version => !/^\d+\.\d+$/.test(version)))) {
@@ -38,15 +35,11 @@ export function normalizeVersionCatalog(value, { url = DEFAULT_URL } = {}) {
     joomla: normalize(value.joomla, 'joomla'), jcb: normalize(value.jcb, 'jcb'), errors: [] };
 }
 
-export async function loadVersionCatalog({ url = DEFAULT_URL, fetchImpl = globalThis.fetch, signal } = {}) {
+export async function loadVersionCatalog({ url = DEFAULT_URL, fetchImpl = networkFetch, signal } = {}) {
   const target = new URL(url);
-  const response = await fetchImpl(target.href, { cache: 'no-cache', credentials: 'same-origin',
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) });
+  const response = await fetchImpl(target.href, { cache: 'no-cache', signal });
   if (!response.ok) throw new Error(`The version catalog is unavailable (HTTP ${response.status}).`);
-  if (response.url && new URL(response.url).origin !== target.origin) throw new Error('The version catalog redirected away from the Playground origin.');
-  if (Number(response.headers.get('Content-Length')) > MAX_BYTES) throw new Error('The version catalog exceeds its size limit.');
   const bytes = await response.arrayBuffer();
-  if (bytes.byteLength > MAX_BYTES) throw new Error('The version catalog exceeds its size limit.');
   return normalizeVersionCatalog(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)), { url: target });
 }
 

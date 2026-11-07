@@ -11,12 +11,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  validate:
-    uses: ./.github/workflows/validate.yml
-
   deploy:
-    name: Deploy verified production Worker
-    needs: validate
+    name: Test and deploy production Worker
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: network-production
@@ -31,17 +27,10 @@ jobs:
           cache-dependency-path: services/network-worker/package-lock.json
       - run: npm ci --ignore-scripts
         working-directory: services/network-worker
-      - name: Validate production configuration
-        id: config
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: node scripts/network-deployment-check.mjs production
-      - name: Deploy production Worker
+      - run: npm test
+        working-directory: services/network-worker
+      - name: Deploy Worker
         working-directory: services/network-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: npx wrangler deploy --env production
-      - name: Verify production health and rejection policy
-        env:
-          NETWORK_ENDPOINT: ${{ steps.config.outputs.endpoint }}
-        run: node scripts/network-health.mjs

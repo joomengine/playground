@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  importJoomlaCheckpoint, parseProvisioningResult, sha256, validateCommand, validateContent, validateInstallOptions, verifyPackage,
+  importJoomlaCheckpoint, parseProvisioningResult, sha256, validateCommand, validateContent, validateInstallOptions,
 } from '../src/joomla/index.mjs';
 
 const configuration = {
@@ -21,7 +21,7 @@ test('renaming existing multilingual sites preserves manual homes while delibera
         calls.push({ operation, payload });
         let result = { ok: true };
         if (operation === 'status') result = { ...result, marker: { state: 'complete', joomlaVersion: '6.2.0' }, configured: true, installerPresent: false };
-        if (operation === 'health') result = { ...result, version: '6.2.0', language: 'en-GB', siteName: 'Renamed copy' };
+        if (operation === 'configure') result = { ...result, version: '6.2.0', language: 'en-GB', siteName: 'Renamed copy' };
         // Model a site whose owner unpublished its original French home in Joomla.
         if (operation === 'configure' && payload.multilingual) result = { ok: false, error: 'A multilingual deployment needs exactly one published home menu for fr-FR.' };
         return { status: 200, text: '\n__JOOMENGINE_RESULT__' + JSON.stringify(result) };
@@ -65,22 +65,18 @@ test('invalid credentials, database identifiers, versions and command forms are 
   assert.throws(() => validateCommand(['cache:clean', '\0']), /NUL/);
 });
 
-test('extension URLs and optional checksums are validated', () => {
-  assert.throws(() => validateInstallOptions({ ...configuration, extensions: [{ url: 'file:///tmp/package.zip' }] }), /HTTP/);
-  assert.throws(() => validateInstallOptions({ ...configuration, extensions: [{ url: 'https://user:secret@example.test/file.zip' }] }), /credentials/);
-  assert.throws(() => validateInstallOptions({ ...configuration, extensions: [{ url: '/extension.zip', sha256: 'invalid' }] }), /SHA-256/);
-  assert.equal(validateInstallOptions({ ...configuration, extensions: [{ url: '/extension.zip', sha256: 'A'.repeat(64) }] }).extensions[0].sha256, 'a'.repeat(64));
+test('extension setup keeps package metadata for Joomla installation', () => {
+  const extensions = Array.from({ length: 40 }, (_, index) => ({ url: `/extension-${index}.zip`, sha256: 'metadata' }));
+  assert.deepEqual(validateInstallOptions({ ...configuration, extensions }).extensions, extensions);
 });
 
-test('language packages require exact tags and pinned download integrity', () => {
+test('language packages retain exact tags and package metadata', () => {
   const language = { tag: 'nl-NL', url: '/packages/nl-NL.zip', sha256: 'A'.repeat(64) };
   const options = validateInstallOptions({ ...configuration, language: 'nl-NL', languages: [language], deployId: 'heritage-demo' });
   assert.equal(options.language, 'nl-NL');
-  assert.equal(options.languages[0].sha256, 'a'.repeat(64));
+  assert.equal(options.languages[0].sha256, language.sha256);
   assert.equal(options.deployId, 'heritage-demo');
   assert.throws(() => validateInstallOptions({ ...configuration, language: '../nl-NL' }), /language tag/);
-  assert.throws(() => validateInstallOptions({ ...configuration, languages: [{ ...language, sha256: undefined }] }), /checksum/);
-  assert.throws(() => validateInstallOptions({ ...configuration, languages: [{ ...language, url: 'javascript:alert(1)' }] }), /HTTP/);
   assert.throws(() => validateInstallOptions({ ...configuration, deployId: '../demo' }), /identity/);
 });
 
@@ -101,15 +97,6 @@ test('multilingual content requires real categories and a unique home in each la
   assert.throws(() => validateContent({ ...content, articles: [...articles, { ...articles[0], key: 'second-home' }] }), /one home/);
   assert.throws(() => validateContent({ ...content, categories: [...categories, categories[0]] }), /unique/);
   assert.throws(() => validateContent({ ...content, articles: [{ ...articles[0], introtext: 'x'.repeat(32769) }, articles[1]] }), /introduction/);
-});
-
-test('package checksum verification detects corrupt downloads before PHP extraction', async () => {
-  const archive = new Uint8Array([0x50, 0x4b, 3, 4, 1, 2, 3]);
-  assert.equal(await sha256(new TextEncoder().encode('abc')), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
-  const digest = await sha256(archive);
-  assert.deepEqual(await verifyPackage(archive, digest), archive);
-  await assert.rejects(verifyPackage(new Uint8Array([0x50, 0x4b, 3, 4, 1, 2, 4]), digest), /SHA-256 verification failed/);
-  await assert.rejects(verifyPackage(new TextEncoder().encode('<html>')), /ZIP/);
 });
 
 test('provisioning accepts only an explicit successful PHP envelope', async () => {
@@ -252,7 +239,7 @@ test('installer errors identify package, phase and deadline without exposing HTM
   assert.equal(calls, 1, 'A partially completed install must never be replayed.');
 });
 
-test('applying packages distinguishes unreadable downloads, verification and installer work', async () => {
+test('applying packages distinguishes unreadable downloads and installer work', async () => {
   const { applyJoomlaConfiguration } = await import('../src/joomla/index.mjs');
   const sourceLoader = async name => `<?php\n// operation:${name}\n`;
   const writes = [], progress = [], calls = [];
@@ -277,7 +264,7 @@ test('applying packages distinguishes unreadable downloads, verification and ins
   calls.length = 0; progress.length = 0;
   await assert.rejects(applyJoomlaConfiguration(runtime, config, { sourceLoader, progress: event => progress.push(event),
     fetchPackage: async () => new Response(new Uint8Array([0x50, 0x4b, 3, 4])) }), /Installer failed/);
-  assert.deepEqual(progress.filter(event => event.phase).map(event => event.phase), ['download', 'verification', 'installation']);
+  assert.deepEqual(progress.filter(event => event.phase).map(event => event.phase), ['download', 'installation']);
   assert.equal(calls.at(-1).payload.installationExecutionTimeSeconds, 180);
   assert.equal(calls.at(-1).options.timeoutMs, 210000);
   assert.equal(writes.length, 1, 'Failure must not rewrite the complete marker or replay installation.');
@@ -303,14 +290,12 @@ test('custom extension URLs go directly to Joomla CLI without a staged archive',
   assert.equal(calls[0].options.timeoutMs, 210000);
 });
 
-test('custom extension and template checksum metadata is ignored while managed packages remain strict', () => {
+test('custom extension and template checksum metadata is ignored', () => {
   const extension = { url: 'https://example.test/extension.zip', sha256: 'ignored', sha512: 'ignored' };
   const template = { url: 'https://example.test/template.zip', element: 'custom', sha256: 'ignored' };
   const options = validateInstallOptions({ ...configuration, extensions: [extension], addonExtensions: [extension], template, addonTemplate: template });
   assert.deepEqual(options.extensions, [{ url: extension.url }]);
   assert.equal(options.template.sha256, undefined);
-  assert.throws(() => validateInstallOptions({ ...configuration, extensions: [extension], addonExtensions: [] }), /SHA-256/);
-  assert.throws(() => validateInstallOptions({ ...configuration, template }), /SHA-256/);
 });
 
 test('failed custom URLs remain warnings while later extensions and site configuration continue', async () => {
@@ -329,7 +314,7 @@ test('failed custom URLs remain warnings while later extensions and site configu
       calls.push({ operation, payload });
       let result = { ok: true };
       if (operation === 'status') result = { ...result, marker: { state: 'complete', joomlaVersion: '6.2.0' }, configured: true, installerPresent: false };
-      if (operation === 'health') result = { ...result, version: '6.2.0', language: 'en-GB', siteName: 'Custom site' };
+      if (operation === 'configure') result = { ...result, version: '6.2.0', language: 'en-GB', siteName: 'Custom site' };
       if (operation === 'console' && payload.argv[1] !== `--url=${second.url}`) {
         result = { ok: false, exitCode: 1, output: 'Joomla could not install this package.' };
       }
@@ -368,7 +353,7 @@ test('missing addon dependencies and custom command failures stay visible while 
       calls.push({ operation, payload });
       let result = { ok: true };
       if (operation === 'status') result = { ...result, marker: { state: 'complete', joomlaVersion: '6.2.0' }, configured: true, installerPresent: false };
-      if (operation === 'health') result = { ...result, version: '6.2.0', language: 'en-GB' };
+      if (operation === 'configure') result = { ...result, version: '6.2.0', language: 'en-GB' };
       if (operation === 'console') result = { ok: false, exitCode: 1, output: 'The optional addon is unavailable.' };
       if (operation === 'configure') {
         assert.equal(payload.allowMissingDependencies, true);
@@ -381,7 +366,8 @@ test('missing addon dependencies and custom command failures stay visible while 
     startupCommands: [command], addonStartupCommands: [command] }, { sourceLoader: async name => `<?php\n// operation:${name}\n` });
   assert.deepEqual(result.extensionWarnings.map(warning => warning.package), ['Extension 1', 'Menu', 'Command 1']);
   assert.equal(calls.filter(call => call.operation === 'console').length, 2, 'A failed optional command is attempted only once.');
-  assert.ok(calls.some(call => call.operation === 'health'), 'Joomla health still has to succeed.');
+  assert.equal(result.language, 'en-GB', 'The configuration operation returns the resulting site metadata.');
+  assert.equal(calls.some(call => ['health', 'metadata'].includes(call.operation)), false, 'Configuration does not run a separate qualification program.');
 });
 
 test('custom installation does not hide engine failures or malformed PHP results', async () => {

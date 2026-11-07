@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { ISOLATION_BOOTSTRAP_VERSION as version, isolationMarker, isolationNavigationURL, isolationResponseHeaders,
-  ownedClientURL, runtimeResource, resolveRequestIsolation, isOwnerClient, isNetworkVerificationPage, networkVerificationHeaders } from '../src/isolation.mjs';
+  ownedClientURL, runtimeResource, resolveRequestIsolation } from '../src/isolation.mjs';
 import { DEFAULT_COMPATIBILITY_CONFIGURATION, nextIsolationAttempt, readBootstrapState, validateCompatibilityConfiguration, prepareBrowserIsolation } from '../src/isolation-bootstrap.mjs';
 import { createShareURL } from '../src/config.mjs';
 import { runtimeLocation } from '../src/ui-state.mjs';
@@ -12,46 +12,43 @@ const initial = () => ({ version, attempted: [], takeover: false, phase: 'pendin
 const owner = (id, policy) => ({ id, type: 'window', frameType: 'top-level', url: isolationNavigationURL(baseURL, policy) });
 const request = (url, clientId = '', extra = {}) => ({ request: new Request(url), clientId, ...extra });
 
-test('shipping compatibility fallback is enabled independently of optional image delivery', async () => {
+test('shipping compatibility fallback is enabled', async () => {
   const config = validateCompatibilityConfiguration(JSON.parse(await readFile(new URL('../config/browser-compatibility.json', import.meta.url), 'utf8')));
   assert.deepEqual(config, DEFAULT_COMPATIBILITY_CONFIGURATION);
   assert.equal(config.fallbackEnabled, true);
-  const images = JSON.parse(await readFile(new URL('../config/public-assets-config.json', import.meta.url), 'utf8'));
-  assert.equal(images.enabled, false);
-  assert.equal(images.relayBaseURL, null);
 });
 
 test('bootstrap distinguishes takeover and one fallback and never reloads failed navigation in a loop', () => {
-  const first = nextIsolationAttempt({ url: baseURL, state: initial(), verified: false, fallbackEnabled: true });
+  const first = nextIsolationAttempt({ url: baseURL, state: initial(), ready: false, fallbackEnabled: true });
   assert.equal(first.reloadRequired, true);
   assert.equal(first.policy, 'credentialless');
   assert.equal(first.state.takeover, true);
-  const removedMarker = nextIsolationAttempt({ url: baseURL, state: first.state, verified: false, fallbackEnabled: true });
+  const removedMarker = nextIsolationAttempt({ url: baseURL, state: first.state, ready: false, fallbackEnabled: true });
   assert.match(removedMarker.error, /did not retain/);
   assert.equal(removedMarker.reloadRequired, undefined);
-  const second = nextIsolationAttempt({ url: first.reloadURL, state: first.state, verified: false, failure: 'SAB missing', fallbackEnabled: true });
+  const second = nextIsolationAttempt({ url: first.reloadURL, state: first.state, ready: false, failure: 'SAB missing', fallbackEnabled: true });
   assert.equal(second.policy, 'require-corp');
   assert.deepEqual(second.state.attempted, ['credentialless', 'require-corp']);
-  const stopped = nextIsolationAttempt({ url: second.reloadURL, state: second.state, verified: false, failure: 'SAB missing', fallbackEnabled: true });
+  const stopped = nextIsolationAttempt({ url: second.reloadURL, state: second.state, ready: false, failure: 'SAB missing', fallbackEnabled: true });
   assert.equal(stopped.reloadRequired, undefined);
   assert.match(stopped.error, /SAB missing/);
   assert.equal(stopped.state.phase, 'failed');
-  const retried = nextIsolationAttempt({ url: first.reloadURL, state: stopped.state, verified: false, failure: 'SAB missing', fallbackEnabled: true });
+  const retried = nextIsolationAttempt({ url: first.reloadURL, state: stopped.state, ready: false, failure: 'SAB missing', fallbackEnabled: true });
   assert.match(retried.error, /No automatic reload was repeated/);
 });
 
-test('bootstrap succeeds only after actual verification and disabled fallback leaves normal mode intact', () => {
+test('bootstrap succeeds when browser APIs are ready and disabled fallback leaves normal mode intact', () => {
   const url = isolationNavigationURL(baseURL, 'credentialless');
-  const normal = nextIsolationAttempt({ url, state: initial(), verified: true, fallbackEnabled: false });
+  const normal = nextIsolationAttempt({ url, state: initial(), ready: true, fallbackEnabled: false });
   assert.equal(normal.mode, 'normal');
   assert.equal(normal.reloadRequired, false);
-  const disabled = nextIsolationAttempt({ url, state: initial(), verified: false, fallbackEnabled: false, failure: 'not isolated', embedded: true });
+  const disabled = nextIsolationAttempt({ url, state: initial(), ready: false, fallbackEnabled: false, failure: 'not isolated', embedded: true });
   assert.match(disabled.error, /fallback is disabled/);
   assert.match(disabled.error, /parent page/);
-  const enabledLater = nextIsolationAttempt({ url, state: disabled.state, verified: false, fallbackEnabled: true, failure: 'not isolated' });
+  const enabledLater = nextIsolationAttempt({ url, state: disabled.state, ready: false, fallbackEnabled: true, failure: 'not isolated' });
   assert.equal(enabledLater.reloadRequired, true);
   assert.equal(enabledLater.policy, 'require-corp');
-  const fallback = nextIsolationAttempt({ url: isolationNavigationURL(baseURL, 'require-corp'), state: initial(), verified: true, fallbackEnabled: true });
+  const fallback = nextIsolationAttempt({ url: isolationNavigationURL(baseURL, 'require-corp'), state: initial(), ready: true, fallbackEnabled: true });
   assert.equal(fallback.mode, 'compatibility');
   assert.equal(fallback.state.phase, 'ready');
 });
@@ -74,7 +71,7 @@ test('two tabs, virtual sites, static nested workers and detached windows recove
     clients.set(`${id}-worker`, { id: `${id}-worker`, type: 'worker', url: worker });
     clients.set(`${id}-window`, { id: `${id}-window`, type: 'window', frameType: 'top-level', url: detached });
     for (const event of [request(`${baseURL}__site/${id}/instance/index.php`), request(worker), request(nested),
-      request(`${baseURL}config/public-assets.json`, `${id}-worker`), request('https://images.example/approved.png', `${id}-window`)]) {
+      request(`${baseURL}config/network.json`, `${id}-worker`), request('https://images.example/image.png', `${id}-window`)]) {
       assert.deepEqual(await resolveRequestIsolation(event, { baseURL, getClient }), { ownerId: id, policy });
     }
     assert.equal(runtimeResource(nested, baseURL).url, `${baseURL}assets/db/vendor/engine/worker.mjs`);
@@ -123,22 +120,24 @@ test('a blocked sessionStorage getter reports a stable startup error before regi
   assert.throws(() => readBootstrapState({ getItem() { throw new Error('Blocked'); } }, baseURL), /Session storage is unavailable/);
 });
 
-test('only the standalone verification page can leave isolation and it cannot own a PHP runtime', async () => {
-  const verificationURL = `${baseURL}network-verify.html#one-time-channel`;
-  assert.equal(isNetworkVerificationPage(verificationURL, baseURL), true);
-  for (const other of [`${baseURL}nested/network-verify.html`, `${baseURL}__site/owner/site/network-verify.html`,
-    `${baseURL}__runtime/owner/network-verify.html`, 'https://other.example/project/network-verify.html']) {
-    assert.equal(isNetworkVerificationPage(other, baseURL), false);
-  }
-  const headers = networkVerificationHeaders(isolationResponseHeaders({ 'Content-Type': 'text/html' }, 'require-corp'));
-  assert.equal(headers.get('Cross-Origin-Embedder-Policy'), 'unsafe-none');
-  assert.equal(headers.get('Cross-Origin-Opener-Policy'), 'unsafe-none');
-  assert.equal(headers.get('Cross-Origin-Resource-Policy'), 'same-origin');
-  assert.equal(headers.get('Cache-Control'), 'no-store');
-  assert.equal(headers.get('X-Frame-Options'), 'DENY');
-  assert.match(headers.get('Content-Security-Policy'), /frame-ancestors 'none'/);
-  const popup = { ...owner('verification', 'require-corp'), url: isolationNavigationURL(verificationURL, 'require-corp') };
-  assert.equal(isOwnerClient(popup, baseURL), false);
-  await assert.rejects(resolveRequestIsolation(request(`${baseURL}__runtime/verification/src/a.mjs`),
-    { baseURL, getClient: async () => popup }), /owner/);
+test('ready browser startup does not construct test workers or shared memory', async () => {
+  const values = new Map();
+  const unused = () => { throw new Error('Startup must not run an environment self-test.'); };
+  const global = {
+    isSecureContext: true, crossOriginIsolated: true, indexedDB: {},
+    SharedArrayBuffer: unused, Atomics: { add: unused }, Worker: unused, WebAssembly: { Memory: unused },
+    location: { href: isolationNavigationURL(baseURL, 'credentialless') },
+    sessionStorage: { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) },
+    navigator: { locks: { request() {} }, serviceWorker: {
+      register: async () => ({}),
+      controller: { scriptURL: new URL('service-worker.mjs', baseURL).href,
+        postMessage(_message, ports) { ports[0].postMessage({ bootstrapVersion: version, clientId: 'owner' }); } },
+    } },
+  };
+  global.parent = global;
+  const result = await prepareBrowserIsolation({ baseURL, global,
+    fetcher: async () => Response.json(DEFAULT_COMPATIBILITY_CONFIGURATION) });
+  assert.equal(result.reloadRequired, false);
+  assert.equal(result.policy, 'credentialless');
+  assert.equal(result.ownerId, 'owner');
 });

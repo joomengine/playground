@@ -186,7 +186,10 @@ try {
             if (is_file($temporary)) unlink($temporary);
         }
     }
-    playgroundFinish(['ok' => true, 'menus' => $created, 'templateStyle' => $styleId, 'warnings' => $warnings]);
+    playgroundFinish(['ok' => true, 'version' => JVERSION,
+        'siteName' => $playground['siteName'] ?? $application->get('sitename'),
+        'language' => \Joomla\CMS\Component\ComponentHelper::getParams('com_languages')->get('site', 'en-GB'),
+        'menus' => $created, 'templateStyle' => $styleId, 'warnings' => $warnings]);
 } catch (Throwable $error) {
     playgroundFinish(['ok' => false, 'error' => $error->getMessage()]);
 }

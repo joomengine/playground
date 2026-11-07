@@ -16,8 +16,6 @@ final class HttpResponse
     public array $headers = [];
     public int $status = 0;
     private $buffer;
-    private int $size = 0;
-    private int $limit = 0;
 
     public function stream_open(string $path, string $mode, int $options, ?string &$openedPath): bool
     {
@@ -53,12 +51,6 @@ final class HttpResponse
         }
         $this->buffer = fopen('php://temp/maxmemory:2097152', 'w+b');
         if ($this->buffer === false) return $this->fail('Cannot allocate the HTTP response stream.', $options);
-        // The Fetch result and the virtual temporary file both consume browser memory.
-        // Reserve headroom for these copies and the caller's resulting PHP string.
-        $memory = self::iniBytes((string) ini_get('memory_limit'));
-        $upload = self::iniBytes((string) ini_get('upload_max_filesize'));
-        $available = $memory > 0 ? max(0, $memory - memory_get_usage(true)) : 512 * 1024 * 1024;
-        $this->limit = min($upload > 0 ? $upload : 128 * 1024 * 1024, intdiv($available, 4));
         $curl = curl_init($path);
         if ($curl === false) { $this->stream_close(); return $this->fail('Cannot create the HTTP request.', $options); }
         $curlOptions = [
@@ -72,22 +64,13 @@ final class HttpResponse
             CURLOPT_HEADERFUNCTION => function ($handle, string $header): int {
                 $line = rtrim($header, "\r\n");
                 if ($line === '' && $this->headersOnly) { $this->headersComplete = true; return 0; }
-                if (!$this->headersOnly && preg_match('/^Content-Length:\s*(\d+)/i', $line, $match) && (float) $match[1] > $this->limit) {
-                    $this->error = 'HTTP response exceeds the available PHP memory and upload budget.';
-                    return 0;
-                }
                 if ($line !== '') $this->headers[] = $line;
                 return strlen($header);
             },
             CURLOPT_WRITEFUNCTION => function ($handle, string $bytes): int {
                 if ($this->headersOnly) return strlen($bytes);
-                if (strlen($bytes) > $this->limit - $this->size) {
-                    $this->error = 'HTTP response exceeds the available PHP memory and upload budget.';
-                    return 0;
-                }
                 $written = fwrite($this->buffer, $bytes);
                 if ($written === false) return 0;
-                $this->size += $written;
                 return $written;
             },
         ];
@@ -121,14 +104,6 @@ final class HttpResponse
     {
         $this->error = $message;
         return false;
-    }
-
-    private static function iniBytes(string $value): int
-    {
-        $number = (float) $value;
-        $unit = strtolower(substr(trim($value), -1));
-        $factor = match ($unit) { 'g' => 1073741824, 'm' => 1048576, 'k' => 1024, default => 1 };
-        return (int) min(PHP_INT_MAX, $number * $factor);
     }
 
     public function body(): string { return (string) stream_get_contents($this->buffer); }

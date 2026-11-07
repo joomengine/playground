@@ -4,14 +4,6 @@ try {
     if (is_file($root . '/configuration.php')) {
         throw new RuntimeException('Joomla is already configured.');
     }
-    foreach (['pdo', 'pdo_mariadb_wasm', 'session', 'zlib', 'xml', 'dom', 'simplexml', 'mbstring', 'iconv'] as $extension) {
-        if (!extension_loaded($extension)) {
-            throw new RuntimeException('Missing required PHP extension: ' . $extension);
-        }
-    }
-    if (!in_array('mysql', PDO::getAvailableDrivers(), true)) {
-        throw new RuntimeException('The MariaDB PDO driver is unavailable.');
-    }
     chdir($root);
     define('_JEXEC', 1);
     define('JPATH_BASE', $root . '/installation');

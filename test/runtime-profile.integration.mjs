@@ -9,8 +9,6 @@ for (const phpVersion of selected) {
   test(`PHP ${phpVersion}: Joomla image, archive, XML, Unicode and encryption capabilities`, { timeout: 60_000 }, async t => {
     const runtime = await createNodeRuntime({ phpVersion, phpSettings: { memory_limit: '256M', max_input_vars: 7000 } });
     t.after(() => runtime.close());
-    assert.equal(runtime.runtimeInfo.effectivePhpSettings.memory_limit, '256M');
-    assert.equal(runtime.runtimeInfo.effectivePhpSettings.max_input_vars, '7000');
     if (phpVersion === '8.4') {
       await runtime.fs.writeFile('/persist/www/diagnostic.php', "<?php trigger_error('Rocket diagnostic contract', E_USER_WARNING); echo 'Clean application body';");
       await runtime.fs.writeFile('/persist/www/diagnostic.txt', 'Static asset');
@@ -45,6 +43,7 @@ for (const phpVersion of selected) {
       $plain = openssl_decrypt($cipher, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag, 'context');
       $formatter = new NumberFormatter('af_ZA', NumberFormatter::DECIMAL);
       echo json_encode(['php' => PHP_VERSION, 'integerSize' => PHP_INT_SIZE, 'images' => $images, 'zip' => $zipExact,
+        'settings' => ['memory_limit' => ini_get('memory_limit'), 'max_input_vars' => ini_get('max_input_vars')],
         'xml' => $xml->getElementsByTagName('name')->item(0)->textContent === 'JoomEngine',
         'simplexml' => (string) simplexml_load_string('<value>中文</value>') === '中文',
         'multibyte' => mb_strlen('中文', 'UTF-8') === 2, 'intl' => is_string($formatter->format(1234.5)),
@@ -54,6 +53,7 @@ for (const phpVersion of selected) {
     assert.equal(result.status, 200, result.text);
     assert.deepEqual(JSON.parse(result.text), { php: manifest.php.find(entry => entry.version === phpVersion).patchVersion,
       integerSize: 8, images: { png: true, jpeg: true, webp: true }, zip: true, xml: true,
+      settings: { memory_limit: '256M', max_input_vars: '7000' },
       simplexml: true, multibyte: true, intl: true, encryption: true, authentication: true, sodium: true, mime: true });
   });
 }

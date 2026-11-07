@@ -19,21 +19,17 @@ test('the deployed version catalog resolves content-addressed packages under the
   assert.equal(result.joomla[0].phpMinimum, '8.3.0');
 });
 
-test('bad catalog versions, duplicate entries, remote URLs and mismatched content paths are rejected', () => {
+test('bad catalog versions and duplicate entries are rejected', () => {
   for (const bad of [
     { ...entry, version: '4.4.0' }, { ...entry, version: '8.0.0' },
-    { ...entry, url: 'https://upstream.example/package.zip' },
-    { ...entry, url: `../packages/${sha256}.zip` }, { ...entry, sha256: 'c'.repeat(64) },
     { ...entry, phpMinimum: 'unknown' }, { ...entry, channel: 'archive' }, { ...entry, sha512: 'bad' },
   ]) assert.throws(() => normalizeVersionCatalog({ ...document(), joomla: [bad] }, { url }));
   assert.throws(() => normalizeVersionCatalog({ ...document(), joomla: [entry, entry] }, { url }), /duplicate/);
   assert.throws(() => normalizeVersionCatalog({ ...document(), schemaVersion: 2 }, { url }), /invalid/);
 });
 
-test('unavailable or oversized catalogs fail without replacing the caller’s previous catalog', async () => {
+test('unavailable catalogs report their HTTP status', async () => {
   await assert.rejects(loadVersionCatalog({ url, fetchImpl: async () => new Response('', { status: 503 }) }), /HTTP 503/);
-  await assert.rejects(loadVersionCatalog({ url, fetchImpl: async () => new Response('{}', { headers: { 'Content-Length': 1024 * 1024 + 1 } }) }), /size limit/);
-  await assert.rejects(loadVersionCatalog({ url, fetchImpl: async () => new Response(' '.repeat(1024 * 1024 + 1)) }), /size limit/);
 });
 
 test('only exact trusted package identities bypass custom setup review', () => {

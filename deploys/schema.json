@@ -87,7 +87,6 @@
     "url": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 2048,
       "format": "uri-reference"
     },
     "sha256": {
@@ -220,7 +219,6 @@
         },
         "extensions": {
           "type": "array",
-          "maxItems": 30,
           "items": {
             "$ref": "#/$defs/package"
           }

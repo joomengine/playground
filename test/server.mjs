@@ -72,14 +72,6 @@ export async function createStaticServer({ directory, prefix = '/playground/', i
         response.end(typeof fixtures[relative] === 'function' ? await fixtures[relative](request) : fixtures[relative]);
         return;
       }
-      if (relative === 'config/network.json') {
-        // Generic browser suites must not request human verification from the
-        // production relay. Network suites supply their own enabled fixture
-        // above; the built artifact and its production configuration stay intact.
-        response.setHeader('Content-Type', contentTypes['.json']);
-        response.end(JSON.stringify({ schemaVersion: 1, enabled: false }));
-        return;
-      }
       if (relative === '__test__.html') {
         response.setHeader('Content-Type', 'text/html; charset=utf-8');
         response.end('<!doctype html><html lang="en"><meta charset="utf-8"><title>Playground integration</title><body><main id="fixture">Browser integration</main></body></html>');

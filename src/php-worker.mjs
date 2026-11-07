@@ -1,9 +1,8 @@
 import { MAX_BODY_BYTES, serializeResponse } from './http.mjs';
-import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeHealthSource, runtimeRandomValue, assertRuntimeHealth } from './php-settings.mjs';
+import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeRandomValue } from './php-settings.mjs';
 import { checkpointSource, restoreCheckpointSource } from './checkpoint-program.mjs';
 import { configurePhpRouting } from './php-routing.mjs';
-import { createPhpFetch } from './php-network.mjs';
-import { createNetworkSessionClient, isLocalNetworkDevelopment } from './network-session.mjs';
+import { createNetworkTransport } from './network-transport.mjs';
 import { installPhpRecovery } from './php-recovery.mjs';
 import { applyJcbRuntimeCompatibility } from './jcb-compatibility.mjs';
 import { staticAssetResponse } from './static-assets.mjs';
@@ -26,7 +25,6 @@ let routePrefix;
 let mountPath;
 let phpSettings;
 let requestBodyLimit = MAX_BODY_BYTES;
-let requestActive = false;
 let issuedDatabaseCalls = 0;
 let workspaceFiles;
 let workspaceFilesystem;
@@ -34,14 +32,11 @@ let debugOptions;
 let debugOwner;
 let debugOwnerLoading;
 let activeOperationId;
-const networkSession = createNetworkSessionClient(message => self.postMessage(message));
-const networkDiagnostic = value => self.postMessage({ type: 'network-diagnostic', value });
 
 async function getDebugOwner() {
   if (!debugOptions) throw new Error('This distribution does not include PHP debugger assets.');
   return debugOwner ??= await (debugOwnerLoading ??= import('./code/debug-owner.mjs').then(({ createPhpDebugOwner }) => createPhpDebugOwner({
     options: debugOptions, getPhp: () => php, getBinary: () => binary, databaseCall, flush,
-    getNetworkSession: networkSession.getSession, onNetworkDiagnostic: networkDiagnostic,
     onState: state => self.postMessage({ type: 'debug-state', state, requestId: activeOperationId }),
     onEvent: event => self.postMessage({ type: 'debug-event', ...event }),
   })));
@@ -172,13 +167,9 @@ async function requestResponse(value) {
   const callsBeforeRequest = issuedDatabaseCalls;
   let recoveryMessage = '';
   if (!readOnly) applyJcbRuntimeCompatibility(binary, php.docroot);
-  let response;
-  requestActive = true;
-  try {
-    response = await php.request(new Request(url, {
-      method, headers, body: ['GET', 'HEAD'].includes(method) ? null : body, redirect: 'manual',
-    }));
-  } finally { requestActive = false; }
+  let response = await php.request(new Request(url, {
+    method, headers, body: ['GET', 'HEAD'].includes(method) ? null : body, redirect: 'manual',
+  }));
   if (php.binary !== captured) {
     try { await php.binary; }
     catch (error) {
@@ -228,11 +219,7 @@ async function initialize(args) {
   routePrefix = `${args.prefix.replace(/\/+$/, '')}/`;
   // Native cURL alone calls this hook. Runtime assets and database networking
   // retain the browser Fetch implementation.
-  globalThis.__joomenginePhpFetch = createPhpFetch(globalThis.fetch.bind(globalThis),
-    new URL(routePrefix, self.location.origin), () => requestActive,
-    { ...args.publicAssets, policy: args.isolationPolicy },
-    { config: args.network, getSession: networkSession.getSession, onDiagnostic: networkDiagnostic,
-      allowInsecureLocalhost: isLocalNetworkDevelopment(self.location.href) });
+  globalThis.__joomenginePhpFetch = createNetworkTransport(globalThis.fetch.bind(globalThis), args.network);
   phpSettings = normalizePhpSettings(args.phpSettings);
   requestBodyLimit = phpRequestBodyLimit(phpSettings);
   persistent = args.persistence === true;
@@ -249,8 +236,8 @@ async function initialize(args) {
   if (args.debugger) debugOptions = {
     moduleUrl: args.debugger.moduleUrl, adapterUrl: adapterURL.href, phpVersion: args.phpVersion,
     sharedLibs: args.debugger.sharedLibs, files: args.files || [],
-    isolationPolicy: args.isolationPolicy, publicAssets: args.publicAssets, network: args.network,
-    ini: `${adapter.ini}${phpIni(phpSettings)}`, siteURL: new URL(routePrefix, self.location.origin).href,
+    network: args.network,
+    ini: `${adapter.ini}${phpIni(phpSettings)}\nauto_prepend_file=/internal/rocket-http.php\n`, siteURL: new URL(routePrefix, self.location.origin).href,
   };
   php = new PhpCgiWorker({
     ...adapter,
@@ -308,14 +295,7 @@ async function initialize(args) {
   php.initialized = true;
   php.staticCacheTime = 0;
   php.dynamicCacheTime = 0;
-  const health = await runPhp(runtimeHealthSource());
-  let result;
-  try { result = JSON.parse(health.text); }
-  catch { throw new FatalRuntimeError(`PHP initialization did not return valid runtime metadata: ${health.text.slice(0, 2000)}`); }
-  if (!result.pdoDrivers?.includes('mysql') || !result.extensions?.includes('pdo_mariadb_wasm')) {
-    throw new FatalRuntimeError('The PHP runtime did not load the MariaDB PDO extension.');
-  }
-  return assertRuntimeHealth(result, phpSettings);
+  return { phpVersion: args.phpVersion, phpSettings };
 }
 
 function filesystem(operation, args) {
@@ -405,7 +385,6 @@ async function operation(name, args = {}) {
 
 self.addEventListener('message', (event) => {
   const message = event.data;
-  if (networkSession.receive(message)) return;
   if (message?.type === 'database-result') {
     const pending = databaseCalls.get(message.id);
     if (!pending) return;

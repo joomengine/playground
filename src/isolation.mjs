@@ -3,24 +3,6 @@ export const ISOLATION_BOOTSTRAP_VERSION = '20261101-1';
 export const ISOLATION_PARAMETER = '__je_coep';
 export const ISOLATION_POLICIES = Object.freeze(['credentialless', 'require-corp']);
 export const RUNTIME_ROUTE = '__runtime/';
-export const NETWORK_VERIFICATION_PAGE = 'network-verify.html';
-
-/** The interactive verification popup must not inherit the PHP page's COEP. */
-export function isNetworkVerificationPage(value, baseURL) {
-  const url = new URL(value), scope = new URL(baseURL);
-  return url.origin === scope.origin && url.pathname === `${scope.pathname}${NETWORK_VERIFICATION_PAGE}`;
-}
-
-export function networkVerificationHeaders(headers) {
-  const result = new Headers(headers);
-  result.set('Cross-Origin-Opener-Policy', 'unsafe-none');
-  result.set('Cross-Origin-Embedder-Policy', 'unsafe-none');
-  result.set('Cross-Origin-Resource-Policy', 'same-origin');
-  result.set('Cache-Control', 'no-store');
-  result.set('X-Frame-Options', 'DENY');
-  result.append('Content-Security-Policy', "frame-ancestors 'none'");
-  return result;
-}
 
 export function isolationMarker(value) {
   const url = new URL(value);
@@ -55,15 +37,14 @@ export function isOwnerClient(client, baseURL) {
   if (!client || client.type !== 'window') return false;
   const scope = new URL(baseURL), url = new URL(client.url);
   if (!withinScope(url, scope)) return false;
-  if (isNetworkVerificationPage(url, baseURL)) return false;
   // Embedded Playground is still supported when its parent supplies compatible
   // isolation. It needs its own controlled document marker and must pass the
-  // same real shared-memory probe before creating a runtime. Virtual Joomla and
+  // same browser isolation requirements before creating a runtime. Virtual Joomla and
   // tool frames below are never allowed to become a runtime owner themselves.
   if (client.frameType === 'nested' && !isolationMarker(url.href)) return false;
   if (!['top-level', 'nested', 'none', undefined].includes(client.frameType)) return false;
   const path = url.pathname.slice(scope.pathname.length);
-  return !['__site/', RUNTIME_ROUTE, '__public-assets/'].some(prefix => path.startsWith(prefix));
+  return !['__site/', RUNTIME_ROUTE].some(prefix => path.startsWith(prefix));
 }
 
 /** Static worker/module paths retain their owner through every relative import. */
@@ -78,7 +59,7 @@ export function ownedClientURL(value, { ownerId, baseURL } = {}) {
     if (currentOwner !== ownerId) throw new TypeError('A runtime resource belongs to another playground tab.');
     return url.href;
   }
-  if (relative.startsWith('__site/') || relative.startsWith('__public-assets/')) throw new TypeError('Site and public-image requests use their own routes.');
+  if (relative.startsWith('__site/')) throw new TypeError('Site requests use their own route.');
   url.pathname = `${scope.pathname}${RUNTIME_ROUTE}${ownerId}/${relative}`;
   return url.href;
 }
@@ -94,7 +75,7 @@ export function runtimeResource(value, baseURL) {
   if (slash < 1 || !/^[a-zA-Z0-9_-]{1,128}$/.test(ownerId) || !resource
     || resource.includes('\\') || /%(?:2f|5c|00|2e)/i.test(resource)
     || resource.split('/').some(part => part === '.' || part === '..')
-    || ['__site/', RUNTIME_ROUTE, '__public-assets/'].some(prefix => resource.startsWith(prefix))) {
+    || ['__site/', RUNTIME_ROUTE].some(prefix => resource.startsWith(prefix))) {
     throw new TypeError('Invalid owned runtime route.');
   }
   url.pathname = `${scope.pathname}${resource}`;

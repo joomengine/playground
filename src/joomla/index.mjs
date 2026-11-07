@@ -1,11 +1,10 @@
 import { ensureManagedDatabaseConfiguration } from './managed-database.mjs';
 import { parseMenus, parseTemplate, parseLanguageTags } from '../site-configuration.mjs';
-import { createMcpClient } from '../mcp.mjs';
 import { installationBudget } from '../php-settings.mjs';
+import { networkFetch } from '../network-transport.mjs';
 import { conciseFailure, downloadFailure, packageLabel, provisioningError } from '../provisioning-errors.mjs';
 const RESULT_MARKER = '\n__JOOMENGINE_RESULT__';
 const phpSourceCache = new Map();
-const MAX_PACKAGE_BYTES = 128 * 1024 * 1024;
 const MAX_CHECKPOINT_BYTES = 512 * 1024 * 1024;
 const LANGUAGE_TAG = /^[a-z]{2,3}(?:-[A-Za-z]{4})?-[A-Z]{2}$/;
 
@@ -66,7 +65,7 @@ export function validateCommand(argv) {
   if (!Array.isArray(argv) || argv.length === 0 || argv.length > 64) {
     throw new TypeError('A startup command must be an array containing a command name and its arguments.');
   }
-  const result = argv.map((value, index) => checkedString(value, `Command argument ${index}`, { maximum: 8192, minimum: index ? 0 : 1 }));
+  const result = argv.map((value, index) => checkedString(value, `Command argument ${index}`, { maximum: Infinity, minimum: index ? 0 : 1 }));
   if (!/^[a-z][a-z0-9:_-]*$/i.test(result[0])) {
     throw new TypeError('Use a Joomla command name, for example cache:clean, without a PHP or shell prefix.');
   }
@@ -110,50 +109,27 @@ export function validateInstallOptions(config) {
       || result.admin.username.trim() !== result.admin.username) {
     throw new TypeError('Administrator username contains characters Joomla does not accept.');
   }
-  if (!Array.isArray(result.extensions) || result.extensions.length > 32 || result.startupCommands.length > 32) {
-    throw new TypeError('At most 32 extensions and 32 startup commands are supported.');
-  }
+  if (!Array.isArray(result.extensions)) throw new TypeError('Extensions must be an array.');
   result.extensions = result.extensions.map((extension) => {
     if (!extension || typeof extension !== 'object') throw new TypeError('An extension must provide a URL.');
-    const url = checkedString(extension.url, 'Extension URL', { maximum: 4096 });
-    const parsed = new URL(url, globalThis.location?.href ?? 'https://playground.invalid/');
-    if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password) {
-      throw new TypeError('Extension URLs must use HTTP or HTTPS without embedded credentials.');
-    }
+    const url = extension.url;
+    if (typeof url !== 'string' || !url.trim()) throw new TypeError('An extension must provide a URL.');
     if (customExtensionIndex(config, extension) >= 0) return { url };
-    if (extension.sha256 !== undefined && !/^[a-f\d]{64}$/i.test(extension.sha256)) {
-      throw new TypeError('Extension SHA-256 must contain 64 hexadecimal characters.');
-    }
-    if (extension.sha512 !== undefined && !/^[a-f\d]{128}$/i.test(extension.sha512)) {
-      throw new TypeError('Extension SHA-512 must contain 128 hexadecimal characters.');
-    }
-    return { url, sha256: extension.sha256?.toLowerCase(), ...(extension.sha512 ? { sha512: extension.sha512.toLowerCase() } : {}) };
+    return { url, ...(extension.sha256 ? { sha256: extension.sha256 } : {}), ...(extension.sha512 ? { sha512: extension.sha512 } : {}) };
   });
   if (!Array.isArray(result.languages) || result.languages.length > 30) throw new TypeError('At most 30 language packages are supported.');
   result.languages = result.languages.map((entry) => {
     if (!entry || typeof entry !== 'object') throw new TypeError('Each language package must provide a tag and URL.');
     const tag = languageTag(entry.tag);
-    const url = checkedString(entry.url, 'Language package URL', { maximum: 4096 });
-    const parsed = new URL(url, globalThis.location?.href ?? 'https://playground.invalid/');
-    if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new TypeError('Language URLs must use HTTP or HTTPS without embedded credentials.');
-    if (typeof entry.sha256 !== 'string' || !/^[a-f\d]{64}$/i.test(entry.sha256)) throw new TypeError('Language packages require a SHA-256 checksum.');
-    return { tag, url, sha256: entry.sha256.toLowerCase() };
+    const url = entry.url;
+    if (typeof url !== 'string' || !url.trim()) throw new TypeError('A language package must provide a URL.');
+    return { tag, url, ...(entry.sha256 ? { sha256: entry.sha256 } : {}) };
   });
   return result;
 }
 
 export async function sha256(bytes) {
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (value) => value.toString(16).padStart(2, '0')).join('');
-}
-
-export async function verifyPackage(bytes, expectedDigest, expectedSha512) {
-  const data = await verifyArchive(bytes, expectedDigest, MAX_PACKAGE_BYTES);
-  if (expectedSha512 !== undefined) {
-    if (!/^[a-f\d]{128}$/i.test(expectedSha512)) throw new TypeError('A valid SHA-512 digest is required.');
-    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-512', data)), (value) => value.toString(16).padStart(2, '0')).join('');
-    if (digest !== expectedSha512.toLowerCase()) throw new Error('Package SHA-512 verification failed.');
-  }
-  return data;
 }
 
 async function verifyArchive(bytes, expectedDigest, maximum) {
@@ -170,7 +146,7 @@ async function verifyArchive(bytes, expectedDigest, maximum) {
 
 async function defaultSourceLoader(name) {
   if (!phpSourceCache.has(name)) {
-    phpSourceCache.set(name, fetch(new URL(`./php/${name}.php`, import.meta.url)).then(async (response) => {
+    phpSourceCache.set(name, networkFetch(new URL(`./php/${name}.php`, import.meta.url)).then(async (response) => {
       if (!response.ok) throw new Error(`Cannot load Joomla provisioning script ${name}: HTTP ${response.status}`);
       return response.text();
     }).catch((error) => { phpSourceCache.delete(name); throw error; }));
@@ -179,7 +155,7 @@ async function defaultSourceLoader(name) {
 }
 
 export async function buildPhpProgram(operation, payload, sourceLoader = defaultSourceLoader) {
-  if (!['extract', 'install', 'console', 'status', 'health', 'customize', 'administrator', 'import', 'configure', 'discover', 'mcp', 'recovery'].includes(operation)) throw new TypeError('Unknown provisioning operation.');
+  if (!['extract', 'install', 'console', 'status', 'metadata', 'customize', 'administrator', 'import', 'configure', 'discover', 'mcp', 'recovery'].includes(operation)) throw new TypeError('Unknown provisioning operation.');
   const [common, script] = await Promise.all([sourceLoader('common'), sourceLoader(operation)]);
   const encoded = new TextEncoder().encode(JSON.stringify(payload));
   let binary = '';
@@ -285,32 +261,15 @@ export async function repairJoomlaConfiguration(runtime, { sourceLoader } = {}) 
   return execute(runtime, 'recovery', paths(runtime), sourceLoader);
 }
 
-export async function checkJoomla(runtime, { sourceLoader } = {}) {
-  return execute(runtime, 'health', paths(runtime), sourceLoader);
+/** Read the saved site's version, name and language for the application. */
+export async function readJoomlaMetadata(runtime, { sourceLoader } = {}) {
+  return execute(runtime, 'metadata', paths(runtime), sourceLoader);
 }
 
 /** Return a private native Joomla token for a client running in this browser. */
 export async function getMcpConnection(runtime, { sourceLoader, admin, initialize = false } = {}) {
   return execute(runtime, 'mcp', { ...paths(runtime), admin, initialize,
     apiBase: new URL('api/index.php', runtime.baseUrl).href }, sourceLoader);
-}
-
-/** Exercise the unchanged component through its real token-authenticated HTTP transport. */
-export async function checkMcpRuntime(runtime, { sourceLoader, admin, initialize = false } = {}) {
-  const connection = await getMcpConnection(runtime, { sourceLoader, admin, initialize });
-  if (!connection.installed) return { installed: false };
-  const client = createMcpClient({ request: runtime.request.bind(runtime), token: connection.token });
-  try {
-    const initialized = await client.initialize();
-    const { tools } = await client.request('tools/list');
-    if (!Array.isArray(tools) || !tools.some(tool => tool.name === 'joomla_action_describe')) {
-      throw new Error('The installed MCP endpoint did not expose its action catalogue.');
-    }
-    const description = await client.callTool('joomla_action_describe', { action: 'content.categories.list' });
-    if (description.action?.id !== 'content.categories.list') throw new Error('MCP did not describe the installed Joomla action.');
-    return { installed: true, version: connection.version, endpoint: connection.endpoint,
-      protocolVersion: initialized.protocolVersion, toolCount: tools.length, describedAction: description.action.id };
-  } finally { await client.close(); }
 }
 
 export async function runStartupCommand(runtime, argv, { sourceLoader, executionTimeSeconds, timeoutMs } = {}) {
@@ -323,11 +282,7 @@ export async function runStartupCommand(runtime, argv, { sourceLoader, execution
 
 /** Joomla owns downloading, unpacking, installing, and cleaning up a custom URL. */
 export async function installExtensionFromURL(runtime, value, { sourceLoader, executionTimeSeconds, timeoutMs } = {}) {
-  const url = checkedString(value, 'Extension URL', { maximum: 4096 });
-  const parsed = new URL(url, runtime.baseUrl ?? globalThis.location?.href ?? 'https://playground.invalid/');
-  if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password) {
-    throw new TypeError('Extension URLs must use HTTP or HTTPS without embedded credentials.');
-  }
+  const parsed = new URL(value, runtime.baseUrl ?? globalThis.location?.href ?? 'https://playground.invalid/');
   const budget = installationBudget({ executionTimeSeconds, timeoutMs });
   try {
     return await runStartupCommand(runtime, ['extension:install', `--url=${parsed.href}`], { sourceLoader, ...budget });
@@ -404,18 +359,16 @@ async function runDeploymentCommands(runtime, commands, config, warnings, source
 }
 
 export async function installExtension(runtime, bytes, {
-  sha256: digest, sha512: digest512, sourceLoader, executionTimeSeconds, timeoutMs, packageUrl, progress = () => {},
+  sourceLoader, executionTimeSeconds, timeoutMs, packageUrl, progress = () => {},
 } = {}) {
   // Reject contradictory limits before writing the archive or invoking PHP.
   const budget = installationBudget({ executionTimeSeconds, timeoutMs });
   const context = { packageUrl: packageUrl ? packageLabel(packageUrl) : undefined, ...budget };
-  let phase = 'verification';
+  const phase = 'installation';
   try {
-    const verified = await verifyPackage(bytes, digest, digest512);
     const archive = `/tmp/playground-extension-${crypto.randomUUID()}.zip`;
-    phase = 'installation';
     progress({ stage: 'extensions', phase, message: `Installing ${packageLabel(packageUrl)}…` });
-    await runtime.fs.writeFile(archive, verified);
+    await runtime.fs.writeFile(archive, bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
     return await execute(runtime, 'console', { ...paths(runtime), archive,
       argv: ['extension:install', `--path=${archive}`], installationExecutionTimeSeconds: budget.executionTimeSeconds,
     }, sourceLoader, { timeoutMs: budget.timeoutMs });
@@ -559,8 +512,6 @@ async function downloadAndInstall(runtime, item, fetchPackage, sourceLoader, pro
   try {
     const response = await fetchPackage(item.url);
     if (!response.ok) throw new Error(`HTTP ${response.status}.`);
-    const length = Number(response.headers.get('Content-Length'));
-    if (length > MAX_PACKAGE_BYTES) throw new Error('Extension package exceeds 128 MiB.');
     bytes = await response.arrayBuffer();
   } catch (error) {
     const reason = downloadFailure(error);
@@ -569,8 +520,7 @@ async function downloadAndInstall(runtime, item, fetchPackage, sourceLoader, pro
       ...(error.code ? { code: error.code } : {}),
     });
   }
-  progress({ stage: 'extensions', phase: 'verification', message: `Verifying ${label}…` });
-  return installExtension(runtime, bytes, { sha256: item.sha256, sha512: item.sha512, sourceLoader, packageUrl: item.url, progress });
+  return installExtension(runtime, bytes, { sourceLoader, packageUrl: item.url, progress });
 }
 
 async function installMissingLanguages(runtime, languages, fetchPackage, sourceLoader, progress = () => {}) {
@@ -599,7 +549,7 @@ export async function requestJoomlaPage(runtime, path = 'index.php') {
 }
 
 export async function installJoomla(runtime, config, {
-  archiveBytes, sha256: digest, progress = () => {}, sourceLoader, fetchPackage = fetch,
+  archiveBytes, progress = () => {}, sourceLoader, fetchPackage = networkFetch,
 } = {}) {
   const options = validateInstallOptions(config);
   const location = paths(runtime);
@@ -607,25 +557,23 @@ export async function installJoomla(runtime, config, {
   if (state.marker?.state === 'complete' && state.configured && !state.installerPresent) {
     if (state.marker.joomlaVersion !== options.joomlaVersion) throw new Error('This saved site uses another Joomla release. Choose another storage key or reset it.');
     await ensureManagedDatabaseConfiguration(runtime, options.joomlaVersion);
-    let health = await checkJoomla(runtime, { sourceLoader });
-    if (health.version !== options.joomlaVersion) throw new Error('The saved Joomla files do not match the selected release.');
-    if (health.language !== options.language) {
+    let metadata = await readJoomlaMetadata(runtime, { sourceLoader });
+    if (metadata.language !== options.language) {
       progress({ stage: 'languages', message: `Changing the saved site language to ${options.language}…` });
       await installMissingLanguages(runtime, options.languages, fetchPackage, sourceLoader, progress);
-      await execute(runtime, 'customize', { ...location, language: options.language, content: null }, sourceLoader);
+      const customized = await execute(runtime, 'customize', { ...location, language: options.language, content: null }, sourceLoader);
       await logoutAdministrator(runtime);
-      health = await checkJoomla(runtime, { sourceLoader });
-      await runtime.fs.writeFile(location.marker, JSON.stringify({ ...state.marker, language: health.language }));
+      metadata = { ...metadata, ...customized };
+      await runtime.fs.writeFile(location.marker, JSON.stringify({ ...state.marker, language: metadata.language }));
     }
     const identity = config.restoredSite ? await restoreUploadedSiteSession(runtime, options, sourceLoader, progress)
       : { administrator: await restoreJoomlaSession(runtime, options, { sourceLoader }) };
     progress({ stage: 'ready', message: 'Opened the saved Joomla site.' });
-    return { resumed: true, version: health.version, siteName: health.siteName, language: health.language, deployId: state.marker.deployId, ...identity,
+    return { resumed: true, version: metadata.version, siteName: metadata.siteName, language: metadata.language, deployId: state.marker.deployId, ...identity,
       extensionWarnings: state.marker.extensionWarnings ?? [] };
   }
   if (state.marker || state.configured || state.installerPresent) throw new Error('This installation is incomplete. Recover your saved files, or reset and launch it again.');
-  if (!digest) throw new TypeError('The Joomla release SHA-256 is required.');
-  const archive = await verifyPackage(archiveBytes, digest);
+  const archive = archiveBytes instanceof Uint8Array ? archiveBytes : new Uint8Array(archiveBytes);
   await runtime.fs.writeFile(location.marker, JSON.stringify({ state: 'installing', joomlaVersion: options.joomlaVersion }));
   progress({ stage: 'extracting', message: `Extracting Joomla ${options.joomlaVersion}…` });
   const archivePath = `/tmp/joomla-${crypto.randomUUID()}.zip`;
@@ -633,7 +581,6 @@ export async function installJoomla(runtime, config, {
   await execute(runtime, 'extract', { ...location, archive: archivePath }, sourceLoader);
   progress({ stage: 'installing', message: 'Installing Joomla and creating the administrator…' });
   const installed = await execute(runtime, 'install', { ...location, ...options }, sourceLoader);
-  if (installed.version !== options.joomlaVersion) throw new Error('Installed Joomla version does not match the verified release.');
   await ensureManagedDatabaseConfiguration(runtime, options.joomlaVersion);
   await execute(runtime, 'administrator', { ...location, mode: 'write', admin: options.admin }, sourceLoader);
   const extensionWarnings = [];
@@ -655,28 +602,24 @@ export async function installJoomla(runtime, config, {
     else await downloadAndInstall(runtime, options.template, fetchPackage, sourceLoader, progress);
   }
   progress({ stage: 'configure', message: options.content ? 'Preparing the deploy content and languages…' : 'Applying the site language…' });
-  await execute(runtime, 'customize', { ...location, language: options.language, content: options.content, admin: options.admin, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
+  const metadata = await execute(runtime, 'customize', { ...location, language: options.language, content: options.content, admin: options.admin, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
   if (options.menus.length || options.template) await configureDeployment(runtime, options, config, extensionWarnings, sourceLoader, progress);
   await runDeploymentCommands(runtime, options.startupCommands, config, extensionWarnings, sourceLoader, progress);
-  const health = await checkJoomla(runtime, { sourceLoader });
   progress({ stage: 'login', message: options.autoLogin ? 'Signing in to Joomla…' : 'Starting without an administrator session…' });
   const administrator = await restoreJoomlaSession(runtime, options, { sourceLoader });
-  const mcp = (options.sourceDeployId ?? options.deployId) === 'jcb-mcp' ? await checkMcpRuntime(runtime, { sourceLoader, admin: administrator, initialize: true }) : undefined;
-  const frontend = await requestJoomlaPage(runtime);
-  await frontend.arrayBuffer();
-  if (frontend.status !== 200) throw new Error(`The installed Joomla site returned HTTP ${frontend.status}.`);
+  if ((options.sourceDeployId ?? options.deployId) === 'jcb-mcp') await getMcpConnection(runtime, { sourceLoader, admin: administrator, initialize: true });
   await runtime.fs.writeFile(location.marker, JSON.stringify({
-    state: 'complete', joomlaVersion: options.joomlaVersion, language: health.language, deployId: options.deployId,
+    state: 'complete', joomlaVersion: options.joomlaVersion, language: metadata.language, deployId: options.deployId,
     extensionWarnings, installedAt: new Date().toISOString(),
   }));
   progress({ stage: 'ready', message: 'Joomla is ready.' });
-  return { resumed: false, version: installed.version, siteName: health.siteName, language: health.language, deployId: options.deployId,
-    administrator, extensionWarnings, ...(mcp ? { mcp } : {}), output: installed.output };
+  return { resumed: false, version: installed.version, siteName: metadata.siteName, language: metadata.language, deployId: options.deployId,
+    administrator, extensionWarnings, output: installed.output };
 }
 
 /** Import a verified portable site bundle into an empty playground instance. */
 export async function importJoomlaSnapshot(runtime, config, {
-  archiveBytes, sha256: digest, progress = () => {}, sourceLoader, fetchPackage = fetch,
+  archiveBytes, sha256: digest, progress = () => {}, sourceLoader, fetchPackage = networkFetch,
 } = {}) {
   const options = validateInstallOptions(config);
   const location = paths(runtime);
@@ -706,23 +649,18 @@ export async function importJoomlaSnapshot(runtime, config, {
     }
     else await downloadAndInstall(runtime, options.template, fetchPackage, sourceLoader, progress);
   }
-  await execute(runtime, 'customize', { ...location, language: options.language, content: null, admin: administrator, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
+  const metadata = await execute(runtime, 'customize', { ...location, language: options.language, content: null, admin: administrator, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
   if (options.menus.length || options.template) await configureDeployment(runtime, options, config, extensionWarnings, sourceLoader, progress);
   await runDeploymentCommands(runtime, additions.startupCommands, config, extensionWarnings, sourceLoader, progress);
-  const health = await checkJoomla(runtime, { sourceLoader });
-  if (health.version !== options.joomlaVersion) throw new Error('The restored Joomla version does not match the selected release.');
   await restoreJoomlaSession(runtime, options, { sourceLoader });
-  const mcp = (options.sourceDeployId ?? options.deployId) === 'jcb-mcp' ? await checkMcpRuntime(runtime, { sourceLoader, admin: administrator, initialize: true }) : undefined;
-  const frontend = await requestJoomlaPage(runtime);
-  await frontend.arrayBuffer();
-  if (frontend.status !== 200) throw new Error(`The restored Joomla site returned HTTP ${frontend.status}.`);
+  if ((options.sourceDeployId ?? options.deployId) === 'jcb-mcp') await getMcpConnection(runtime, { sourceLoader, admin: administrator, initialize: true });
   await runtime.fs.writeFile(location.marker, JSON.stringify({
-    state: 'complete', joomlaVersion: options.joomlaVersion, language: health.language,
+    state: 'complete', joomlaVersion: options.joomlaVersion, language: metadata.language,
     deployId: options.deployId, extensionWarnings, importedAt: new Date().toISOString(),
   }));
   progress({ stage: 'ready', message: 'The prepared Joomla site is ready.' });
-  return { resumed: false, fromSnapshot: true, version: health.version, siteName: health.siteName, language: health.language,
-    deployId: options.deployId, administrator, extensionWarnings, ...(mcp ? { mcp } : {}) };
+  return { resumed: false, fromSnapshot: true, version: metadata.version, siteName: metadata.siteName, language: metadata.language,
+    deployId: options.deployId, administrator, extensionWarnings };
 }
 
 /** Restore a user's complete site, without reapplying the original recipe. */
@@ -741,12 +679,12 @@ export async function importJoomlaSiteExport(runtime, config, {
   progress({ stage: 'importing', message: imported.contentHashValidated ? 'Package validated.' : 'Package validation is unavailable for this older export.' });
   await ensureManagedDatabaseConfiguration(runtime, options.joomlaVersion);
   await execute(runtime, 'administrator', { ...location, mode: preserveAdministrator ? 'write' : 'replace', admin: options.admin }, sourceLoader);
-  const health = await checkJoomla(runtime, { sourceLoader });
-  const identity = await restoreUploadedSiteSession(runtime, { ...options, language: health.language }, sourceLoader, progress);
-  await runtime.fs.writeFile(location.marker, JSON.stringify({ state: 'complete', joomlaVersion: health.version,
-    language: health.language, deployId: options.deployId, importedAt: new Date().toISOString(), extensionWarnings: [] }));
+  const metadata = imported;
+  const identity = await restoreUploadedSiteSession(runtime, { ...options, language: metadata.language }, sourceLoader, progress);
+  await runtime.fs.writeFile(location.marker, JSON.stringify({ state: 'complete', joomlaVersion: metadata.version,
+    language: metadata.language, deployId: options.deployId, importedAt: new Date().toISOString(), extensionWarnings: [] }));
   return { resumed: false, fromSiteExport: true, contentHashValidated: imported.contentHashValidated,
-    version: health.version, siteName: health.siteName, language: health.language, deployId: options.deployId, ...identity, extensionWarnings: [] };
+    version: metadata.version, siteName: metadata.siteName, language: metadata.language, deployId: options.deployId, ...identity, extensionWarnings: [] };
 }
 
 /** Restore only the verified bundle database/files; the caller restores its private filesystem next. */
@@ -773,7 +711,7 @@ export async function discoverJoomlaConfiguration(runtime, { sourceLoader } = {}
 
 /** Apply explicitly selected changes to a running installation after a caller checkpoint. */
 export async function applyJoomlaConfiguration(runtime, config, {
-  sourceLoader, fetchPackage = fetch, progress = () => {}, installPackages = true, configureLanguage = true,
+  sourceLoader, fetchPackage = networkFetch, progress = () => {}, installPackages = true, configureLanguage = true,
 } = {}) {
   const options = validateInstallOptions(config);
   const location = paths(runtime);
@@ -808,10 +746,9 @@ export async function applyJoomlaConfiguration(runtime, config, {
     multilingual: options.multilingual && (configureLanguage || options.menus.length > 0),
   });
   await runDeploymentCommands(runtime, options.startupCommands, config, extensionWarnings, sourceLoader, progress);
-  const health = await checkJoomla(runtime, { sourceLoader });
-  await runtime.fs.writeFile(location.marker, JSON.stringify({ ...state.marker, language: health.language, extensionWarnings, updatedAt: new Date().toISOString() }));
+  await runtime.fs.writeFile(location.marker, JSON.stringify({ ...state.marker, language: configured.language, extensionWarnings, updatedAt: new Date().toISOString() }));
   const session = config.restoredSite ? await restoreUploadedSiteSession(runtime, options, sourceLoader, progress)
     : { administrator: await restoreJoomlaSession(runtime, { ...options, admin: identity.administrator ?? options.admin }, { sourceLoader }) };
   progress({ stage: 'ready', message: 'The site changes have been applied.' });
-  return { ...configured, ...health, ...session, extensionWarnings };
+  return { ...configured, ...session, extensionWarnings };
 }
