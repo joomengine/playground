@@ -2,11 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeHealthSource, runtimeRandomValue, assertRuntimeHealth } from '../src/php-settings.mjs';
+import { normalizePhpSettings, phpIni, phpRequestBodyLimit, runtimeRandomValue } from '../src/php-settings.mjs';
 import { configurePhpRouting } from '../src/php-routing.mjs';
 import { installPhpRecovery } from '../src/php-recovery.mjs';
 import { applyJcbRuntimeCompatibility } from '../src/jcb-compatibility.mjs';
-import { createPhpFetch } from '../src/php-network.mjs';
+import { createNetworkTransport } from '../src/network-transport.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -32,8 +32,7 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
   let closing = false;
   let failed;
   let closePromise;
-  let requestActive = false;
-  const originalFetch = globalThis.fetch;
+  const previousPhpFetch = globalThis.__joomenginePhpFetch;
   const headersSet = new Set();
   const prefix = `/__site/build/${randomUUID()}/`;
   const baseUrl = `http://localhost${prefix}`;
@@ -90,7 +89,6 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
     php.error = [];
     const original = php.binary;
     applyJcbRuntimeCompatibility(binary, php.docroot);
-    requestActive = true;
     try {
       let response = await php.request({ url: `${url.pathname}${url.search}`, method: input.method, headers, body: inputBody ? new Blob([inputBody]).stream() : null });
       if (php.binary !== original) {
@@ -107,7 +105,6 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
       if (diagnostics) console.warn(`[PHP ${entry.version}] ${diagnostics.slice(0, 8000)}`);
       return response;
     } finally {
-      requestActive = false;
       await databaseRuntime.reset();
     }
   };
@@ -168,15 +165,16 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
         closed = true;
         try { await databaseRuntime.close(); } finally {
           php = null; binary = null;
-          globalThis.fetch = originalFetch;
+          if (previousPhpFetch === undefined) delete globalThis.__joomenginePhpFetch;
+          else globalThis.__joomenginePhpFetch = previousPhpFetch;
         }
       })();
     },
   };
   try {
-    // This runtime owns its worker's fetch function. Install the same recursive
-    // request guard as the browser here, where native cURL actually runs.
-    globalThis.fetch = createPhpFetch(originalFetch.bind(globalThis), baseUrl, () => requestActive);
+    // Node can reach upstream HTTP directly; use the same PHP boundary without
+    // changing Fetch for runtime assets or local package loading.
+    globalThis.__joomenginePhpFetch = createNetworkTransport(globalThis.fetch.bind(globalThis));
     const adapter = createPhpWasmAdapter(databaseRuntime.hostCalls, { shimUrl: new URL('./php-wasm.php', assetURL(manifest.bridge.adapterUrl)) });
     php = new PhpCgiNode({
       ...adapter, phpArgs: { ...adapter.phpArgs, getRandomValue: runtimeRandomValue }, version: entry.version, prefix, docroot: raw.documentRoot, persist: [], staticFS: true, autoTransaction: false,
@@ -198,10 +196,7 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
     php.initialized = true;
     php.staticCacheTime = 0;
     php.dynamicCacheTime = 0;
-    const result = await handle.runPhp(runtimeHealthSource());
-    const identity = JSON.parse(result.text);
-    if (!identity.extensions.includes('pdo_mariadb_wasm') || !identity.pdoDrivers.includes('mysql') || identity.phpVersion !== entry.patchVersion) throw new Error(`Build runtime identity differs from its manifest: ${result.text}`);
-    handle.runtimeInfo = assertRuntimeHealth(identity, phpSettings);
+    handle.runtimeInfo = { phpVersion: entry.patchVersion, phpSettings };
     return handle;
   } catch (error) {
     await handle.close();

@@ -1,3 +1,5 @@
+import { networkFetch } from './network-transport.mjs';
+
 /** Discover the current and forward official packages for build-time staging. */
 
 const VERSION = /^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\d*(?:-dev)?|-dev)?$/i;
@@ -257,7 +259,7 @@ async function requestData(fetchImpl, url, signal, { storage, kind, ttl, now, fo
  * it never walks release history, branch lists, or the package tag archive.
  * Pinned inputs remain a safe baseline when an upstream feed is unavailable.
  */
-export async function discoverDynamicCatalog({ fetchImpl = globalThis.fetch, signal, sources = {},
+export async function discoverDynamicCatalog({ fetchImpl = networkFetch, signal, sources = {},
   pinnedJoomla = [], pinnedJcb = [], cacheStorage, cacheTtlMs = DEFAULT_TTL,
   forceRefresh = false, now = Date.now } = {}) {
   if (typeof fetchImpl !== 'function') throw new TypeError('A fetch implementation is required.');

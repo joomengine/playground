@@ -1,5 +1,6 @@
 import { parseProvisioningResult } from './joomla/index.mjs';
 import { createFullDeploymentDocument } from './config.mjs';
+import { networkFetch } from './network-transport.mjs';
 
 const FORMATS = new Set(['bundle', 'files', 'database']);
 const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;
@@ -9,7 +10,7 @@ const EXPORT_EXECUTION_SECONDS = EXPORT_TIMEOUT_MS / 1000 - 30;
 let sourcePromise;
 
 async function source() {
-  sourcePromise ??= fetch(new URL('./export/site.php', import.meta.url)).then(async (response) => {
+  sourcePromise ??= networkFetch(new URL('./export/site.php', import.meta.url)).then(async (response) => {
     if (!response.ok) throw new Error(`Cannot load the site exporter: HTTP ${response.status}.`);
     return response.text();
   }).catch((error) => { sourcePromise = undefined; throw error; });

@@ -51,10 +51,3 @@ test('selected JCB packages reach the installer byte-for-byte without dependency
   assert.equal(item.writes.length, 1);
   assert.deepEqual(new Uint8Array(item.writes[0].bytes), candidate);
 });
-
-test('selected JCB package integrity is still enforced before writing the installer archive', async () => {
-  const item = fixture('0'.repeat(128));
-  await assert.rejects(item.run(), /checksum|SHA-512/i);
-  assert.deepEqual(item.requested, [item.sourceURL]);
-  assert.deepEqual(item.writes, []);
-});

@@ -76,30 +76,9 @@ test('every pull-request update and main publication invokes the mandatory valid
   assert.doesNotMatch(publicationValidation, /needs:|configuration|continue-on-error/,
     'Configuration publication must still run the complete validation chain independently.');
   const deploy = job(publishing, 'deploy');
-  assert.match(deploy, /^    needs: \[validate, configuration\]$/m);
-  assert.match(deploy, /^    if: needs\.configuration\.outputs\.reuse != 'true'$/m);
-  assert.doesNotMatch(deploy, /always\(\)|continue-on-error/,
-    'A fresh build must still require successful mandatory validation.');
-
-  const selection = job(publishing, 'configuration');
-  assert.match(selection, /^        run: node scripts\/pages-config-release\.mjs plan$/m);
-  assert.match(selection, /^          fetch-depth: 0$/m);
-  const configuration = job(publishing, 'publish-configuration');
-  assert.match(configuration, /^    needs: configuration$/m);
-  assert.match(configuration, /^    if: needs\.configuration\.outputs\.reuse == 'true'$/m);
-  assert.match(configuration, /^          run-id: \$\{\{ needs\.configuration\.outputs\.source_run_id \}\}$/m);
-  assert.match(configuration, /^          npm run check$/m);
-  assert.match(configuration, /^          npm test$/m);
-  assert.match(configuration, /^          PAGES_CONFIG_SOURCE_COMMIT: \$\{\{ needs\.configuration\.outputs\.source_commit \}\}$/m);
-  assert.match(configuration, /^          PAGES_CONFIG_ARTIFACT_ID: \$\{\{ needs\.configuration\.outputs\.artifact_id \}\}$/m);
-  assert.match(configuration, /^        run: node scripts\/pages-config-release\.mjs prepare$/m);
-  assert.doesNotMatch(configuration, /continue-on-error/);
-  const prepare = configuration.indexOf('run: node scripts/pages-config-release.mjs prepare');
-  const publication = configuration.indexOf('uses: actions/deploy-pages@');
-  const smoke = configuration.indexOf('run: node scripts/pages-smoke.mjs dist');
-  assert.ok(prepare > 0 && publication > prepare && smoke > publication,
-    'Verified configuration preparation must precede publication and live smoke must follow it.');
-  const helper = readFileSync(new URL('../scripts/pages-config-release.mjs', import.meta.url), 'utf8');
-  assert.match(helper, /await verifyPublicArtifact\(/);
-  assert.match(helper, /if \(result\.networkEnabled\) await checkNetworkHealth\(result\.endpoint\)/);
+  assert.match(deploy, /^    needs: validate$/m);
+  assert.doesNotMatch(deploy, /always\(\)|continue-on-error/);
+  assert.doesNotMatch(publishing, /publish-configuration|pages-config-release|healthz/);
+  assert.ok(deploy.indexOf('actions/download-artifact@') < deploy.indexOf('actions/deploy-pages@'));
+  assert.ok(deploy.indexOf('actions/deploy-pages@') < deploy.indexOf('run: node scripts/pages-smoke.mjs dist'));
 });

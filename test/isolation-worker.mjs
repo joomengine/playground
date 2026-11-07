@@ -1,5 +1,4 @@
-// Exercise dedicated module workers, nested workers and shared WASM memory before
-// PHP or MariaDB is created. This probe never opens site storage.
+// Browser-test fixture for dedicated workers, nested workers and shared WASM memory.
 self.onmessage = async ({ data }) => {
   let child, timer;
   try {
@@ -8,7 +7,7 @@ self.onmessage = async ({ data }) => {
     const values = new Int32Array(data.memory.buffer);
     Atomics.add(values, 0, 1);
     if (!data.leaf) {
-      child = new Worker(new URL('./isolation-probe.mjs', import.meta.url), { type: 'module', name: 'joomengine-isolation-nested-probe' });
+      child = new Worker(new URL('./isolation-worker.mjs', import.meta.url), { type: 'module', name: 'isolation-test-nested-worker' });
       await new Promise((resolve, reject) => {
         timer = setTimeout(() => reject(new Error('The nested shared-memory worker did not respond.')), 8000);
         child.onmessage = event => event.data?.ok ? resolve() : reject(new Error(event.data?.error || 'Nested worker capability verification failed.'));

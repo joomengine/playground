@@ -169,7 +169,6 @@ try {
     if ($count === 0) {
         throw new RuntimeException('The prebuilt database has no statements.');
     }
-    $connection = null;
     require $root . '/configuration.php';
     require_once $root . '/libraries/vendor/autoload.php';
     $configuration = new \Joomla\Registry\Registry(new JConfig());
@@ -197,7 +196,12 @@ try {
     if (file_put_contents($root . '/configuration.php', $data) !== strlen($data)) {
         throw new RuntimeException('Cannot configure the imported browser site.');
     }
-    playgroundFinish(['ok' => true, 'version' => $playground['joomlaVersion'], 'statements' => $count, 'contentHashValidated' => $contentHashValidated]);
+    $languageSettings = $connection->query('SELECT params FROM `' . $configuration->get('dbprefix') . 'extensions` WHERE type = \'component\' AND element = \'com_languages\'')->fetchColumn();
+    $languageSettings = json_decode($languageSettings ?: '{}', true, 512, JSON_THROW_ON_ERROR);
+    $connection = null;
+    playgroundFinish(['ok' => true, 'version' => (string) $manifest->version,
+        'siteName' => $configuration->get('sitename'), 'language' => $languageSettings['site'] ?? 'en-GB',
+        'statements' => $count, 'contentHashValidated' => $contentHashValidated]);
 } catch (Throwable $error) {
     playgroundFinish(['ok' => false, 'error' => $error->getMessage()]);
 }

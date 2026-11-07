@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { createNodeRuntime } from '../scripts/node-runtime.mjs';
-import { NESTED_PHP_REQUEST_ERROR } from '../src/php-network.mjs';
 import { builtManifest } from './runtime-artifacts.mjs';
 
 for (const phpVersion of (process.env.PLAYGROUND_PHP_VERSIONS?.split(',') || (await builtManifest()).php.map(entry => entry.version))) {
 test(`PHP ${phpVersion}: native HTTP streams preserve bytes, contexts, response headers and timeouts`, { timeout: 60_000 }, async t => {
   const requests = [];
   const binary = Buffer.from([0, 255, 65, 128, 10]);
+  const download = Buffer.alloc(2 * 1024 * 1024, 65);
   const server = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -18,12 +18,14 @@ test(`PHP ${phpVersion}: native HTTP streams preserve bytes, contexts, response 
     else if (request.url === '/missing') { response.writeHead(404); response.end('not found'); }
     else if (request.url === '/slow') { /* The stream's real timeout must abort this response. */ }
     else if (request.url === '/headers-only') { response.setHeader('Content-Length', 1024 * 1024 * 1024); response.flushHeaders(); }
+    else if (request.url === '/download') response.end(download);
     else if (request.url === '/echo') response.end(Buffer.concat(chunks));
     else response.end(binary);
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
-  const runtime = await createNodeRuntime({ directory: process.env.PLAYGROUND_DIST, phpVersion });
+  const runtime = await createNodeRuntime({ directory: process.env.PLAYGROUND_DIST, phpVersion,
+    phpSettings: { upload_max_filesize: '1M' } });
   t.after(() => runtime.close());
   const base = `http://127.0.0.1:${server.address().port}`;
   const result = await runtime.runPhp(`<?php
@@ -60,16 +62,10 @@ test(`PHP ${phpVersion}: native HTTP streams preserve bytes, contexts, response 
     $headerStart = microtime(true);
     $largeHeaders = get_headers($base . '/headers-only');
     $headerElapsed = microtime(true) - $headerStart;
-    $overLimit = @file_get_contents($base . '/headers-only');
-    $recursive = @file_get_contents('${runtime.baseUrl}callback');
-    $recursiveCurl = curl_init('${runtime.baseUrl}callback');
-    curl_setopt($recursiveCurl, CURLOPT_RETURNTRANSFER, true);
-    $recursiveCurlResult = curl_exec($recursiveCurl);
-    $recursiveError = curl_error($recursiveCurl);
-    curl_close($recursiveCurl);
+    $downloadSize = strlen(file_get_contents($base . '/download'));
     $remoteFileExists = file_exists($base . '/binary');
     echo json_encode(compact('read', 'post', 'redirect', 'missing', 'errorBody', 'timeout', 'elapsed', 'first', 'again', 'stat', 'customTrust')
-      + compact('localHeaders', 'errorHeaders', 'headerFunction', 'headFunction', 'largeHeaders', 'headerElapsed', 'remoteFileExists', 'retainedContext', 'overLimit', 'recursive', 'recursiveCurlResult', 'recursiveError')
+      + compact('localHeaders', 'errorHeaders', 'headerFunction', 'headFunction', 'largeHeaders', 'headerElapsed', 'remoteFileExists', 'retainedContext', 'downloadSize')
       + ['headers' => $meta['wrapper_data'],
       'afterTimeout' => base64_encode(file_get_contents($base . '/binary'))], JSON_THROW_ON_ERROR);
   `);
@@ -94,10 +90,7 @@ test(`PHP ${phpVersion}: native HTTP streams preserve bytes, contexts, response 
   assert.ok(proof.headerElapsed < 3, 'get_headers must return without waiting for the response body.');
   assert.equal(proof.remoteFileExists, false, 'HTTP file_exists follows PHP native unsupported-stat behavior.');
   assert.deepEqual(proof.retainedContext, { http: { header: ['X-Proof: retained-context'] } });
-  assert.equal(proof.overLimit, false, 'The response must be rejected before exceeding the PHP memory budget.');
-  assert.equal(proof.recursive, false);
-  assert.equal(proof.recursiveCurlResult, false);
-  assert.ok(proof.recursiveError.includes(NESTED_PHP_REQUEST_ERROR), proof.recursiveError);
+  assert.equal(proof.downloadSize, download.length, 'Downloads must not inherit upload_max_filesize.');
   assert.ok(requests.some(request => request.method === 'HEAD'));
   const received = requests.find(request => request.path === '/echo');
   assert.equal(received.method, 'PATCH');

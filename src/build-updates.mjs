@@ -1,7 +1,9 @@
+import { networkFetch } from './network-transport.mjs';
+
 const BUILD_ID = /^[a-f0-9]{64}$/;
 
 /** Check on startup/focus/launch, without reloading or touching any saved-site storage. */
-export function createBuildUpdateMonitor({ baseURL, loadedId, fetchImpl = globalThis.fetch,
+export function createBuildUpdateMonitor({ baseURL, loadedId, fetchImpl = networkFetch,
   onUpdate = () => {}, now = Date.now, minimumInterval = 30_000 } = {}) {
   const base = new URL(baseURL);
   const markerURL = new URL('build.json', base);

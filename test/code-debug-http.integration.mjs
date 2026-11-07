@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
 import { builtWrapper, builtManifest, releasedLibraries } from './runtime-artifacts.mjs';
 import { PhpDebugRuntime } from '../src/code/debug-runtime.mjs';
+import { createNetworkTransport } from '../src/network-transport.mjs';
 
 const pins = await builtManifest();
 const versions = process.env.PHPDBG_TEST_VERSION ? [process.env.PHPDBG_TEST_VERSION] : pins.php.map(entry => entry.version);
@@ -77,4 +80,60 @@ inspect_request($object);
   assert.deepEqual(parsed, { method: 'POST', post: { title: 'JoomEngine Code' }, cookie: 'active', raw: 'title=JoomEngine+Code', object: 'inspected', local: 42 });
   const result = new Map(runtime.snapshotEntries);
   assert.equal(new TextDecoder().decode(result.get('/persist/www/count.txt').bytes), '1');
+});
+
+for (const version of versions) test(`phpdbg uses the same cURL and HTTP stream bridge on PHP ${version}`, { timeout: 60_000 }, async t => {
+  const payload = Buffer.from([0, 65, 255, 128, 10]);
+  const requests = [];
+  const server = createServer((request, response) => {
+    requests.push(request.url);
+    response.writeHead(200, { 'Content-Type': 'application/octet-stream', 'X-Debug-Network': 'shared-http' });
+    response.end(payload);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const url = `http://127.0.0.1:${server.address().port}/binary`;
+  const previousHook = globalThis.__joomenginePhpFetch;
+  const transport = createNetworkTransport(globalThis.fetch.bind(globalThis));
+  const transported = [];
+  globalThis.__joomenginePhpFetch = (input, init) => {
+    transported.push(String(input));
+    return transport(input, init);
+  };
+  t.after(() => {
+    if (previousHook === undefined) delete globalThis.__joomenginePhpFetch;
+    else globalThis.__joomenginePhpFetch = previousHook;
+  });
+  const { PhpDbgNode } = await builtWrapper(version, 'debugger');
+  const runtime = new PhpDebugRuntime({
+    Runtime: PhpDbgNode, phpVersion: version, siteURL: 'https://example.test/__site/owner/site/',
+    sharedLibs: [...await releasedLibraries(version),
+      { name: `php${version}-curl.so`, ini: true, url: new URL(`../.cache/curl/php${version}-curl.so`, import.meta.url) },
+      { name: `php${version}-jec-phpdbg-http.so`, ini: true,
+        url: new URL(`../.cache/phpdbg/php${version}-jec-phpdbg-http.so`, import.meta.url) }],
+    ini: 'auto_prepend_file=/internal/rocket-http.php\n',
+    snapshot: snapshot({
+      '/internal/mariadb.php': '<?php // This HTTP-only request does not use a database.\n',
+      '/internal/rocket-http.php': await readFile(new URL('../src/php-http-stream.php', import.meta.url), 'utf8'),
+      '/persist/www/index.php': `<?php
+header('Content-Type: application/json');
+$stream = file_get_contents('${url}', false, stream_context_create(['http' => ['timeout' => 5]]));
+$headers = $http_response_header;
+$curl = curl_init('${url}');
+curl_setopt_array($curl, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
+$body = curl_exec($curl);
+echo json_encode(['stream' => base64_encode($stream), 'curl' => base64_encode($body),
+    'headers' => $headers, 'error' => curl_error($curl)], JSON_THROW_ON_ERROR);
+`,
+    }),
+  });
+  const response = await runtime.execute({ url: 'https://example.test/__site/owner/site/index.php', method: 'GET', headers: [] });
+  assert.equal(response.status, 200);
+  const result = JSON.parse(new TextDecoder().decode(response.body));
+  assert.equal(result.stream, payload.toString('base64'));
+  assert.equal(result.curl, payload.toString('base64'));
+  assert.equal(result.error, '');
+  assert.ok(result.headers.some(header => /^x-debug-network: shared-http$/i.test(header)));
+  assert.deepEqual(requests, ['/binary', '/binary']);
+  assert.deepEqual(transported, [url, url]);
 });

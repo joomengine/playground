@@ -41,7 +41,7 @@ The Weblinks recipe is a complete example:
 }
 ```
 
-For repository recipes, common configuration is applied first, then the selected Joomla major's variant, then explicit URL or caller settings. Extension and CLI additions append in that order. Saved custom recipes contain complete lists and replace them when edited. Duplicate managed package URLs with identical checksums are installed once; conflicting managed checksums fail validation. Repository recipes cannot define administrator credentials.
+For repository recipes, common configuration is applied first, then the selected Joomla major's variant, then explicit URL or caller settings. Extension and CLI additions append in that order. Saved custom recipes contain complete lists and replace them when edited. Duplicate managed package URLs are installed once. Repository recipes cannot define administrator credentials.
 
 The build verifies repository package digests and stages them under the playground's own origin. Staged recipes retain the publisher URL as `sourceUrl` and use relative local asset URLs. Runtime validation in `src/deploys.mjs` also checks relationships that JSON Schema cannot express, including catalog IDs, category references and supported variants.
 
@@ -76,7 +76,7 @@ Supported deployment parameters include:
 | `toolbar` | `0` | Hide the header and footer together; edge tabs restore them without restarting Joomla |
 | `start` | `0` | Load the configuration without starting automatically |
 
-`extensions` accepts a JSON array of `{ "url": "…" }` objects; repeated `extension=URL` parameters provide a shorter form. Custom URLs go to Joomla's `extension:install --url=URL` command, and user-supplied checksum fields are ignored. Installer errors remain visible while the site opens. Repository packages retain mandatory verified checksums and must install successfully.
+`extensions` accepts a JSON array of `{ "url": "…" }` objects; repeated `extension=URL` parameters provide a shorter form. Custom URLs go to Joomla's `extension:install --url=URL` command, and user-supplied checksum fields are ignored. Installer errors remain visible while the site opens. Repository packages retain build-time pins and must install successfully.
 
 `commands` accepts JSON arrays of Joomla CLI argument arrays. Use a command such as `["cache:clean"]`, without `php`, `cli/joomla.php` or a shell prefix. Arguments are passed directly to the Joomla CLI, without shell interpolation.
 
@@ -151,7 +151,7 @@ Public share links continue using schema version 1 and exclude administrator set
 }
 ```
 
-The share panel encodes advanced public configurations in a `#deploy=` fragment and shows the URL for copying. Generated links are limited to 16 KiB. Larger public documents can be hosted at an HTTPS URL and opened with `?config=URL&sha256=DIGEST`; the host must permit browser Fetch reads. The optional digest covers the exact JSON file bytes. Full version 2 documents are exported and imported through the editor. Documents are limited to 1 MiB.
+The share panel encodes advanced public configurations in a `#deploy=` fragment and shows the URL for copying. Generated links are limited to 16 KiB. Larger public documents can be hosted at a URL and opened with `?config=URL`; retrieval uses the shared HTTP transport. Full version 2 documents are exported and imported through the editor. Documents are limited to 1 MiB.
 
 Programmatic consumers can import `createFullDeploymentDocument`, `createDeploymentDocument`, `parseDeploymentDocument`, `loadDeploymentDocument`, `createShareURL` and `createDeploymentSourceURL` from `src/config.mjs`. `createFullDeploymentDocument(config, { name, requirements })` creates the version 2 document. Its requirements declare Joomla majors, optional PHP constraints, explicit Joomla fallbacks and whether JCB is required. Parsing version 2 returns a `deploymentRecipe` alongside the configuration; the resolver uses those complete lists without appending the original preset again. Public shares carry a standalone sanitized recipe for custom deployments, omitting administrator settings and local storage identities.
 
@@ -161,7 +161,7 @@ Menu items use `key`, `title`, `alias`, `menuType`, `component`, `view`, `query`
 
 Packages install before menu configuration. The editor can discover the actual installed component menu types and template styles. Joomla's own models validate and save these records. Applying a menu with the same menu type, alias and language updates the existing record rather than creating a duplicate.
 
-A template may contain a package `url`, followed by its `element` or installed `styleId`, `params`, and optional `menuKeys`. Managed template packages retain their verified checksum; custom template URLs use Joomla's console installer and ignore supplied checksum fields. Without `menuKeys`, the template becomes the default site template. With assignments, only the named deployment menu items receive that style. Its Joomla form validates parameters.
+A template may contain a package `url`, followed by its `element` or installed `styleId`, `params`, and optional `menuKeys`. Managed template packages retain their build-time checksum metadata; custom template URLs use Joomla's console installer and ignore supplied checksum fields. Without `menuKeys`, the template becomes the default site template. With assignments, only the named deployment menu items receive that style. Its Joomla form validates parameters.
 
 `languageTags` requests installation of selected language packs. `language` selects the site's default language. Setting `multilingual: true` also creates content-language records and activates Joomla's language filter and switcher. A custom multilingual deployment needs one published home item per selected language. The heritage preset supplies articles, categories and associated homes for all eight languages. Interface language is a separate browser preference and does not change Joomla content.
 
@@ -171,7 +171,7 @@ PHP settings are an allowlist of the six documented settings. The runtime report
 
 Global Configuration can save normal Joomla settings. Database connection credentials and filesystem session storage are managed by Rocket while PHP uses the embedded MariaDB bridge. Changing those fields is rejected with an explanation; export the site to configure a different server. A narrowly scoped, checksum-verified adapter preserves Joomla's native configuration save flow and its original server behavior. See [the reviewed source and adapter provenance](../dependencies/joomla/README.md).
 
-Managed extension ZIPs are limited to 128 MiB. Custom URL installations use Joomla's downloader and installer. Prepared snapshots and private saved-site transfers accept a verified bundle up to 512 MiB compressed; exported and imported bundles share a limit of 100,000 ZIP entries and 768 MiB expanded. PHP upload limits are separate and adjustable in the runtime settings.
+Runtime extension downloads have no additional Playground size or checksum gate. Joomla's downloader and installer handle custom URL installations. Prepared snapshots and private saved-site transfers accept a verified bundle up to 512 MiB compressed; exported and imported bundles share a limit of 100,000 ZIP entries and 768 MiB expanded. PHP upload limits are separate and adjustable in the runtime settings.
 
 ## Browser deployment images
 
@@ -179,7 +179,7 @@ Complete site **Download** and **Upload** preserve an existing installation, inc
 
 **Deployment images** manages the prepared images available in this browser. Each image is an independent base for creating sites; removing an image does not delete a saved site's files or database. A later launch downloads a maintained image again or rebuilds a custom image when it is no longer stored locally.
 
-Maintained images follow the server's current build manifest. Before creating a site, the browser revalidates that small manifest and compares its published image hash with the local copy. A changed or removed server image invalidates the older local copy. The replacement ZIP is downloaded only when needed and its SHA-256 is verified before reuse. The manager displays deployment names, runtime versions, availability and size; download addresses remain internal.
+Maintained images follow the server's current build manifest. Before creating a site, the browser revalidates that small manifest and compares its published image hash with the local copy. A changed or removed server image invalidates the older local copy. The replacement ZIP is downloaded only when needed. Stored image records retain their content hash and are checked when read from the local cache. The manager displays deployment names, runtime versions, availability and size; download addresses remain internal.
 
 A successful initial custom build is exported and stored before the site opens for editing. Later sites with the same effective packages, configuration and runtime restore a separate copy, apply their own site name and administrator, and skip packages and commands already included in the image. Builds with failed optional setup steps are not stored as reusable images. Saved sites continue resuming their own state, and later interactive edits are never silently added to a deployment image.
 

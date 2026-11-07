@@ -11,7 +11,6 @@ import { stageSodium } from './sodium.mjs';
 import { applyCgiRequestOverlay } from './cgi-request-overlay.mjs';
 import { stageCodeAssets } from './code-assets.mjs';
 import { stageAdminer } from './prepare-adminer.mjs';
-import { validatePublicAssetRegistry, validatePublicAssetConfiguration } from '../src/public-assets.mjs';
 import { validateCompatibilityConfiguration } from '../src/isolation-bootstrap.mjs';
 import { stagePhpDebugHttp, applyPhpDebugWorkerOverlay } from './phpdbg.mjs';
 import { loadPhpRuntime } from './php-runtime.mjs';
@@ -22,20 +21,11 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const versions = await loadPhpRuntime({ root });
 const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
-const approvedImages = validatePublicAssetRegistry(JSON.parse(await readFile(path.join(root, 'config/public-assets.json'), 'utf8')));
-const imageDelivery = validatePublicAssetConfiguration(JSON.parse(await readFile(path.join(root, 'config/public-assets-config.json'), 'utf8')));
 const browserCompatibility = validateCompatibilityConfiguration(JSON.parse(await readFile(path.join(root, 'config/browser-compatibility.json'), 'utf8')));
 const deploymentEnvironment = process.env.PLAYGROUND_DEPLOYMENT_ENV || 'production';
 if (!['production', 'staging'].includes(deploymentEnvironment)) throw new Error('Invalid Playground deployment environment.');
 const networkConfigurationPath = deploymentEnvironment === 'staging' ? 'config/network.staging.json' : 'config/network.json';
 const network = normalizeNetworkConfig(JSON.parse(await readFile(path.join(root, networkConfigurationPath), 'utf8')));
-if (network.enabled && (!network.turnstileSiteKey
-  || (deploymentEnvironment === 'production' && /^[123]x0{20}[A-Z]{2}$/.test(network.turnstileSiteKey)))) {
-  throw new Error('An enabled published network service requires a Turnstile site key; production rejects test keys.');
-}
-if (!imageDelivery.registryVersions.includes(approvedImages.version)) throw new Error('The image relay configuration must support the staged registry version.');
-// Runtime isolation is independent of optional external-image delivery. The
-// same-origin PHP and MariaDB assets work with either verified COEP policy.
 const domain = (await readFile(path.join(root, 'CNAME'), 'utf8')).trim();
 if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
   throw new Error('CNAME must contain one valid deployment hostname.');
@@ -211,12 +201,12 @@ try {
   console.log('Staging current and forward Joomla/JCB packages…');
   const versionCatalog = await stageVersionCatalog({ assets, cache, pinnedJoomla: versions.joomla,
     stagedJoomla: joomla, deployPackages: deploys.packages });
-  for (const name of ['index.html', 'network-verify.html', 'src', 'config', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
+  for (const name of ['index.html', 'src', 'config', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
     await cp(path.join(root, name), path.join(staging, name), { recursive: true });
   }
   // Each artifact includes only its chosen public environment configuration.
   await rm(path.join(staging, 'config/network.staging.json'), { force: true });
-  // Serialize the validated public allowlist rather than copying unreviewed fields.
+  // Publish the selected fallback endpoint with the runtime.
   await writeFile(path.join(staging, 'config/network.json'), `${JSON.stringify(network, null, 2)}\n`);
   await writeFile(path.join(staging, '.nojekyll'), '');
   let sourceCommit;
@@ -225,7 +215,7 @@ try {
   const manifest = {
     schemaVersion: 1, projectVersion: pkg.version, sourceCommit, code,
     deployment: { canonicalUrl, domain, environment: deploymentEnvironment },
-    browserCompatibility, publicAssets: { registryVersion: approvedImages.version, enabled: imageDelivery.enabled }, network,
+    browserCompatibility, network,
     runtime: versions.runtime, upstream: versions.upstream, nativeDriver: versions.nativeDriver, packages, php, joomla, deploys, versionCatalog,
     bridge: {
       protocolVersion: versions.bridge.protocolVersion,

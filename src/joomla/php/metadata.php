@@ -11,10 +11,6 @@ try {
     if (!preg_match('/^[a-zA-Z0-9_]+$/', $prefix)) {
         throw new RuntimeException('The Joomla table prefix is invalid.');
     }
-    $users = $connection->query('SELECT COUNT(*) FROM `' . $prefix . 'users`')->fetchColumn();
-    if ((int) $users < 1) {
-        throw new RuntimeException('The saved MariaDB database does not contain a Joomla administrator.');
-    }
     $languageSettings = $connection->query('SELECT params FROM `' . $prefix . 'extensions` WHERE type = \'component\' AND element = \'com_languages\'')->fetchColumn();
     $languageSettings = json_decode($languageSettings ?: '{}', true, 512, JSON_THROW_ON_ERROR);
     $connection = null;

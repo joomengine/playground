@@ -5,7 +5,6 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { normalizeNetworkConfig } from '../src/network-config.mjs';
-import { checkNetworkHealth } from './network-health.mjs';
 
 const files = ['assets/manifest.json', 'config/network.json', 'build.json', 'index.html', 'src/app.mjs'];
 
@@ -78,9 +77,8 @@ export async function verifyPublishedPlayground({ directory = 'dist', baseURL, e
             assert.ok(actual.equals(expected.get(file)), `Published ${file} differs from the tested artifact.`);
           }
         }
-        const relay = normalized.enabled ? await checkNetworkHealth(normalized.endpoint, { fetcher, signal: controller.signal }) : null;
         return { url: base.href, sourceCommit: manifest.sourceCommit, buildId: build.id, attempts,
-          networkEnabled: normalized.enabled, relay };
+          networkEndpoint: normalized.endpoint };
       } catch (error) {
         lastError = error;
         if (controller.signal.aborted || attempts === maxAttempts) break;

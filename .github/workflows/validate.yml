@@ -280,7 +280,7 @@ jobs:
           retention-days: 14
 
   network-worker:
-    name: Network Worker contract and security
+    name: Network Worker tests
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -383,7 +383,7 @@ jobs:
           retention-days: 14
 
   compatibility:
-    name: Isolation and approved images (${{ matrix.browser }})
+    name: Browser isolation and HTTP images (${{ matrix.browser }})
     needs: [checks, build]
     if: needs.checks.outputs.build == 'true'
     runs-on: ubuntu-24.04
@@ -407,18 +407,16 @@ jobs:
         uses: ./.github/actions/install-playwright
         with:
           browser: ${{ matrix.browser }}
-      - name: Verify isolation and original image bytes through real PHP
+      - name: Verify browser isolation and HTTP images
         env:
           PLAYGROUND_ISOLATION_BROWSER: ${{ matrix.browser }}
           PLAYGROUND_ISOLATION_RUNTIME_DIST: dist
-          PUBLIC_ASSET_BROWSER: ${{ matrix.browser }}
-          PUBLIC_ASSET_RUNTIME_DIST: dist
-          PUBLIC_ASSET_BROWSER_EVIDENCE: test-results/public-assets-${{ matrix.browser }}.json
+          NETWORK_IMAGES_BROWSER: ${{ matrix.browser }}
+          NETWORK_IMAGES_BROWSER_EVIDENCE: test-results/network-images-${{ matrix.browser }}.json
         run: |
           mkdir -p test-results
           node --test test/isolation.browser.mjs
-          node --test test/network-session.browser.mjs
-          node --test test/public-assets.browser.mjs
+          node --test test/network-images.browser.mjs
       - name: Verify Adminer persistence and tool lifecycle
         if: matrix.browser == 'chromium'
         run: node --test test/adminer.browser.mjs

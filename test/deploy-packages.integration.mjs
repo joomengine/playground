@@ -5,8 +5,26 @@ import { test } from 'node:test';
 import { createNodeRuntime } from '../scripts/node-runtime.mjs';
 import { parseCatalog } from '../src/config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
-import { checkMcpRuntime, getMcpConnection, discoverJoomlaConfiguration, installJoomla, requestJoomlaPage } from '../src/joomla/index.mjs';
+import { getMcpConnection, discoverJoomlaConfiguration, installJoomla, requestJoomlaPage } from '../src/joomla/index.mjs';
 import { createMcpClient } from '../src/mcp.mjs';
+
+/** Exercise the unchanged component through its real token-authenticated HTTP transport. */
+async function checkMcpRuntime(runtime, { sourceLoader, admin, initialize = false } = {}) {
+  const connection = await getMcpConnection(runtime, { sourceLoader, admin, initialize });
+  if (!connection.installed) return { installed: false };
+  const client = createMcpClient({ request: runtime.request.bind(runtime), token: connection.token });
+  try {
+    const initialized = await client.initialize();
+    const { tools } = await client.request('tools/list');
+    if (!Array.isArray(tools) || !tools.some(tool => tool.name === 'joomla_action_describe')) {
+      throw new Error('The installed MCP endpoint did not expose its action catalogue.');
+    }
+    const description = await client.callTool('joomla_action_describe', { action: 'content.categories.list' });
+    if (description.action?.id !== 'content.categories.list') throw new Error('MCP did not describe the installed Joomla action.');
+    return { installed: true, version: connection.version, endpoint: connection.endpoint,
+      protocolVersion: initialized.protocolVersion, toolCount: tools.length, describedAction: description.action.id };
+  } finally { await client.close(); }
+}
 
 const sourceLoader = (name) => readFile(new URL(`../src/joomla/php/${name}.php`, import.meta.url), 'utf8');
 const pairs = [ ['servicedirectory', '5'], ['servicedirectory', '6'], ['jcb-mcp', '6'] ];
@@ -48,12 +66,13 @@ for (const [deployId, major] of pairs) {
       } else {
         const health = await runtime.runPhp('<?php echo json_encode(["sodium" => extension_loaded("sodium"), "sodiumRoundTrip" => sodium_bin2hex(sodium_hex2bin("00ff80"))], JSON_THROW_ON_ERROR);');
         assert.deepEqual(JSON.parse(health.text), { sodium: true, sodiumRoundTrip: '00ff80' });
-        assert.equal(installed.mcp?.installed, true);
-        assert.equal(installed.mcp.version, '1.0.10');
-        assert.equal(installed.mcp.protocolVersion, '2025-11-25');
-        assert.ok(installed.mcp.toolCount > 0);
-        assert.equal(installed.mcp.describedAction, 'content.categories.list');
-        assert.equal(Object.hasOwn(installed.mcp, 'token'), false, 'Installation diagnostics never expose API credentials.');
+        const mcp = await checkMcpRuntime(runtime, { sourceLoader, admin: configuration.admin });
+        assert.equal(mcp.installed, true);
+        assert.equal(mcp.version, '1.0.10');
+        assert.equal(mcp.protocolVersion, '2025-11-25');
+        assert.ok(mcp.toolCount > 0);
+        assert.equal(mcp.describedAction, 'content.categories.list');
+        assert.equal(Object.hasOwn(mcp, 'token'), false, 'Installation diagnostics never expose API credentials.');
         const invalid = createMcpClient({ request: runtime.request.bind(runtime), token: 'invalid-test-token' });
         await assert.rejects(invalid.initialize(), /HTTP 401/);
         const connection = await getMcpConnection(runtime, { sourceLoader, admin: configuration.admin });

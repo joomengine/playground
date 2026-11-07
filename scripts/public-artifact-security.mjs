@@ -7,8 +7,7 @@ import { Unzip, UnzipInflate } from 'fflate';
 import { normalizeNetworkConfig } from '../src/network-config.mjs';
 
 export const serverCredentialNames = Object.freeze([
-  'CLOUDFLARE_API_TOKEN', 'TURNSTILE_SECRET_KEY', 'STAGING_TEST_SECRET',
-  'NETWORK_STAGING_TEST_SECRET', 'SESSION_SIGNING_KEY',
+  'CLOUDFLARE_API_TOKEN',
 ]);
 
 export function createBuildCanaries() {
@@ -110,9 +109,5 @@ export async function verifyPublicArtifact({ directory, canaries, environment = 
   }
   if (manifest.schemaVersion !== 1 || !/^[a-f0-9]{40}$/.test(manifest.sourceCommit || '')
     || manifest.deployment?.environment !== environment) throw new Error('Public artifact deployment identity is invalid.');
-  if (environment === 'production' && normalized.enabled
-    && (!normalized.turnstileSiteKey || /^[123]x0{20}[A-Z]{2}$/.test(normalized.turnstileSiteKey))) {
-    throw new Error('Production artifacts cannot enable a Turnstile test key.');
-  }
   return { ...result, sourceCommit: manifest.sourceCommit, serverCredentialChecks: [...serverCredentialNames] };
 }

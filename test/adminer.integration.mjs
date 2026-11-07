@@ -75,7 +75,7 @@ test('Adminer browses and modifies the active MariaDB with CSRF protection and e
   assert.equal(exported.status, 200, csv);
   assert.match(csv, /row-edited café 🦁/);
   assert.match(csv, /imported/);
-  assert.doesNotMatch(csv, /__adminer|__public-assets/);
+  assert.doesNotMatch(csv, /__adminer/);
   const forgedLogin = await runtime.request('/database-test.php', {
     method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: 'auth[server]=external.invalid&auth[username]=someone',

@@ -14,8 +14,9 @@ const browserType = { chromium, webkit }[browserName];
 
 async function launchBrowser(server) {
   try {
-    return await browserType.launch({ headless: true,
-      ...(process.env.PLAYGROUND_BROWSER_EXECUTABLE ? { executablePath: process.env.PLAYGROUND_BROWSER_EXECUTABLE } : {}) });
+    const executablePath = process.env.PLAYGROUND_BROWSER_EXECUTABLE
+      || (browserName === 'chromium' ? process.env.PLAYGROUND_CHROMIUM_EXECUTABLE : undefined);
+    return await browserType.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
   } catch (error) { await server.close(); throw error; }
 }
 
@@ -39,6 +40,26 @@ async function prepare(page, url, { simulateUnsupportedCredentialless = false } 
   throw new Error('The bootstrap exceeded two controlled navigations.');
 }
 
+async function assertSharedMemory(page, { baseURL, ownerId }) {
+  const result = await page.evaluate(async ({ baseURL, ownerId }) => {
+    const { ownedClientURL } = await import(new URL('src/isolation.mjs', baseURL));
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 2, shared: true });
+    const worker = new Worker(ownedClientURL(new URL('test/isolation-worker.mjs', baseURL), { baseURL, ownerId }), { type: 'module' });
+    let timer;
+    try {
+      const result = await new Promise((resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Shared-memory worker test timed out.')), 12_000);
+        worker.onmessage = event => event.data.ok ? resolve(event.data) : reject(new Error(event.data.error));
+        worker.onerror = event => reject(new Error(event.message));
+        worker.onmessageerror = () => reject(new Error('Shared memory could not be transferred to the worker.'));
+        worker.postMessage({ memory });
+      });
+      return { ...result, shared: memory.buffer instanceof SharedArrayBuffer, value: Atomics.load(new Int32Array(memory.buffer), 0) };
+    } finally { clearTimeout(timer); worker.terminate(); }
+  }, { baseURL, ownerId });
+  assert.deepEqual(result, { ok: true, isolated: true, shared: true, value: 2 });
+}
+
 test(`${browserName}: headerless hosting, independent policies, owned workers, detached views and SW restart`, { timeout: 120_000 }, async () => {
   // Exercise the configuration that ships, rather than enabling a test-only
   // fallback that could hide a disabled production deployment.
@@ -56,8 +77,10 @@ test(`${browserName}: headerless hosting, independent policies, owned workers, d
     const compatibleState = await prepare(compatible, new URL('__test__.html', server.url).href, { simulateUnsupportedCredentialless: true });
     assert.equal(compatibleState.result.policy, 'require-corp');
     assert.deepEqual(compatibleState.attempts.map(item => item.policy), ['credentialless', 'require-corp', 'require-corp']);
+    await assertSharedMemory(normal, { baseURL: server.url, ownerId: normalState.result.ownerId });
+    await assertSharedMemory(compatible, { baseURL: server.url, ownerId: compatibleState.result.ownerId });
     const headers = async page => page.evaluate(async () => {
-      const response = await fetch('./src/isolation-probe.mjs', { cache: 'no-store' });
+      const response = await fetch('./src/isolation.mjs', { cache: 'no-store' });
       return { coep: response.headers.get('Cross-Origin-Embedder-Policy'), coop: response.headers.get('Cross-Origin-Opener-Policy') };
     });
     assert.deepEqual(await headers(normal), { coep: normalState.result.policy, coop: 'same-origin' });
@@ -157,28 +180,6 @@ test(`${browserName}: the production entry stops if an intervening host removes 
   } finally { await browser.close(); await server.close(); }
 });
 
-test(`${browserName}: verification popup leaves COEP while the production shell stays isolated`, { timeout: 120_000 }, async () => {
-  const server = await createStaticServer({ directory, isolation: true, fixtures: {
-    'network-verify.html': '<!doctype html><title>Verification header proof</title><p>Verification</p>',
-  } });
-  const browser = await launchBrowser(server);
-  try {
-    const page = await browser.newPage();
-    const state = await prepare(page, `${server.url}__test__.html`, { simulateUnsupportedCredentialless: true });
-    assert.equal(state.result.policy, 'require-corp');
-    const popupPromise = page.waitForEvent('popup');
-    await page.evaluate(() => window.open('./network-verify.html'));
-    const popup = await popupPromise;
-    await popup.waitForLoadState();
-    assert.equal(await popup.evaluate(() => crossOriginIsolated), false);
-    assert.equal(await page.evaluate(() => crossOriginIsolated), true);
-    const headers = await page.evaluate(async () => Object.fromEntries((await fetch('./network-verify.html')).headers));
-    assert.equal(headers['cross-origin-embedder-policy'], 'unsafe-none');
-    assert.equal(headers['x-frame-options'], 'DENY');
-    await popup.close();
-  } finally { await browser.close(); await server.close(); }
-});
-
 test(`${browserName}: production entry and service worker start Joomla under capability fallback`, {
   timeout: 300_000, skip: !process.env.PLAYGROUND_ISOLATION_RUNTIME_DIST,
 }, async () => {
@@ -256,7 +257,7 @@ test(`${browserName}: production entry and service worker start Joomla under cap
   }
 });
 
-test(`${browserName}: mobile-sized compatibility mode runs PHP, MariaDB and Joomla without an image relay`, {
+test(`${browserName}: mobile-sized compatibility mode runs PHP, MariaDB and Joomla without external downloads`, {
   timeout: 300_000, skip: !process.env.PLAYGROUND_ISOLATION_RUNTIME_DIST,
 }, async () => {
   const server = await createStaticServer({ directory: path.resolve(process.env.PLAYGROUND_ISOLATION_RUNTIME_DIST), isolation: false });
@@ -270,8 +271,6 @@ test(`${browserName}: mobile-sized compatibility mode runs PHP, MariaDB and Joom
     assert.equal(state.result.policy, 'require-corp');
     const proof = await page.evaluate(async () => {
       const { createPlayground } = await import('./src/playground.mjs');
-      const delivery = await (await fetch('./config/public-assets-config.json')).json();
-      if (delivery.enabled || delivery.relayBaseURL !== null) throw new Error('This proof requires the unconfigured image relay shipped by default.');
       const site = await createPlayground({ persistence: false, phpVersion: '8.4',
         admin: { name: 'Mobile test', username: 'mobile-test', password: 'Mobile-fixture-2026!', email: 'mobile@example.test' } });
       try {

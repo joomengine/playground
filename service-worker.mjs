@@ -1,12 +1,18 @@
 import { serializeRequest, restoreResponse } from './src/http.mjs';
 import { StaticAssetCache } from './src/static-assets.mjs';
-import { ISOLATION_BOOTSTRAP_VERSION, isolationMarker, isolationResponseHeaders, isOwnerClient, resolveRequestIsolation, runtimeResource, isNetworkVerificationPage, networkVerificationHeaders } from './src/isolation.mjs';
-import { createPublicAssetHandler } from './src/public-assets-worker.mjs';
+import { ISOLATION_BOOTSTRAP_VERSION, isolationMarker, isolationResponseHeaders, isOwnerClient, resolveRequestIsolation, runtimeResource } from './src/isolation.mjs';
+import { loadNetworkConfiguration } from './src/network-config.mjs';
+import { createNetworkTransport } from './src/network-transport.mjs';
 
 const scope = new URL(self.registration.scope);
 const sitePrefix = `${scope.pathname}__site/`;
 const staticAssets = new StaticAssetCache();
-const publicAssets = createPublicAssetHandler({ baseURL: scope.href });
+let networkTransport;
+
+function sharedTransport() {
+  return networkTransport ??= loadNetworkConfiguration(scope.href)
+    .then(config => createNetworkTransport(fetch, config));
+}
 
 self.addEventListener('install', event => event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
@@ -86,33 +92,28 @@ async function routeToPlayground(request) {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   const local = url.origin === scope.origin && url.pathname.startsWith(scope.pathname);
-  // The only cross-origin interception is an exact registry-approved image in
-  // confirmed compatibility mode. Other requests retain ordinary Fetch rules.
+  // Compatibility-mode images use the same transport as PHP HTTP requests.
   if (!local && event.request.destination !== 'image') return;
   if (event.request.cache === 'only-if-cached' && event.request.mode !== 'same-origin') return;
   event.respondWith((async () => {
     let policy = 'credentialless';
     try {
-      if (isNetworkVerificationPage(url, scope.href)) {
-        if (!['GET', 'HEAD'].includes(event.request.method)) {
-          return new Response('Verification page supports GET and HEAD only.', { status: 405,
-            headers: networkVerificationHeaders({ Allow: 'GET, HEAD' }) });
-        }
-        // Only this exact standalone page can embed Turnstile without COEP.
-        // Joomla, owned runtime assets and the active shell keep isolation.
-        const response = await fetch(event.request, { cache: 'no-store', redirect: 'error' });
-        return new Response(response.body, { status: response.status, statusText: response.statusText,
-          headers: networkVerificationHeaders(response.headers) });
-      }
       const isolation = await resolveRequestIsolation(event, { baseURL: scope.href, getClient: id => self.clients.get(id) });
       policy = isolation.policy;
-      const compatibleImage = await publicAssets(event.request, { policy, onDiagnostic: detail => {
-        if (isolation.ownerId) void self.clients.get(isolation.ownerId).then(owner => owner?.postMessage(detail));
-      } });
-      if (!local && !compatibleImage) {
+      if (!local && policy === 'require-corp') {
+        const transport = await sharedTransport();
+        const response = await transport(url.href, {
+          method: event.request.method, headers: event.request.headers, signal: event.request.signal,
+        });
+        const headers = new Headers(response.headers);
+        // WebKit checks the response against the image's original remote URL.
+        headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+        return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      }
+      if (!local) {
         // A shared SW has no document COEP. Preserve credentialless's actual
         // no-cors semantics explicitly when forwarding the original image URL;
-        // CORS requests and compatibility-mode requests keep their own rules.
+        // CORS requests keep their own credential rules.
         return fetch(event.request, policy === 'credentialless' && event.request.mode === 'no-cors'
           ? { credentials: 'omit' } : {});
       }
@@ -122,7 +123,7 @@ self.addEventListener('fetch', event => {
           headers: isolationResponseHeaders({ Allow: 'GET, HEAD', 'Cache-Control': 'no-store' }, policy) });
       }
       const sourceURL = resource ? new URL(resource.url) : url;
-      const response = compatibleImage ?? (url.pathname.startsWith(sitePrefix)
+      const response = url.pathname.startsWith(sitePrefix)
         ? await routeToPlayground(event.request)
         : await fetch(resource ? new Request(resource.url, {
           method: event.request.method, headers: event.request.headers, mode: 'same-origin',
@@ -133,16 +134,9 @@ self.addEventListener('fetch', event => {
           // runtime binaries use versioned/content-hashed URLs in the manifest.
           ...(!sourceURL.pathname.startsWith(`${scope.pathname}assets/`) || ['manifest.json', 'version-catalog.json'].some(name => sourceURL.pathname === `${scope.pathname}assets/${name}`)
             ? { cache: ['no-store', 'reload'].includes(event.request.cache) ? event.request.cache : 'no-cache' } : {}),
-        }));
+        });
       if (response.type === 'opaque' || response.status === 0) return response;
       const headers = isolationResponseHeaders(response.headers, policy);
-      // WebKit evaluates an intercepted external image against its original URL.
-      // Only the registry handler's fully validated public bytes may carry this
-      // embedding permission; documents, workers and errors stay same-origin.
-      if (compatibleImage?.status === 200 && response.headers.get('Cross-Origin-Resource-Policy') === 'cross-origin'
-        && /^image\/(?:png|jpeg|gif|webp)$/.test(response.headers.get('Content-Type') || '')) {
-        headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
-      }
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     } catch (error) {
       return new Response(error.message, { status: 503, headers: isolationResponseHeaders({ 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }, policy) });
