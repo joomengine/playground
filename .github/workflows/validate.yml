@@ -294,11 +294,8 @@ jobs:
         working-directory: services/network-worker
       - run: npm test
         working-directory: services/network-worker
-      - name: Validate both explicit deployment configurations without credentials
+      - run: npm run check
         working-directory: services/network-worker
-        run: |
-          npx wrangler deploy --dry-run --env staging
-          npx wrangler deploy --dry-run --env production
 
   php-network:
     name: PHP networking (${{ matrix.browser }})
