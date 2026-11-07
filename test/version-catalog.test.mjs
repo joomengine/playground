@@ -195,6 +195,110 @@ test('catalog metadata retry adapter never replays a non-GET request', async t =
   assert.equal(attempts, 1);
 });
 
+test('package delivery retries transient HTTP and HTML responses with one deadline before accepting verified bytes', async t => {
+  const attempts = [];
+  let cancelled = 0;
+  const f = await fixture(t, { fetchImpl: async (url, init) => {
+    if (url !== stable.url) return new Response(jcbBytes);
+    attempts.push(init);
+    if (attempts.length === 1) return new Response(new ReadableStream({ cancel() { cancelled++; } }), { status: 503 });
+    if (attempts.length === 2) return new Response('<html>Temporary download failure</html>', { headers: { 'Content-Type': 'text/html' } });
+    return new Response(stableBytes);
+  } });
+  await stageVersionCatalog(f.configuration);
+  assert.equal(attempts.length, 3);
+  assert.equal(cancelled, 1, 'Discard the HTTP error body before retrying.');
+  assert.ok(attempts.every(init => init.signal === attempts[0].signal
+    && init.credentials === 'omit' && init.cache === 'no-store' && init.redirect === 'follow'));
+  const catalog = await f.catalog();
+  assert.equal(catalog.joomla[0].sha256, stable.sha256);
+  assert.deepEqual(await readFile(path.join(f.configuration.assets, catalog.joomla[0].url)), stableBytes);
+});
+
+test('package delivery retries a connection failure and an interrupted body without retaining partial bytes', async t => {
+  let attempts = 0;
+  const f = await fixture(t, { fetchImpl: async url => {
+    if (url !== stable.url) return new Response(jcbBytes);
+    attempts++;
+    if (attempts === 1) throw new TypeError('Connection reset');
+    if (attempts === 2) {
+      let sent = false;
+      return new Response(new ReadableStream({ pull(controller) {
+        if (sent) controller.error(new TypeError('Socket closed during download'));
+        else { sent = true; controller.enqueue(stableBytes.subarray(0, 32)); }
+      } }));
+    }
+    return new Response(stableBytes);
+  } });
+  await stageVersionCatalog(f.configuration);
+  assert.equal(attempts, 3);
+  const entry = (await f.catalog()).joomla[0];
+  assert.deepEqual(await readFile(path.join(f.configuration.assets, entry.url)), stableBytes);
+});
+
+test('exhausted invalid package responses retain the prior catalog and expose bounded download diagnostics', async t => {
+  const f = await fixture(t);
+  await stageVersionCatalog(f.configuration);
+  const previous = await f.catalog();
+  let attempts = 0;
+  const nightly = { ...stable, version: '7.0.0-alpha1-dev', channel: 'nightly', source: 'nightly', sha256: null,
+    url: 'https://publisher.test/nightly.zip' };
+  const body = '<html>Temporary download failure</html>';
+  await assert.rejects(stageVersionCatalog({ ...f.configuration,
+    discover: async () => ({ joomla: [nightly], jcb: [jcb], errors: [] }),
+    fetchImpl: async url => {
+      assert.equal(url, nightly.url);
+      attempts++;
+      const response = new Response(body, { headers: { 'Content-Type': 'text/html', 'Content-Length': String(body.length) } });
+      Object.defineProperty(response, 'url', { value: 'https://cdn.publisher.test/nightly.zip?signature=temporary-secret' });
+      return response;
+    },
+  }), error => {
+    assert.match(error.message, /Cannot stage joomla 7\.0\.0-alpha1-dev: Package retrieval failed after 3 attempts/);
+    assert.match(error.message, /not a ZIP archive/);
+    for (const attempt of [1, 2, 3]) assert.ok(error.message.includes(`"attempt":${attempt}`));
+    assert.ok(error.message.includes(`"source":"${nightly.url}"`));
+    assert.ok(error.message.includes('"finalURL":"https://cdn.publisher.test/nightly.zip"'));
+    assert.ok(error.message.includes('"status":200'));
+    assert.ok(error.message.includes('"contentType":"text/html"'));
+    assert.ok(error.message.includes(`"receivedBytes":${body.length}`));
+    assert.ok(error.message.includes(`"firstBytes":"${Buffer.from(body).subarray(0, 16).toString('hex')}"`));
+    assert.equal(error.message.includes('temporary-secret'), false);
+    return true;
+  });
+  assert.equal(attempts, 3);
+  assert.deepEqual(await f.catalog(), previous);
+});
+
+test('package retries do not mask permanent HTTP failures or published checksum mismatches', async t => {
+  for (const response of [
+    () => new Response('Not found', { status: 404 }),
+    () => new Response('Forbidden', { status: 403 }),
+    () => new Response(zip('wrong published bytes')),
+  ]) {
+    let attempts = 0;
+    const f = await fixture(t, { fetchImpl: async () => { attempts++; return response(); } });
+    await assert.rejects(stageVersionCatalog(f.configuration), /failed after 1 attempt:.*(?:HTTP 404|HTTP 403|published sha256 checksum)/);
+    assert.equal(attempts, 1);
+    await assert.rejects(f.catalog(), { code: 'ENOENT' });
+  }
+});
+
+test('package deadline interrupts retry backoff without starting another download', async t => {
+  const controller = new AbortController();
+  t.mock.method(AbortSignal, 'timeout', () => controller.signal);
+  let attempts = 0;
+  const f = await fixture(t, { fetchImpl: async () => {
+    attempts++;
+    const timer = setTimeout(() => controller.abort(new DOMException('Package deadline expired', 'TimeoutError')), 20);
+    t.after(() => clearTimeout(timer));
+    return new Response('Gateway timeout', { status: 504 });
+  } });
+  await assert.rejects(stageVersionCatalog(f.configuration), /Package retrieval deadline expired after 1 attempt/);
+  assert.equal(attempts, 1);
+  await assert.rejects(f.catalog(), { code: 'ENOENT' });
+});
+
 test('non-ZIP, oversized declared responses and oversized streams are rejected before catalog publication', async t => {
   for (const response of [
     () => new Response('<html>Download error</html>'),

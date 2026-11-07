@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { createServer } from 'node:http';
 import { createNetworkTransport } from '../src/network-transport.mjs';
 import { normalizeNetworkConfig, loadNetworkConfiguration } from '../src/network-config.mjs';
 import { encodeNetworkMetadata, decodeNetworkMetadata, NETWORK_REQUEST_HEADER, NETWORK_RESPONSE_HEADER } from '../src/network-protocol.mjs';
@@ -56,6 +58,79 @@ test('direct Request uploads remain native requests and proxied Request uploads 
       return proxied('saved');
     }, proxy ? config : {});
     assert.equal(await (await transport(input)).text(), 'saved');
+  }
+});
+
+test('proxy uploads preserve Request payloads and multipart boundaries without Request.body support', async t => {
+  // Older Firefox exposes Body methods but no Request.body stream.
+  t.mock.getter(Request.prototype, 'body', () => null);
+  for (const requestInput of [false, true]) {
+    const data = new FormData(); data.append('name', 'Joomla');
+    const transport = createNetworkTransport(async (_url, init) => {
+      assert.ok(init.body instanceof Blob);
+      const headers = new Headers(decodeNetworkMetadata(init.headers[NETWORK_REQUEST_HEADER]).headers);
+      assert.equal((await new Response(init.body, { headers }).formData()).get('name'), 'Joomla');
+      return proxied('saved');
+    }, config);
+    const input = requestInput ? new Request(destination, { method: 'POST', body: data }) : destination;
+    assert.equal(await (await transport(input, requestInput ? {} : { method: 'POST', body: data })).text(), 'saved');
+  }
+  const input = new Request(destination, { method: 'POST', body: 'original' });
+  const transport = createNetworkTransport(async (_url, init) => {
+    assert.equal(init.method, 'PATCH');
+    assert.equal(await new Response(init.body).text(), 'replacement');
+    return proxied('saved');
+  }, config);
+  await transport(input, { method: 'PATCH', body: 'replacement' });
+});
+
+test('proxy serialization rejects consumed Request bodies and cancels unfinished uploads', async () => {
+  const used = new Request(destination, { method: 'POST', body: 'already consumed' });
+  await used.text();
+  const noDispatch = createNetworkTransport(() => assert.fail('Invalid or cancelled uploads must not be dispatched.'), config);
+  await assert.rejects(noDispatch(used), TypeError);
+  let cancelled = false;
+  const streaming = new Request(destination, { method: 'POST', duplex: 'half', body: new ReadableStream({
+    pull() { return new Promise(() => {}); }, cancel() { cancelled = true; },
+  }) });
+  await assert.rejects(noDispatch(streaming, { network: { timeoutMs: 15 } }), { code: 'UPSTREAM_TIMEOUT' });
+  assert.equal(cancelled, true);
+});
+
+test('real Fetch enforces caller integrity on fallback and applies RequestInit overrides', async t => {
+  const bytes = Buffer.from([0, 255, 128, 65]);
+  const correct = `sha256-${createHash('sha256').update(bytes).digest('base64')}`;
+  const incorrect = `sha256-${Buffer.alloc(32).toString('base64')}`;
+  const received = [];
+  const server = createServer((request, response) => {
+    received.push(request.url);
+    if (request.url.startsWith('/proxy')) {
+      response.setHeader(NETWORK_RESPONSE_HEADER, encodeNetworkMetadata({ version: 1, status: 200,
+        statusText: 'OK', headers: [], url: destination, redirected: false, redirectCount: 0 }));
+    }
+    response.end(bytes);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const direct = createNetworkTransport(fetch, { endpoint: `${origin}/proxy` });
+  await assert.rejects(fetch(`${origin}/file`, { integrity: incorrect }), TypeError);
+  await assert.rejects(direct(`${origin}/file`, { integrity: incorrect }), TypeError);
+  assert.equal(received.filter(url => url.startsWith('/proxy')).length, 1,
+    'An integrity failure on the direct response must not become successful through the proxy.');
+
+  const fallback = createNetworkTransport((url, init) => {
+    if (!new URL(url).pathname.startsWith('/proxy')) throw new TypeError('Browser CORS failure');
+    return fetch(url, init);
+  }, { endpoint: `${origin}/proxy` });
+  for (const [requestIntegrity, override, succeeds] of [
+    [incorrect, undefined, false], [correct, undefined, true],
+    [incorrect, correct, true], [correct, incorrect, false], [incorrect, '', true],
+  ]) {
+    const request = new Request(`${origin}/file`, { integrity: requestIntegrity });
+    const response = fallback(request, override === undefined ? {} : { integrity: override });
+    if (succeeds) assert.deepEqual(Buffer.from(await (await response).arrayBuffer()), bytes);
+    else await assert.rejects(response, TypeError);
   }
 });
 

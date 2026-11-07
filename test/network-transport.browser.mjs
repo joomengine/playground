@@ -17,7 +17,7 @@ for (const name of names) test(`${name}: direct CORS downloads and anonymous pro
     await fixture.attach(context);
     const page = await context.newPage();
     await page.goto(new URL('__test__.html', fixture.url).href);
-    const results = await page.evaluate(async ({ config, fixtureOrigin, writeOrigin }) => {
+    const results = await page.evaluate(async ({ config, fixtureOrigin, writeOrigin, correctIntegrity }) => {
       const { createNetworkTransport } = await import('./src/network-transport.mjs');
       const transport = createNetworkTransport(fetch.bind(globalThis), config);
       const hash = async response => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await response.arrayBuffer()))]
@@ -33,11 +33,20 @@ for (const name of names) test(`${name}: direct CORS downloads and anonymous pro
         headers: { Authorization: 'Bearer upstream-fixture', 'Content-Type': 'application/octet-stream', 'X-API-Key': 'custom' } });
       const form = new FormData(); form.append('name', 'Joomla');
       const requestUpload = await transport(new Request(`${writeOrigin}/denied/echo`, { method: 'POST', body: form }));
+      const formUpload = await transport(`${writeOrigin}/denied/echo`, { method: 'POST', body: form });
+      const incorrectIntegrity = `sha256-${btoa('\0'.repeat(32))}`;
+      let integrityRejected = false;
+      try { await transport(new Request(`${fixtureOrigin}/direct/binary`, { integrity: incorrectIntegrity })); }
+      catch { integrityRejected = true; }
+      const integrityFallback = await hash(await transport(new Request(`${fixtureOrigin}/denied/binary`, { integrity: correctIntegrity })));
+      const integrityOverride = await hash(await transport(new Request(`${fixtureOrigin}/denied/binary`, { integrity: incorrectIntegrity }), { integrity: correctIntegrity }));
+      const integrityCleared = await hash(await transport(new Request(`${fixtureOrigin}/denied/binary`, { integrity: incorrectIntegrity }), { integrity: '' }));
       const status = await transport(`${writeOrigin}/denied/status/500`);
       const post = await transport(`${fixtureOrigin}/denied/echo`, { method: 'POST', body: 'write once', headers: { 'Content-Type': 'text/plain' } });
       return { direct, browserHeaders, deliveredHeaders, denied, fallback, upload: [...new Uint8Array(await upload.arrayBuffer())],
-        status: status.status, post: await post.text(), requestUpload: await requestUpload.text() };
-    }, { config: fixture.config, fixtureOrigin, writeOrigin });
+        status: status.status, post: await post.text(), requestUpload: await requestUpload.text(), formUpload: await formUpload.text(),
+        integrityRejected, integrityFallback, integrityOverride, integrityCleared };
+    }, { config: fixture.config, fixtureOrigin, writeOrigin, correctIntegrity: `sha256-${Buffer.from(binaryHash, 'hex').toString('base64')}` });
     assert.equal(results.direct, binaryHash);
     assert.equal(results.browserHeaders.cookie, null, 'Native browser Fetch must demonstrate the header delivery limitation.');
     assert.deepEqual(results.deliveredHeaders, { cookie: 'php_session=exact-cookie', origin: 'https://caller.example', referer: 'https://caller.example/source' });
@@ -46,6 +55,15 @@ for (const name of names) test(`${name}: direct CORS downloads and anonymous pro
     assert.equal(results.fallback, binaryHash); assert.deepEqual(results.upload, [0, 255, 65, 128]);
     assert.equal(results.status, 500); assert.equal(results.post, 'write once');
     assert.match(results.requestUpload, /name="name"[\s\S]*Joomla/);
+    assert.match(results.formUpload, /name="name"[\s\S]*Joomla/);
+    const multipart = fixture.requests.filter(item => item.method === 'POST' && item.body.toString().includes('name="name"'));
+    assert.equal(multipart.length, 2);
+    for (const request of multipart) {
+      assert.equal((await new Response(request.body, { headers: { 'Content-Type': request.headers['content-type'] } }).formData()).get('name'), 'Joomla',
+        'The upstream multipart boundary must match the exact uploaded body.');
+    }
+    assert.equal(results.integrityRejected, true, 'Proxy fallback must not bypass a caller integrity mismatch.');
+    for (const key of ['integrityFallback', 'integrityOverride', 'integrityCleared']) assert.equal(results[key], binaryHash, key);
     assert.equal(fixture.requests.filter(item => item.method === 'POST' && item.body.toString() === 'write once').length, 1);
     const patch = fixture.requests.filter(item => item.method === 'PATCH');
     assert.equal(patch.length, 1); assert.equal(patch[0].headers.authorization, 'Bearer upstream-fixture');

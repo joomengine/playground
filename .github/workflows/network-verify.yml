@@ -1,0 +1,69 @@
+name: Verify deployed networking
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_environment:
+        description: Environment recorded in the deployed website manifest
+        required: true
+        type: choice
+        options: [staging, production]
+        default: staging
+      playground_url:
+        description: HTTPS URL of the deployed Playground website
+        required: true
+        type: string
+      endpoint:
+        description: HTTPS Worker endpoint configured by that website
+        required: true
+        type: string
+      test_target:
+        description: Public HTTPS file whose server denies cross-origin browser Fetch
+        required: true
+        type: string
+      expected_sha256:
+        description: SHA-256 of the test file's decoded response bytes
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: network-verify-${{ inputs.deployment_environment }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify the deployed website and Worker together
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: '.node-version'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Install Chromium
+        uses: ./.github/actions/install-playwright
+        with:
+          browser: chromium
+      - name: Exercise actual PHP and Joomla over HTTPS
+        env:
+          NETWORK_DEPLOYMENT_ENV: ${{ inputs.deployment_environment }}
+          NETWORK_PLAYGROUND_URL: ${{ inputs.playground_url }}
+          NETWORK_ENDPOINT: ${{ inputs.endpoint }}
+          NETWORK_TEST_TARGET: ${{ inputs.test_target }}
+          NETWORK_EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+        run: node --test test/network-hosted.browser.mjs
+      - name: Retain hosted networking evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playground-network-hosted-${{ inputs.deployment_environment }}
+          path: test-results/network-hosted.json
+          if-no-files-found: error
+          retention-days: 14

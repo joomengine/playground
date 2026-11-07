@@ -10,12 +10,15 @@ const required = name => {
   return process.env[name];
 };
 
-test('deployed staging relay completes actual PHP and clean JCB workflows over verified HTTPS', { timeout: 1_200_000 }, async () => {
+test('deployed website and Worker complete actual PHP and clean JCB workflows over verified HTTPS', { timeout: 1_200_000 }, async () => {
   const appURL = new URL(required('NETWORK_PLAYGROUND_URL'));
   const endpoint = new URL(required('NETWORK_ENDPOINT'));
   const target = new URL(required('NETWORK_TEST_TARGET'));
   const expectedHash = required('NETWORK_EXPECTED_SHA256');
   const sourceCommit = required('GITHUB_SHA');
+  const environment = required('NETWORK_DEPLOYMENT_ENV');
+  assert.ok(['staging', 'production'].includes(environment), 'Select staging or production.');
+  assert.match(sourceCommit, /^[a-f0-9]{40}$/, 'Run the workflow from the deployed source commit.');
   for (const url of [appURL, endpoint, target]) {
     assert.equal(url.protocol, 'https:', 'Hosted acceptance requires real HTTPS.');
     assert.equal(url.username + url.password, '', 'Hosted test URLs must not contain credentials.');
@@ -23,7 +26,7 @@ test('deployed staging relay completes actual PHP and clean JCB workflows over v
   assert.equal(target.search + target.hash, '', 'Use an unsigned controlled test target; receipts must not contain signed query credentials.');
   assert.match(expectedHash, /^[a-f0-9]{64}$/);
   appURL.searchParams.set('start', '0');
-  const receipt = { status: 'running', sourceCommit, endpoint: endpoint.origin, appOrigin: appURL.origin, hostedTLSValidated: true, cases: [] };
+  const receipt = { status: 'running', sourceCommit, environment, endpoint: endpoint.href, appOrigin: appURL.origin, hostedTLSValidated: true, cases: [] };
   await mkdir('test-results', { recursive: true });
   let browser;
   try {
@@ -44,8 +47,8 @@ test('deployed staging relay completes actual PHP and clean JCB workflows over v
       return { manifest, network };
     });
     assert.equal(metadata.manifest.sourceCommit, sourceCommit, 'The hosted candidate must match the current commit.');
-    assert.equal(metadata.manifest.deployment.environment, 'staging');
-    assert.equal(metadata.network.endpoint.replace(/\/+$/, ''), endpoint.origin);
+    assert.equal(metadata.manifest.deployment.environment, environment);
+    assert.equal(new URL(metadata.network.endpoint).href.replace(/\/+$/, ''), endpoint.href.replace(/\/+$/, ''));
     const blocked = await page.evaluate(async target => {
       try { await fetch(target, { mode: 'cors', credentials: 'omit' }); return false; } catch { return true; }
     }, target.href);
@@ -65,7 +68,7 @@ test('deployed staging relay completes actual PHP and clean JCB workflows over v
         window.playground = await createPlayground(configuration);
       }, joomlaVersion);
       const native = await page.evaluate(async target => {
-        const source = `<?php $url=${JSON.stringify(target)}; $c=curl_init($url); curl_setopt_array($c,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_TIMEOUT=>90]);
+        const source = `<?php $url=base64_decode('${btoa(target)}'); $c=curl_init($url); curl_setopt_array($c,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_TIMEOUT=>90]);
           $a=curl_exec($c); $status=curl_getinfo($c,CURLINFO_RESPONSE_CODE); $error=curl_error($c); curl_close($c);
           $b=file_get_contents($url); echo json_encode(['curl'=>$a===false?false:hash('sha256',$a),'stream'=>$b===false?false:hash('sha256',$b),'status'=>$status,'error'=>$error]);`;
         const response = await window.playground.runPhp(source);

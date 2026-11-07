@@ -86,7 +86,7 @@ export function createNetworkTransport(fetcher = globalThis.fetch.bind(globalThi
     const original = input instanceof Request ? input : null;
     const target = new URL(original?.url ?? String(input), globalThis.location?.href);
     const method = String(init.method ?? original?.method ?? 'GET').toUpperCase();
-    const body = init.body ?? original?.body ?? null;
+    const body = init.body ?? null;
     const network = init.network ?? {};
     const redirect = network.redirect ?? init.redirect ?? original?.redirect ?? 'follow';
     const timeout = network.timeoutMs;
@@ -136,25 +136,33 @@ export function createNetworkTransport(fetcher = globalThis.fetch.bind(globalThi
       proxyURL.searchParams.set('url', target.href);
       let proxyBody = body;
       const upstreamHeaders = new Headers(init.headers ?? original?.headers);
-      if (body != null) {
-        const serialized = new Request(target, { method, headers: upstreamHeaders, body,
+      if (body != null || original) {
+        const serialized = new Request(original ?? target, { method, headers: upstreamHeaders,
+          ...(body != null ? { body } : {}),
           ...(body instanceof ReadableStream ? { duplex: 'half' } : {}) });
         for (const [key, value] of serialized.headers) upstreamHeaders.set(key, value);
         // Browser Fetch cannot upload streams in every supported engine or
         // over HTTP/1. Serialize once, preserving the generated multipart
         // boundary; downloaded responses continue to stream without buffering.
-        if (body instanceof ReadableStream || body instanceof FormData) {
-          const reader = serialized.body.getReader();
-          const chunks = [];
-          try {
-            for (;;) {
-              const chunk = await cancellable(() => reader.read(), ctx);
-              if (chunk.done) break;
-              chunks.push(chunk.value);
-            }
-            proxyBody = new Blob(chunks, { type: serialized.headers.get('content-type') || '' });
-          } catch (error) { void reader.cancel(error).catch(() => {}); throw error; }
-          finally { reader.releaseLock(); }
+        if (!readMethods.has(method) && (original || body instanceof ReadableStream || body instanceof FormData)) {
+          // Firefox versions without Request.body still retain the payload in
+          // the Request's Body methods. An absent stream does not mean no body.
+          const stream = serialized.body;
+          if (!stream) {
+            proxyBody = await cancellable(() => serialized.blob(), ctx);
+          } else {
+            const reader = stream.getReader();
+            const chunks = [];
+            try {
+              for (;;) {
+                const chunk = await cancellable(() => reader.read(), ctx);
+                if (chunk.done) break;
+                chunks.push(chunk.value);
+              }
+              proxyBody = new Blob(chunks, { type: serialized.headers.get('content-type') || '' });
+            } catch (error) { void reader.cancel(error).catch(() => {}); throw error; }
+            finally { reader.releaseLock(); }
+          }
         }
       }
       const metadata = { version: NETWORK_PROTOCOL_VERSION, headers: [...upstreamHeaders], redirect,
@@ -163,6 +171,9 @@ export function createNetworkTransport(fetcher = globalThis.fetch.bind(globalThi
       const response = await cancellable(() => fetcher(proxyURL.href, {
         method, headers: { [NETWORK_REQUEST_HEADER]: encodeNetworkMetadata(metadata) }, body: proxyBody,
         signal: ctx.signal, credentials: 'omit', redirect: 'error',
+        // The proxy carries the same upstream bytes, so Fetch must enforce the
+        // caller's integrity requirement on this route as well as the direct one.
+        integrity: init.integrity === undefined ? original?.integrity : init.integrity,
         ...(proxyBody instanceof ReadableStream ? { duplex: 'half' } : {}),
       }), ctx);
       ctx.check();

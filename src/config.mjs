@@ -323,7 +323,7 @@ export function readURLConfiguration(url) {
   if (params.has('extension')) config.extensions = parseUserExtensions([...(config.extensions ?? []), ...params.getAll('extension').map((value) => ({ url: value }))], location.href);
   if (params.has('commands') || params.has('startupCommands')) config.startupCommands = parseStartupCommands(params.get('commands') ?? params.get('startupCommands'));
   const deploymentOptions = ['name', 'deploy', 'php', 'joomla', 'jcb', 'language', 'login', 'fresh', 'extensions', 'extension', 'commands', 'startupCommands'];
-  const document = params.has('config') ? parseExtensions([{ url: params.get('config'), ...(params.has('sha256') ? { sha256: params.get('sha256') } : {}) }], location.href)[0] : null;
+  const document = params.has('config') ? parseExtensions([{ url: params.get('config') }], location.href)[0] : null;
   const immediate = params.has('immediate') ? boolean('immediate') : false;
   return { config, immediate, autostart: params.has('start') ? boolean('start') : immediate || !!document || fragment.has('deploy') || deploymentOptions.some((name) => params.has(name)), ...(document ? { document } : {}) };
 }
@@ -576,10 +576,9 @@ export async function loadDeploymentDocument(url, { fetcher = networkFetch, base
 }
 
 export function createDeploymentSourceURL(location, source) {
-  const url = new URL(location); const item = parseExtensions([source], url.href)[0];
+  const url = new URL(location); const item = parseExtensions([{ url: source?.url }], url.href)[0];
   assertPublic(item);
   url.search = ''; url.hash = ''; url.searchParams.set('config', item.url);
-  if (item.sha256) url.searchParams.set('sha256', item.sha256);
   url.searchParams.set('start', '1');
   return url.href;
 }
