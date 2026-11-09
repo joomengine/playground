@@ -16,6 +16,7 @@ import { assertFrameLayoutStable } from './frame-layout-contract.mjs';
 import { assertJoomlaDebugConfiguration } from './joomla-debug-contract.mjs';
 import { assertJcbCompiler } from './jcb-compiler-contract.mjs';
 import { assertLaunchCountdown, assertFailedDeploymentRecovery } from './launch-ui-contract.mjs';
+import { assertLaunchMedia } from './launch-media-browser.mjs';
 import { assertImmediateShareOption, assertImmediateLaunch } from './share-immediate-browser.mjs';
 import { assertLiveFocusMode, assertInitialFocusMode } from './focus-ui-contract.mjs';
 import { assertJcbHardReload } from './jcb-hard-reload-contract.mjs';
@@ -1464,6 +1465,8 @@ for (const name of browserNames) {
       const page = observePage(await context.newPage());
       page.setDefaultTimeout(30_000);
       try {
+        page.testStep = 'rocket playback begins before countdown and manual launch preflight completes';
+        const launchMedia = await assertLaunchMedia(browser, server.url);
         const url = new URL(server.url);
         for (const [key, value] of Object.entries({ deploy: 'blank', joomla: defaultPair.joomlaVersion, php: defaultPair.phpVersion,
           name: 'Rocket shared demonstration', persist: '0', start: '0', extension: new URL('__test_extension.zip', server.url).href })) url.searchParams.set(key, value);
@@ -1670,7 +1673,7 @@ for (const name of browserNames) {
         await bounded(Promise.allSettled([...page.responseChecks]), 'Read embedded site responses', 10_000);
         await assertCleanConsole(page);
         records.push({ ...defaultPair, rocket: true, shareLink: true, independentInterfaceLanguage: true, rtl: true,
-          temporaryToSaved: true, retainedCredentials: true, effectivePhpSettings: settings, singleScroll: true, focus, buildUpdate,
+          temporaryToSaved: true, retainedCredentials: true, effectivePhpSettings: settings, singleScroll: true, focus, buildUpdate, launchMedia,
           knownBrowserDiagnostics: page.knownBrowserDiagnostics });
       } catch (error) {
         if (!page.isClosed()) await saveBrowserDiagnostics(page, `rocket-${name}`, error);
