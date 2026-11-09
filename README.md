@@ -37,7 +37,7 @@ compatibility-mode images use the [shared HTTP transport](docs/network.md).
 Browser isolation does not require a network verification step.
 
 For an agent-oriented introduction to configuring a site, working with JCB,
-testing extensions and exporting results, see the [Playground agent guide](docs/agent-guide.md).
+testing extensions and exporting results, see the canonical [Playground agent guide in JoomEngine Skills](https://github.com/joomengine/skills/blob/main/testing/playground/README.md).
 
 ## Upstream foundations and credits
 
