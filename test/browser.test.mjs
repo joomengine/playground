@@ -1466,7 +1466,7 @@ for (const name of browserNames) {
       page.setDefaultTimeout(30_000);
       try {
         page.testStep = 'rocket playback begins before countdown and manual launch preflight completes';
-        const launchMedia = await assertLaunchMedia(browser, server.url);
+        const launchMedia = await assertLaunchMedia(browser, server.url, fixtures);
         const url = new URL(server.url);
         for (const [key, value] of Object.entries({ deploy: 'blank', joomla: defaultPair.joomlaVersion, php: defaultPair.phpVersion,
           name: 'Rocket shared demonstration', persist: '0', start: '0', extension: new URL('__test_extension.zip', server.url).href })) url.searchParams.set(key, value);
