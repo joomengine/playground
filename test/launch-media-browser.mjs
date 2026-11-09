@@ -29,9 +29,12 @@ export async function assertLaunchMedia(browser, baseURL) {
       assert.equal(await page.locator('#launch-video').evaluate(video => video.paused), true);
       assert.equal(await page.locator('#loading-view').isVisible(), false);
       if (trigger === 'countdown') await page.locator('#launch-countdown:not([hidden])').waitFor();
-      // Decode the locally preloaded asset before holding a request whose own
-      // production timeout is five seconds. No timing assumption about PHP is needed.
-      await page.waitForFunction(() => document.getElementById('launch-video').readyState >= 2);
+      // Manual launches can wait for decoding before holding a request whose
+      // production timeout is five seconds. Arm the countdown immediately so
+      // slow decoding cannot let its launch slip past the intercepted check.
+      if (trigger !== 'countdown') {
+        await page.waitForFunction(() => document.getElementById('launch-video').readyState >= 2);
+      }
       if (trigger === 'form') await page.locator('#settings-toggle').click();
       armed = true;
       if (trigger !== 'countdown') await page.locator(trigger === 'form' ? '#launch-button' : '#embedded-launch').click();
