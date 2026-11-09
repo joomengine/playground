@@ -2,23 +2,18 @@ import assert from 'node:assert/strict';
 import { withPinnedCatalog } from './dynamic-catalog-fixture.mjs';
 
 /** The rocket must move while launch is still waiting on its first network check. */
-export async function assertLaunchMedia(browser, baseURL) {
+export async function assertLaunchMedia(browser, baseURL, fixtures) {
   const results = [];
   for (const trigger of ['countdown', 'embedded', 'form']) {
     const context = await withPinnedCatalog(browser, { reducedMotion: 'no-preference' });
     const page = await context.newPage();
     page.setDefaultTimeout(30_000);
-    let armed = false, release;
+    const hadBuildFixture = Object.hasOwn(fixtures, 'build.json');
+    const previousBuildFixture = fixtures['build.json'];
+    let release;
     let markRequested;
     const requested = new Promise(resolve => { markRequested = resolve; });
-    await page.route('**/build.json', async route => {
-      if (!armed) { await route.continue(); return; }
-      armed = false;
-      await new Promise(resolve => { release = resolve; markRequested(); });
-      const loaded = await page.locator('meta[name="joomengine-build"]').getAttribute('content');
-      const changed = `${loaded[0] === 'a' ? 'b' : 'a'}${loaded.slice(1)}`;
-      await route.fulfill({ json: { schemaVersion: 1, id: changed } });
-    });
+    const released = new Promise(resolve => { release = resolve; });
     try {
       const url = new URL(baseURL);
       url.searchParams.set('deploy', 'blank');
@@ -36,7 +31,16 @@ export async function assertLaunchMedia(browser, baseURL) {
         await page.waitForFunction(() => document.getElementById('launch-video').readyState >= 2);
       }
       if (trigger === 'form') await page.locator('#settings-toggle').click();
-      armed = true;
+      const loaded = await page.locator('meta[name="joomengine-build"]').getAttribute('content');
+      assert.match(loaded, /^[a-f0-9]{64}$/, 'The launch check needs a published build identity.');
+      const changed = `${loaded[0] === 'a' ? 'b' : 'a'}${loaded.slice(1)}`;
+      // The service worker owns local fetches, so hold the server response
+      // instead of a Playwright page route that the worker can bypass.
+      fixtures['build.json'] = async () => {
+        markRequested();
+        await released;
+        return JSON.stringify({ schemaVersion: 1, id: changed });
+      };
       if (trigger !== 'countdown') await page.locator(trigger === 'form' ? '#launch-button' : '#embedded-launch').click();
       let deadline;
       try {
@@ -58,8 +62,28 @@ export async function assertLaunchMedia(browser, baseURL) {
       assert.equal(await page.locator('#launch-video').evaluate(video => video.paused && video.hidden), true);
       assert.equal(await page.locator('#launch-image-poster').evaluate(poster => poster.hidden), false);
       results.push(trigger);
+    } catch (error) {
+      const state = await page.evaluate(() => {
+        const video = document.getElementById('launch-video');
+        const countdown = document.getElementById('launch-countdown');
+        const failure = document.getElementById('error-view');
+        return {
+          url: location.href, visibility: document.visibilityState,
+          countdown: { hidden: countdown?.hidden, seconds: document.getElementById('countdown-value')?.textContent },
+          loadingHidden: document.getElementById('loading-view')?.hidden,
+          loadingMessage: document.getElementById('loading-message')?.textContent,
+          launchDisabled: document.getElementById('embedded-launch')?.disabled,
+          video: video && { hidden: video.hidden, paused: video.paused, currentTime: video.currentTime,
+            readyState: video.readyState, networkState: video.networkState, error: video.error?.message },
+          error: failure && !failure.hidden ? document.getElementById('error-message')?.textContent : null,
+        };
+      }).catch(failure => ({ diagnosticError: failure.message, url: page.url() }));
+      error.message += `\nLaunch media ${trigger} state: ${JSON.stringify(state)}`;
+      throw error;
     } finally {
-      release?.();
+      if (hadBuildFixture) fixtures['build.json'] = previousBuildFixture;
+      else delete fixtures['build.json'];
+      release();
       await context.close();
     }
   }
