@@ -13,6 +13,7 @@ import { prepareUploadedSiteCopy } from './site-copy.mjs';
 import { DEFAULT_PHP_SETTINGS, normalizePhpSettings } from './php-settings.mjs';
 import { UI_LANGUAGES, getLocale, initializeLocale, setLocale, t } from './i18n.mjs';
 import { createLaunchCountdown } from './launch-countdown.mjs';
+import { createLaunchMedia } from './launch-media.mjs';
 import { deploymentLaunchReadiness } from './launch-readiness.mjs';
 import { startAutosave } from './autosave.mjs';
 import { presentError } from './error-presentation.mjs';
@@ -97,6 +98,7 @@ const launchCountdown = createLaunchCountdown({
   },
   onLaunch: () => launch(),
 });
+const launchMedia = createLaunchMedia({ video: $('launch-video'), poster: $('launch-image-poster') });
 let preferences;
 try { preferences = localStorage; } catch { /* A temporary site can run without preference storage. */ }
 let savedState = readSavedState(preferences, preferenceKey);
@@ -188,10 +190,7 @@ function activity(message) {
 function show(view) {
   for (const name of ['welcome', 'loading-view', 'error-view', 'site-mount']) $(name).hidden = name !== view;
   document.querySelector('.preview-panel').classList.toggle('launching', view === 'loading-view');
-  const video = $('launch-video');
-  video.pause();
-  video.hidden = true;
-  $('launch-image-poster').hidden = false;
+  launchMedia.setActive(view === 'loading-view' && launching);
 }
 function feedback(message, { error = false, persistent = false } = {}) {
   clearTimeout(feedbackTimer);
@@ -583,13 +582,6 @@ function progress(event) {
   const phaseKeys = { assets: 'status.loadingCatalog', database: 'status.startingDatabase', php: 'status.startingPhp', install: 'status.installingJoomla', extensions: 'status.installingExtensions', configure: 'status.configuringSite', saving: 'status.saving', ready: 'status.openingSite', download: 'status.loading' };
   const imageTitles = { 'build-image': 'Building your deployment image', 'launch-image': 'Launching your site', 'download-image': 'Downloading image', 'save-image': 'Saving image' };
   $('loading-title').textContent = imageTitles[details?.phase] || t(phaseKeys[details?.phase] || 'title.loading');
-  if (details?.phase === 'launch-image' && !$('loading-view').hidden && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    $('launch-image-poster').hidden = true;
-    $('launch-video').hidden = false;
-    $('launch-video').play().catch(() => {});
-  } else if (['build-image', 'download-image', 'save-image'].includes(details?.phase)) {
-    $('launch-video').pause(); $('launch-video').hidden = true; $('launch-image-poster').hidden = false;
-  }
   $('loading-message').textContent = messageOf(message);
   if (typeof details?.progress === 'number' && Number.isFinite(details.progress)) {
     $('loading-progress').max = 1;
@@ -985,6 +977,7 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
   if (busy || launching || !initialized || !catalog || !deployCatalog) return;
   launching = true;
   let switchingStarted = false;
+  let previousView;
   launchCountdown.stop();
   $('launch-countdown').hidden = true;
   $('dashboard-countdown').hidden = true;
@@ -993,6 +986,16 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     // Reserve the transition before checking the network. Validate first:
     // disabled form controls do not participate in native form validation.
     setBusy(true);
+    $('loading-title').textContent = t('title.loading');
+    $('loading-message').textContent = t('status.loading');
+    $('loading-progress').removeAttribute('value');
+    // A landing-page launch gives immediate feedback, including while the
+    // update check and configuration resolve. Keep an existing site visible
+    // until its close/save flow has accepted a switch.
+    if (!runtime) {
+      previousView = ['welcome', 'error-view', 'site-mount'].find(name => !$(name).hidden) || 'welcome';
+      show('loading-view');
+    }
     if (await buildUpdates.check({ force: true })) return;
     let input = importedConfiguration || formInput();
     const nightly = dynamicMetadata.joomla.find(entry => entry.version === input.joomlaVersion && entry.source === 'nightly');
@@ -1006,8 +1009,6 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     }
     clearFeedback();
     setBusy(true);
-    $('loading-title').textContent = t('title.loading');
-    $('loading-progress').removeAttribute('value');
     if (freshKeyPending && !siteExport && !checkpoint) {
       input.storageKey = `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-fresh-${crypto.randomUUID().slice(0, 8)}`;
       fields.storageKey.value = input.storageKey;
@@ -1101,6 +1102,8 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     displayError(error);
   } finally {
     launching = false;
+    launchMedia.setActive(false);
+    if (!switchingStarted && previousView) show(previousView);
     setBusy(false);
     if (!$('error-view').hidden) $('preview-dot').className = 'status-dot failed';
   }
