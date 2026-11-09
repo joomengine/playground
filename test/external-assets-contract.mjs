@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 
-/** Public resources have no CORS/CORP headers; explicit data fetches still use CORS. */
+/** Public resources need no CORS/CORP headers; browser data fetches still use CORS. */
 export async function assertExternalAssets(page) {
   const nonce = randomUUID();
   const requests = [];
@@ -11,7 +11,7 @@ export async function assertExternalAssets(page) {
     '/style.css': ['text/css', '#public-image { border-top: 3px solid rgb(18, 52, 86); }'],
     '/script.js': ['text/javascript', `window.publicAssetProof = ${JSON.stringify(nonce)};`],
     '/data.json': ['application/json', JSON.stringify({ nonce })],
-    '/denied-stream.txt': ['text/plain', 'This response does not grant cross-origin read permission.'],
+    '/denied-stream.txt': ['text/plain', 'The upstream server denied this request.'],
   };
   const server = createServer((request, response) => {
     const pathname = new URL(request.url, 'http://localhost').pathname;
@@ -20,7 +20,8 @@ export async function assertExternalAssets(page) {
     requests.push({ path: pathname, credentialsReceived: Boolean(request.headers.cookie), mode: request.headers['sec-fetch-mode'] ?? null });
     response.setHeader('Content-Type', resource[0]);
     response.setHeader('Cache-Control', 'no-store');
-    if (pathname === '/data.json') response.setHeader('Access-Control-Allow-Origin', '*');
+    if (pathname === '/data.json' || pathname === '/denied-stream.txt') response.setHeader('Access-Control-Allow-Origin', '*');
+    if (pathname === '/denied-stream.txt') response.statusCode = 403;
     response.end(resource[1]);
   });
   await new Promise((resolve, reject) => {
@@ -74,8 +75,9 @@ $proof = $db->query('SELECT 6 * 7')->fetchColumn();
       assert.equal(recorded[0].credentialsReceived, false, 'Credentialless public resource loading must omit cookies.');
       if (recorded[0].mode) assert.equal(recorded[0].mode, 'no-cors');
     }
-    // A PHP read is a CORS data request, even when an HTML image can display the URL.
-    // Verify a rejected read reports the network error and leaves PHP/database usable.
+    // PHP's shared transport can relay a CORS-blocked read. Use an explicit,
+    // browser-readable HTTP denial so this recovery check stays local and does
+    // not depend on the production relay rejecting a loopback target.
     page.expectedConsoleURLs?.add(`${origin}/denied-stream.txt`);
     const stream = await page.evaluate(async origin => {
       const result = await window.playground.runPhp(`<?php
@@ -83,18 +85,20 @@ $proof = $db->query('SELECT 6 * 7')->fetchColumn();
         set_error_handler(function ($level, $message) use (&$warnings) { $warnings[] = $message; return true; });
         $started = microtime(true);
         $denied = file_get_contents('${origin}/denied-stream.txt');
+        $deniedHeaders = $http_response_header ?? [];
         $elapsed = microtime(true) - $started;
         restore_error_handler();
         $allowed = json_decode(file_get_contents('${origin}/data.json'), true, 512, JSON_THROW_ON_ERROR);
         $db = new PDO('mysql:dbname=joomla;charset=utf8mb4', 'root', '');
-        echo json_encode(['denied' => $denied, 'warnings' => $warnings, 'elapsed' => $elapsed,
+        echo json_encode(['denied' => $denied, 'headers' => $deniedHeaders, 'warnings' => $warnings, 'elapsed' => $elapsed,
           'allowed' => $allowed, 'database' => $db->query('SELECT 42')->fetchColumn()], JSON_THROW_ON_ERROR);`);
       return { status: result.status, data: JSON.parse(result.text) };
     }, origin);
     assert.equal(stream.status, 200);
     assert.equal(stream.data.denied, false);
-    assert.match(stream.data.warnings.join('\n'), /Failed to open stream.*(?:fetch|NetworkError)/i);
-    assert.ok(stream.data.elapsed < 3, 'A CORS rejection must return promptly, without exhausting PHP execution time.');
+    assert.ok(stream.data.headers.some(header => /^HTTP\/\S+ 403\b/.test(header)), 'PHP must preserve the upstream HTTP denial.');
+    assert.match(stream.data.warnings.join('\n'), /Failed to open stream: HTTP request returned status 403\./);
+    assert.ok(stream.data.elapsed < 3, 'An HTTP denial must return promptly, without exhausting PHP execution time.');
     assert.deepEqual(stream.data.allowed, { nonce });
     assert.equal(Number(stream.data.database), 42);
     assert.equal(requests.filter(request => request.path === '/data.json').length, 2);
