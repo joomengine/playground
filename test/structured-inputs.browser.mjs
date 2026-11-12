@@ -62,9 +62,17 @@ for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox'
       assert.equal(content.articles[0].introtext, '');
 
       await page.locator('#menus-fields').getByRole('button', { name: 'Add menu item', exact: true }).click();
+      await page.locator('#menus-fields').getByRole('combobox', { name: 'Page type', exact: true }).selectOption({ label: 'Single article' });
       await page.locator('#menus-fields').getByRole('textbox', { name: 'Title', exact: true }).fill('Read news');
       await page.locator('#menus-fields').getByRole('spinbutton', { name: 'Article number', exact: true }).fill('7');
       assert.equal(await page.evaluate(() => window.menus.read()[0].query.id), 7);
+      await page.evaluate(() => {
+        window.menus.setContext({ menuTypes: [] });
+        window.menus.setValue([{ title: 'Directory', component: 'com_service_directory', view: 'directory', query: { existing: 'kept' } }]);
+      });
+      assert.equal(await page.locator('#menus-fields').getByRole('combobox', { name: 'Page type', exact: true }).locator('option:checked').textContent(), 'Service directory · Directory');
+      assert.equal(await page.locator('#menus-fields').getByRole('textbox', { name: 'Component', exact: true }).isVisible(), false);
+      assert.equal(await page.evaluate(() => window.menus.read()[0].query.existing), 'kept');
       assert.equal(await page.getByRole('option', { name: /^(?:Array|Object|String)$/ }).count(), 0);
 
       // The verified offline Repository form supports GUID-only patches and masks tokens.
