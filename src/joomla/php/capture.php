@@ -5,8 +5,7 @@ function playgroundCaptureRecord(array $target, int $id, $application, $database
     $context = playgroundDataContext($target, [], $application, $database, $administrator, $id);
     extract($context);
     $key = $target['key'] ?? strtolower(($kind === 'record' ? $target['component'] . '-' . $target['view'] : $kind . '-' . ($target['element'] ?? $target['component'])) . '-' . ($data['guid'] ?? $id));
-    $key = preg_replace('/[^a-z0-9_-]/', '-', $key);
-    playgroundDataIdentifier($key, 'captured overlay key', '/^[a-z][a-z0-9_-]{0,127}$/');
+    playgroundDataIdentifier($key, 'captured overlay key', '/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/');
     $identity = playgroundDataTarget($target) . ':' . $id;
     $seen[$identity] = $key;
     $overlay = ['key' => $key, 'kind' => $kind];
@@ -65,6 +64,12 @@ function playgroundCaptureRecord(array $target, int $id, $application, $database
     $context = playgroundDataContext($target, [], $application, $database, $administrator, $id);
     $form = $context['model']->getForm($kind === 'component' ? $data['params'] : $data, false);
     if (!$form) throw new RuntimeException('The saved record has no native editable form.');
+    $form->bind($kind === 'component' ? $data['params'] : $data);
+    if ($kind === 'record') foreach (array_keys($fields) as $name) {
+        // Tables can contain infrastructure columns which their native form does
+        // not edit (for example an unused JCB params column). Do not export those.
+        if (!$form->getField($name) && !$form->getGroup($name, true)) unset($fields[$name]);
+    }
     $schema = playgroundDataSchema($form, $metadata, $kind === 'component');
     if (!$metadata && $kind === 'record') {
         // These Joomla fields identify local rows. Without a relationship descriptor their IDs
@@ -85,6 +90,7 @@ try {
     $root = playgroundRoot($playground);
     [$application, $container, $database] = playgroundApplication($root, true);
     $administrator = playgroundDataAdministrator($root, $playground, $application, $container, $database);
+    playgroundDataLanguage($playground, $application, $container);
     $target = array_intersect_key($playground, array_flip(['key', 'kind', 'component', 'view', 'element', 'folder', 'clientId']));
     $target['kind'] ??= 'record';
     $target = playgroundDataCanonicalTarget($target, $application);

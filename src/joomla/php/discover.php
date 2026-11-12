@@ -3,9 +3,7 @@ try {
     $root = playgroundRoot($playground);
     [$application, $container, $database] = playgroundApplication($root, true);
     $administrator = playgroundDataAdministrator($root, $playground, $application, $container, $database);
-    if (isset($playground['language']) && is_string($playground['language']) && preg_match('/^[a-z]{2,3}(?:-[A-Za-z]{4})?-[A-Z]{2}$/', $playground['language'])) {
-        $application->loadLanguage($container->get(\Joomla\CMS\Language\LanguageFactoryInterface::class)->createLanguage($playground['language'], false));
-    }
+    playgroundDataLanguage($playground, $application, $container);
     // A selected target is described lazily; listing views never boots hundreds of models.
     if (isset($playground['kind']) || isset($playground['view'])) {
         $target = array_intersect_key($playground, array_flip(['kind', 'component', 'view', 'element', 'folder', 'clientId']));
@@ -14,6 +12,7 @@ try {
         $context = playgroundDataContext($target, [], $application, $database, $administrator);
         $form = $context['model']->getForm($target['kind'] === 'component' ? ($context['data']['params'] ?? []) : $context['data'], false);
         if (!$form) throw new RuntimeException('The native configuration form is unavailable.');
+        $form->bind($target['kind'] === 'component' ? ($context['data']['params'] ?? []) : $context['data']);
         $schema = playgroundDataSchema($form, $context['metadata'], $target['kind'] === 'component');
         ob_clean();
         playgroundFinish(['ok' => true, 'schema' => $schema, 'configurationTargets' => [$target + ['schema' => $schema]]]);
