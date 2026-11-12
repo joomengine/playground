@@ -1079,7 +1079,9 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     activity(`Starting ${resolved.deploy?.title || currentConfig.deployId} with Joomla ${currentConfig.joomlaVersion} and PHP ${currentConfig.phpVersion}.`);
     const resumePath = resumeLastRoute && !input.fresh && currentConfig.persistence && savedState.sites[currentConfig.storageKey]?.lastPath;
     runtime = await createPlayground({ ...currentConfig, ...(resumePath ? { initialPath: safeSavedRoute(resumePath, currentConfig.initialPath) } : {}) }, { onProgress: progress, siteExport, checkpoint, jcbUpgrade, rotateAdministrator, deferInitialSave: true });
-    currentConfig = runtime.configuration;
+    // The runtime opens the last visited route, but the deployment retains its
+    // chosen initial path for future fresh installations and configuration exports.
+    currentConfig = { ...runtime.configuration, initialPath: currentConfig.initialPath };
     currentInput = { ...currentInput, jcbVersion: currentConfig.jcbVersion, jcbPackage: currentConfig.jcbPackage };
     jcbSelection = { version: currentConfig.jcbVersion || 'none', omit: false,
       ...(currentConfig.jcbPackage ? { package: currentConfig.jcbPackage } : {}) };

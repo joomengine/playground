@@ -186,16 +186,21 @@ test(`editor Use creates a new instance while dashboard Launch resumes a closed 
     await page.locator('#welcome:not([hidden])').waitFor();
     await page.locator('#deploy-editor-button').click();
     const originalName = await page.locator('#site-name').inputValue();
+    assert.equal(await page.locator('#initial-path').inputValue(), '/', 'Resuming the last visited page must not overwrite the configured initial path.');
     await page.locator('#use-deploy').click();
     await page.locator('#site-frame').waitFor();
     const launches = await page.evaluate(() => window.launchedConfigurations);
     assert.equal(launches.length, 3);
     assert.equal(launches[0].storageKey, launches[1].storageKey, 'Dashboard Launch reopens the closed saved identity.');
+    assert.equal(launches[1].initialPath, '/__test__.html', 'Dashboard Launch still restores the saved last route.');
     assert.notEqual(launches[1].storageKey, launches[2].storageKey, 'Use creates a separate fresh identity even without edits or a running runtime.');
+    assert.equal(launches[2].initialPath, launches[0].initialPath, 'A fresh Use starts at the configured path instead of the source site’s last route.');
     assert.equal(launches[2].siteName, originalName);
     assert.deepEqual(launches[1].admin, launches[2].admin, 'The chosen administrator is preserved.');
     const saved = await page.evaluate(baseURL => JSON.parse(localStorage.getItem(`joomengine:launch:${baseURL}`)), server.url);
     assert.ok(saved.sites[launches[0].storageKey], 'The original saved site remains available.');
+    assert.equal(saved.sites[launches[0].storageKey].initialPath, '/', 'The deployment keeps its chosen initial path separately from navigation state.');
+    assert.equal(saved.sites[launches[0].storageKey].lastPath, '/__test__.html');
     assert.ok(saved.sites[launches[2].storageKey]);
     assert.deepEqual(errors, []);
   } finally {
