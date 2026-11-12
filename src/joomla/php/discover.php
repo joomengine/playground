@@ -77,6 +77,18 @@ try {
     }
     unset($template);
     foreach ($database->setQuery("SELECT type, element, folder, client_id, name FROM #__extensions WHERE type IN ('plugin', 'module') ORDER BY type, folder, element")->loadAssocList() as $extension) {
+        // Match Joomla's own extension lists: these labels live in .sys language
+        // files, which are not loaded by creating the administrator application.
+        if ($extension['type'] === 'module') {
+            $clientPath = (int) $extension['client_id'] === 1 ? JPATH_ADMINISTRATOR : JPATH_SITE;
+            $languageExtension = $extension['element'] . '.sys';
+            $application->getLanguage()->load($languageExtension, $clientPath)
+                || $application->getLanguage()->load($languageExtension, $clientPath . '/modules/' . $extension['element']);
+        } else {
+            $languageExtension = 'plg_' . $extension['folder'] . '_' . $extension['element'] . '.sys';
+            $application->getLanguage()->load($languageExtension, JPATH_ADMINISTRATOR)
+                || $application->getLanguage()->load($languageExtension, JPATH_PLUGINS . '/' . $extension['folder'] . '/' . $extension['element']);
+        }
         $target = ['kind' => $extension['type'], 'element' => $extension['element'], 'title' => \Joomla\CMS\Language\Text::_($extension['name']), 'modelAvailable' => true];
         if ($extension['type'] === 'plugin') $target['folder'] = $extension['folder'];
         else $target['clientId'] = (int) $extension['client_id'];
