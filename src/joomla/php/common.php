@@ -150,6 +150,7 @@ function playgroundApplication(string $root, bool $administratorModels = false):
     \Joomla\CMS\Factory::$application = $application;
     if ($administratorModels) {
         $application->loadLanguage($container->get(\Joomla\CMS\Language\LanguageFactoryInterface::class)->createLanguage('en-GB', false));
+        \Joomla\CMS\Factory::$language = $application->getLanguage();
     }
     $application->createExtensionNamespaceMap();
     return [$application, $container, $container->get(\Joomla\Database\DatabaseInterface::class)];
@@ -210,6 +211,22 @@ function playgroundDataIdentifier($value, string $label, string $pattern = '/^[a
     return $value;
 }
 
+/** Match the interface locale to an installed administrator language only. */
+function playgroundDataLanguage(array $options, $application, $container): void
+{
+    $requested = $options['uiLanguage'] ?? $options['language'] ?? null;
+    if (is_string($requested) && preg_match('/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/', $requested)) {
+        $installed = array_keys(\Joomla\CMS\Language\LanguageHelper::getInstalledLanguages(1));
+        $matches = array_values(array_filter($installed, static fn($tag) => strcasecmp($tag, $requested) === 0));
+        if (!$matches) {
+            $prefix = strtolower(explode('-', $requested)[0]) . '-';
+            $matches = array_values(array_filter($installed, static fn($tag) => str_starts_with(strtolower($tag), $prefix)));
+        }
+        if ($matches) $application->loadLanguage($container->get(\Joomla\CMS\Language\LanguageFactoryInterface::class)->createLanguage($matches[0], false));
+    }
+    \Joomla\CMS\Factory::$language = $application->getLanguage();
+}
+
 /** Resolve a list view using metadata or the installed controller's explicit edit-model mapping. */
 function playgroundDataCanonicalTarget(array $target, $application): array
 {
@@ -219,7 +236,7 @@ function playgroundDataCanonicalTarget(array $target, $application): array
     $application->bootComponent($component);
     if ($component === 'com_componentbuilder' && class_exists(\VDM\Joomla\Componentbuilder\Table::class)) {
         $table = new \VDM\Joomla\Componentbuilder\Table();
-        if (!$table->exist($view)) {
+        if (!in_array($view, $table->tables(), true)) {
             foreach ($table->tables() as $entity) foreach ($table->fields($entity, false, true) ?? [] as $field) {
                 if (($field['list'] ?? '') === $view) { $target['view'] = $entity; return $target; }
             }
@@ -248,12 +265,20 @@ function playgroundDataModel($application, $database, $user, string $component, 
     $installed = (int) $database->setQuery("SELECT extension_id FROM #__extensions WHERE type = 'component' AND enabled = 1 AND element = " . $database->quote($component))->loadResult();
     if (!$installed) throw new RuntimeException('Component ' . $component . ' is not installed and enabled.');
     if (!$user->authorise('core.manage', $component)) throw new RuntimeException('The administrator cannot configure ' . $component . '.');
+    // A native form behaves as it does in its own administrator dispatch. The
+    // caller isolates entries because PHP component constants cannot be changed.
     $path = JPATH_ADMINISTRATOR . '/components/' . $component;
+    if (defined('JPATH_COMPONENT') && JPATH_COMPONENT !== $path) throw new RuntimeException('This related component requires its own configuration request.');
+    if (!defined('JPATH_COMPONENT')) define('JPATH_COMPONENT', $path);
+    if (!defined('JPATH_COMPONENT_ADMINISTRATOR')) define('JPATH_COMPONENT_ADMINISTRATOR', JPATH_COMPONENT);
+    if (!defined('JPATH_COMPONENT_SITE')) define('JPATH_COMPONENT_SITE', JPATH_SITE . '/components/' . $component);
     $application->getInput()->set('option', $component);
     $application->getInput()->set('view', $view);
     $application->getInput()->set('task', '');
     $application->getInput()->set('id', 0);
     $application->getInput()->set('a_id', 0);
+    $application->getLanguage()->load('joomla', JPATH_ADMINISTRATOR);
+    $application->getLanguage()->load('lib_joomla', JPATH_ADMINISTRATOR);
     $application->getLanguage()->load($component, JPATH_ADMINISTRATOR);
     $application->getLanguage()->load($component, $path);
     \Joomla\CMS\Form\Form::addFormPath($path . '/forms');
@@ -363,60 +388,83 @@ function playgroundDataJcbFields(string $component, string $view): ?array
 }
 
 /** Describe the native Joomla form as ordinary JSON Schema for deployment editors. */
-function playgroundDataSchema($form, ?array $metadata = null, bool $componentParams = false): array
+function playgroundDataSchema($form, ?array $metadata = null, bool $componentParams = false, int $depth = 0): array
 {
     $schema = ['type' => 'object', 'properties' => [], 'required' => []];
     if (!$form) return $schema;
     $seen = [];
-    foreach ($form->getFieldsets() as $fieldset) {
-        foreach ($form->getFieldset($fieldset->name) as $field) {
-            $name = $field->fieldname;
-            $type = strtolower($field->type);
-            $group = (string) $field->group;
-            $identity = $group . '.' . $name;
-            if (isset($seen[$identity])) continue;
-            $seen[$identity] = true;
-            if (in_array($type, ['hidden', 'note', 'spacer', 'rules'], true) || !array_key_exists($name, playgroundDataPortableFields([$name => 1]))) continue;
-            if (strtolower((string) $field->getAttribute('filter', '')) === 'unset' || (string) $field->getAttribute('disabled', '') === 'true') continue;
-            $property = ['type' => 'string', 'title' => \Joomla\CMS\Language\Text::_((string) ($field->getAttribute('label') ?: $name))];
-            $description = \Joomla\CMS\Language\Text::_((string) $field->getAttribute('description', ''));
-            if ($description !== '') $property['description'] = strip_tags($description);
-            $filter = strtolower((string) $field->getAttribute('filter', ''));
-            if (in_array($filter, ['int', 'integer', 'uint'], true) || $type === 'number') $property['type'] = 'integer';
-            if (in_array($filter, ['float', 'double'], true)) $property['type'] = 'number';
-            if ($type === 'password') $property['format'] = 'password';
-            if ($type === 'textarea' || $type === 'editor') $property['format'] = 'textarea';
-            if ($type === 'email' || $type === 'url') $property['format'] = $type === 'url' ? 'uri' : 'email';
-            if ($type === 'subform') $property = ['type' => 'object', 'title' => $property['title'], 'additionalProperties' => true];
-            if ($type === 'checkbox') $property['type'] = 'boolean';
-            if (in_array($type, ['list', 'radio'], true)) {
-                $options = [];
-                foreach (($field->options ?? []) as $option) {
-                    $value = (string) $option->value;
-                    if ($value === '') continue;
-                    $options[] = ['const' => $property['type'] === 'integer' ? (int) $value : $value, 'title' => \Joomla\CMS\Language\Text::_((string) $option->text)];
-                }
-                if ($options) $property['oneOf'] = $options;
+    // Native forms also allow unnamed fieldsets and bare fields (common in
+    // module forms and inline subforms); the group API includes those too.
+    foreach ($form->getGroup(null, true) as $field) {
+        $name = $field->fieldname;
+        $type = strtolower($field->type);
+        $group = (string) $field->group;
+        $identity = $group . '.' . $name;
+        if (isset($seen[$identity])) continue;
+        $seen[$identity] = true;
+        if (in_array($type, ['hidden', 'note', 'spacer', 'rules'], true) || !array_key_exists($name, playgroundDataPortableFields([$name => 1]))) continue;
+        if (strtolower((string) $field->getAttribute('filter', '')) === 'unset' || (string) $field->getAttribute('disabled', '') === 'true') continue;
+        $property = ['type' => 'string', 'title' => \Joomla\CMS\Language\Text::_((string) ($field->getAttribute('label') ?: $name))];
+        $description = \Joomla\CMS\Language\Text::_((string) $field->getAttribute('description', ''));
+        if ($description !== '') $property['description'] = strip_tags($description);
+        $filter = strtolower((string) $field->getAttribute('filter', ''));
+        if (in_array($filter, ['int', 'integer', 'uint'], true) || $type === 'number') $property['type'] = 'integer';
+        if (in_array($filter, ['float', 'double'], true)) $property['type'] = 'number';
+        if ($type === 'password') $property['format'] = 'password';
+        if ($type === 'textarea' || $type === 'editor') $property['format'] = 'textarea';
+        if ($type === 'email' || $type === 'url') $property['format'] = $type === 'url' ? 'uri' : 'email';
+        if ($type === 'subform') {
+            $nested = ['type' => 'object', 'additionalProperties' => true];
+            if ($depth < 4 && method_exists($field, 'loadSubForm')) {
+                try { $nested = playgroundDataSchema($field->loadSubForm(), null, false, $depth + 1); }
+                catch (Throwable $error) { /* A missing external form must not hide the other native fields. */ }
             }
-            if ((string) $field->getAttribute('multiple', '') === 'true') {
-                $property = ['type' => 'array', 'title' => $property['title'], 'items' => $property];
-            }
-            $default = $field->getAttribute('default');
-            if ($default !== null && $default !== '' && in_array($property['type'], ['integer', 'number', 'string'], true)) {
-                $property['default'] = $property['type'] === 'integer' ? (int) $default : ($property['type'] === 'number' ? (float) $default : (string) $default);
-            }
-            if (isset($metadata[$name]['link'])) $property['x-joomla-link'] = $metadata[$name]['link'];
-            $groups = $group === '' ? [] : explode('.', $group);
-            if ($componentParams && ($groups[0] ?? '') !== 'params') array_unshift($groups, 'params');
-            $node =& $schema;
-            foreach ($groups as $part) {
-                $node['properties'][$part] ??= ['type' => 'object', 'title' => ucfirst($part), 'properties' => [], 'required' => []];
-                $node =& $node['properties'][$part];
-            }
-            $node['properties'][$name] = $property;
-            if ((string) $field->getAttribute('required', '') === 'true' && !(string) $field->getAttribute('showon', '')) $node['required'][] = $name;
-            unset($node);
+            $property = array_replace($property, $nested);
         }
+        if ($type === 'checkbox') $property['type'] = 'boolean';
+        if ($field instanceof \Joomla\CMS\Form\Field\ListField || $type === 'radio') {
+            $options = [];
+            foreach (($field->options ?? []) as $option) {
+                $value = (string) $option->value;
+                if ($value === '') continue;
+                $options[] = ['const' => $property['type'] === 'integer' ? (int) $value : $value, 'title' => \Joomla\CMS\Language\Text::_((string) $option->text)];
+            }
+            if ($options) $property['oneOf'] = $options;
+        }
+        if ($type === 'modulelayout') {
+            // Joomla exposes layout choices through its native select renderer,
+            // including installed template overrides, rather than an options API.
+            try {
+                $document = new \DOMDocument();
+                if (@$document->loadHTML($field->input, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
+                    $options = [];
+                    foreach ($document->getElementsByTagName('option') as $option) {
+                        $value = $option->getAttribute('value');
+                        if ($value !== '') $options[] = ['const' => $value, 'title' => trim($option->textContent)];
+                    }
+                    if ($options) { $property['oneOf'] = $options; $property['default'] = $options[0]['const']; }
+                }
+            } catch (Throwable $error) { /* Custom layout rendering can require a full document. */ }
+        }
+        if ((string) $field->getAttribute('multiple', '') === 'true') {
+            $property = ['type' => 'array', 'title' => $property['title'], 'items' => $property]
+                + (isset($property['description']) ? ['description' => $property['description']] : []);
+        }
+        $default = $field->getAttribute('default');
+        if ($default !== null && $default !== '' && in_array($property['type'], ['integer', 'number', 'string'], true)) {
+            $property['default'] = $property['type'] === 'integer' ? (int) $default : ($property['type'] === 'number' ? (float) $default : (string) $default);
+        }
+        if (isset($metadata[$name]['link'])) $property['x-joomla-link'] = $metadata[$name]['link'];
+        $groups = $group === '' ? [] : explode('.', $group);
+        if ($componentParams && ($groups[0] ?? '') !== 'params') array_unshift($groups, 'params');
+        $node =& $schema;
+        foreach ($groups as $part) {
+            $node['properties'][$part] ??= ['type' => 'object', 'title' => ucfirst($part), 'properties' => [], 'required' => []];
+            $node =& $node['properties'][$part];
+        }
+        $node['properties'][$name] = $property;
+        if (((string) $field->getAttribute('required', '') === 'true' || $type === 'modulelayout') && !(string) $field->getAttribute('showon', '')) $node['required'][] = $name;
+        unset($node);
     }
     // An empty properties map must serialize as an object, not a JSON array.
     if (!$schema['properties']) $schema['properties'] = new \stdClass();
@@ -566,7 +614,7 @@ function playgroundDataApply(array $entry, array $bindings, $application, $datab
     if ($kind === 'record') {
         $nativeForm = $model->getForm($values, false);
         foreach ($fields as $name => $value) {
-            if (!$nativeForm || !$nativeForm->getField($name)) throw new InvalidArgumentException('The native administrator form does not support field ' . $name . '.');
+            if (!$nativeForm || (!$nativeForm->getField($name) && !$nativeForm->getGroup($name, true))) throw new InvalidArgumentException('The native administrator form does not support field ' . $name . '.');
         }
     }
     if ($kind === 'component') {
@@ -586,8 +634,10 @@ function playgroundDataApply(array $entry, array $bindings, $application, $datab
     $useDataItem = $kind === 'record' && ($entry['component'] ?? '') === 'com_componentbuilder' && $metadata && isset($metadata['guid']) && class_exists(\VDM\Joomla\Componentbuilder\Factory::class)
         && \VDM\Joomla\Componentbuilder\Factory::getArea($entry['view']);
     foreach ($metadata ?? [] as $definition) if (!empty($definition['store']) && !in_array($definition['store'], ['base64', 'json'], true)) $useDataItem = false;
+    // Data.Item omits NULL values. Let the native administrator model handle an
+    // explicit clear that remains NULL after its own form filtering instead.
+    foreach ($fields as $name => $value) if (array_key_exists($name, $valid) && $valid[$name] === null) $useDataItem = false;
     if ($useDataItem) {
-        foreach ($fields as $value) if ($value === null) throw new InvalidArgumentException('Use an empty value to clear a JCB field; this native data adapter does not write NULL.');
         \VDM\Joomla\Utilities\Component\Helper::setOption('com_componentbuilder');
         $item = \VDM\Joomla\Componentbuilder\Factory::_($entry['view'], 'Data.Item');
         $guid = $entry['guid'] ?? $data['guid'] ?? \VDM\Joomla\Utilities\GuidHelper::get();
