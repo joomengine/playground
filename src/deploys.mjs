@@ -7,6 +7,7 @@ import {
 import { validateContent } from './joomla/index.mjs';
 import { deploymentRecipeMajor, deploymentRequiresJcb, deploymentPhpVersions } from './deployment-compatibility.mjs';
 import { pinnedJcbPackages } from './jcb-selection.mjs';
+import { normalizeDeploymentOverlays, sameDeploymentValue } from './deployment-overlays.mjs';
 
 const VERSION = /^\d+\.\d+\.\d+$/;
 const PACKAGE_DIGEST = /^[a-f\d]{64}$/i;
@@ -43,7 +44,7 @@ function normalizeRequirements(value = {}, supported = []) {
 
 function packageEntry(value, baseURL, requireIntegrity) {
   object(value, 'Package');
-  properties(value, ['url', 'sha256', 'sha512', 'sourceUrl', 'tag'], 'Package');
+  properties(value, ['url', 'sha256', 'sha512', 'sourceUrl', 'tag', 'provider', 'apiBase', 'authentication', 'headers'], 'Package');
   const result = parseExtensions([value], baseURL)[0];
   if (requireIntegrity && !PACKAGE_DIGEST.test(result.sha256 ?? '')) throw new TypeError('Repository deploy packages require a SHA-256 digest.');
   if (value.sourceUrl !== undefined) result.sourceUrl = parseExtensions([{ url: value.sourceUrl }], baseURL)[0].url;
@@ -115,7 +116,7 @@ function normalizeContent(value) {
 
 function normalizeSetup(value = {}, baseURL, requireIntegrity) {
   object(value, 'Deploy configuration');
-  properties(value, ['siteName', 'initialPath', 'joomlaVersion', 'phpVersion', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'extensions', 'startupCommands', 'languages', 'languageTags', 'multilingual', 'menus', 'template', 'phpSettings', 'content', 'snapshot'], 'Deploy configuration');
+  properties(value, ['siteName', 'initialPath', 'joomlaVersion', 'phpVersion', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'extensions', 'startupCommands', 'languages', 'languageTags', 'multilingual', 'menus', 'template', 'phpSettings', 'content', 'snapshot', 'overlays'], 'Deploy configuration');
   const result = {};
   if (value.siteName !== undefined) result.siteName = text(value.siteName, 'Site name', 100);
   if (value.initialPath !== undefined) result.initialPath = normalizeInitialPath(value.initialPath);
@@ -138,6 +139,7 @@ function normalizeSetup(value = {}, baseURL, requireIntegrity) {
   result.startupCommands = parseStartupCommands(value.startupCommands ?? []);
   if (value.languageTags !== undefined) result.languageTags = parseLanguageTags(value.languageTags);
   if (value.menus !== undefined) result.menus = parseMenus(value.menus);
+  if (value.overlays !== undefined) result.overlays = normalizeDeploymentOverlays(value.overlays);
   if (value.template !== undefined) result.template = parseTemplate(value.template, baseURL);
   if (value.phpSettings !== undefined) result.phpSettings = normalizePhpSettings(value.phpSettings);
   if (value.content !== undefined) result.content = normalizeContent(value.content);
@@ -213,7 +215,7 @@ function uniquePackages(entries) {
   const result = new Map();
   for (const entry of entries) {
     const existing = result.get(entry.url);
-    if (existing && (existing.sha256 !== entry.sha256 || existing.sha512 !== entry.sha512)) throw new TypeError('The deployment contains conflicting package checksums.');
+    if (existing && !samePackage(existing, entry)) throw new TypeError('The deployment contains conflicting package checksums or download settings.');
     result.set(entry.url, entry);
   }
   return [...result.values()];
@@ -235,7 +237,8 @@ async function sharedJcbPackages(registry, fetcher) {
 }
 
 function samePackage(left, right) {
-  return left?.url === right?.url && left?.sha256 === right?.sha256 && left?.sha512 === right?.sha512;
+  return ['url', 'sha256', 'sha512', 'provider', 'apiBase', 'authentication', 'headers']
+    .every(key => sameDeploymentValue(left?.[key], right?.[key]));
 }
 
 /** A saved clone is a complete recipe. Its editable lists replace the previous

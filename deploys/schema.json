@@ -109,6 +109,38 @@
         },
         "sourceUrl": {
           "$ref": "#/$defs/url"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "direct",
+            "github",
+            "gitea",
+            "gitlab"
+          ],
+          "title": "Package provider",
+          "description": "Choose the service hosting the package. Use Direct for an ordinary download URL."
+        },
+        "apiBase": {
+          "type": "string",
+          "format": "uri",
+          "title": "Provider API URL",
+          "description": "Only needed when your self-hosted service uses a different API address."
+        },
+        "authentication": {
+          "$ref": "#/$defs/authentication"
+        },
+        "headers": {
+          "type": "object",
+          "title": "Additional request headers",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[^\\r\\n\\u0000]*$"
+          },
+          "description": "Private request headers for this package host. These values are included in private exports."
+        },
+        "sha512": {
+          "$ref": "#/$defs/sha512"
         }
       }
     },
@@ -132,6 +164,38 @@
         },
         "sourceUrl": {
           "$ref": "#/$defs/url"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "direct",
+            "github",
+            "gitea",
+            "gitlab"
+          ],
+          "title": "Package provider",
+          "description": "Choose the service hosting the package. Use Direct for an ordinary download URL."
+        },
+        "apiBase": {
+          "type": "string",
+          "format": "uri",
+          "title": "Provider API URL",
+          "description": "Only needed when your self-hosted service uses a different API address."
+        },
+        "authentication": {
+          "$ref": "#/$defs/authentication"
+        },
+        "headers": {
+          "type": "object",
+          "title": "Additional request headers",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[^\\r\\n\\u0000]*$"
+          },
+          "description": "Private request headers for this package host. These values are included in private exports."
+        },
+        "sha512": {
+          "$ref": "#/$defs/sha512"
         }
       }
     },
@@ -266,6 +330,14 @@
         },
         "multilingual": {
           "type": "boolean"
+        },
+        "overlays": {
+          "type": "array",
+          "title": "Extension configuration",
+          "items": {
+            "$ref": "#/$defs/overlay"
+          },
+          "default": []
         }
       }
     },
@@ -465,6 +537,38 @@
           "items": {
             "$ref": "#/$defs/contentKey"
           }
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "direct",
+            "github",
+            "gitea",
+            "gitlab"
+          ],
+          "title": "Package provider",
+          "description": "Choose the service hosting the package. Use Direct for an ordinary download URL."
+        },
+        "apiBase": {
+          "type": "string",
+          "format": "uri",
+          "title": "Provider API URL",
+          "description": "Only needed when your self-hosted service uses a different API address."
+        },
+        "authentication": {
+          "$ref": "#/$defs/authentication"
+        },
+        "headers": {
+          "type": "object",
+          "title": "Additional request headers",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[^\\r\\n\\u0000]*$"
+          },
+          "description": "Private request headers for this package host. These values are included in private exports."
+        },
+        "sha512": {
+          "$ref": "#/$defs/sha512"
         }
       }
     },
@@ -528,6 +632,404 @@
           }
         }
       }
+    },
+    "authentication": {
+      "title": "Authentication",
+      "description": "Credentials used only when downloading this package. Private deployment exports include these values.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "token"
+          ],
+          "properties": {
+            "type": {
+              "const": "bearer"
+            },
+            "token": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^\\r\\n\\u0000]*$",
+              "writeOnly": true
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "token"
+          ],
+          "properties": {
+            "type": {
+              "const": "token"
+            },
+            "token": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^\\r\\n\\u0000]*$",
+              "writeOnly": true
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "username",
+            "password"
+          ],
+          "properties": {
+            "type": {
+              "const": "basic"
+            },
+            "username": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^\\r\\n\\u0000]*$"
+            },
+            "password": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^\\r\\n\\u0000]*$",
+              "writeOnly": true
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "name",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "header"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^\\r\\n\\u0000]*$"
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^\\r\\n\\u0000]*$",
+              "writeOnly": true
+            }
+          }
+        }
+      ]
+    },
+    "sha512": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{128}$"
+    },
+    "overlayReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "$ref"
+      ],
+      "properties": {
+        "$ref": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+        },
+        "field": {
+          "type": "string",
+          "enum": [
+            "id",
+            "guid"
+          ],
+          "default": "id"
+        }
+      }
+    },
+    "overlayValue": {
+      "description": "A setting value or a reference to the identity of another configured record.",
+      "anyOf": [
+        {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/overlayValue"
+          }
+        },
+        {
+          "type": "object",
+          "not": {
+            "required": [
+              "$ref"
+            ]
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/overlayValue"
+          }
+        },
+        {
+          "$ref": "#/$defs/overlayReference"
+        }
+      ]
+    },
+    "overlay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "kind"
+      ],
+      "title": "Extension configuration",
+      "description": "Apply settings after extensions are installed. Unavailable extensions or records produce a notice and do not stop the site.",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$",
+          "title": "Configuration name",
+          "description": "A unique name used to refer to this configuration from other records."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "record",
+            "component",
+            "plugin",
+            "module"
+          ],
+          "title": "What to configure"
+        },
+        "component": {
+          "type": "string",
+          "pattern": "^com_[a-z0-9_]+$",
+          "title": "Component"
+        },
+        "view": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Administrator view",
+          "description": "The component's editable record type, for example repository."
+        },
+        "guid": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$",
+          "title": "Record GUID",
+          "description": "The stable identifier of a record. JCB can load a record from its repositories when only this identifier is supplied."
+        },
+        "match": {
+          "type": "object",
+          "title": "Find an existing record",
+          "propertyNames": {
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$"
+          },
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        },
+        "fields": {
+          "type": "object",
+          "title": "Settings",
+          "default": {},
+          "propertyNames": {
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+            "not": {
+              "enum": [
+                "id",
+                "guid",
+                "asset_id",
+                "checked_out",
+                "checked_out_time"
+              ]
+            }
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/overlayValue"
+          }
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "title": "Remote record source",
+          "properties": {
+            "repository": {
+              "type": [
+                "string",
+                "object"
+              ],
+              "description": "Optional JCB repository identifier or repository settings."
+            },
+            "refresh": {
+              "type": "boolean",
+              "default": false,
+              "description": "Refresh this record from its repository before applying the supplied values."
+            }
+          }
+        },
+        "dependsOn": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"
+          },
+          "title": "Apply after"
+        },
+        "element": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Extension name"
+        },
+        "folder": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Plugin group"
+        },
+        "clientId": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ],
+          "default": 0,
+          "title": "Site or administrator"
+        },
+        "schema": {
+          "type": "object",
+          "title": "Captured form information",
+          "description": "Optional native form metadata for the editor. This does not change permissions or the fields accepted by Joomla."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "record",
+                  "component"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "component"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "component"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "record"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "view"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "view"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "plugin",
+                  "module"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "element"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "element"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "plugin"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "folder"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "folder"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "module"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "element": {
+                "pattern": "^mod_[a-z0-9_]+$"
+              }
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "clientId"
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }

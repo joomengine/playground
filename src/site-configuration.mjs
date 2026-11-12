@@ -1,3 +1,4 @@
+import { normalizePackageSource } from './package-sources.mjs';
 const NAME = /^[a-z][a-z0-9_-]{0,63}$/;
 const LANGUAGE = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?-[A-Z]{2}$/;
 const RESERVED = new Set(['__proto__', 'prototype', 'constructor']);
@@ -84,17 +85,17 @@ export function parseTemplate(value, baseURL = 'https://playground.invalid/') {
   if (value === undefined || value === null || value === '') return null;
   if (typeof value === 'string') { try { value = JSON.parse(value); } catch { throw new TypeError('Template must be a JSON object.'); } }
   record(value, 'Template');
-  const allowed = ['url', 'sha256', 'element', 'styleId', 'params', 'menuKeys'];
+  const allowed = ['url', 'sha256', 'sha512', 'provider', 'apiBase', 'authentication', 'headers', 'element', 'styleId', 'params', 'menuKeys'];
   for (const key of Object.keys(value)) if (!allowed.includes(key)) throw new TypeError(`Template contains unsupported property ${key}.`);
   const result = { params: siteParameters(value.params ?? {}, 'Template parameters'), menuKeys: [] };
   if (value.url !== undefined) {
     if (typeof value.url !== 'string' || !value.url.trim()) throw new TypeError('Template must provide a URL.');
-    const url = new URL(value.url, baseURL);
-    result.url = url.href;
+    Object.assign(result, normalizePackageSource(value, baseURL));
+    if (value.sha512 !== undefined) result.sha512 = typeof value.sha512 === 'string' ? value.sha512.toLowerCase() : value.sha512;
     if (value.sha256 !== undefined) {
       result.sha256 = typeof value.sha256 === 'string' ? value.sha256.toLowerCase() : value.sha256;
     }
-  } else if (value.sha256 !== undefined) throw new TypeError('A template checksum requires a package URL.');
+  } else if (['sha256', 'sha512', 'provider', 'apiBase', 'authentication', 'headers'].some(key => value[key] !== undefined)) throw new TypeError('Template download settings require a package URL.');
   if (value.element !== undefined) result.element = identifier(value.element, 'Template element');
   if (value.styleId !== undefined) result.styleId = integer(value.styleId, 'Template style', 1);
   if (!result.element && !result.styleId) throw new TypeError('Choose the installed template element or style ID.');
