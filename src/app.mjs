@@ -653,9 +653,19 @@ function applyAdministrator(value) {
     if (typeof value[name] === 'string') $(`admin-${name}`).value = value[name];
   }
 }
+function matchesInstalledSelection(input) {
+  const source = runtime?.configuration?.storageKey === input.storageKey
+    && runtime.configuration.persistence === input.persistence ? runtime.configuration : savedState.sites[input.storageKey];
+  return source && source.deployId === input.deployId && source.joomlaVersion === input.joomlaVersion
+    && (source.jcbVersion || 'none') === (input.jcbVersion || 'none')
+    && source.persistence === input.persistence;
+}
 function formInput(overrides = {}) {
   const joomlaVersion = overrides.joomlaVersion ?? fields.joomlaVersion.value;
-  const unchangedRestoredJcb = editorConfiguration?.restoredSite
+  const unchangedRestoredJcb = (editorConfiguration?.restoredSite || matchesInstalledSelection({
+    ...editorConfiguration, deployId: fields.deployId.value, storageKey: fields.storageKey.value,
+    joomlaVersion, jcbVersion: fields.jcbVersion.value, persistence: fields.persistence.checked,
+  }))
     && fields.jcbVersion.value === (editorConfiguration.jcbVersion ?? 'none');
   const jcbInput = unchangedRestoredJcb ? { jcbVersion: fields.jcbVersion.value } : jcbSelectionInput({ selection: { ...jcbSelection, version: fields.jcbVersion.value },
     major: joomlaVersion.split('.')[0], deploy: currentDeployRecipe, pinned: pinnedJcb });
@@ -680,7 +690,7 @@ function formInput(overrides = {}) {
   if (full.restoredSite) return full;
   const setupFields = ['siteName', 'initialPath', 'admin', 'extensions', 'startupCommands', 'menus', 'template', 'languageTags', 'multilingual', 'content', 'overlays', 'language', 'autoLogin', 'phpSettings'];
   const sameSetup = editorConfiguration && setupFields.every(name => JSON.stringify(full[name] ?? null) === JSON.stringify(editorConfiguration[name] ?? null));
-  if (sameSetup && !editorSourceInput?.deploymentRecipe && !fields.deployId.value.startsWith('custom-')) {
+  if (sameSetup && !matchesInstalledSelection(full) && !editorSourceInput?.deploymentRecipe && !fields.deployId.value.startsWith('custom-')) {
     // Keep unchanged core recipes eligible for their prepared image. The editor
     // shows full lists while the core resolver receives only genuine additions.
     const input = { ...full, extensions: editorConfiguration.addonExtensions || [],
@@ -709,6 +719,12 @@ async function resolve(input) {
     selectedJoomlaPackages.set(input.joomlaVersion, { ...catalog.joomla.find(entry => entry.version === input.joomlaVersion) });
     fillJoomlaOptions();
     return { configuration: normalizeConfiguration(input, { catalog, baseURL: deploymentURL }), deploy: deploymentDescriptor('blank') };
+  }
+  // A complete recipe for an unchanged installed runtime needs no package lookup.
+  // This also lets owners configure a JCB version no longer present in the catalog.
+  if (input.deploymentRecipe && matchesInstalledSelection(input)) {
+    return { configuration: normalizeConfiguration(input, { catalog: catalogForRestoredSite(catalog, input), baseURL: deploymentURL }),
+      deploy: deploymentDescriptor(input.deployId) };
   }
   input = customDeploymentInput(input);
   input.joomlaVersion ||= catalog.defaults.joomlaVersion;
