@@ -40,3 +40,15 @@ test('storage failures preserve prior recipes and corrupt entries do not hide va
   assert.throws(() => saveCustomDeployment(local, key, saved.registry, document('Directory'), { builtInNames: ['Directory'] }), /distinct name/);
   assert.equal(customDeploymentName('Directory', ['Directory Custom']), 'Directory Custom 2');
 });
+
+test('private settings persist alongside existing version 2 recipes', () => {
+  const local = storage();
+  const legacy = { ...document('Existing recipe'), schemaVersion: 2 };
+  const first = saveCustomDeployment(local, key, readDeploymentRegistry(local, key), legacy);
+  const current = document('Agent setup');
+  current.configuration.extensions = [{ url: 'https://example.test/private.zip', authentication: { type: 'bearer', token: 'temporary-package-token' } }];
+  current.configuration.overlays = [{ key: 'repository', kind: 'record', component: 'com_componentbuilder', view: 'repository', fields: { token: 'temporary-record-token' } }];
+  saveCustomDeployment(local, key, first.registry, current);
+  const restored = readDeploymentRegistry(local, key);
+  assert.deepEqual(restored.deployments.map(entry => entry.document), [legacy, current]);
+});

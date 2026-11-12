@@ -208,7 +208,7 @@ test('complete deployment exports preserve private setup, materialized packages 
   };
   const requirements = { joomla: ['5', '6'], jcb: 'required', php: ['8.4', '8.5'], joomlaFallbacks: { '7': '6' } };
   const document = createFullDeploymentDocument(configuration, { name: 'Component Builder Custom', requirements });
-  assert.equal(document.schemaVersion, 2);
+  assert.equal(document.schemaVersion, 3);
   assert.equal(document.name, 'Component Builder Custom');
   assert.deepEqual(document.requirements, requirements);
   assert.deepEqual(document.configuration.admin, configuration.admin);
@@ -308,4 +308,50 @@ test('public HTTP and HTTPS template URLs survive configuration parsing for Joom
     assert.equal(parseTemplate({ url, element: 'managed', sha256: 'A'.repeat(64) }).sha256, 'a'.repeat(64),
       'Managed template digest normalization remains intact.');
   }
+});
+
+test('private v3 recipes preserve authenticated packages, record references and captured form metadata', () => {
+  const extensions = [
+    { provider: 'github', authentication: { type: 'bearer', token: 'temporary-github-token' } },
+    { provider: 'gitea', apiBase: 'https://git.example.test/api/v1', authentication: { type: 'token', token: 'temporary-gitea-token' } },
+    { provider: 'gitlab', authentication: { type: 'header', name: 'private-token', value: 'temporary-gitlab-token' } },
+    { provider: 'direct', authentication: { type: 'basic', username: 'agent', password: 'temporary-download-password' }, headers: { 'x-download-key': 'temporary-header' } },
+  ].map((entry, index) => ({ url: `https://packages.example.test/${index}.zip`, ...entry }));
+  const overlays = [
+    { key: '1.Repository:primary', kind: 'record', component: 'com_componentbuilder', view: 'repository',
+      guid: '12345678-1234-1234-1234-123456789abc', fields: { name: 'Private code', token: 'temporary-repository-token' },
+      schema: { type: 'object', properties: { name: { $ref: '#/$defs/title' } }, $defs: { title: { type: 'string' } } } },
+    { key: 'dependent', kind: 'record', component: 'com_example', view: 'item',
+      fields: { repository: { $ref: '1.Repository:primary', field: 'guid' } }, dependsOn: ['1.Repository:primary'] },
+    { key: 'component', kind: 'component', component: 'com_example', fields: { params: { enabled: true } } },
+    { key: 'plugin', kind: 'plugin', folder: 'system', element: 'example', fields: { enabled: 1 } },
+    { key: 'module', kind: 'module', element: 'mod_custom', clientId: 0, match: { title: 'Welcome' }, fields: { title: 'Welcome' } },
+  ];
+  const document = createFullDeploymentDocument({ extensions, overlays,
+    template: { ...extensions[0], element: 'custom' }, jcbVersion: '6.2.0', jcbPackage: extensions[1] });
+  const restored = parseDeploymentDocument(JSON.stringify(document));
+  assert.equal(document.schemaVersion, 3);
+  assert.deepEqual(restored.extensions, extensions);
+  assert.deepEqual(restored.template.authentication, extensions[0].authentication);
+  assert.deepEqual(restored.jcbPackage, extensions[1]);
+  assert.deepEqual(restored.overlays, overlays);
+  assert.deepEqual(createFullDeploymentDocument(restored), document);
+  assert.throws(() => createShareURL('https://playground.test/', restored), /secrets/);
+  assert.throws(() => createDeploymentDocument({ extensions: [extensions[3]] }), /secrets|private/);
+  assert.throws(() => createDeploymentDocument({ extensions: [{ url: extensions[0].url, headers: { 'x-custom': 'temporary' } }] }), /private/);
+  assert.throws(() => createDeploymentDocument({ overlays }), /secrets/);
+  assert.throws(() => createFullDeploymentDocument({ ...restored, overlays: [...overlays, overlays[0]] }), /Duplicate configuration key/);
+  assert.throws(() => createFullDeploymentDocument({ ...restored, overlays: [{ ...overlays[0], fields: { id: 42 } }] }), /record identity/);
+});
+
+test('legacy deployment versions still import and unsupported core authentication fails explicitly', () => {
+  const legacy = { schemaVersion: 2, name: 'Existing deployment', requirements: { joomla: ['6'] },
+    configuration: { siteName: 'Existing site', extensions: [{ url: 'https://example.test/public.zip' }] } };
+  const restored = parseDeploymentDocument(legacy);
+  assert.equal(restored.deploymentRecipe.schemaVersion, 2);
+  assert.equal(createFullDeploymentDocument(restored).schemaVersion, 3);
+  assert.deepEqual(parseDeploymentDocument({ schemaVersion: 1, configuration: legacy.configuration }).extensions, legacy.configuration.extensions);
+  assert.throws(() => createFullDeploymentDocument({ joomlaVersion: '6.2.0', joomlaPackage: {
+    url: 'https://example.test/core.zip', php: ['8.4'], authentication: { type: 'bearer', token: 'temporary' },
+  } }), /not Joomla core packages/);
 });

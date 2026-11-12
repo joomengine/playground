@@ -156,3 +156,17 @@ test('conflicting managed packages do not expose their internal archive URL', as
     return true;
   });
 });
+
+test('private additions and overlays survive preset resolution and standalone recipe reuse', async () => {
+  const { createFullDeploymentDocument, parseDeploymentDocument } = await import('../src/config.mjs');
+  const extensions = [{ url: 'https://git.example.test/team/private/archive/main.zip', provider: 'gitea', authentication: { type: 'token', token: 'temporary-token' } }];
+  const overlays = [{ key: 'settings', kind: 'component', component: 'com_example', fields: { params: { token: 'temporary-record-token' } } }];
+  const first = await resolveDeployConfiguration({ deployId: 'blank', admin, extensions, overlays }, options);
+  assert.deepEqual(first.configuration.extensions, extensions);
+  assert.deepEqual(first.configuration.overlays, overlays);
+  const document = createFullDeploymentDocument(first.configuration);
+  const restored = await resolveDeployConfiguration(parseDeploymentDocument(document), options);
+  assert.deepEqual(restored.configuration.extensions, extensions);
+  assert.deepEqual(restored.configuration.addonExtensions, extensions);
+  assert.deepEqual(restored.configuration.overlays, overlays);
+});

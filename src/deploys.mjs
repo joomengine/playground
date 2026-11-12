@@ -215,7 +215,8 @@ function uniquePackages(entries) {
   const result = new Map();
   for (const entry of entries) {
     const existing = result.get(entry.url);
-    if (existing && !samePackage(existing, entry)) throw new TypeError('The deployment contains conflicting package checksums or download settings.');
+    if (existing && (existing.sha256 !== entry.sha256 || existing.sha512 !== entry.sha512)) throw new TypeError('The deployment contains conflicting package checksums.');
+    if (existing && !samePackage(existing, entry)) throw new TypeError('The deployment contains conflicting package download settings.');
     result.set(entry.url, entry);
   }
   return [...result.values()];

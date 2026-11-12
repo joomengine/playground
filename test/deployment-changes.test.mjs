@@ -47,3 +47,24 @@ test('deliberately changing language defaults enables customization and checks r
     assert.deepEqual(changes.configuration.languages, next.languages);
   }
 });
+
+test('changed credentials and overlay values apply while unchanged instructions and form metadata do not replay', () => {
+  const installed = previous();
+  installed.extensions[0].authentication = { type: 'bearer', token: 'old-token' };
+  installed.template.authentication = { type: 'bearer', token: 'template-token' };
+  installed.overlays = [{ key: 'settings', kind: 'component', component: 'com_example', fields: { params: { title: 'Original' } }, schema: { title: 'Settings' } },
+    { key: 'stable', kind: 'plugin', folder: 'system', element: 'example', fields: { enabled: 1 } }];
+  const next = structuredClone(installed);
+  next.extensions[0].authentication.token = 'new-token';
+  next.template.params.color = 'green';
+  next.overlays[0].schema.title = 'Localized settings';
+  let changes = deploymentConfigurationChanges(installed, next).configuration;
+  assert.deepEqual(changes.extensions, next.extensions);
+  assert.deepEqual(changes.overlays, []);
+  assert.deepEqual(changes.template, { element: 'existing', params: { color: 'green' } });
+  next.template.authentication.token = 'replacement-template-token';
+  next.overlays[0].fields.params.title = 'Edited';
+  changes = deploymentConfigurationChanges(installed, next).configuration;
+  assert.deepEqual(changes.template, next.template);
+  assert.deepEqual(changes.overlays, [next.overlays[0]]);
+});
