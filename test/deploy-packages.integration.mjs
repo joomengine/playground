@@ -78,6 +78,9 @@ async function checkDeploymentOverlays(runtime, options) {
   const discovered = await discoverJoomlaConfiguration(runtime, { ...options, kind: 'record', component: 'com_componentbuilder', view: 'repository', uiLanguage: 'de' });
   assert.equal(discovered.schema.properties.token.format, 'password');
   assert.equal(discovered.schema.properties.token.title, captured.schema.properties.token.title, 'Unavailable interface languages retain the installed-language fallback.');
+  const targets = await discoverJoomlaConfiguration(runtime, { ...options, uiLanguage: 'en' });
+  assert.equal(targets.configurationTargets.find(item => item.kind === 'module' && item.element === 'mod_custom' && item.clientId === 0).title, 'Custom');
+  assert.equal(targets.configurationTargets.find(item => item.kind === 'plugin' && item.folder === 'system' && item.element === 'debug').title, 'System - Debug');
 
   const administratorPath = '/persist/meta/administrator.json';
   const original = await runtime.fs.readFile(administratorPath, { encoding: 'utf8' });
