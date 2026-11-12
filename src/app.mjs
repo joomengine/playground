@@ -19,6 +19,9 @@ import { startAutosave } from './autosave.mjs';
 import { presentError } from './error-presentation.mjs';
 import { createExtensionInputs } from './extension-inputs.mjs';
 import { createStructuredInputs } from './structured-inputs.mjs';
+import { loadDeploymentFormSchemas } from './deployment-form-schema.mjs';
+import { administratorCaptureTargets } from './deployment-capture.mjs';
+import { normalizeDeploymentOverlays } from './deployment-overlays.mjs';
 import { deploymentRegistryKey, readDeploymentRegistry, saveCustomDeployment, deleteCustomDeployment, customDeploymentName } from './deployment-registry.mjs';
 import { initialJcbSelection, jcbSelectionInput, pinnedJcbPackages, recipeIncludesJcb } from './jcb-selection.mjs';
 import { deploymentRequiresJcb, deploymentPhpVersions, selectDeploymentRuntime } from './deployment-compatibility.mjs';
@@ -74,7 +77,9 @@ let codeHost;
 let databaseHost, openingDatabase;
 let openingCode;
 let extensionInputs;
-let commandInputs, parameterInputs, menuInputs, contentInputs;
+let commandInputs, parameterInputs, menuInputs, contentInputs, overlayInputs;
+let deploymentFormSchemas = {};
+let discoveredConfiguration;
 let editorConfiguration, editorSourceInput;
 let pinnedJcb = new Map();
 const selectedJoomlaPackages = new Map();
@@ -349,6 +354,8 @@ function mountPreview(url) {
       const markDirty = event => { if (event.isTrusted && event.target.closest('form')) previewDirty = true; };
       frame.contentDocument.addEventListener('input', markDirty, { capture: true });
       frame.contentDocument.addEventListener('change', markDirty, { capture: true });
+      frame.contentDocument.addEventListener('change', updateCaptureAction);
+      updateCaptureAction();
     } catch { /* The browser owns cross-origin form navigation checks. */ }
   });
   disconnectFrame();
@@ -362,6 +369,7 @@ function mountPreview(url) {
       }
       updateNavigation();
     }
+    updateCaptureAction();
     $('credentials-button').dataset.signedOut = String(signedOut);
     $('credentials-button').textContent = `${t('title.credentials')}${signedOut ? ` · ${t('status.signedOut')}` : ''}`;
   } });
@@ -476,6 +484,7 @@ function setBusy(value) {
   $('database-button').disabled = locked || !runtime || filesOnly || Boolean(openingCode || openingDatabase);
   $('code-button').disabled = locked || !runtime || Boolean(openingCode || openingDatabase);
   $('download-dialog-button').disabled = locked || !runtime;
+  updateCaptureAction();
   const recoveryFormat = $('export-format').querySelector('[value="recovery"]');
   recoveryFormat.hidden = !runtime?.recovery;
   recoveryFormat.disabled = !runtime?.recovery;
@@ -645,7 +654,9 @@ function applyAdministrator(value) {
 }
 function formInput(overrides = {}) {
   const joomlaVersion = overrides.joomlaVersion ?? fields.joomlaVersion.value;
-  const jcbInput = editorConfiguration?.restoredSite ? { jcbVersion: editorConfiguration.jcbVersion ?? 'none' } : jcbSelectionInput({ selection: { ...jcbSelection, version: fields.jcbVersion.value },
+  const unchangedRestoredJcb = editorConfiguration?.restoredSite
+    && fields.jcbVersion.value === (editorConfiguration.jcbVersion ?? 'none');
+  const jcbInput = unchangedRestoredJcb ? { jcbVersion: fields.jcbVersion.value } : jcbSelectionInput({ selection: { ...jcbSelection, version: fields.jcbVersion.value },
     major: joomlaVersion.split('.')[0], deploy: currentDeployRecipe, pinned: pinnedJcb });
   const candidate = {
     ...(editorConfiguration || {}),
@@ -659,13 +670,14 @@ function formInput(overrides = {}) {
     extensions: extensionInputs.read(), startupCommands: commandInputs ? commandInputs.read() : fields.startupCommands.value,
     phpSettings, jcbVersion: fields.jcbVersion.value || 'none', ...jcbInput, multilingual: $('multilingual').checked, languageTags: $('deploy-languages').value.split(',').map(value => value.trim()).filter(Boolean),
     menus: menuInputs ? menuInputs.read() : parseEditorJSON('deploy-menus', []), template: templateInput(),
-    content: contentInputs ? contentInputs.read() : editorConfiguration?.content, ...overrides,
+    content: contentInputs ? contentInputs.read() : editorConfiguration?.content,
+    overlays: overlayInputs ? overlayInputs.read() : editorConfiguration?.overlays || [], ...overrides,
   };
   if (candidate.jcbVersion === 'none' || (editorConfiguration?.jcbVersion !== candidate.jcbVersion && !jcbInput.jcbPackage)) delete candidate.jcbPackage;
   if (candidate.content == null) delete candidate.content;
   const full = normalizeConfiguration(candidate, { catalog, baseURL: deploymentURL });
   if (full.restoredSite) return full;
-  const setupFields = ['siteName', 'initialPath', 'admin', 'extensions', 'startupCommands', 'menus', 'template', 'languageTags', 'multilingual', 'content', 'language', 'autoLogin', 'phpSettings'];
+  const setupFields = ['siteName', 'initialPath', 'admin', 'extensions', 'startupCommands', 'menus', 'template', 'languageTags', 'multilingual', 'content', 'overlays', 'language', 'autoLogin', 'phpSettings'];
   const sameSetup = editorConfiguration && setupFields.every(name => JSON.stringify(full[name] ?? null) === JSON.stringify(editorConfiguration[name] ?? null));
   if (sameSetup && !editorSourceInput?.deploymentRecipe && !fields.deployId.value.startsWith('custom-')) {
     // Keep unchanged core recipes eligible for their prepared image. The editor
@@ -678,8 +690,9 @@ function formInput(overrides = {}) {
   }
   const previousAddons = new Set((editorConfiguration?.addonExtensions || []).map(item => item.url));
   const managed = new Map((editorConfiguration?.extensions || []).filter(item => !previousAddons.has(item.url)).map(item => [item.url, item]));
-  full.extensions = full.extensions.map(item => managed.has(item.url) ? structuredClone(managed.get(item.url)) : { url: item.url });
-  full.addonExtensions = full.extensions.filter(item => !managed.has(item.url)).map(item => ({ url: item.url }));
+  full.extensions = full.extensions.map(item => managed.has(item.url) && !item.authentication && !item.headers && !item.provider
+    ? structuredClone(managed.get(item.url)) : structuredClone(item));
+  full.addonExtensions = full.extensions.filter(item => !managed.has(item.url) || item.authentication || item.headers || item.provider).map(item => structuredClone(item));
   full.addonStartupCommands = full.startupCommands;
   full.addonLanguages = full.languages || [];
   full.addonTemplate = full.template?.url && full.template.url !== editorConfiguration?.template?.url
@@ -690,6 +703,7 @@ function formInput(overrides = {}) {
 }
 async function resolve(input) {
   if (input.restoredSite) {
+    if (input.jcbVersion !== editorConfiguration?.jcbVersion) await prepareDynamicInput(input);
     catalog = catalogForRestoredSite(catalog, input);
     selectedJoomlaPackages.set(input.joomlaVersion, { ...catalog.joomla.find(entry => entry.version === input.joomlaVersion) });
     fillJoomlaOptions();
@@ -850,7 +864,7 @@ function renderJcbOptions(major, selection = jcbSelection) {
   const choices = matchingJcbChoices(major, dynamicMetadata.jcb, pinnedJcb);
   if (selection.version !== 'none' && !choices.some(entry => entry.version === selection.version)) {
     const pinned = [...pinnedJcb.values()].find(entry => entry.version === selection.version);
-    if (selection.package || pinned || editorConfiguration?.restoredSite) choices.push({ version: selection.version, label: `JCB ${selection.version}`, channel: 'saved' });
+    if (selection.package || pinned || editorConfiguration?.restoredSite || runtime?.configuration?.jcbVersion === selection.version) choices.push({ version: selection.version, label: `JCB ${selection.version}`, channel: 'saved' });
   }
   fillOptions(fields.jcbVersion, [{ version: 'none', label: t('label.jcbNone'), disabled: deploymentRequiresJcb(currentDeployRecipe) }, ...choices]);
   if (![...fields.jcbVersion.options].some(option => option.value === selection.version)) {
@@ -904,6 +918,8 @@ function applyConfiguration(config, input = config, deploy) {
   $('template-params').value = JSON.stringify((input.template || config.template)?.params || {}, null, 2);
   parameterInputs?.setValue((input.template || config.template)?.params || {});
   contentInputs?.setValue(config.content || null);
+  overlayInputs?.setValue(input.overlays || config.overlays || []);
+  updateDeploymentFormContext();
   $('multilingual').checked = config.multilingual === true || config.content?.multilingual === true;
   renderEditorLists();
   fields.startupCommands.value = JSON.stringify(config.startupCommands || [], null, 2);
@@ -973,7 +989,7 @@ function findProfile(deployId, joomlaVersion) {
   return drafts.get(`${deployId}:${joomlaVersion}`)
     || Object.values(savedState.sites).reverse().find((item) => item.deployId === deployId && item.joomlaVersion === joomlaVersion);
 }
-async function launch({ siteExport, checkpoint, importedConfiguration, deploymentChanges, rotateAdministrator = false } = {}) {
+async function launch({ siteExport, checkpoint, importedConfiguration, deploymentChanges, jcbUpgrade, rotateAdministrator = false } = {}) {
   if (busy || launching || !initialized || !catalog || !deployCatalog) return;
   launching = true;
   let switchingStarted = false;
@@ -1013,13 +1029,15 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
       input.storageKey = `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-fresh-${crypto.randomUUID().slice(0, 8)}`;
       fields.storageKey.value = input.storageKey;
     }
-    const recipe = input.restoredSite ? { configuration: input, changed: false } : await isolateSetup(savedState, input);
+    const recipe = checkpoint || input.restoredSite ? { configuration: input, changed: false } : await isolateSetup(savedState, input);
     input = recipe.configuration;
     if (recipe.changed) {
       fields.storageKey.value = input.storageKey;
       activity(`Changed setup steps use a separate site key, “${input.storageKey}”. Your previous site is preserved.`);
     }
-    const resolved = await resolve(input);
+    const resolved = checkpoint
+      ? { configuration: normalizeConfiguration(input, { catalog: catalogForRestoredSite(catalog, input), baseURL: deploymentURL }), deploy: deploymentDescriptor(input.deployId) }
+      : await resolve(input);
     if (runtime && currentConfig.storageKey === resolved.configuration.storageKey && currentConfig.persistence === resolved.configuration.persistence && JSON.stringify(publicConfiguration(currentInput)) === JSON.stringify(publicConfiguration(input))) {
       setDrawer(false); $('site-frame')?.focus(); feedback(t('status.alreadyRunning')); return;
     }
@@ -1039,13 +1057,19 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     $('preview-label').textContent = currentConfig.siteName;
     activity(`Starting ${resolved.deploy?.title || currentConfig.deployId} with Joomla ${currentConfig.joomlaVersion} and PHP ${currentConfig.phpVersion}.`);
     const resumePath = resumeLastRoute && !input.fresh && currentConfig.persistence && savedState.sites[currentConfig.storageKey]?.lastPath;
-    runtime = await createPlayground({ ...currentConfig, ...(resumePath ? { initialPath: safeSavedRoute(resumePath, currentConfig.initialPath) } : {}) }, { onProgress: progress, siteExport, checkpoint, rotateAdministrator, deferInitialSave: true });
+    runtime = await createPlayground({ ...currentConfig, ...(resumePath ? { initialPath: safeSavedRoute(resumePath, currentConfig.initialPath) } : {}) }, { onProgress: progress, siteExport, checkpoint, jcbUpgrade, rotateAdministrator, deferInitialSave: true });
+    currentConfig = runtime.configuration;
+    currentInput = { ...currentInput, jcbVersion: currentConfig.jcbVersion, jcbPackage: currentConfig.jcbPackage };
+    jcbSelection = { version: currentConfig.jcbVersion || 'none', omit: false,
+      ...(currentConfig.jcbPackage ? { package: currentConfig.jcbPackage } : {}) };
+    renderJcbOptions(currentConfig.joomlaVersion.split('.')[0], jcbSelection);
     if (deploymentChanges) {
+      deploymentChanges = { ...deploymentChanges, jcbVersion: currentConfig.jcbVersion, jcbPackage: currentConfig.jcbPackage };
       await runtime.applyConfiguration(deploymentChanges);
       currentConfig = runtime.configuration;
       currentInput = { ...deploymentChanges, admin: runtime.installation?.administrator || deploymentChanges.admin };
-      applyConfiguration(currentConfig, currentInput, resolved.deploy);
     }
+    applyConfiguration(currentConfig, currentInput, resolved.deploy);
     runningSiteId = currentConfig.storageKey;
     selectedSiteId = currentConfig.persistence ? currentConfig.storageKey : null;
     const restoredPath = resumePath
@@ -1435,26 +1459,43 @@ function templateInput() {
   return template;
 }
 function renderEditorLists() {
-  if (menuInputs) {
-    try { menuInputs.setValue(parseEditorJSON('deploy-menus', [])); } catch { /* Keep unfinished JSON in its editor. */ }
-    $('menu-list').hidden = true;
-    return;
+  for (const editor of [menuInputs, contentInputs, parameterInputs, overlayInputs, commandInputs]) editor?.refresh();
+}
+function updateDeploymentFormContext() {
+  const context = { ...discoveredConfiguration, language: fields.language.value || 'en-GB' };
+  for (const editor of [menuInputs, contentInputs, parameterInputs, overlayInputs]) editor?.setContext(context);
+  const template = discoveredConfiguration?.templates?.find(item => item.template === $('template-name').value);
+  if (parameterInputs) parameterInputs.setSchema(template?.schema?.properties?.params || template?.schema || deploymentFormSchemas.parameters);
+}
+function updateCaptureAction() {
+  const available = runtime && !runtime.recovery && !busy && !launching
+    && administratorCaptureTargets($('site-frame'), runtime.baseUrl).length > 0;
+  for (const id of ['capture-deployment-data', 'capture-deployment-data-editor']) {
+    const button = $(id);
+    if (button) { button.disabled = !available; button.title = t(available ? 'deployment.captureSaved' : 'deployment.captureUnavailable'); }
   }
-  for (const [field, target, label] of [
-    ['deploy-menus', 'menu-list', item => `${item.title} · ${item.component || ''}${item.view ? ` / ${item.view}` : ''}${item.home ? ' ★' : ''}`],
-  ]) {
-    let items;
-    try { items = parseEditorJSON(field, []); } catch { continue; }
-    if (!Array.isArray(items)) continue;
-    $(target).replaceChildren(...items.map((item, index) => {
-      const row = document.createElement('div'); row.className = 'package-row';
-      const text = document.createElement('span'); text.textContent = label(item);
-      const button = document.createElement('button'); button.type = 'button'; button.textContent = '×';
-      button.setAttribute('aria-label', `${t('action.remove')}: ${label(item)}`);
-      button.addEventListener('click', () => { items.splice(index, 1); $(field).value = JSON.stringify(items, null, 2); renderEditorLists(); });
-      row.append(text, button); return row;
-    }));
+}
+async function captureDeploymentData() {
+  const targets = administratorCaptureTargets($('site-frame'), runtime?.baseUrl);
+  if (!runtime?.captureConfiguration || runtime.recovery || busy || launching || !targets.length) {
+    feedback(t('deployment.captureUnavailable'), { error: true }); return;
   }
+  setBusy(true);
+  try {
+    for (const target of targets) {
+      const captured = await runtime.captureConfiguration(target);
+      for (const related of captured.related || []) overlayInputs.append(related, { schema: related.schema });
+      overlayInputs.append(captured.overlay, { schema: captured.schema });
+      for (const warning of captured.warnings || []) activity(typeof warning === 'string' ? warning : warning.message);
+    }
+    markDeploymentEdited();
+    activity(t('deployment.captureSuccess'));
+    openEditor();
+    $('deployment-overlays-section').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    $('deployment-capture-feedback').textContent = t('deployment.reviewCopied');
+  } catch (error) {
+    feedback(t('deployment.captureFailed', { message: messageOf(error) }), { error: true });
+  } finally { setBusy(false); }
 }
 function openEditor() {
   $('deploy-error').hidden = true;
@@ -1462,13 +1503,14 @@ function openEditor() {
   $('editor-runtime-summary').textContent = `${deploymentDescriptor(fields.deployId.value)?.title || fields.siteName.value} · Joomla ${fields.joomlaVersion.value} · PHP ${fields.phpVersion.value}`;
   updateMcpPreview();
   renderEditorLists(); openDialog('deploy-dialog');
+  updateCaptureAction();
   if (runtime?.discoverConfiguration && !runtime.recovery && !busy) void runtime.discoverConfiguration().then(discovered => {
-    $('component-options').replaceChildren(...[...new Set(discovered.menuTypes.map(item => item.component))].map(value => { const option = document.createElement('option'); option.value = value; return option; }));
-    $('template-options').replaceChildren(...[...new Set(discovered.templates.map(item => item.template))].map(value => { const option = document.createElement('option'); option.value = value; return option; }));
-    const empty = document.createElement('option'); empty.value = ''; empty.textContent = '—';
-    $('menu-preset').replaceChildren(empty, ...discovered.menuTypes.map(item => { const option = document.createElement('option'); option.value = JSON.stringify({component:item.component,view:item.view,layout:item.layout}); option.textContent = `${item.title || item.view} · ${item.component}${item.layout && item.layout !== 'default' ? ` / ${item.layout}` : ''}`; return option; }));
+    discoveredConfiguration = discovered;
+    $('template-options').replaceChildren(...[...new Set((discovered.templates || []).map(item => item.template))].map(value => { const option = document.createElement('option'); option.value = value; return option; }));
+    updateDeploymentFormContext();
   }).catch(error => activity(error));
 }
+
 async function saveDeployment({ copy = false } = {}) {
   if (busy || launching || !catalog) return;
   $('deploy-error').hidden = true;
@@ -1595,13 +1637,20 @@ async function useDeployment() {
   try {
     let input = formInput();
     const storageKey = `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`;
-    if (input.restoredSite) {
+    const sourceSite = savedState.sites[input.storageKey] || (runtime?.configuration?.storageKey === input.storageKey ? runtime.configuration : null);
+    if (input.restoredSite || sourceSite) {
+      if (input.jcbVersion && input.jcbVersion !== 'none' && !input.jcbPackage) {
+        await prepareDynamicInput(input);
+        const pin = [...pinnedJcb.values()].find(item => item.version === input.jcbVersion);
+        if (!input.jcbPackage && pin) input.jcbPackage = structuredClone(pin.package);
+      }
+      input = (await resolve(input)).configuration;
       setBusy(true);
       let copy;
       try {
         if (codeHost && !codeHost.closed && !await codeHost.beforeClose()) return;
         if (databaseHost && !databaseHost.closed && !await databaseHost.beforeClose()) return;
-        const sourceConfiguration = { ...(savedState.sites[input.storageKey] || editorConfiguration),
+        const sourceConfiguration = { ...(sourceSite || editorConfiguration),
           storageKey: input.storageKey, admin: input.admin };
         copy = await prepareUploadedSiteCopy({ input, sourceConfiguration, runtime, storageKey, administratorEdited,
           open: async source => createPlayground((await resolve(source)).configuration, { onProgress: progress }) });
@@ -1609,7 +1658,7 @@ async function useDeployment() {
       freshKeyPending = false; selectedSiteId = null; resumeLastRoute = false;
       $('deploy-dialog').close();
       await launch({ checkpoint: copy.checkpoint, importedConfiguration: copy.configuration, deploymentChanges: copy.changes,
-        rotateAdministrator: copy.rotateAdministrator });
+        rotateAdministrator: copy.rotateAdministrator, jcbUpgrade: copy.jcbUpgrade });
       return;
     }
     // Using a recipe creates an independent installation, including when a
@@ -1699,12 +1748,22 @@ function setupInterface() {
   });
   const structured = (kind, textarea, container, advanced, error, validate) => createStructuredInputs({
     kind, textarea: $(textarea), container: $(container), advanced: $(advanced), errorElement: $(error),
-    validate, onChange: markDeploymentEdited,
+    validate, schema: deploymentFormSchemas[kind], onChange: markDeploymentEdited,
+    onSchemaRequest: target => runtime?.discoverConfiguration && !runtime.recovery
+      ? runtime.discoverConfiguration({ ...target, language: fields.language.value }) : null,
   });
   commandInputs = structured('commands', 'startup-commands', 'command-inputs', 'commands-advanced', 'command-error', parseStartupCommands);
   parameterInputs = structured('parameters', 'template-params', 'template-parameter-inputs', 'template-advanced', 'template-parameter-error');
   menuInputs = structured('menus', 'deploy-menus', 'menu-inputs', 'menus-advanced', 'menu-input-error');
   contentInputs = structured('content', 'deploy-content', 'content-inputs', 'content-advanced', 'content-input-error');
+  overlayInputs = structured('overlays', 'deploy-overlays', 'overlay-inputs', 'overlays-advanced', 'overlay-input-error', normalizeDeploymentOverlays);
+  for (const id of ['capture-deployment-data', 'capture-deployment-data-editor']) $(id).addEventListener('click', () => void captureDeploymentData());
+  $('template-name').addEventListener('change', updateDeploymentFormContext);
+  fields.language.addEventListener('change', updateDeploymentFormContext);
+  for (const button of document.querySelectorAll('[data-deployment-section]')) button.addEventListener('click', () => {
+    $('advanced-settings').open = true;
+    $(button.dataset.deploymentSection)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  });
   $('installation-fields').addEventListener('input', markDeploymentEdited);
   $('installation-fields').addEventListener('change', markDeploymentEdited);
   $('editor-deployment').addEventListener('change', async event => {
@@ -1745,6 +1804,7 @@ function setupInterface() {
     renderSavedSites(); renderEditorLists();
     languageSelector?.refresh(); deploymentLanguageSelector?.refresh();
     extensionInputs?.refresh();
+    updateCaptureAction();
     if (catalog && fields.joomlaVersion.value) renderDynamicChoices();
   });
   $('settings-toggle').addEventListener('click', () => setDrawer($('settings').hidden));
@@ -1780,20 +1840,6 @@ function setupInterface() {
   $('share-immediate').addEventListener('change', () => showShare(sharedConfiguration));
   $('share-export-config').addEventListener('click', () => void downloadConfiguration(sharedConfiguration).catch(error => { $('share-feedback').textContent = messageOf(error); }));
   $('native-share').addEventListener('click', async () => { try { await navigator.share({ title: sharedConfiguration?.siteName || 'JoomEngine Rocket', url: $('share-url').value }); } catch (error) { if (error.name !== 'AbortError') $('share-feedback').textContent = messageOf(error); } });
-  $('menu-preset').addEventListener('change', event => { if (event.target.value) { const item = JSON.parse(event.target.value); $('menu-component').value = item.component; $('menu-view').value = item.view; } });
-  $('add-menu').addEventListener('click', () => { try {
-    const title = $('menu-title').value.trim(), component = $('menu-component').value.trim(), view = $('menu-view').value.trim();
-    if (!title || !component || !view) throw new TypeError(t('error.configuration'));
-    const menus = parseEditorJSON('deploy-menus', []);
-    const home = $('menu-home').checked;
-    if (home) for (const item of menus) if ((item.language || '*') === '*') item.home = false;
-    const preset = $('menu-preset').value ? JSON.parse($('menu-preset').value) : undefined;
-    const query = preset?.component === component && preset.view === view && preset.layout ? { layout: preset.layout } : {};
-    menus.push({ key: `menu-${crypto.randomUUID().slice(0, 8)}`, title, component, view, query, home, menuType: 'mainmenu', language: '*', published: true });
-    $('deploy-menus').value = JSON.stringify(menus, null, 2); formInput();
-    $('menu-title').value = ''; $('menu-component').value = ''; $('menu-view').value = ''; $('menu-preset').value = ''; $('menu-home').checked = false; renderEditorLists();
-  } catch (error) { editorError(error); } });
-  $('deploy-menus').addEventListener('change', renderEditorLists);
   $('use-deploy').addEventListener('click', () => void useDeployment());
   $('apply-deploy').addEventListener('click', () => void applyDeployment());
   $('export-config').addEventListener('click', () => void downloadConfiguration().catch(editorError));
@@ -1929,6 +1975,11 @@ async function initialize() {
   }
 }
 
-setupInterface();
-setBusy(false);
-void initialize();
+async function startInterface() {
+  try { deploymentFormSchemas = await loadDeploymentFormSchemas({ fetcher: networkFetch }); }
+  catch { /* Advanced JSON remains available if schema assets cannot be read. */ }
+  setupInterface();
+  setBusy(false);
+  await initialize();
+}
+void startInterface();
