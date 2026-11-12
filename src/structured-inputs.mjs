@@ -184,8 +184,8 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
   function reference(current, replace, caption, field, path) {
     const wrapper = document.createElement('div'); wrapper.className = 'deployment-reference';
     const choices = linkedChoices(field, path);
-    wrapper.append(scalar(current.$ref, { type: 'string', oneOf: choices }, next => { if (next) replace({ ...current, $ref: next }); }, [], `${caption} · ${t('deploymentForm.reference')}`));
-    wrapper.append(scalar(current.field || 'id', { type: 'string', enum: ['id', 'guid'] }, next => { if (next) replace({ ...current, field: next }); }, [], t('deploymentForm.referenceField')));
+    wrapper.append(scalar(current.$ref, { type: 'string', oneOf: choices }, next => { if (next) replace({ ...current, $ref: next }); }, [...path, '$ref'], `${caption} · ${t('deploymentForm.reference')}`));
+    wrapper.append(scalar(current.field || 'id', { type: 'string', enum: ['id', 'guid'] }, next => { if (next) replace({ ...current, field: next }); }, [...path, 'field'], t('deploymentForm.referenceField')));
     return wrapper;
   }
   function objectFields(current, descriptor, replace, path = []) {
@@ -218,7 +218,7 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
         replace(object);
       };
       let rendered;
-      if (record(object[name]) && typeof object[name].$ref === 'string') rendered = reference(object[name], update, caption, field, path);
+      if (record(object[name]) && typeof object[name].$ref === 'string') rendered = reference(object[name], update, caption, field, [...path, name]);
       // Joomla subforms may retain named rows (for example options0/options1).
       // Render their values as rows, but keep the saved shape until a row is edited.
       else if (field.type === 'array') rendered = list(record(object[name]) ? Object.values(object[name]) : object[name] ?? [], field, update, [...path, name], caption);
@@ -344,7 +344,7 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
       const result = await onSchemaRequest(structuredValue(entry));
       if (!result || targetKey(entry) !== key || !value.includes(entry)) return;
       const next = result.schema || result.configurationTargets?.find(target => targetKey(target) === key)?.schema || (result.properties ? result : null);
-      if (next) { recordSchemas.set(key, structuredValue(next)); entry.schema = structuredValue(next); if (!jsonError && !fieldErrors.size) { changed(); render(); } }
+      if (next) { recordSchemas.set(key, structuredValue(next)); entry.schema = structuredValue(next); if (!jsonError && !fieldErrors.size) { changed(); render({ preserveFocus: true }); } }
     } catch { showError(new Error(t('deploymentForm.schemaUnavailable'))); }
     finally { pendingSchemas.delete(key); }
   }
@@ -486,7 +486,9 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
     if (kind === 'parameters' && !record(next)) throw new TypeError(t('deploymentForm.invalidValue'));
     return next;
   }
-  function render() {
+  function render({ preserveFocus = false } = {}) {
+    const active = preserveFocus && container.contains(document.activeElement) ? document.activeElement : null;
+    const focus = active?.dataset.fieldPath ? { path: active.dataset.fieldPath, start: active.selectionStart, end: active.selectionEnd, direction: active.selectionDirection } : null;
     fieldErrors = new Map(); container.classList.add('structured-editor', 'deployment-schema-editor');
     let body;
     if (kind === 'commands') body = commands();
@@ -495,6 +497,17 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
     else if (kind === 'content' && !formSchema) body = notice(discovery.schemaUnavailable ? 'deployment.schemaFailure' : 'deploymentForm.schemaLoading');
     else body = objectFields(kind === 'content' ? { categories: [], articles: [], ...value } : value, formSchema || { type: 'object' }, next => { value = next; });
     container.replaceChildren(body); lock(jsonError);
+    if (focus) {
+      const control = [...container.querySelectorAll('input,select,textarea')].find(input => input.dataset.fieldPath === focus.path && !input.disabled);
+      if (control) {
+        for (let parent = control.parentElement; parent && parent !== container; parent = parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true;
+        control.focus({ preventScroll: true });
+        if (Number.isInteger(focus.start) && Number.isInteger(focus.end)) {
+          try { control.setSelectionRange(focus.start, focus.end, focus.direction); }
+          catch { /* The native schema may have changed the field to a non-text input. */ }
+        }
+      }
+    }
   }
   function setValue(next) {
     const parsed = checkShape(structuredValue(typeof next === 'string' ? JSON.parse(next) : next));
@@ -520,10 +533,10 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
   setValue(textarea.value.trim() ? JSON.parse(textarea.value) : fallback);
   return {
     setValue, read,
-    refresh() { if (!fieldErrors.size) render(); },
-    setSchema(next) { formSchema = next; if (!jsonError && !fieldErrors.size) render(); },
-    setContext(next) { discovery = { ...discovery, ...next }; if (!jsonError && !fieldErrors.size) render(); },
-    setRecordSchema(target, next) { recordSchemas.set(targetKey(target), next); if (!jsonError && !fieldErrors.size) render(); },
+    refresh() { if (!fieldErrors.size) render({ preserveFocus: true }); },
+    setSchema(next) { formSchema = next; if (!jsonError && !fieldErrors.size) render({ preserveFocus: true }); },
+    setContext(next) { discovery = { ...discovery, ...next }; if (!jsonError && !fieldErrors.size) render({ preserveFocus: true }); },
+    setRecordSchema(target, next) { recordSchemas.set(targetKey(target), next); if (!jsonError && !fieldErrors.size) render({ preserveFocus: true }); },
     append(entry, { schema } = {}) {
       if (!Array.isArray(value) || jsonError) throw jsonError || new TypeError(t('deploymentForm.invalidValue'));
       const next = structuredValue(entry);
