@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "Используйте только поля, необходимые для выбранного способа аутентификации.",
   "error.packageAuthRequired": "Заполните поля для выбранного способа аутентификации.",
   "error.packageAuthSingleLine": "Значения аутентификации должны быть однострочным текстом.",
-  "error.packageBasicUsername": "Имя пользователя для аутентификации Basic не может содержать двоеточие."
+  "error.packageBasicUsername": "Имя пользователя для аутентификации Basic не может содержать двоеточие.",
+  "deploymentForm.field.pageType": "Тип страницы",
+  "deploymentForm.menu.singleArticle": "Отдельная статья",
+  "deploymentForm.menu.featuredArticles": "Избранные статьи",
+  "deploymentForm.menu.categoryList": "Список категории",
+  "deploymentForm.field.articleNumber": "Номер статьи",
+  "deploymentForm.field.categoryNumber": "Номер категории",
+  "deploymentForm.help.pageType": "Выберите тип страницы, которую открывает этот пункт меню. Запустите сайт, чтобы найти типы страниц установленных расширений.",
+  "deploymentForm.help.contentNumber": "Введите номер этой статьи или категории, отображаемый в Joomla."
 });

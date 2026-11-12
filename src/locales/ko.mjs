@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "선택한 인증 방식에 필요한 필드만 사용하세요.",
   "error.packageAuthRequired": "선택한 인증 방식의 필드를 입력하세요.",
   "error.packageAuthSingleLine": "인증 값은 한 줄의 텍스트여야 합니다.",
-  "error.packageBasicUsername": "Basic 인증 사용자 이름에는 콜론을 포함할 수 없습니다."
+  "error.packageBasicUsername": "Basic 인증 사용자 이름에는 콜론을 포함할 수 없습니다.",
+  "deploymentForm.field.pageType": "페이지 유형",
+  "deploymentForm.menu.singleArticle": "단일 문서",
+  "deploymentForm.menu.featuredArticles": "주요 문서",
+  "deploymentForm.menu.categoryList": "카테고리 목록",
+  "deploymentForm.field.articleNumber": "문서 번호",
+  "deploymentForm.field.categoryNumber": "카테고리 번호",
+  "deploymentForm.help.pageType": "이 메뉴 항목이 여는 페이지 유형을 선택하세요. 사이트를 시작하면 설치된 확장 기능이 제공하는 페이지 유형을 찾을 수 있습니다.",
+  "deploymentForm.help.contentNumber": "Joomla에서 이 문서 또는 카테고리에 표시된 번호를 입력하세요."
 });

@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "Use only the fields required by the selected authentication method.",
   "error.packageAuthRequired": "Complete the fields for the selected authentication method.",
   "error.packageAuthSingleLine": "Authentication values must be single-line text.",
-  "error.packageBasicUsername": "A Basic authentication username cannot contain a colon."
+  "error.packageBasicUsername": "A Basic authentication username cannot contain a colon.",
+  "deploymentForm.field.pageType": "Page type",
+  "deploymentForm.menu.singleArticle": "Single article",
+  "deploymentForm.menu.featuredArticles": "Featured articles",
+  "deploymentForm.menu.categoryList": "Category list",
+  "deploymentForm.field.articleNumber": "Article number",
+  "deploymentForm.field.categoryNumber": "Category number",
+  "deploymentForm.help.pageType": "Choose the kind of page this menu item opens. Start the site to discover page types provided by installed extensions.",
+  "deploymentForm.help.contentNumber": "Enter the number shown for this article or category in Joomla."
 });

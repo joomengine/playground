@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "יש להשתמש רק בשדות הנדרשים לשיטת האימות שנבחרה.",
   "error.packageAuthRequired": "יש למלא את השדות של שיטת האימות שנבחרה.",
   "error.packageAuthSingleLine": "ערכי האימות חייבים להיות טקסט בשורה אחת.",
-  "error.packageBasicUsername": "שם משתמש לאימות Basic אינו יכול להכיל נקודתיים."
+  "error.packageBasicUsername": "שם משתמש לאימות Basic אינו יכול להכיל נקודתיים.",
+  "deploymentForm.field.pageType": "סוג עמוד",
+  "deploymentForm.menu.singleArticle": "מאמר יחיד",
+  "deploymentForm.menu.featuredArticles": "מאמרים נבחרים",
+  "deploymentForm.menu.categoryList": "רשימת קטגוריה",
+  "deploymentForm.field.articleNumber": "מספר המאמר",
+  "deploymentForm.field.categoryNumber": "מספר הקטגוריה",
+  "deploymentForm.help.pageType": "יש לבחור את סוג העמוד שפריט התפריט הזה פותח. יש להפעיל את האתר כדי לגלות סוגי עמודים שמספקות ההרחבות המותקנות.",
+  "deploymentForm.help.contentNumber": "יש להזין את המספר שמוצג עבור המאמר או הקטגוריה ב-Joomla."
 });

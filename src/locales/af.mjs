@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "Gebruik slegs die velde wat die gekose stawingsmetode vereis.",
   "error.packageAuthRequired": "Voltooi die velde vir die gekose stawingsmetode.",
   "error.packageAuthSingleLine": "Stawingswaardes moet teks op ’n enkele reël wees.",
-  "error.packageBasicUsername": "’n Gebruikersnaam vir Basic-stawing mag nie ’n dubbelpunt bevat nie."
+  "error.packageBasicUsername": "’n Gebruikersnaam vir Basic-stawing mag nie ’n dubbelpunt bevat nie.",
+  "deploymentForm.field.pageType": "Bladsytipe",
+  "deploymentForm.menu.singleArticle": "Enkele artikel",
+  "deploymentForm.menu.featuredArticles": "Kolligartikels",
+  "deploymentForm.menu.categoryList": "Kategorielys",
+  "deploymentForm.field.articleNumber": "Artikelnommer",
+  "deploymentForm.field.categoryNumber": "Kategorienommer",
+  "deploymentForm.help.pageType": "Kies die soort bladsy wat hierdie kieslysitem oopmaak. Begin die webwerf om die bladsytipes van geïnstalleerde uitbreidings te ontdek.",
+  "deploymentForm.help.contentNumber": "Voer die nommer in wat Joomla vir hierdie artikel of kategorie wys."
 });

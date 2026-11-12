@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "Gebruik alleen de velden die de gekozen authenticatiemethode vereist.",
   "error.packageAuthRequired": "Vul de velden voor de gekozen authenticatiemethode in.",
   "error.packageAuthSingleLine": "Authenticatiewaarden moeten tekst op één regel zijn.",
-  "error.packageBasicUsername": "Een gebruikersnaam voor Basic-authenticatie mag geen dubbele punt bevatten."
+  "error.packageBasicUsername": "Een gebruikersnaam voor Basic-authenticatie mag geen dubbele punt bevatten.",
+  "deploymentForm.field.pageType": "Paginatype",
+  "deploymentForm.menu.singleArticle": "Enkel artikel",
+  "deploymentForm.menu.featuredArticles": "Speciale artikelen",
+  "deploymentForm.menu.categoryList": "Categorielijst",
+  "deploymentForm.field.articleNumber": "Artikelnummer",
+  "deploymentForm.field.categoryNumber": "Categorienummer",
+  "deploymentForm.help.pageType": "Kies het type pagina dat dit menu-item opent. Start de website om paginatypen van geïnstalleerde extensies te vinden.",
+  "deploymentForm.help.contentNumber": "Voer het nummer in dat Joomla voor dit artikel of deze categorie toont."
 });

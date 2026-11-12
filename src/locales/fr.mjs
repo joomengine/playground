@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "Utilisez uniquement les champs requis par la méthode d’authentification sélectionnée.",
   "error.packageAuthRequired": "Remplissez les champs de la méthode d’authentification sélectionnée.",
   "error.packageAuthSingleLine": "Les valeurs d’authentification doivent être du texte sur une seule ligne.",
-  "error.packageBasicUsername": "Un nom d’utilisateur pour l’authentification Basic ne peut pas contenir de deux-points."
+  "error.packageBasicUsername": "Un nom d’utilisateur pour l’authentification Basic ne peut pas contenir de deux-points.",
+  "deploymentForm.field.pageType": "Type de page",
+  "deploymentForm.menu.singleArticle": "Article unique",
+  "deploymentForm.menu.featuredArticles": "Articles en vedette",
+  "deploymentForm.menu.categoryList": "Liste de catégorie",
+  "deploymentForm.field.articleNumber": "Numéro de l’article",
+  "deploymentForm.field.categoryNumber": "Numéro de la catégorie",
+  "deploymentForm.help.pageType": "Choisissez le type de page ouvert par cet élément de menu. Démarrez le site pour découvrir les types de pages proposés par les extensions installées.",
+  "deploymentForm.help.contentNumber": "Saisissez le numéro affiché pour cet article ou cette catégorie dans Joomla."
 });

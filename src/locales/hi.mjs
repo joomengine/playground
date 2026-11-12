@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "केवल चुनी गई प्रमाणीकरण विधि के लिए आवश्यक फ़ील्ड उपयोग करें।",
   "error.packageAuthRequired": "चुनी गई प्रमाणीकरण विधि के फ़ील्ड भरें।",
   "error.packageAuthSingleLine": "प्रमाणीकरण मान एक पंक्ति के टेक्स्ट होने चाहिए।",
-  "error.packageBasicUsername": "Basic प्रमाणीकरण के उपयोगकर्ता नाम में कोलन नहीं हो सकता।"
+  "error.packageBasicUsername": "Basic प्रमाणीकरण के उपयोगकर्ता नाम में कोलन नहीं हो सकता।",
+  "deploymentForm.field.pageType": "पृष्ठ का प्रकार",
+  "deploymentForm.menu.singleArticle": "एक लेख",
+  "deploymentForm.menu.featuredArticles": "विशेष लेख",
+  "deploymentForm.menu.categoryList": "श्रेणी की सूची",
+  "deploymentForm.field.articleNumber": "लेख संख्या",
+  "deploymentForm.field.categoryNumber": "श्रेणी संख्या",
+  "deploymentForm.help.pageType": "चुनें कि यह मेनू आइटम किस प्रकार का पृष्ठ खोलेगा। स्थापित एक्सटेंशन के पृष्ठ प्रकार खोजने के लिए साइट शुरू करें।",
+  "deploymentForm.help.contentNumber": "Joomla में इस लेख या श्रेणी के लिए दिखाई गई संख्या दर्ज करें।"
 });

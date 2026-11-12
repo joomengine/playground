@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "Gunakan hanya kolom yang diperlukan oleh metode autentikasi yang dipilih.",
   "error.packageAuthRequired": "Lengkapi kolom untuk metode autentikasi yang dipilih.",
   "error.packageAuthSingleLine": "Nilai autentikasi harus berupa teks satu baris.",
-  "error.packageBasicUsername": "Nama pengguna autentikasi Basic tidak boleh berisi titik dua."
+  "error.packageBasicUsername": "Nama pengguna autentikasi Basic tidak boleh berisi titik dua.",
+  "deploymentForm.field.pageType": "Jenis halaman",
+  "deploymentForm.menu.singleArticle": "Artikel tunggal",
+  "deploymentForm.menu.featuredArticles": "Artikel unggulan",
+  "deploymentForm.menu.categoryList": "Daftar kategori",
+  "deploymentForm.field.articleNumber": "Nomor artikel",
+  "deploymentForm.field.categoryNumber": "Nomor kategori",
+  "deploymentForm.help.pageType": "Pilih jenis halaman yang dibuka oleh item menu ini. Jalankan situs untuk menemukan jenis halaman yang disediakan oleh ekstensi terpasang.",
+  "deploymentForm.help.contentNumber": "Masukkan nomor yang ditampilkan untuk artikel atau kategori ini di Joomla."
 });
