@@ -200,13 +200,13 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
     }
     let preserved = false;
     for (const [name, field] of Object.entries(properties)) {
-      if (RESERVED.has(name) || field.ui?.hidden || name === 'key' || name === 'schema') continue;
+      if (RESERVED.has(name) || field.ui?.hidden) continue;
       if (field.ui?.showWhen && !Object.entries(field.ui.showWhen).every(([key, expected]) => (object[key] ?? properties[key]?.default) === expected)) continue;
       const caption = label(field, name);
       const update = next => {
         const old = object[name];
         if (next === undefined) delete object[name]; else object[name] = next;
-        if (name === 'title' && own(properties, 'alias') && (!object.alias || object.alias === slug(old))) {
+        if (name === 'title' && own(descriptor.properties, 'alias') && (!object.alias || object.alias === slug(old))) {
           object.alias = slug(next) || object.key || '';
           const aliasPath = JSON.stringify([...path, 'alias']);
           const alias = [...wrapper.querySelectorAll('input')].find(control => control.dataset.fieldPath === aliasPath);
@@ -236,7 +236,7 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
       }
       (field.ui?.advanced ? extra : wrapper).append(rendered);
     }
-    for (const name of Object.keys(object)) if (!own(properties, name) && name !== 'key' && name !== 'schema') preserved = true;
+    for (const name of Object.keys(object)) if (!own(properties, name)) preserved = true;
     if (extra.childElementCount > 1) wrapper.append(extra);
     if (preserved) wrapper.append(notice('deploymentForm.savedAdvanced'));
     if (!wrapper.childElementCount) wrapper.append(notice('deploymentForm.noSchema'));
