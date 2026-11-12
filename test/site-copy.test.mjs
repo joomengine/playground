@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { prepareUploadedSiteCopy } from '../src/site-copy.mjs';
+import { deploymentConfigurationChanges } from '../src/deployment-changes.mjs';
 
 const original = () => ({ storageKey: 'uploaded-source', persistence: true, fresh: false,
   restoredSite: { joomlaVersion: '6.2.0', php: ['8.4', '8.5'] }, joomlaVersion: '6.2.0', jcbVersion: '6.1.3', phpVersion: '8.4',
@@ -52,13 +53,18 @@ test('checkpoint failure closes an internally opened source and leaves its ident
   assert.equal(configuration.storageKey, 'uploaded-source');
 });
 
-test('copying does not relabel installed Joomla or JCB as a different version', async () => {
+test('a copy preserves installed JCB when none is selected and still refuses changing Joomla', async () => {
   const configuration = original();
-  for (const changed of [{ joomlaVersion: '5.4.2' }, { jcbVersion: 'none' }]) {
-    await assert.rejects(prepareUploadedSiteCopy({ input: { ...configuration, ...changed }, sourceConfiguration: configuration,
-      storageKey: 'copy', runtime: { configuration, checkpoint: async () => ({ configuration }) } }), /installed Joomla or JCB/);
-  }
+  const runtime = { configuration, checkpoint: async () => ({ configuration: structuredClone(configuration) }) };
+  await assert.rejects(prepareUploadedSiteCopy({ input: { ...configuration, joomlaVersion: '5.4.2' }, sourceConfiguration: configuration,
+    storageKey: 'copy', runtime }), /installed Joomla version/);
+  const copy = await prepareUploadedSiteCopy({ input: { ...configuration, jcbVersion: 'none' }, sourceConfiguration: configuration,
+    storageKey: 'copy', runtime });
+  assert.equal(copy.configuration.jcbVersion, '6.1.3');
+  assert.equal(copy.changes, undefined);
+  assert.equal(configuration.jcbVersion, '6.1.3');
 });
+
 
 test('only deliberate administrator edits replace the account in the new copy', async () => {
   const configuration = original();
@@ -73,4 +79,42 @@ test('only deliberate administrator edits replace the account in the new copy', 
   assert.equal(edited.changes, undefined, 'Changing the account does not replay package setup steps.');
   assert.deepEqual(edited.checkpoint.configuration.admin, configuration.admin, 'The source snapshot stays unchanged.');
   assert.equal(configuration.admin.username, 'owner');
+});
+
+test('a JCB upgrade copy retains source data and applies overlays without reinstalling the source package or startup commands', async () => {
+  const oldPackage = { url: 'https://github.com/joomengine/pkg-component-builder/archive/refs/tags/6.1.3.zip' };
+  const newPackage = { url: 'https://github.com/joomengine/pkg-component-builder/archive/refs/tags/6.2.0.zip' };
+  const configuration = { ...original(), jcbPackage: oldPackage, extensions: [oldPackage], addonExtensions: [oldPackage],
+    startupCommands: [['jcb:power', 'shared-guid']] };
+  const before = structuredClone(configuration);
+  const overlays = [{ key: 'repository', kind: 'record', component: 'com_componentbuilder', view: 'repository',
+    guid: '10215abf-b850-48a5-8bb1-2d0ce6ea1f11', fields: { organisation: 'team' } }];
+  const snapshot = { configuration: structuredClone(configuration), archive: new Uint8Array([1, 2]), filesystem: new Uint8Array([3, 4]) };
+  const input = { ...configuration, jcbVersion: '6.2.0', jcbPackage: newPackage, overlays };
+  const copy = await prepareUploadedSiteCopy({ input, sourceConfiguration: configuration, storageKey: 'upgraded-copy',
+    runtime: { configuration, checkpoint: async () => snapshot } });
+  assert.deepEqual(configuration, before, 'The source configuration stays unchanged.');
+  assert.equal(copy.checkpoint, snapshot, 'The full source archive and filesystem are retained.');
+  assert.deepEqual(copy.jcbUpgrade, { version: '6.2.0', package: newPackage });
+  assert.deepEqual(copy.configuration.extensions, [newPackage]);
+  assert.deepEqual(copy.changes.extensions, [newPackage]);
+  assert.deepEqual(copy.changes.addonExtensions, []);
+  const delta = deploymentConfigurationChanges({ ...copy.configuration, languages: [], overlays: [] }, { ...copy.changes, languages: [] }).configuration;
+  assert.deepEqual(delta.extensions, [], 'JCB was updated before applying edited configuration.');
+  assert.deepEqual(delta.startupCommands, [], 'Previously executed startup commands must not run again.');
+  assert.deepEqual(delta.overlays, overlays);
+  assert.deepEqual(copy.configuration.deploymentRecipe.configuration.startupCommands, configuration.startupCommands);
+  assert.deepEqual(copy.changes.deploymentRecipe.configuration.extensions, [newPackage]);
+});
+
+test('an unchanged stale selection uses the checkpoint installed version without retaining its old download', async () => {
+  const stale = { ...original(), jcbPackage: { url: 'https://example.test/jcb-old.zip' } };
+  const actual = { ...original(), jcbVersion: '6.2.0' };
+  const copy = await prepareUploadedSiteCopy({ input: stale, sourceConfiguration: stale, storageKey: 'actual-copy',
+    runtime: { configuration: stale, checkpoint: async () => ({ configuration: actual }) } });
+  assert.equal(copy.configuration.jcbVersion, '6.2.0');
+  assert.equal(copy.configuration.jcbPackage, undefined);
+  assert.equal(copy.jcbUpgrade.version, '6.2.0');
+  assert.equal(copy.jcbUpgrade.package, undefined, 'A no-op comparison must not associate the previous archive with the installed version.');
+  assert.equal(stale.jcbVersion, '6.1.3');
 });
