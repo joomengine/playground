@@ -4,60 +4,64 @@ const PROVIDERS = new Set(['direct', 'github', 'gitea', 'gitlab']);
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 const RESERVED_HEADERS = new Set(['host', 'connection', 'content-length', 'transfer-encoding', 'upgrade', 'x-playground-request', 'x-playground-response']);
 
+function invalid(key, message) {
+  return Object.assign(new TypeError(message), { i18nKey: `error.${key}` });
+}
+
 function text(value, label) {
-  if (typeof value !== 'string' || !value.trim()) throw new TypeError(`${label} is required.`);
-  if (/[\r\n\0]/.test(value)) throw new TypeError(`${label} contains an invalid character.`);
+  if (typeof value !== 'string' || !value.trim()) throw invalid('packageAuthRequired', `${label} is required.`);
+  if (/[\r\n\0]/.test(value)) throw invalid('packageAuthSingleLine', `${label} contains an invalid character.`);
   return value;
 }
 
 function sourceURL(value, baseURL, label = 'Package URL') {
   let url;
   try { url = new URL(text(value, label), baseURL); }
-  catch { throw new TypeError(`${label} must be an HTTP or HTTPS URL.`); }
-  if (!['https:', 'http:'].includes(url.protocol)) throw new TypeError(`${label} must be an HTTP or HTTPS URL.`);
-  if (url.username || url.password) throw new TypeError('Put package credentials in Authentication, not in the URL.');
+  catch { throw invalid(label === 'Provider API URL' ? 'packageApiBase' : 'packageUrl', `${label} must be an HTTP or HTTPS URL.`); }
+  if (!['https:', 'http:'].includes(url.protocol)) throw invalid(label === 'Provider API URL' ? 'packageApiBase' : 'packageUrl', `${label} must be an HTTP or HTTPS URL.`);
+  if (url.username || url.password) throw invalid('packageUrlCredentials', 'Put package credentials in Authentication, not in the URL.');
   return url;
 }
 
 function headerName(value) {
   if (typeof value !== 'string' || !HEADER_NAME.test(value) || RESERVED_HEADERS.has(value.toLowerCase())) {
-    throw new TypeError('Use a valid, application-level HTTP header name.');
+    throw invalid('packageHeaderName', 'Use a valid, application-level HTTP header name.');
   }
   return value.toLowerCase();
 }
 
 /** Normalize only download fields; the deployment parser owns integrity metadata. */
 export function normalizePackageSource(entry, baseURL = 'https://playground.invalid/') {
-  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new TypeError('An extension package must be an object.');
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw invalid('packageObject', 'An extension package must be an object.');
   const result = { url: sourceURL(entry.url, baseURL).href };
   if (entry.provider !== undefined) {
-    if (!PROVIDERS.has(entry.provider)) throw new TypeError('Choose a supported package provider.');
+    if (!PROVIDERS.has(entry.provider)) throw invalid('packageProvider', 'Choose a supported package provider.');
     result.provider = entry.provider;
   }
   if (entry.apiBase !== undefined) {
     const base = sourceURL(entry.apiBase, baseURL, 'Provider API URL');
-    if (base.search || base.hash) throw new TypeError('The provider API URL must not contain a query or fragment.');
+    if (base.search || base.hash) throw invalid('packageApiBase', 'The provider API URL must not contain a query or fragment.');
     result.apiBase = base.href.replace(/\/$/, '');
   }
   if (entry.headers !== undefined) {
-    if (!entry.headers || typeof entry.headers !== 'object' || Array.isArray(entry.headers)) throw new TypeError('Package headers must be an object of header names and values.');
+    if (!entry.headers || typeof entry.headers !== 'object' || Array.isArray(entry.headers)) throw invalid('packageHeaders', 'Package headers must be an object of header names and values.');
     const pairs = [];
     for (const [name, value] of Object.entries(entry.headers)) {
-      if (typeof value !== 'string' || /[\r\n\0]/.test(value)) throw new TypeError('Package header values must be single-line text.');
+      if (typeof value !== 'string' || /[\r\n\0]/.test(value)) throw invalid('packageHeaders', 'Package header values must be single-line text.');
       pairs.push([headerName(name), value]);
     }
     result.headers = Object.fromEntries(pairs);
   }
   if (entry.authentication !== undefined) {
     const auth = entry.authentication;
-    if (!auth || typeof auth !== 'object' || Array.isArray(auth)) throw new TypeError('Package authentication must be an object.');
+    if (!auth || typeof auth !== 'object' || Array.isArray(auth)) throw invalid('packageAuthObject', 'Package authentication must be an object.');
     const types = { bearer: ['token'], token: ['token'], basic: ['username', 'password'], header: ['name', 'value'] };
     const fields = Object.hasOwn(types, auth.type) ? types[auth.type] : null;
-    if (!fields) throw new TypeError('Choose a supported package authentication method.');
-    if (Object.keys(auth).some(key => !['type', ...fields].includes(key))) throw new TypeError('Package authentication contains an unsupported field.');
+    if (!fields) throw invalid('packageAuthMethod', 'Choose a supported package authentication method.');
+    if (Object.keys(auth).some(key => !['type', ...fields].includes(key))) throw invalid('packageAuthFields', 'Use only the fields required by the selected authentication method.');
     result.authentication = { type: auth.type };
     for (const field of fields) result.authentication[field] = text(auth[field], `Authentication ${field}`);
-    if (auth.type === 'basic' && auth.username.includes(':')) throw new TypeError('A Basic authentication username cannot contain a colon.');
+    if (auth.type === 'basic' && auth.username.includes(':')) throw invalid('packageBasicUsername', 'A Basic authentication username cannot contain a colon.');
     if (auth.type === 'header') result.authentication.name = headerName(auth.name);
   }
   return result;

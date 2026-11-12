@@ -140,6 +140,45 @@ test('metadata preserves Unicode and large ordinary header values without an art
   assert.throws(() => decodeNetworkMetadata('not json'), { code: 'RELAY_PROTOCOL_ERROR' });
 });
 
+test('public fallback uses v1 while custom credentials require the v2 redirect and no-store contract', async () => {
+  for (const secret of [false, true]) {
+    let calls = 0;
+    const transport = createNetworkTransport(async (_url, init) => {
+      if (++calls === 1) throw new TypeError('CORS');
+      const metadata = decodeNetworkMetadata(init.headers[NETWORK_REQUEST_HEADER]);
+      assert.equal(metadata.version, secret ? 2 : 1);
+      if (secret) {
+        assert.deepEqual(metadata.credentialHeaders, ['x-download-key']);
+        assert.equal(metadata.cache, 'no-store'); assert.equal(init.cache, 'no-store');
+      }
+      return proxied('downloaded', { version: metadata.version });
+    }, config);
+    const init = secret ? { headers: { 'X-Download-Key': 'private' }, network: { credentialHeaders: ['X-Download-Key'] } } : {};
+    assert.equal(await (await transport(destination, init)).text(), 'downloaded');
+    assert.equal(calls, 2);
+  }
+});
+
+test('direct custom-token redirects retain same-origin credentials and strip every declared secret on another origin', async () => {
+  const requests = [];
+  const transport = createNetworkTransport(async input => {
+    const request = new Request(input); requests.push(request);
+    if (requests.length === 1) return new Response(null, { status: 302, headers: { Location: '/next' } });
+    if (requests.length === 2) return new Response(null, { status: 302, headers: { Location: 'https://cdn.example/package.zip' } });
+    return new Response('package');
+  }, () => assert.fail('Exposed direct responses do not need the proxy.'));
+  const response = await transport(destination, { headers: { 'PRIVATE-TOKEN': 'gitlab', 'X-Download-Key': 'custom', Accept: 'application/zip' },
+    network: { credentialHeaders: ['X-Download-Key'] } });
+  assert.equal(await response.text(), 'package'); assert.equal(response.redirected, true);
+  assert.equal(response.networkRedirectCount, 2);
+  for (const request of requests.slice(0, 2)) {
+    assert.equal(request.headers.get('private-token'), 'gitlab'); assert.equal(request.headers.get('x-download-key'), 'custom');
+    assert.equal(request.cache, 'no-store'); assert.equal(request.redirect, 'manual');
+  }
+  assert.equal(requests[2].headers.has('private-token'), false); assert.equal(requests[2].headers.has('x-download-key'), false);
+  assert.equal(requests[2].headers.get('accept'), 'application/zip');
+});
+
 test('successful direct requests and real HTTP errors never contact the proxy', async () => {
   for (const status of [200, 401, 403, 404, 429, 500]) {
     let calls = 0;

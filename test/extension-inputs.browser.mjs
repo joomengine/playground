@@ -54,7 +54,7 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
         });
       });
 
-      const inputs = page.locator('#package-list input');
+      const inputs = page.locator('#package-list .extension-url-row > .field > input');
       const inputValues = () => inputs.evaluateAll(nodes => nodes.map(node => node.value));
       const read = () => page.evaluate(() => window.extensionInputs.read());
       const json = page.locator('#extensions');
@@ -122,6 +122,38 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       assert.deepEqual(await read(), []);
       assert.equal(await add.isEnabled(), true);
       assert.equal(await inputs.count(), 1);
+
+      await inputs.first().fill('https://github.com/team/private/releases/download/v1/extension.zip');
+      const access = page.locator('.extension-package-access').first();
+      await access.locator('summary').click();
+      await access.getByLabel('Package provider', { exact: true }).selectOption('github');
+      await access.getByLabel('Authentication', { exact: true }).selectOption('bearer');
+      await access.getByLabel('Token', { exact: true }).fill('temporary-private-token');
+      await access.getByLabel('Additional HTTP headers (JSON)', { exact: true }).fill('{"X-Download-Key":"second-private-value"}');
+      const privatePackage = [{ url: 'https://github.com/team/private/releases/download/v1/extension.zip', provider: 'github',
+        authentication: { type: 'bearer', token: 'temporary-private-token' }, headers: { 'x-download-key': 'second-private-value' } }];
+      assert.deepEqual(await read(), privatePackage);
+      const exported = await page.evaluate(async () => {
+        const { createFullDeploymentDocument, parseDeploymentDocument } = await import('./src/config.mjs');
+        const document = createFullDeploymentDocument({ extensions: window.extensionInputs.read(), joomlaVersion: '6.2.0' });
+        window.extensionInputs.setValue(parseDeploymentDocument(JSON.stringify(document)).extensions);
+        return document;
+      });
+      assert.equal(exported.schemaVersion, 3);
+      assert.deepEqual(exported.configuration.extensions, privatePackage);
+      assert.deepEqual(await read(), privatePackage);
+      assert.equal(await access.getByLabel('Token', { exact: true }).getAttribute('type'), 'password');
+      assert.equal(await access.getByLabel('Token', { exact: true }).inputValue(), 'temporary-private-token');
+      await access.getByLabel('Additional HTTP headers (JSON)', { exact: true }).fill('{"X-Unfinished":');
+      await add.click();
+      assert.equal(await access.getByLabel('Additional HTTP headers (JSON)', { exact: true }).inputValue(), '{"X-Unfinished":',
+        'Adding another package preserves an unfinished header draft.');
+      assert.equal(await page.evaluate(() => { try { window.extensionInputs.read(); return false; } catch { return true; } }), true);
+      await page.getByRole('button', { name: 'Remove extension URL 2', exact: true }).click();
+      await access.getByLabel('Authentication', { exact: true }).selectOption('');
+      await access.getByLabel('Additional HTTP headers (JSON)', { exact: true }).fill('{}');
+      assert.equal((await read())[0].authentication, undefined, 'Removing access data does not resurrect imported credentials.');
+      await page.evaluate(() => window.extensionInputs.setValue([]));
 
       const packages = Array.from({ length: 40 }, (_, index) => ({ url: `https://packages.example.test/${index}.zip` }));
       await json.fill(JSON.stringify(packages));

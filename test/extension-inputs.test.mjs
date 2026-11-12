@@ -7,6 +7,7 @@ import { createExtensionInputs } from '../src/extension-inputs.mjs';
 class Element {
   constructor(document, tag = 'div') {
     this.ownerDocument = document; this.tag = tag; this.listeners = new Map();
+    this.tagName = tag.toUpperCase(); this.classList = { add: (...names) => { this.className = [this.className, ...names].filter(Boolean).join(' '); } };
     this.attributes = new Map(); this.children = []; this.value = ''; this.open = false;
   }
   append(...children) { this.children.push(...children); }

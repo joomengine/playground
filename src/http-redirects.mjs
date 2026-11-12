@@ -34,7 +34,8 @@ export async function fetchHttpRedirects(fetcher, target, request, options = {},
     const location = response.headers.get('location');
     if (!REDIRECT_STATUSES.has(response.status) || !location || mode === 'manual') {
       replay?.body?.cancel().catch(() => {});
-      return { response, url: response.url || url.href, redirectCount, redirected: redirectCount > 0 };
+      return { response, url: response.url || url.href,
+        redirectCount: redirectCount + (response.networkRedirectCount ?? 0), redirected: redirectCount > 0 || response.redirected === true };
     }
     if (mode === 'error' || redirectCount >= maxRedirects) {
       replay?.body?.cancel().catch(() => {});

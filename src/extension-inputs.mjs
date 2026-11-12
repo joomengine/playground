@@ -11,19 +11,21 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
   let source = 'rows';
   let jsonError;
   let visibleError;
+  const headerDrafts = new WeakMap();
   const withIntegrity = (entry, managed) => ({ ...entry,
     ...Object.fromEntries(['sha256', 'sha512'].filter(key => managed?.[key]).map(key => [key, managed[key]])) });
   const parse = value => parseUserExtensions(value, baseURL).map(entry => withIntegrity(entry, managedEntries.get(entry.url)));
+  const message = error => error?.i18nKey ? t(error.i18nKey) : error?.message || '';
 
   const showError = error => {
     visibleError = error;
-    errorElement.textContent = error ? `${source === 'json' ? `${t('error.extensionJson')} ` : ''}${error.message}` : '';
+    errorElement.textContent = error ? `${source === 'json' ? `${t('error.extensionJson')} ` : ''}${message(error)}` : '';
     errorElement.hidden = !error;
   };
   const markJson = error => {
     jsonError = error;
     textarea.setAttribute('aria-invalid', String(Boolean(error)));
-    textarea.setCustomValidity(error?.message || '');
+    textarea.setCustomValidity(message(error));
     for (const control of controls) {
       for (const input of control.inputs) input.disabled = Boolean(error);
     }
@@ -39,7 +41,7 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
       } catch (failure) { error = failure; }
       const control = controls[index];
       control?.input.setAttribute('aria-invalid', String(Boolean(error)));
-      control?.input.setCustomValidity(error?.message || '');
+      control?.input.setCustomValidity(message(error));
       if (error) return { error, index };
     }
     return null;
@@ -92,7 +94,9 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
       const addField = (key, type = 'text') => {
         const wrapper = document.createElement('label'); wrapper.className = 'field';
         const caption = localized(document.createElement('span'), key);
+        caption.id = `extension-access-${index + 1}-${key.replaceAll('.', '-')}`;
         const control = document.createElement(type === 'select' ? 'select' : type === 'textarea' ? 'textarea' : 'input');
+        control.setAttribute('aria-labelledby', caption.id);
         if (control.tagName === 'INPUT') control.type = type;
         control.autocomplete = 'off'; control.spellcheck = false;
         wrapper.append(caption, control); fields.append(wrapper);
@@ -118,11 +122,13 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
       const name = addField('label.packageHeaderName'); name.control.value = entry.authentication?.name || '';
       const value = addField('label.packageHeaderValue', 'password'); value.control.value = entry.authentication?.value || '';
       const headers = addField('label.packageHeaders', 'textarea'); headers.wrapper.classList.add('extension-package-headers');
-      headers.control.rows = 3; headers.control.value = JSON.stringify(entry.headers || {}, null, 2);
+      headers.control.rows = 3; headers.control.value = headerDrafts.get(entry) ?? JSON.stringify(entry.headers || {}, null, 2);
       const help = localized(document.createElement('p'), 'help.packageAccess'); help.className = 'extension-package-help';
       fields.append(help); access.append(summary, fields);
       const result = { row, label, input, remove, translations, inputs: [input, remove, provider.control, apiBase.control,
-        authentication.control, token.control, username.control, password.control, name.control, value.control, headers.control], headersError: false };
+        authentication.control, token.control, username.control, password.control, name.control, value.control, headers.control], headersError: headerDrafts.has(entry) };
+      headers.control.setAttribute('aria-invalid', String(result.headersError));
+      headers.control.setCustomValidity(result.headersError ? t('error.packageHeaders') : '');
       const showAuthentication = () => {
         const type = authentication.control.value;
         token.wrapper.hidden = !['bearer', 'token'].includes(type);
@@ -142,8 +148,9 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
           const parsed = JSON.parse(headers.control.value.trim() || '{}');
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.values(parsed).some(item => typeof item !== 'string')) throw new TypeError();
           if (Object.keys(parsed).length) entry.headers = parsed; else delete entry.headers;
+          headerDrafts.delete(entry);
           result.headersError = false;
-        } catch { result.headersError = true; }
+        } catch { result.headersError = true; headerDrafts.set(entry, headers.control.value); }
         headers.control.setAttribute('aria-invalid', String(result.headersError));
         headers.control.setCustomValidity(result.headersError ? t('error.packageHeaders') : '');
         showAuthentication(); writeRows();

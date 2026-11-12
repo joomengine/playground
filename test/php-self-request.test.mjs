@@ -214,18 +214,20 @@ test('self-request delivery preserves 307 upload bytes, explicit headers and red
     transport: async () => assert.fail('A local callback does not use external delivery'),
     request: async request => {
       requests.push({ url: request.url, method: request.method, cookie: request.headers.get('cookie'),
+        token: request.headers.get('private-token'),
         bytes: new Uint8Array(await request.arrayBuffer()) });
       return request.url.endsWith('/first.php')
         ? new Response(null, { status: 307, headers: { location: './final.php' } })
         : new Response(bytes, { status: 201 });
     } });
   const response = await fetch(new Request('https://site.test/joomla/first.php', {
-    method: 'POST', body: bytes, headers: { cookie: 'callback=explicit' },
+    method: 'POST', body: bytes, headers: { cookie: 'callback=explicit', 'private-token': 'callback-token' },
   }), { network: { maxRedirects: 1 } });
   assert.equal(requests.length, 2);
   for (const request of requests) {
     assert.equal(request.method, 'POST');
     assert.equal(request.cookie, 'callback=explicit');
+    assert.equal(request.token, 'callback-token');
     assert.deepEqual(request.bytes, bytes);
   }
   assert.equal(response.status, 201);
