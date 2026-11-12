@@ -1502,7 +1502,7 @@ async function captureDeploymentData() {
   setBusy(true);
   try {
     for (const target of targets) {
-      const captured = await runtime.captureConfiguration(target);
+      const captured = await runtime.captureConfiguration({ ...target, uiLanguage: getLocale() });
       for (const related of captured.related || []) overlayInputs.append(related, { schema: related.schema });
       overlayInputs.append(captured.overlay, { schema: captured.schema });
       for (const warning of captured.warnings || []) activity(typeof warning === 'string' ? warning : warning.message);
@@ -1523,7 +1523,7 @@ function openEditor() {
   updateMcpPreview();
   renderEditorLists(); openDialog('deploy-dialog');
   updateCaptureAction();
-  if (runtime?.discoverConfiguration && !runtime.recovery && !busy) void runtime.discoverConfiguration().then(discovered => {
+  if (runtime?.discoverConfiguration && !runtime.recovery && !busy) void runtime.discoverConfiguration({ uiLanguage: getLocale() }).then(discovered => {
     discoveredConfiguration = discovered;
     $('template-options').replaceChildren(...[...new Set((discovered.templates || []).map(item => item.template))].map(value => { const option = document.createElement('option'); option.value = value; return option; }));
     updateDeploymentFormContext();
@@ -1769,7 +1769,7 @@ function setupInterface() {
     kind, textarea: $(textarea), container: $(container), advanced: $(advanced), errorElement: $(error),
     validate, schema: deploymentFormSchemas[kind], context: { schemaUnavailable: deploymentSchemaUnavailable }, onChange: markDeploymentEdited,
     onSchemaRequest: target => runtime?.discoverConfiguration && !runtime.recovery
-      ? runtime.discoverConfiguration({ ...target, language: fields.language.value }) : null,
+      ? runtime.discoverConfiguration({ ...target, uiLanguage: getLocale() }) : null,
   });
   commandInputs = structured('commands', 'startup-commands', 'command-inputs', 'commands-advanced', 'command-error', parseStartupCommands);
   parameterInputs = structured('parameters', 'template-params', 'template-parameter-inputs', 'template-advanced', 'template-parameter-error');
