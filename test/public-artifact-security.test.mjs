@@ -62,6 +62,9 @@ test('Worker source, private configuration and unselected staging configuration 
 
 test('credential-derived filenames and ZIP entry names fail with redacted constant diagnostics', async t => {
   const fixture = await artifact(t);
+  // Random base64 can contain //, which the filesystem collapses before scanning.
+  // Keep the raw pathname fixture representable while covering encoding characters.
+  fixture.canaries.CLOUDFLARE_API_TOKEN = `artifact-canary:${'pathname-fixture'.repeat(4)}+/="`;
   const value = Object.values(fixture.canaries)[0];
   for (const name of [value, encodeURIComponent(value), Buffer.from(value).toString('hex')]) {
     const filename = `assets/leak-${name}.json`;
