@@ -104,6 +104,17 @@ for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox'
       await page.evaluate(() => window.overlays.append({ key: 'remote-snippet', kind: 'record', component: 'com_componentbuilder', view: 'snippet', guid: '22222222-2222-4222-8222-222222222222', fields: {} }));
       await page.locator('#overlays-fields').getByRole('combobox', { name: 'Repository · Linked configuration', exact: true }).selectOption({ label: 'Private packages' });
       assert.deepEqual(await page.evaluate(() => window.overlays.read().at(-1).source.repository), { $ref: capture[0].key, field: 'guid' });
+      await page.evaluate(() => window.overlays.setValue([{ key: 'custom-module', kind: 'module', element: 'mod_custom', clientId: 0, fields: { title: 'Original' },
+        schema: { type: 'object', properties: { title: { type: 'string', title: 'Module title' } } },
+      }]));
+      await page.locator('#overlays-fields').getByRole('textbox', { name: 'Module title', exact: true }).fill('Updated module');
+      assert.deepEqual(await page.evaluate(() => window.overlays.read()[0].fields), { title: 'Updated module' });
+      await page.evaluate(() => {
+        window.parameters.setSchema({ type: 'object', properties: { key: { type: 'string', title: 'Template key' } } });
+        window.parameters.setValue({ key: 'Original' });
+      });
+      await page.locator('#parameters-fields').getByRole('textbox', { name: 'Template key', exact: true }).fill('Updated key');
+      assert.deepEqual(await page.evaluate(() => window.parameters.read()), { key: 'Updated key' });
       const nativeSubform = await page.evaluate(() => {
         window.parameters.setSchema({ type: 'object', properties: { rows: { type: 'array', title: 'Placeholders', items: { type: 'object', properties: { name: { type: 'string', title: 'Placeholder name' } } } } } });
         window.parameters.setValue({ rows: { row0: { name: 'ORIGINAL' } } });
