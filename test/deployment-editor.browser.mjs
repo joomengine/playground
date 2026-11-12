@@ -139,7 +139,11 @@ test(`deployment editor clones core recipes, saves reloadable customs and import
   }
 });
 
-test(`editor Use creates a new instance while dashboard Launch resumes a closed saved site (${browserName})`, { timeout: 30_000 }, async () => {
+for (const deployment of [
+  { id: 'blank', initialPath: '/' },
+  { id: 'jcb', initialPath: '/administrator/index.php?option=com_componentbuilder' },
+]) {
+test(`editor Use creates a new instance while dashboard Launch resumes a closed saved ${deployment.id} site (${browserName})`, { timeout: 30_000 }, async () => {
   const manifest = { php: [{ version: '8.4' }], joomla: [{ version: '6.2.0', php: ['8.4'] }],
     defaults: { phpVersion: '8.4', joomlaVersion: '6.2.0' } };
   const server = await createStaticServer({ directory: fileURLToPath(new URL('../', import.meta.url)), fixtures: {
@@ -151,7 +155,8 @@ test(`editor Use creates a new instance while dashboard Launch resumes a closed 
       export async function prepareEnvironment() { return { reloadRequired: false }; }
       export async function resetPlayground() {}
       export async function createPlayground(configuration) {
-        (window.launchedConfigurations ||= []).push(structuredClone(configuration));
+        (window.launchedConfigurations ||= JSON.parse(sessionStorage.getItem('fixture-launches') || '[]')).push(structuredClone(configuration));
+        sessionStorage.setItem('fixture-launches', JSON.stringify(window.launchedConfigurations));
         const baseUrl = new URL('./', location.href).href;
         return { configuration, baseUrl, url: new URL('__test__.html', baseUrl).href, healthy: true,
           debugger: { state: 'idle' }, installation: { siteName: configuration.siteName, administrator: configuration.admin },
@@ -165,7 +170,7 @@ test(`editor Use creates a new instance while dashboard Launch resumes a closed 
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto(`${server.url}?deploy=blank`);
+    await page.goto(`${server.url}?deploy=${deployment.id}`);
     await page.locator('#launch-countdown:not([hidden])').waitFor();
     for (const id of ['stop-countdown', 'stop-countdown-button']) {
       assert.equal(await page.locator(`#${id}`).getAttribute('aria-label'), 'Stop countdown');
@@ -176,9 +181,12 @@ test(`editor Use creates a new instance while dashboard Launch resumes a closed 
     assert.equal(await page.locator('#new-site-button').count(), 0);
     await page.locator('#embedded-launch').click();
     await page.locator('#site-frame').waitFor();
+    const savedKey = await page.locator('#storage-key').inputValue();
     await page.locator('#settings-toggle').click();
     await page.locator('#close-button:enabled').click();
     await page.locator('#welcome:not([hidden])').waitFor();
+    await page.goto(`${server.url}?key=${encodeURIComponent(savedKey)}&start=0`);
+    await page.locator('#embedded-launch:enabled').waitFor();
     await page.locator('#embedded-launch').click();
     await page.locator('#site-frame').waitFor();
     await page.locator('#settings-toggle').click();
@@ -186,7 +194,7 @@ test(`editor Use creates a new instance while dashboard Launch resumes a closed 
     await page.locator('#welcome:not([hidden])').waitFor();
     await page.locator('#deploy-editor-button').click();
     const originalName = await page.locator('#site-name').inputValue();
-    assert.equal(await page.locator('#initial-path').inputValue(), '/', 'Resuming the last visited page must not overwrite the configured initial path.');
+    assert.equal(await page.locator('#initial-path').inputValue(), deployment.initialPath, 'Resuming the last visited page must not overwrite the configured initial path.');
     await page.locator('#use-deploy').click();
     await page.locator('#site-frame').waitFor();
     const launches = await page.evaluate(() => window.launchedConfigurations);
@@ -199,7 +207,7 @@ test(`editor Use creates a new instance while dashboard Launch resumes a closed 
     assert.deepEqual(launches[1].admin, launches[2].admin, 'The chosen administrator is preserved.');
     const saved = await page.evaluate(baseURL => JSON.parse(localStorage.getItem(`joomengine:launch:${baseURL}`)), server.url);
     assert.ok(saved.sites[launches[0].storageKey], 'The original saved site remains available.');
-    assert.equal(saved.sites[launches[0].storageKey].initialPath, '/', 'The deployment keeps its chosen initial path separately from navigation state.');
+    assert.equal(saved.sites[launches[0].storageKey].initialPath, deployment.initialPath, 'The deployment keeps its chosen initial path separately from navigation state.');
     assert.equal(saved.sites[launches[0].storageKey].lastPath, '/__test__.html');
     assert.ok(saved.sites[launches[2].storageKey]);
     assert.deepEqual(errors, []);
@@ -207,4 +215,5 @@ test(`editor Use creates a new instance while dashboard Launch resumes a closed 
     try { await browser?.close(); } finally { await server.close(); }
   }
 });
+}
 }
