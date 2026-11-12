@@ -39,6 +39,12 @@ for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox'
       assert.deepEqual(await page.evaluate(() => window.commands.read()), [['config:set', 'sitename', '  exact "quoted" value\nsecond line  ']]);
       await page.locator('#parameters-fields').getByRole('textbox', { name: 'Template title', exact: true }).fill('Updated');
       assert.deepEqual(await page.evaluate(() => window.parameters.read()), { title: 'Updated', count: 3, future: { kept: [false, null, 'item'] } });
+      assert.deepEqual(await page.evaluate(() => {
+        document.activeElement.setSelectionRange(1, 4);
+        window.parameters.setContext({ language: 'en-GB' });
+        window.parameters.refresh();
+        return [document.activeElement.getAttribute('aria-label'), document.activeElement.selectionStart, document.activeElement.selectionEnd];
+      }), ['Template title', 1, 4]);
       const count = page.locator('#parameters-fields').getByRole('spinbutton', { name: 'Count', exact: true });
       await count.fill(''); await count.press('-');
       assert.ok(await page.evaluate(() => { try { window.parameters.read(); return false; } catch { return true; } }));
