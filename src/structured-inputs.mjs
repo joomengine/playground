@@ -219,7 +219,9 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
       };
       let rendered;
       if (record(object[name]) && typeof object[name].$ref === 'string') rendered = reference(object[name], update, caption, field, path);
-      else if (field.type === 'array') rendered = list(object[name] ?? [], field, update, [...path, name], caption);
+      // Joomla subforms may retain named rows (for example options0/options1).
+      // Render their values as rows, but keep the saved shape until a row is edited.
+      else if (field.type === 'array') rendered = list(record(object[name]) ? Object.values(object[name]) : object[name] ?? [], field, update, [...path, name], caption);
       else if (field.type === 'object' || field.properties || record(object[name])) {
         if (!field.properties && !record(object[name])) continue;
         const section = document.createElement('fieldset'); const legend = document.createElement('legend'); legend.textContent = caption;
@@ -422,10 +424,38 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
         matchPicker.addEventListener('change', () => { if (!matchPicker.value) return; entry.match ||= {}; entry.match[matchPicker.value] = entry.fields?.[matchPicker.value] ?? ''; changed(); render(); });
         identity.append(matchPicker);
       }
-      if (entry.kind === 'record') identity.append(objectFields(entry.source || {}, { type: 'object', properties: {
-        repository: { type: 'string', ui: { label: 'deploymentForm.field.repository', help: 'deploymentForm.help.source' } },
-        refresh: { type: 'boolean', ui: { label: 'deploymentForm.field.refresh' } },
-      } }, next => { entry.source = next; }, ['overlays', index, 'source']));
+      if (entry.kind === 'record') {
+        const repository = entry.source?.repository;
+        const updateRepository = next => {
+          if (next !== undefined) { entry.source ||= {}; entry.source.repository = next; }
+          else if (entry.source) { delete entry.source.repository; if (!Object.keys(entry.source).length) delete entry.source; }
+        };
+        const repositories = value.filter(item => item !== entry && item.kind === 'record' && item.component === 'com_componentbuilder' && item.view === 'repository');
+        if (entry.component === 'com_componentbuilder' && (repositories.length || record(repository))) {
+          section.insertBefore(scalar(record(repository) ? repository.$ref : undefined, {
+            type: 'string', oneOf: repositories.map(item => ({ const: item.key, title: item.fields?.system_name || item.fields?.title || item.key })),
+            ui: { help: 'deploymentForm.help.source', rerender: true },
+          }, next => {
+            if (next) updateRepository({ $ref: next, field: 'guid' });
+            else if (record(entry.source?.repository)) updateRepository(undefined);
+          }, ['overlays', index, 'source', 'repository', '$ref'], `${t('deploymentForm.field.repository')} · ${t('deploymentForm.reference')}`), fieldset);
+        }
+        identity.append(scalar(typeof repository === 'string' ? repository : undefined, {
+          type: 'string', ui: { help: 'deploymentForm.help.source' },
+        }, next => {
+          if (next) updateRepository(next);
+          else if (typeof entry.source?.repository === 'string') updateRepository(undefined);
+          const selectorPath = JSON.stringify(['overlays', index, 'source', 'repository', '$ref']);
+          for (const control of section.querySelectorAll('select')) if (control.dataset.fieldPath === selectorPath) control.value = '';
+        }, ['overlays', index, 'source', 'repository'], `${t('deploymentForm.field.repository')} · ${t('deploymentForm.field.guid')}`));
+        const otherSource = { ...entry.source }; delete otherSource.repository;
+        identity.append(objectFields(otherSource, { type: 'object', properties: {
+          refresh: { type: 'boolean', ui: { label: 'deploymentForm.field.refresh' } },
+        } }, next => {
+          const current = entry.source?.repository;
+          entry.source = current === undefined ? next : { ...next, repository: current };
+        }, ['overlays', index, 'source']));
+      }
       section.append(identity, button(t('deploymentForm.remove'), () => { value.splice(index, 1); changed(); render(); })); wrapper.append(section);
     });
     wrapper.append(button(t('deploymentForm.addSetting'), () => {
