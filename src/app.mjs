@@ -662,6 +662,17 @@ function matchesInstalledSelection(input) {
     && (source.jcbVersion || 'none') === (input.jcbVersion || 'none')
     && source.persistence === input.persistence;
 }
+function sameEditorSetup(input, baseline) {
+  return baseline && ['siteName', 'initialPath', 'admin', 'extensions', 'startupCommands', 'menus', 'template', 'languageTags', 'multilingual', 'content', 'overlays', 'language', 'autoLogin', 'phpSettings']
+    .every(name => JSON.stringify(input[name] ?? null) === JSON.stringify(baseline[name] ?? null));
+}
+function coreRecipeAdditions(configuration) {
+  const input = { ...configuration, extensions: configuration.addonExtensions || [],
+    startupCommands: configuration.addonStartupCommands || [], languages: configuration.addonLanguages || [],
+    template: configuration.addonTemplate || editorSourceInput?.template };
+  delete input.deploymentRecipe;
+  return input;
+}
 function formInput(overrides = {}) {
   const joomlaVersion = overrides.joomlaVersion ?? fields.joomlaVersion.value;
   const unchangedRestoredJcb = (editorConfiguration?.restoredSite || matchesInstalledSelection({
@@ -690,16 +701,11 @@ function formInput(overrides = {}) {
   if (candidate.content == null) delete candidate.content;
   const full = normalizeConfiguration(candidate, { catalog, baseURL: deploymentURL });
   if (full.restoredSite) return full;
-  const setupFields = ['siteName', 'initialPath', 'admin', 'extensions', 'startupCommands', 'menus', 'template', 'languageTags', 'multilingual', 'content', 'overlays', 'language', 'autoLogin', 'phpSettings'];
-  const sameSetup = editorConfiguration && setupFields.every(name => JSON.stringify(full[name] ?? null) === JSON.stringify(editorConfiguration[name] ?? null));
-  if (sameSetup && !matchesInstalledSelection(full) && !editorSourceInput?.deploymentRecipe && !fields.deployId.value.startsWith('custom-')) {
+  const sameSetup = sameEditorSetup(full, editorConfiguration);
+  if (sameSetup && !editorSourceInput?.deploymentRecipe && !fields.deployId.value.startsWith('custom-')) {
     // Keep unchanged core recipes eligible for their prepared image. The editor
     // shows full lists while the core resolver receives only genuine additions.
-    const input = { ...full, extensions: editorConfiguration.addonExtensions || [],
-      startupCommands: editorConfiguration.addonStartupCommands || [], languages: editorConfiguration.addonLanguages || [],
-      template: editorConfiguration.addonTemplate || editorSourceInput?.template };
-    delete input.deploymentRecipe;
-    return input;
+    return coreRecipeAdditions(full);
   }
   const previousAddons = new Set((editorConfiguration?.addonExtensions || []).map(item => item.url));
   const managed = new Map((editorConfiguration?.extensions || []).filter(item => !previousAddons.has(item.url)).map(item => [item.url, item]));
@@ -722,13 +728,22 @@ async function resolve(input) {
     fillJoomlaOptions();
     return { configuration: normalizeConfiguration(input, { catalog, baseURL: deploymentURL }), deploy: deploymentDescriptor('blank') };
   }
+  // An unchanged core recipe keeps additive setup identity in saved preferences,
+  // while the editor retains its complete configuration for package-free resume.
+  const retainedCore = !input.deploymentRecipe && !editorSourceInput?.deploymentRecipe && editorConfiguration
+    && ['storageKey', 'persistence', 'deployId', 'joomlaVersion', 'jcbVersion'].every(name => input[name] === editorConfiguration[name])
+    && JSON.stringify(input.languages || []) === JSON.stringify(editorConfiguration.addonLanguages || [])
+    && sameEditorSetup(input, coreRecipeAdditions(editorConfiguration));
+  const installedInput = input.deploymentRecipe ? input : retainedCore ? { ...editorConfiguration, ...input,
+    extensions: editorConfiguration.extensions, startupCommands: editorConfiguration.startupCommands,
+    languages: editorConfiguration.languages, template: editorConfiguration.template } : null;
   // A complete recipe for an unchanged installed runtime needs no package lookup.
   // This also lets owners configure a JCB version no longer present in the catalog.
-  if (input.deploymentRecipe && matchesInstalledSelection(input)) {
+  if (installedInput && matchesInstalledSelection(input)) {
     const document = input.deploymentRecipe;
-    return { configuration: normalizeConfiguration(input, { catalog: catalogForRestoredSite(catalog, input), baseURL: deploymentURL }),
-      deploy: deploymentDescriptor(input.deployId) || { id: input.deployId, title: document.name,
-        joomla: document.requirements.joomla, requirements: document.requirements, configuration: document.configuration } };
+    return { configuration: normalizeConfiguration(installedInput, { catalog: catalogForRestoredSite(catalog, installedInput), baseURL: deploymentURL }),
+      deploy: deploymentDescriptor(input.deployId) || (document ? { id: input.deployId, title: document.name,
+        joomla: document.requirements.joomla, requirements: document.requirements, configuration: document.configuration } : undefined) };
   }
   input = customDeploymentInput(input);
   input.joomlaVersion ||= catalog.defaults.joomlaVersion;
