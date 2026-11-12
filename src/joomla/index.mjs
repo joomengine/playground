@@ -119,7 +119,7 @@ export function validateInstallOptions(config) {
     const url = extension.url;
     if (typeof url !== 'string' || !url.trim()) throw new TypeError('An extension must provide a URL.');
     const source = normalizePackageSource(extension, runtimeBase(config));
-    return { ...source, ...(extension.sha256 ? { sha256: extension.sha256 } : {}), ...(extension.sha512 ? { sha512: extension.sha512 } : {}) };
+    return { ...source, url, ...(extension.sha256 ? { sha256: extension.sha256 } : {}), ...(extension.sha512 ? { sha512: extension.sha512 } : {}) };
   });
   if (!Array.isArray(result.languages) || result.languages.length > 30) throw new TypeError('At most 30 language packages are supported.');
   result.languages = result.languages.map((entry) => {
