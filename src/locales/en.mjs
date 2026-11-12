@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "Header value",
   "label.packageHeaders": "Additional HTTP headers (JSON)",
   "help.packageAccess": "Credentials are included in private configuration exports. Download credentials stay with their configured host.",
-  "error.packageHeaders": "Enter a JSON object with HTTP header names and text values."
+  "error.packageHeaders": "Enter a JSON object with HTTP header names and text values.",
+  "error.packageUrl": "Enter a valid HTTP or HTTPS package URL.",
+  "error.packageApiBase": "Enter a provider API URL without a query, fragment, username, or password.",
+  "error.packageUrlCredentials": "Put package credentials in Authentication, not in the URL.",
+  "error.packageHeaderName": "Use a valid, application-level HTTP header name.",
+  "error.packageObject": "An extension package must be an object.",
+  "error.packageProvider": "Choose a supported package provider.",
+  "error.packageAuthObject": "Package authentication must be an object.",
+  "error.packageAuthMethod": "Choose a supported package authentication method.",
+  "error.packageAuthFields": "Use only the fields required by the selected authentication method.",
+  "error.packageAuthRequired": "Complete the fields for the selected authentication method.",
+  "error.packageAuthSingleLine": "Authentication values must be single-line text.",
+  "error.packageBasicUsername": "A Basic authentication username cannot contain a colon."
 });

@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "Header-Wert",
   "label.packageHeaders": "Zusätzliche HTTP-Header (JSON)",
   "help.packageAccess": "Zugangsdaten sind in privaten Konfigurationsexporten enthalten. Download-Zugangsdaten werden nur an ihren konfigurierten Host gesendet.",
-  "error.packageHeaders": "Geben Sie ein JSON-Objekt mit HTTP-Header-Namen und Textwerten ein."
+  "error.packageHeaders": "Geben Sie ein JSON-Objekt mit HTTP-Header-Namen und Textwerten ein.",
+  "error.packageUrl": "Gib eine gültige HTTP- oder HTTPS-Paket-URL ein.",
+  "error.packageApiBase": "Gib eine Anbieter-API-URL ohne Abfrage, Fragment, Benutzername oder Passwort ein.",
+  "error.packageUrlCredentials": "Trage die Paket-Zugangsdaten unter Authentifizierung ein, nicht in der URL.",
+  "error.packageHeaderName": "Verwende einen gültigen HTTP-Headernamen auf Anwendungsebene.",
+  "error.packageObject": "Ein Erweiterungspaket muss ein Objekt sein.",
+  "error.packageProvider": "Wähle einen unterstützten Paketanbieter.",
+  "error.packageAuthObject": "Die Paket-Authentifizierung muss ein Objekt sein.",
+  "error.packageAuthMethod": "Wähle eine unterstützte Authentifizierungsmethode für das Paket.",
+  "error.packageAuthFields": "Verwende nur die Felder, die die gewählte Authentifizierungsmethode benötigt.",
+  "error.packageAuthRequired": "Fülle die Felder für die gewählte Authentifizierungsmethode aus.",
+  "error.packageAuthSingleLine": "Authentifizierungswerte müssen einzeiliger Text sein.",
+  "error.packageBasicUsername": "Ein Benutzername für Basic-Authentifizierung darf keinen Doppelpunkt enthalten."
 });

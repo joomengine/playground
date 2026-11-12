@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "헤더 값",
   "label.packageHeaders": "추가 HTTP 헤더(JSON)",
   "help.packageAccess": "비공개 설정 내보내기에 인증 정보가 포함됩니다. 다운로드 인증 정보는 구성된 호스트에만 전송됩니다.",
-  "error.packageHeaders": "HTTP 헤더 이름과 텍스트 값을 포함하는 JSON 객체를 입력하세요."
+  "error.packageHeaders": "HTTP 헤더 이름과 텍스트 값을 포함하는 JSON 객체를 입력하세요.",
+  "error.packageUrl": "올바른 HTTP 또는 HTTPS 패키지 URL을 입력하세요.",
+  "error.packageApiBase": "쿼리, 프래그먼트, 사용자 이름 또는 비밀번호가 없는 공급자 API URL을 입력하세요.",
+  "error.packageUrlCredentials": "패키지 자격 증명은 URL이 아닌 인증에 입력하세요.",
+  "error.packageHeaderName": "올바른 애플리케이션 수준 HTTP 헤더 이름을 사용하세요.",
+  "error.packageObject": "확장 패키지는 객체여야 합니다.",
+  "error.packageProvider": "지원되는 패키지 공급자를 선택하세요.",
+  "error.packageAuthObject": "패키지 인증은 객체여야 합니다.",
+  "error.packageAuthMethod": "지원되는 패키지 인증 방식을 선택하세요.",
+  "error.packageAuthFields": "선택한 인증 방식에 필요한 필드만 사용하세요.",
+  "error.packageAuthRequired": "선택한 인증 방식의 필드를 입력하세요.",
+  "error.packageAuthSingleLine": "인증 값은 한 줄의 텍스트여야 합니다.",
+  "error.packageBasicUsername": "Basic 인증 사용자 이름에는 콜론을 포함할 수 없습니다."
 });

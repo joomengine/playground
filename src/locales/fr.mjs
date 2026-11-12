@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "Valeur de l’en-tête",
   "label.packageHeaders": "En-têtes HTTP supplémentaires (JSON)",
   "help.packageAccess": "Les identifiants sont inclus dans les exports privés de configuration. Les identifiants de téléchargement restent limités à l’hôte configuré.",
-  "error.packageHeaders": "Saisissez un objet JSON avec des noms d’en-têtes HTTP et des valeurs textuelles."
+  "error.packageHeaders": "Saisissez un objet JSON avec des noms d’en-têtes HTTP et des valeurs textuelles.",
+  "error.packageUrl": "Saisissez une URL HTTP ou HTTPS valide pour le paquet.",
+  "error.packageApiBase": "Saisissez une URL d’API du fournisseur sans paramètres de requête, fragment, nom d’utilisateur ni mot de passe.",
+  "error.packageUrlCredentials": "Saisissez les identifiants du paquet dans Authentification, pas dans l’URL.",
+  "error.packageHeaderName": "Utilisez un nom d’en-tête HTTP valide au niveau de l’application.",
+  "error.packageObject": "Un paquet d’extension doit être un objet.",
+  "error.packageProvider": "Choisissez un fournisseur de paquets pris en charge.",
+  "error.packageAuthObject": "L’authentification du paquet doit être un objet.",
+  "error.packageAuthMethod": "Choisissez une méthode d’authentification du paquet prise en charge.",
+  "error.packageAuthFields": "Utilisez uniquement les champs requis par la méthode d’authentification sélectionnée.",
+  "error.packageAuthRequired": "Remplissez les champs de la méthode d’authentification sélectionnée.",
+  "error.packageAuthSingleLine": "Les valeurs d’authentification doivent être du texte sur une seule ligne.",
+  "error.packageBasicUsername": "Un nom d’utilisateur pour l’authentification Basic ne peut pas contenir de deux-points."
 });

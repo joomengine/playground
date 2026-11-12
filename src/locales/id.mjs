@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "Nilai header",
   "label.packageHeaders": "Header HTTP tambahan (JSON)",
   "help.packageAccess": "Kredensial disertakan dalam ekspor konfigurasi pribadi. Kredensial unduhan hanya digunakan untuk host yang dikonfigurasi.",
-  "error.packageHeaders": "Masukkan objek JSON dengan nama header HTTP dan nilai teks."
+  "error.packageHeaders": "Masukkan objek JSON dengan nama header HTTP dan nilai teks.",
+  "error.packageUrl": "Masukkan URL paket HTTP atau HTTPS yang valid.",
+  "error.packageApiBase": "Masukkan URL API penyedia tanpa kueri, fragmen, nama pengguna, atau kata sandi.",
+  "error.packageUrlCredentials": "Masukkan kredensial paket di Autentikasi, bukan di URL.",
+  "error.packageHeaderName": "Gunakan nama header HTTP tingkat aplikasi yang valid.",
+  "error.packageObject": "Paket ekstensi harus berupa objek.",
+  "error.packageProvider": "Pilih penyedia paket yang didukung.",
+  "error.packageAuthObject": "Autentikasi paket harus berupa objek.",
+  "error.packageAuthMethod": "Pilih metode autentikasi paket yang didukung.",
+  "error.packageAuthFields": "Gunakan hanya kolom yang diperlukan oleh metode autentikasi yang dipilih.",
+  "error.packageAuthRequired": "Lengkapi kolom untuk metode autentikasi yang dipilih.",
+  "error.packageAuthSingleLine": "Nilai autentikasi harus berupa teks satu baris.",
+  "error.packageBasicUsername": "Nama pengguna autentikasi Basic tidak boleh berisi titik dua."
 });

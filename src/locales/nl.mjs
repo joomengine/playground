@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "Headerwaarde",
   "label.packageHeaders": "Extra HTTP-headers (JSON)",
   "help.packageAccess": "Inloggegevens worden opgenomen in privéconfiguratie-exports. Downloadinloggegevens blijven beperkt tot de ingestelde host.",
-  "error.packageHeaders": "Voer een JSON-object in met HTTP-headernamen en tekstwaarden."
+  "error.packageHeaders": "Voer een JSON-object in met HTTP-headernamen en tekstwaarden.",
+  "error.packageUrl": "Voer een geldige HTTP- of HTTPS-pakket-URL in.",
+  "error.packageApiBase": "Voer een API-URL van de aanbieder in zonder query, fragment, gebruikersnaam of wachtwoord.",
+  "error.packageUrlCredentials": "Vul de pakketgegevens in bij Authenticatie, niet in de URL.",
+  "error.packageHeaderName": "Gebruik een geldige HTTP-headernaam op toepassingsniveau.",
+  "error.packageObject": "Een extensiepakket moet een object zijn.",
+  "error.packageProvider": "Kies een ondersteunde pakketaanbieder.",
+  "error.packageAuthObject": "De pakketauthenticatie moet een object zijn.",
+  "error.packageAuthMethod": "Kies een ondersteunde authenticatiemethode voor het pakket.",
+  "error.packageAuthFields": "Gebruik alleen de velden die de gekozen authenticatiemethode vereist.",
+  "error.packageAuthRequired": "Vul de velden voor de gekozen authenticatiemethode in.",
+  "error.packageAuthSingleLine": "Authenticatiewaarden moeten tekst op één regel zijn.",
+  "error.packageBasicUsername": "Een gebruikersnaam voor Basic-authenticatie mag geen dubbele punt bevatten."
 });
