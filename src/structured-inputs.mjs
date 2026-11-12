@@ -156,6 +156,7 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
       if (choices) next = control.value === '' ? undefined : JSON.parse(control.value);
       else if (type === 'boolean') next = control.checked;
       else if (isNumber) {
+        if (control.validity?.badInput) { fieldError(control, t('deploymentForm.invalidValue')); return; }
         if (control.value === '') next = undefined;
         else if (!Number.isFinite(Number(control.value)) || (type === 'integer' && !Number.isInteger(Number(control.value)))) {
           fieldError(control, t('deploymentForm.invalidValue')); return;
@@ -165,7 +166,6 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
       if (field.ui?.rerender || choices && path.at(-1) === 'type' || choices && path.at(-1) === 'access_repo') render();
     });
     if (control.tagName === 'INPUT' && control.type !== 'checkbox') control.addEventListener('keydown', event => { if (event.key === 'Enter') event.preventDefault(); });
-    if (kind === 'content' && path.at(-1) === 'title') control.addEventListener('change', () => { if (!jsonError) render(); });
     wrapper.prepend(heading); wrapper.append(control);
     if (kind === 'content' && path.at(-1) === 'category' && !choices?.length) wrapper.append(notice('deploymentForm.noCategories'));
     return wrapper;
@@ -211,6 +211,9 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
           const aliasPath = JSON.stringify([...path, 'alias']);
           const alias = [...wrapper.querySelectorAll('input')].find(control => control.dataset.fieldPath === aliasPath);
           if (alias) alias.value = object.alias;
+        }
+        if (kind === 'content' && name === 'title' && path[0] === 'categories') {
+          for (const option of container.querySelectorAll('option')) if (option.value === JSON.stringify(object.key)) option.textContent = next || object.key;
         }
         replace(object);
       };
@@ -326,8 +329,8 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
       const result = await onSchemaRequest(structuredValue(entry));
       if (!result || targetKey(entry) !== key || !value.includes(entry)) return;
       const next = result.schema || result.configurationTargets?.find(target => targetKey(target) === key)?.schema || (result.properties ? result : null);
-      if (next) { recordSchemas.set(key, structuredValue(next)); entry.schema = structuredValue(next); if (!jsonError) { changed(); render(); } }
-    } catch (error) { showError(error); }
+      if (next) { recordSchemas.set(key, structuredValue(next)); entry.schema = structuredValue(next); if (!jsonError && !fieldErrors.size) { changed(); render(); } }
+    } catch { showError(new Error(t('deploymentForm.schemaUnavailable'))); }
     finally { pendingSchemas.delete(key); }
   }
   function overlayFields(entry) {
@@ -445,7 +448,8 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
     let body;
     if (kind === 'commands') body = commands();
     else if (kind === 'overlays') body = overlays();
-    else if (kind === 'menus') body = formSchema ? list(value, formSchema, next => { value = next; }, ['menus']) : notice('deploymentForm.schemaLoading');
+    else if (kind === 'menus') body = formSchema ? list(value, formSchema, next => { value = next; }, ['menus']) : notice(discovery.schemaUnavailable ? 'deployment.schemaFailure' : 'deploymentForm.schemaLoading');
+    else if (kind === 'content' && !formSchema) body = notice(discovery.schemaUnavailable ? 'deployment.schemaFailure' : 'deploymentForm.schemaLoading');
     else body = objectFields(kind === 'content' ? { categories: [], articles: [], ...value } : value, formSchema || { type: 'object' }, next => { value = next; });
     container.replaceChildren(body); lock(jsonError);
   }
@@ -474,9 +478,9 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
   return {
     setValue, read,
     refresh() { if (!fieldErrors.size) render(); },
-    setSchema(next) { formSchema = next; if (!jsonError) render(); },
-    setContext(next) { discovery = { ...discovery, ...next }; if (!jsonError) render(); },
-    setRecordSchema(target, next) { recordSchemas.set(targetKey(target), next); if (!jsonError) render(); },
+    setSchema(next) { formSchema = next; if (!jsonError && !fieldErrors.size) render(); },
+    setContext(next) { discovery = { ...discovery, ...next }; if (!jsonError && !fieldErrors.size) render(); },
+    setRecordSchema(target, next) { recordSchemas.set(targetKey(target), next); if (!jsonError && !fieldErrors.size) render(); },
     append(entry, { schema } = {}) {
       if (!Array.isArray(value) || jsonError) throw jsonError || new TypeError(t('deploymentForm.invalidValue'));
       const next = structuredValue(entry);
