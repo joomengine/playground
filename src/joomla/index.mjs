@@ -762,28 +762,60 @@ export async function captureJoomlaData(runtime, target, { sourceLoader, admin }
   return execute(runtime, 'capture', { ...paths(runtime), ...target, ...(admin ? { admin } : {}) }, sourceLoader);
 }
 
-/** A component overlay is optional: report each failure and continue provisioning. */
+function overlayDependencies(entry) {
+  const dependencies = new Set(entry.dependsOn ?? []);
+  const visit = value => {
+    if (!value || typeof value !== 'object') return;
+    if (typeof value.$ref === 'string') dependencies.add(value.$ref);
+    for (const child of Object.values(value)) visit(child);
+  };
+  visit(entry.fields); visit(entry.source);
+  return [...dependencies];
+}
+
+/** Each component boots in its own PHP request; failed optional records never block launch. */
 export async function applyJoomlaOverlays(runtime, overlays, { sourceLoader, progress = () => {}, warnings = [], admin } = {}) {
-  if (!overlays?.length) return { results: [], warnings };
   const results = [];
-  try {
-    // PHP owns dependency ordering and isolates each item's native save failure.
-    const result = await execute(runtime, 'overlays', { ...paths(runtime), overlays, ...(admin ? { admin } : {}) }, sourceLoader);
-    results.push(...(result.results ?? []));
-    for (const value of result.overlayWarnings ?? result.warnings ?? []) {
-      const warning = { package: 'Configuration overlay', phase: 'configuration', message: typeof value === 'string' ? value : value.message || 'A deployment overlay could not be configured.' };
-      warnings.push(warning); progress({ stage: 'configure', phase: 'warning', message: warning.message, warning });
+  const pending = new Map((overlays ?? []).map(entry => [entry.key, entry]));
+  const dependencies = new Map([...pending].map(([key, entry]) => [key, overlayDependencies(entry)]));
+  const completed = new Map();
+  const warn = (key, message) => {
+    const warning = { package: key, phase: 'configuration', message };
+    warnings.push(warning); progress({ stage: 'configure', phase: 'warning', message, warning });
+  };
+  const skip = (key, message) => {
+    const result = { key, status: 'skipped', notice: message };
+    completed.set(key, result); results.push(result); warn(key, message);
+  };
+  while (pending.size) {
+    let advanced = false;
+    for (const [key, entry] of pending) {
+      const requires = dependencies.get(key);
+      if (requires.some(dependency => pending.has(dependency))) continue;
+      pending.delete(key); advanced = true;
+      const failed = requires.find(dependency => completed.has(dependency) && completed.get(dependency).status !== 'applied');
+      if (failed) {
+        skip(key, `${key} was skipped because dependency ${failed} was not applied.`);
+        continue;
+      }
+      try {
+        // Unchanged dependencies are resolved by PHP from persisted native bindings.
+        const response = await execute(runtime, 'overlays', { ...paths(runtime), overlays: [entry], ...(admin ? { admin } : {}) }, sourceLoader);
+        const result = response.results?.find(item => item.key === key);
+        if (!result || !['applied', 'skipped'].includes(result.status)) throw new Error('The component did not return its configuration result.');
+        completed.set(key, result); results.push(result);
+        const notices = response.overlayWarnings ?? response.warnings ?? [];
+        for (const value of notices) warn(key, typeof value === 'string' ? value : value.message || `${key} could not be configured.`);
+        if (result.status === 'applied') progress({ stage: 'configure', message: `${key} configured.` });
+        else if (!notices.length) warn(key, result.notice || `${key} could not be configured; deployment will continue.`);
+      } catch {
+        // Native exceptions can contain supplied field values; never echo those secrets.
+        skip(key, `${key} could not be configured; deployment will continue. Check that its component, view and required fields are available.`);
+      }
     }
-    for (const item of result.results ?? []) {
-      if (item.status === 'applied') progress({ stage: 'configure', message: `${item.key || 'Deployment overlay'} configured.` });
-    }
-  } catch {
-    // Component errors may contain supplied field values; do not echo secrets.
-    for (const [index, overlay] of overlays.entries()) {
-      const label = overlay.key || `Overlay ${index + 1}`;
-      const warning = { package: label, phase: 'configuration', message: `${label} could not be configured; deployment will continue. Check that its component, view and required fields are available.` };
-      warnings.push(warning); results.push({ key: label, status: 'skipped', notice: warning.message });
-      progress({ stage: 'configure', phase: 'warning', message: warning.message, warning });
+    if (!advanced) {
+      for (const key of pending.keys()) skip(key, `${key} was skipped because its dependencies are cyclic or unavailable.`);
+      break;
     }
   }
   return { results, warnings };
