@@ -119,6 +119,7 @@ export function validateInstallOptions(config) {
     const url = extension.url;
     if (typeof url !== 'string' || !url.trim()) throw new TypeError('An extension must provide a URL.');
     const source = normalizePackageSource(extension, runtimeBase(config));
+    if (customExtensionIndex(config, extension) >= 0) return { ...source, url };
     return { ...source, url, ...(extension.sha256 ? { sha256: extension.sha256 } : {}), ...(extension.sha512 ? { sha512: extension.sha512 } : {}) };
   });
   if (!Array.isArray(result.languages) || result.languages.length > 30) throw new TypeError('At most 30 language packages are supported.');
@@ -613,7 +614,8 @@ export async function installJoomla(runtime, config, {
     const identity = config.restoredSite ? await restoreUploadedSiteSession(runtime, options, sourceLoader, progress)
       : { administrator: await restoreJoomlaSession(runtime, options, { sourceLoader }) };
     progress({ stage: 'ready', message: 'Opened the saved Joomla site.' });
-    return { resumed: true, version: metadata.version, siteName: metadata.siteName, language: metadata.language, deployId: state.marker.deployId, ...identity,
+    return { resumed: true, version: metadata.version, siteName: metadata.siteName, language: metadata.language,
+      jcbVersion: metadata.jcbVersion, jcbInstalled: metadata.jcbInstalled, deployId: state.marker.deployId, ...identity,
       extensionWarnings: state.marker.extensionWarnings ?? [] };
   }
   if (state.marker || state.configured || state.installerPresent) throw new Error('This installation is incomplete. Recover your saved files, or reset and launch it again.');

@@ -76,10 +76,14 @@ for (const major of ['5', '6']) {
       assert.match(await page(runtime, 'administrator/index.php'), /name="passwd"/);
       assert.match(await page(runtime, 'index.php?option=com_users&view=login'), /name="password"/);
       const resumed = await installJoomla(runtime, {
-        ...configuration, language: 'nl-NL', admin: { ...configuration.admin, password: `Unused-${crypto.randomUUID()}!` },
+        ...configuration, language: 'nl-NL', jcbVersion: `${major}.99.0`,
+        jcbPackage: { url: 'https://unavailable.example.test/never-download-on-resume.zip' },
+        admin: { ...configuration.admin, password: `Unused-${crypto.randomUUID()}!` },
       }, options);
       assert.equal(resumed.administrator.password, installed.administrator.password);
       assert.equal(resumed.language, 'nl-NL');
+      assert.equal(resumed.jcbInstalled, false, 'Ordinary resume reports the installed extensions, without applying a selected upgrade.');
+      assert.equal(resumed.jcbVersion, 'none');
       const administratorPage = await page(runtime, 'administrator/index.php');
       assert.doesNotMatch(administratorPage, /name="passwd"/);
       assert.match(administratorPage, /lang="nl-nl"/i);

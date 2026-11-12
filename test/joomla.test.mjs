@@ -396,3 +396,97 @@ test('custom installation does not hide engine failures or malformed PHP results
     assert.equal(calls, 2);
   }
 });
+
+function runtimePayload(source) {
+  return { operation: [...source.matchAll(/operation:([a-z-]+)/g)].at(-1)[1],
+    payload: JSON.parse(Buffer.from(/base64_decode\('([^']+)'\)/.exec(source)[1], 'base64')) };
+}
+const operationSource = async name => `<?php\n// operation:${name}\n`;
+const operationResult = value => ({ status: 200, text: '\n__JOOMENGINE_RESULT__' + JSON.stringify(value) });
+
+test('JCB equal versions do not download or reinstall, and lower selections cannot change the copy', async () => {
+  const { reconcileJcbVersion } = await import('../src/joomla/index.mjs');
+  for (const comparison of [0, -1]) {
+    const calls = [];
+    const runtime = { fs: { writeFile: async () => assert.fail('No archive may be staged.') }, runPhp: async source => {
+      const call = runtimePayload(source); calls.push(call);
+      return operationResult({ ok: true, jcbInstalled: true, jcbVersion: '6.2.0', jcbComparison: comparison });
+    } };
+    const request = { version: comparison === 0 ? '6.2.0' : '6.1.3' };
+    const options = { sourceLoader: operationSource, fetchPackage: async () => assert.fail('No package download is needed.') };
+    if (comparison === 0) assert.equal((await reconcileJcbVersion(runtime, request, options)).jcbVersion, '6.2.0');
+    else await assert.rejects(reconcileJcbVersion(runtime, request, options), /cannot be downgraded/);
+    assert.deepEqual(calls.map(call => call.operation), ['metadata']);
+    assert.equal(calls[0].payload.jcbTargetVersion, request.version);
+  }
+});
+
+test('JCB upgrades inspect package bytes before native CLI installation and verify the installed version afterward', async () => {
+  const { reconcileJcbVersion } = await import('../src/joomla/index.mjs');
+  const bytes = new Uint8Array([0x50, 0x4b, 3, 4]);
+  for (const outcome of ['success', 'preflight-failure', 'version-mismatch']) {
+    const calls = [], files = new Map();
+    let installed = false, downloads = 0;
+    const runtime = { fs: { writeFile: async (path, value) => files.set(path, value), unlink: async path => files.delete(path) },
+      runPhp: async source => {
+        const call = runtimePayload(source); calls.push(call);
+        if (call.operation === 'console') {
+          assert.equal(calls.at(-2).payload.jcbTargetVersion, '6.2.0');
+          assert.ok(calls.at(-2).payload.jcbArchive, 'Package preflight must precede installation.');
+          assert.deepEqual(call.payload.argv, ['extension:install', `--path=${call.payload.archive}`]);
+          assert.deepEqual(files.get(call.payload.archive), bytes);
+          installed = true;
+          return operationResult({ ok: true, exitCode: 0 });
+        }
+        assert.equal(call.operation, 'metadata');
+        if (call.payload.jcbArchive) {
+          assert.deepEqual(files.get(call.payload.jcbArchive), bytes);
+          if (outcome === 'preflight-failure') return operationResult({ ok: false, error: 'The selected ZIP contains an older JCB version.' });
+        }
+        const updated = installed && outcome !== 'version-mismatch';
+        return operationResult({ ok: true, jcbInstalled: true, jcbVersion: updated ? '6.2.0' : '6.1.3', jcbComparison: updated ? 0 : 1 });
+      } };
+    const request = { version: '6.2.0', package: { url: 'https://example.test/jcb.zip', sha256: await sha256(bytes) } };
+    const action = reconcileJcbVersion(runtime, request, { sourceLoader: operationSource,
+      fetchPackage: async url => { downloads++; assert.equal(url, request.package.url); return new Response(bytes); } });
+    if (outcome === 'success') assert.equal((await action).jcbVersion, '6.2.0');
+    else await assert.rejects(action, outcome === 'preflight-failure' ? /older JCB/ : /verification failed/);
+    assert.equal(downloads, 1);
+    assert.equal(calls.filter(call => call.operation === 'console').length, outcome === 'preflight-failure' ? 0 : 1);
+    assert.equal(files.size, 0, 'Staged private archives are removed after success or failure.');
+  }
+});
+
+test('component overlays run after package installation, retain dependency input, and fail without stopping startup commands', async () => {
+  const { applyJoomlaConfiguration } = await import('../src/joomla/index.mjs');
+  const extension = { url: 'https://example.test/component.zip' };
+  const overlays = [
+    { key: 'component', kind: 'record', component: 'com_componentbuilder', view: 'joomla_component',
+      fields: { sales_server: { $ref: 'server', field: 'guid' } }, dependsOn: ['server'] },
+    { key: 'server', kind: 'record', component: 'com_componentbuilder', view: 'server', fields: { name: 'Deployment server' } },
+  ];
+  for (const failed of [false, true]) {
+    const calls = [], progress = [];
+    const runtime = { fs: { writeFile: async () => {} },
+      request: async () => new Response('<a href="index.php?option=com_login&task=logout">Logout</a>'),
+      runPhp: async source => {
+        const call = runtimePayload(source); calls.push(call);
+        if (call.operation === 'status') return operationResult({ ok: true, marker: { state: 'complete', joomlaVersion: '6.2.0' }, configured: true, installerPresent: false });
+        if (call.operation === 'overlays') {
+          assert.deepEqual(call.payload.overlays, overlays, 'Forward dependencies must reach PHP together.');
+          return operationResult(failed ? { ok: false, error: 'Private failure: token=do-not-echo' }
+            : { ok: true, results: [{ key: 'server', status: 'applied' }, { key: 'component', status: 'skipped' }],
+              overlayWarnings: ['The optional administrator view is unavailable.'] });
+        }
+        if (call.operation === 'configure') return operationResult({ ok: true, version: '6.2.0', language: 'en-GB', siteName: 'Configured site' });
+        return operationResult({ ok: true });
+      } };
+    const result = await applyJoomlaConfiguration(runtime, { ...configuration, extensions: [extension], addonExtensions: [extension], overlays,
+      startupCommands: [['cache:clean']] }, { sourceLoader: operationSource, progress: value => progress.push(value) });
+    assert.deepEqual(calls.filter(call => call.operation === 'console' || call.operation === 'overlays')
+      .map(call => call.operation === 'console' ? call.payload.argv[0] : call.operation), ['extension:install', 'overlays', 'cache:clean']);
+    assert.ok(result.extensionWarnings.length);
+    assert.equal(progress.at(-1).stage, 'ready');
+    assert.doesNotMatch(JSON.stringify(progress), /do-not-echo/);
+  }
+});
