@@ -2,6 +2,7 @@ import { ensureManagedDatabaseConfiguration } from './managed-database.mjs';
 import { parseMenus, parseTemplate, parseLanguageTags } from '../site-configuration.mjs';
 import { installationBudget } from '../php-settings.mjs';
 import { networkFetch } from '../network-transport.mjs';
+import { normalizePackageSource, hasPackageAuthentication, downloadExtensionPackage } from '../package-sources.mjs';
 import { conciseFailure, downloadFailure, packageLabel, provisioningError } from '../provisioning-errors.mjs';
 const RESULT_MARKER = '\n__JOOMENGINE_RESULT__';
 const phpSourceCache = new Map();
@@ -72,6 +73,8 @@ export function validateCommand(argv) {
   return result;
 }
 
+function runtimeBase(config) { return config.baseURL ?? globalThis.location?.href ?? 'https://playground.invalid/'; }
+
 export function validateInstallOptions(config) {
   if (!config || typeof config !== 'object') throw new TypeError('Joomla configuration is required.');
   const version = checkedString(config.joomlaVersion, 'Joomla version', { maximum: 32 });
@@ -88,6 +91,7 @@ export function validateInstallOptions(config) {
       email: checkedString(admin.email ?? 'admin@example.test', 'Administrator email'),
     },
     startupCommands: (config.startupCommands ?? []).map(validateCommand),
+    overlays: config.overlays ?? [],
     extensions: config.extensions ?? [],
     language: languageTag(config.language ?? 'en-GB'),
     languages: config.languages ?? [],
@@ -114,8 +118,8 @@ export function validateInstallOptions(config) {
     if (!extension || typeof extension !== 'object') throw new TypeError('An extension must provide a URL.');
     const url = extension.url;
     if (typeof url !== 'string' || !url.trim()) throw new TypeError('An extension must provide a URL.');
-    if (customExtensionIndex(config, extension) >= 0) return { url };
-    return { url, ...(extension.sha256 ? { sha256: extension.sha256 } : {}), ...(extension.sha512 ? { sha512: extension.sha512 } : {}) };
+    const source = normalizePackageSource(extension, runtimeBase(config));
+    return { ...source, ...(extension.sha256 ? { sha256: extension.sha256 } : {}), ...(extension.sha512 ? { sha512: extension.sha512 } : {}) };
   });
   if (!Array.isArray(result.languages) || result.languages.length > 30) throw new TypeError('At most 30 language packages are supported.');
   result.languages = result.languages.map((entry) => {
@@ -155,7 +159,7 @@ async function defaultSourceLoader(name) {
 }
 
 export async function buildPhpProgram(operation, payload, sourceLoader = defaultSourceLoader) {
-  if (!['extract', 'install', 'console', 'status', 'metadata', 'customize', 'administrator', 'import', 'configure', 'discover', 'mcp', 'recovery'].includes(operation)) throw new TypeError('Unknown provisioning operation.');
+  if (!['extract', 'install', 'console', 'status', 'metadata', 'customize', 'administrator', 'import', 'configure', 'discover', 'mcp', 'recovery', 'overlays', 'capture'].includes(operation)) throw new TypeError('Unknown provisioning operation.');
   const [common, script] = await Promise.all([sourceLoader('common'), sourceLoader(operation)]);
   const encoded = new TextEncoder().encode(JSON.stringify(payload));
   let binary = '';
@@ -262,8 +266,8 @@ export async function repairJoomlaConfiguration(runtime, { sourceLoader } = {}) 
 }
 
 /** Read the saved site's version, name and language for the application. */
-export async function readJoomlaMetadata(runtime, { sourceLoader } = {}) {
-  return execute(runtime, 'metadata', paths(runtime), sourceLoader);
+export async function readJoomlaMetadata(runtime, { sourceLoader, jcbTargetVersion, jcbArchive } = {}) {
+  return execute(runtime, 'metadata', { ...paths(runtime), ...(jcbTargetVersion ? { jcbTargetVersion } : {}), ...(jcbArchive ? { jcbArchive } : {}) }, sourceLoader);
 }
 
 /** Return a private native Joomla token for a client running in this browser. */
@@ -307,10 +311,12 @@ async function installOptionalExtension(runtime, extension, index, warnings, sou
   const label = index === null ? 'Custom template' : `Custom extension ${index + 1}`;
   progress({ stage: 'extensions', phase: 'installation', message: `Installing ${label.toLowerCase()} through Joomla…` });
   try {
-    await installExtensionFromURL(runtime, extension.url, { sourceLoader });
+    if (hasPackageAuthentication(extension) || (extension.provider && extension.provider !== 'direct')) {
+      await downloadAndInstall(runtime, extension, networkFetch, sourceLoader, progress);
+    } else await installExtensionFromURL(runtime, extension.url, { sourceLoader });
     return true;
   } catch (error) {
-    if (error.code !== 'JOOMLA_OPERATION_FAILED') throw error;
+    if (error.code !== 'JOOMLA_OPERATION_FAILED' && error.phase !== 'download') throw error;
     const detail = conciseFailure(error.message).replace(/https?:\/\/[^\s<>"']+/gi, '[download URL]');
     const warning = {
       url: extension.url, package: index === null ? 'Template' : `Extension ${index + 1}`,
@@ -365,8 +371,8 @@ export async function installExtension(runtime, bytes, {
   const budget = installationBudget({ executionTimeSeconds, timeoutMs });
   const context = { packageUrl: packageUrl ? packageLabel(packageUrl) : undefined, ...budget };
   const phase = 'installation';
+  const archive = `/tmp/playground-extension-${crypto.randomUUID()}.zip`;
   try {
-    const archive = `/tmp/playground-extension-${crypto.randomUUID()}.zip`;
     progress({ stage: 'extensions', phase, message: `Installing ${packageLabel(packageUrl)}…` });
     await runtime.fs.writeFile(archive, bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
     return await execute(runtime, 'console', { ...paths(runtime), archive,
@@ -383,6 +389,9 @@ export async function installExtension(runtime, bytes, {
       incomplete: phase === 'installation',
       technicalDetails: error.technicalDetails || error.message,
     });
+  } finally {
+    // PHP also cleans up; cover host interruption when the worker is still usable.
+    try { await runtime.fs.unlink(archive); } catch { /* A stopped worker or PHP already removed the archive. */ }
   }
 }
 
@@ -505,14 +514,23 @@ async function restoreUploadedSiteSession(runtime, options, sourceLoader, progre
   return { administrator: identity.administrator ?? options.admin, administratorUnavailable: true, loginNotice };
 }
 
-async function downloadAndInstall(runtime, item, fetchPackage, sourceLoader, progress = () => {}) {
+async function downloadPackageBytes(item, fetchPackage, progress = () => {}) {
   const label = packageLabel(item.url);
   progress({ stage: 'extensions', phase: 'download', message: `Downloading ${label}…` });
   let bytes;
   try {
-    const response = await fetchPackage(item.url);
-    if (!response.ok) throw new Error(`HTTP ${response.status}.`);
-    bytes = await response.arrayBuffer();
+    if (hasPackageAuthentication(item) || (item.provider && item.provider !== 'direct')) {
+      bytes = await downloadExtensionPackage(item, { fetcher: fetchPackage });
+    } else {
+      const response = await fetchPackage(item.url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}.`);
+      bytes = await response.arrayBuffer();
+    }
+    bytes = await verifyArchive(bytes, item.sha256, MAX_CHECKPOINT_BYTES);
+    if (item.sha512) {
+      const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-512', bytes))].map(value => value.toString(16).padStart(2, '0')).join('');
+      if (digest !== item.sha512.toLowerCase()) throw new Error('Package SHA-512 verification failed.');
+    }
   } catch (error) {
     const reason = downloadFailure(error);
     throw provisioningError(`${label} download failed. ${reason}`, {
@@ -520,7 +538,33 @@ async function downloadAndInstall(runtime, item, fetchPackage, sourceLoader, pro
       ...(error.code ? { code: error.code } : {}),
     });
   }
-  return installExtension(runtime, bytes, { sourceLoader, packageUrl: item.url, progress });
+  return bytes;
+}
+
+async function downloadAndInstall(runtime, item, fetchPackage, sourceLoader, progress = () => {}) {
+  return installExtension(runtime, await downloadPackageBytes(item, fetchPackage, progress), { sourceLoader, packageUrl: item.url, progress });
+}
+
+/** Update an explicitly requested checkpoint copy; ordinary resumes never call this. */
+export async function reconcileJcbVersion(runtime, request, { sourceLoader, fetchPackage = networkFetch, progress = () => {} } = {}) {
+  const version = request?.version;
+  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)) throw new TypeError('Choose an exact JCB version to upgrade this copy.');
+  const before = await readJoomlaMetadata(runtime, { sourceLoader, jcbTargetVersion: version });
+  if (before.jcbInstalled && !before.jcbVersion) throw new Error('The installed JCB version could not be verified. Its files have not been changed.');
+  if (before.jcbComparison < 0) throw new Error(`JCB ${before.jcbVersion} cannot be downgraded to ${version}. The source site has not been changed.`);
+  if (before.jcbComparison === 0) return before;
+  if (!request.package?.url) throw new Error(`The selected JCB ${version} package is unavailable.`);
+  const bytes = await downloadPackageBytes(request.package, fetchPackage, progress);
+  const archive = `/tmp/joomengine-jcb-upgrade-${crypto.randomUUID()}.zip`;
+  await runtime.fs.writeFile(archive, bytes);
+  try {
+    await readJoomlaMetadata(runtime, { sourceLoader, jcbTargetVersion: version, jcbArchive: archive });
+  } finally { await runtime.fs.unlink(archive); }
+  progress({ stage: 'extensions', message: before.jcbInstalled ? `Updating JCB ${before.jcbVersion} to ${version} in the new site…` : `Installing JCB ${version} in the new site…` });
+  await installExtension(runtime, bytes, { sourceLoader, packageUrl: request.package.url, progress });
+  const after = await readJoomlaMetadata(runtime, { sourceLoader, jcbTargetVersion: version });
+  if (!after.jcbInstalled || after.jcbComparison !== 0) throw new Error(`JCB update verification failed: expected ${version}, found ${after.jcbVersion || 'no verified version'}. The source site has not been changed.`);
+  return after;
 }
 
 async function installMissingLanguages(runtime, languages, fetchPackage, sourceLoader, progress = () => {}) {
@@ -604,6 +648,7 @@ export async function installJoomla(runtime, config, {
   progress({ stage: 'configure', message: options.content ? 'Preparing the deploy content and languages…' : 'Applying the site language…' });
   const metadata = await execute(runtime, 'customize', { ...location, language: options.language, content: options.content, admin: options.admin, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
   if (options.menus.length || options.template) await configureDeployment(runtime, options, config, extensionWarnings, sourceLoader, progress);
+  await applyJoomlaOverlays(runtime, options.overlays, { sourceLoader, progress, warnings: extensionWarnings, admin: options.admin });
   await runDeploymentCommands(runtime, options.startupCommands, config, extensionWarnings, sourceLoader, progress);
   progress({ stage: 'login', message: options.autoLogin ? 'Signing in to Joomla…' : 'Starting without an administrator session…' });
   const administrator = await restoreJoomlaSession(runtime, options, { sourceLoader });
@@ -651,6 +696,7 @@ export async function importJoomlaSnapshot(runtime, config, {
   }
   const metadata = await execute(runtime, 'customize', { ...location, language: options.language, content: null, admin: administrator, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
   if (options.menus.length || options.template) await configureDeployment(runtime, options, config, extensionWarnings, sourceLoader, progress);
+  await applyJoomlaOverlays(runtime, options.overlays, { sourceLoader, progress, warnings: extensionWarnings, admin: administrator });
   await runDeploymentCommands(runtime, additions.startupCommands, config, extensionWarnings, sourceLoader, progress);
   await restoreJoomlaSession(runtime, options, { sourceLoader });
   if ((options.sourceDeployId ?? options.deployId) === 'jcb-mcp') await getMcpConnection(runtime, { sourceLoader, admin: administrator, initialize: true });
@@ -705,8 +751,40 @@ export async function importJoomlaCheckpoint(runtime, config, {
 }
 
 /** Inspect actual installed menu types and site template styles for the editor. */
-export async function discoverJoomlaConfiguration(runtime, { sourceLoader } = {}) {
-  return execute(runtime, 'discover', paths(runtime), sourceLoader);
+export async function discoverJoomlaConfiguration(runtime, { sourceLoader, ...target } = {}) {
+  return execute(runtime, 'discover', { ...paths(runtime), ...target }, sourceLoader);
+}
+
+/** Capture native values through the same component adapter used during deployment. */
+export async function captureJoomlaData(runtime, target, { sourceLoader, admin } = {}) {
+  return execute(runtime, 'capture', { ...paths(runtime), ...target, ...(admin ? { admin } : {}) }, sourceLoader);
+}
+
+/** A component overlay is optional: report each failure and continue provisioning. */
+export async function applyJoomlaOverlays(runtime, overlays, { sourceLoader, progress = () => {}, warnings = [], admin } = {}) {
+  if (!overlays?.length) return { results: [], warnings };
+  const results = [];
+  try {
+    // PHP owns dependency ordering and isolates each item's native save failure.
+    const result = await execute(runtime, 'overlays', { ...paths(runtime), overlays, ...(admin ? { admin } : {}) }, sourceLoader);
+    results.push(...(result.results ?? []));
+    for (const value of result.overlayWarnings ?? result.warnings ?? []) {
+      const warning = { package: 'Configuration overlay', phase: 'configuration', message: typeof value === 'string' ? value : value.message || 'A deployment overlay could not be configured.' };
+      warnings.push(warning); progress({ stage: 'configure', phase: 'warning', message: warning.message, warning });
+    }
+    for (const item of result.results ?? []) {
+      if (item.status === 'applied') progress({ stage: 'configure', message: `${item.key || 'Deployment overlay'} configured.` });
+    }
+  } catch {
+    // Component errors may contain supplied field values; do not echo secrets.
+    for (const [index, overlay] of overlays.entries()) {
+      const label = overlay.key || `Overlay ${index + 1}`;
+      const warning = { package: label, phase: 'configuration', message: `${label} could not be configured; deployment will continue. Check that its component, view and required fields are available.` };
+      warnings.push(warning); results.push({ key: label, status: 'skipped', notice: warning.message });
+      progress({ stage: 'configure', phase: 'warning', message: warning.message, warning });
+    }
+  }
+  return { results, warnings };
 }
 
 /** Apply explicitly selected changes to a running installation after a caller checkpoint. */
@@ -745,6 +823,7 @@ export async function applyJoomlaConfiguration(runtime, config, {
     // menu changes while copying or renaming an existing multilingual site.
     multilingual: options.multilingual && (configureLanguage || options.menus.length > 0),
   });
+  await applyJoomlaOverlays(runtime, options.overlays, { sourceLoader, progress, warnings: extensionWarnings, admin: options.admin });
   await runDeploymentCommands(runtime, options.startupCommands, config, extensionWarnings, sourceLoader, progress);
   await runtime.fs.writeFile(location.marker, JSON.stringify({ ...state.marker, language: configured.language, extensionWarnings, updatedAt: new Date().toISOString() }));
   const session = config.restoredSite ? await restoreUploadedSiteSession(runtime, options, sourceLoader, progress)

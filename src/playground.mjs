@@ -1,5 +1,5 @@
 import { catalogWithSelectedJoomlaPackage, normalizeConfiguration, parseCatalog, normalizeInitialPath, resolveSiteURL } from './config.mjs';
-import { installJoomla, inspectJoomla, sha256, importJoomlaSnapshot, importJoomlaCheckpoint, readJoomlaMetadata, restoreJoomlaSession, applyJoomlaConfiguration, discoverJoomlaConfiguration, getMcpConnection, readJoomlaAdministrator, repairJoomlaConfiguration, runStartupCommand } from './joomla/index.mjs';
+import { installJoomla, inspectJoomla, sha256, importJoomlaSnapshot, importJoomlaCheckpoint, readJoomlaMetadata, restoreJoomlaSession, applyJoomlaConfiguration, discoverJoomlaConfiguration, getMcpConnection, readJoomlaAdministrator, repairJoomlaConfiguration, runStartupCommand, reconcileJcbVersion, captureJoomlaData } from './joomla/index.mjs';
 import { exportSite } from './export.mjs';
 import { serializeRequest, restoreResponse } from './http.mjs';
 import { normalizePhpSettings, phpRequestTimeoutMs } from './php-settings.mjs';
@@ -9,7 +9,7 @@ import { prepareBrowserIsolation } from './isolation-bootstrap.mjs';
 import { ownedClientURL } from './isolation.mjs';
 import { loadNetworkConfiguration } from './network-config.mjs';
 import { configureNetworkTransport, networkFetch } from './network-transport.mjs';
-import { deploymentImages, deploymentImageFingerprint, deploymentSnapshotSource, completedDeploymentImageConfiguration } from './deployment-images.mjs';
+import { deploymentImages, deploymentImageFingerprint, deploymentSnapshotSource, completedDeploymentImageConfiguration, canCacheDeploymentImage } from './deployment-images.mjs';
 import { catalogForRestoredSite } from './site-import.mjs';
 import { deploymentConfigurationChanges } from './deployment-changes.mjs';
 import { importJoomlaSiteExport } from './joomla/index.mjs';
@@ -341,7 +341,7 @@ export async function resetPlayground({ storageKey = 'default' } = {}) {
 }
 
 /** Create a real Joomla installation backed by upstream PHP and MariaDB WASM. */
-export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, siteExport = null, recovery = false, rotateAdministrator = false, deferInitialSave = false } = {}) {
+export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, siteExport = null, recovery = false, rotateAdministrator = false, deferInitialSave = false, jcbUpgrade = null } = {}) {
   const environment = await prepareEnvironment();
   if (environment.reloadRequired) throw new Error(environment.reason + ' Complete the controlled page navigation before starting the playground.');
   let imagePhase;
@@ -362,6 +362,10 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     const selected = selectedCatalog.joomla.find(entry => entry.version === input.joomlaVersion);
     manifest.joomla = manifest.joomla.filter(entry => entry.version !== input.joomlaVersion);
     manifest.joomla.push(selected);
+  }
+  if (jcbUpgrade && (!checkpoint || (checkpoint.configuration.storageKey === input.storageKey
+      && checkpoint.configuration.persistence === input.persistence))) {
+    throw new Error('JCB upgrades require a separate copy of a saved site.');
   }
   const config = normalizeConfiguration(input, { catalog: selectedCatalog, baseURL: base.href });
   const fetchPackage = createPackageFetcher([config.joomlaPackage, config.jcbPackage].filter(Boolean), networkFetch);
@@ -540,7 +544,12 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           return { bytes, filename: `joomengine-recovery-${config.storageKey}.zip`, mimeType: 'application/zip' };
         } finally { changing = false; if (!filesOnly) registerSession(); }
       },
-      discoverConfiguration: () => discoverJoomlaConfiguration(handle),
+      discoverConfiguration: target => discoverJoomlaConfiguration(handle, { ...target, admin: handle.installation?.administrator }),
+      captureConfiguration: target => {
+        requireDatabase();
+        if (changing || closePromise || debugState === 'paused') throw new Error('Wait for the current site operation before cloning data.');
+        return captureJoomlaData(handle, target, { admin: handle.installation?.administrator });
+      },
       getMcpConnection: () => getMcpConnection(handle, { admin: handle.installation?.administrator }),
       async repairConfiguration() {
         requireDatabase();
@@ -561,6 +570,11 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         if (managePause && changing) throw new Error('Wait for the current site operation.');
         if (managePause) { changing = true; instances.delete(instanceId); }
         try {
+          const metadata = await readJoomlaMetadata(handle);
+          if (metadata.jcbVersion) {
+            if (metadata.jcbVersion !== config.jcbVersion || metadata.jcbVersion === 'none') delete config.jcbPackage;
+            config.jcbVersion = metadata.jcbVersion;
+          }
           const archive = await exportSite(handle, { format: 'bundle' });
           const filesystem = await session.send('checkpoint', {}, 600_000);
           return { archive: archive.bytes, sha256: await sha256(archive.bytes), filesystem, configuration: { ...structuredClone(config), admin: { ...handle.installation.administrator } } };
@@ -720,7 +734,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         const maintained = snapshot?.maintained;
         const customImage = !maintained || Boolean(config.addonExtensions?.length || config.addonStartupCommands?.length
           || config.addonLanguages?.length || config.addonTemplate?.url || config.deploymentRecipe);
-        if (customImage) {
+        if (customImage && canCacheDeploymentImage(config)) {
           fingerprint = await deploymentImageFingerprint(config, manifest, { baseURL: base.href });
           if (!config.fresh) {
             image = await deploymentImages.getCustom(fingerprint);
@@ -771,6 +785,16 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       imagePhase = 'launch-image';
       if (pristine) progress({ message: 'Launching your site…' });
     }
+    if (jcbUpgrade) {
+      const updated = await reconcileJcbVersion(handle, jcbUpgrade, { progress, fetchPackage });
+      installed = { ...installed, ...updated };
+    }
+    const actual = await readJoomlaMetadata(handle);
+    installed = { ...installed, ...actual };
+    if (actual.jcbVersion) {
+      if (actual.jcbVersion !== config.jcbVersion || actual.jcbVersion === 'none') delete config.jcbPackage;
+      config.jcbVersion = actual.jcbVersion;
+    }
     imagePhase = undefined;
     if (!config.persistence || !deferInitialSave) await handle.flush();
     await session.send('enablePersistence');
@@ -779,7 +803,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     progress({ phase: 'ready', message: installed.resumed ? 'Your saved Joomla site is ready.' : 'Joomla is installed and ready.' });
     return handle;
   } catch (error) {
-    try { await finish(false); } catch (cleanupError) { error.message += ` Cleanup: ${cleanupError.message}`; }
+    try { await finish(Boolean(jcbUpgrade)); } catch (cleanupError) { error.message += ` Cleanup: ${cleanupError.message}`; }
     throw error;
   }
 }
