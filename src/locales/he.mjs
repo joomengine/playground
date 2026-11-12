@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "ערך הכותרת",
   "label.packageHeaders": "כותרות HTTP נוספות (JSON)",
   "help.packageAccess": "פרטי הגישה נכללים בייצוא פרטי של התצורה. פרטי הגישה להורדה נשלחים רק למארח שהוגדר.",
-  "error.packageHeaders": "הזינו אובייקט JSON עם שמות של כותרות HTTP וערכי טקסט."
+  "error.packageHeaders": "הזינו אובייקט JSON עם שמות של כותרות HTTP וערכי טקסט.",
+  "error.packageUrl": "יש להזין כתובת HTTP או HTTPS תקינה לחבילה.",
+  "error.packageApiBase": "יש להזין כתובת API של הספק ללא שאילתה, מקטע, שם משתמש או סיסמה.",
+  "error.packageUrlCredentials": "יש להזין את פרטי הגישה לחבילה תחת אימות, ולא בכתובת.",
+  "error.packageHeaderName": "יש להשתמש בשם תקין של כותרת HTTP ברמת היישום.",
+  "error.packageObject": "חבילת הרחבה חייבת להיות אובייקט.",
+  "error.packageProvider": "יש לבחור ספק חבילות נתמך.",
+  "error.packageAuthObject": "אימות החבילה חייב להיות אובייקט.",
+  "error.packageAuthMethod": "יש לבחור שיטת אימות נתמכת לחבילה.",
+  "error.packageAuthFields": "יש להשתמש רק בשדות הנדרשים לשיטת האימות שנבחרה.",
+  "error.packageAuthRequired": "יש למלא את השדות של שיטת האימות שנבחרה.",
+  "error.packageAuthSingleLine": "ערכי האימות חייבים להיות טקסט בשורה אחת.",
+  "error.packageBasicUsername": "שם משתמש לאימות Basic אינו יכול להכיל נקודתיים."
 });

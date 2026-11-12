@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "Kopskrifwaarde",
   "label.packageHeaders": "Bykomende HTTP-kopskrifte (JSON)",
   "help.packageAccess": "Aanmeldbewyse word by private konfigurasie-uitvoere ingesluit. Aflaaibewyse bly by hul opgestelde gasheer.",
-  "error.packageHeaders": "Voer ’n JSON-objek met HTTP-kopskrifname en tekswaardes in."
+  "error.packageHeaders": "Voer ’n JSON-objek met HTTP-kopskrifname en tekswaardes in.",
+  "error.packageUrl": "Voer ’n geldige HTTP- of HTTPS-pakket-URL in.",
+  "error.packageApiBase": "Voer ’n verskaffer-API-URL sonder ’n navraag, fragment, gebruikersnaam of wagwoord in.",
+  "error.packageUrlCredentials": "Voer pakketaanmeldbewyse onder Stawing in, nie in die URL nie.",
+  "error.packageHeaderName": "Gebruik ’n geldige HTTP-kopskrifnaam op toepassingsvlak.",
+  "error.packageObject": "’n Uitbreidingspakket moet ’n objek wees.",
+  "error.packageProvider": "Kies ’n ondersteunde pakketverskaffer.",
+  "error.packageAuthObject": "Pakketstawing moet ’n objek wees.",
+  "error.packageAuthMethod": "Kies ’n ondersteunde pakketstawingsmetode.",
+  "error.packageAuthFields": "Gebruik slegs die velde wat die gekose stawingsmetode vereis.",
+  "error.packageAuthRequired": "Voltooi die velde vir die gekose stawingsmetode.",
+  "error.packageAuthSingleLine": "Stawingswaardes moet teks op ’n enkele reël wees.",
+  "error.packageBasicUsername": "’n Gebruikersnaam vir Basic-stawing mag nie ’n dubbelpunt bevat nie."
 });

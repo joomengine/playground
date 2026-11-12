@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "Valor do cabeçalho",
   "label.packageHeaders": "Cabeçalhos HTTP adicionais (JSON)",
   "help.packageAccess": "As credenciais são incluídas nas exportações privadas de configuração. As credenciais de download ficam restritas ao host configurado.",
-  "error.packageHeaders": "Insira um objeto JSON com nomes de cabeçalhos HTTP e valores de texto."
+  "error.packageHeaders": "Insira um objeto JSON com nomes de cabeçalhos HTTP e valores de texto.",
+  "error.packageUrl": "Introduza um URL HTTP ou HTTPS válido para o pacote.",
+  "error.packageApiBase": "Introduza um URL da API do fornecedor sem consulta, fragmento, nome de utilizador ou palavra-passe.",
+  "error.packageUrlCredentials": "Introduza as credenciais do pacote em Autenticação, não no URL.",
+  "error.packageHeaderName": "Utilize um nome de cabeçalho HTTP válido ao nível da aplicação.",
+  "error.packageObject": "Um pacote de extensão tem de ser um objeto.",
+  "error.packageProvider": "Escolha um fornecedor de pacotes suportado.",
+  "error.packageAuthObject": "A autenticação do pacote tem de ser um objeto.",
+  "error.packageAuthMethod": "Escolha um método de autenticação do pacote suportado.",
+  "error.packageAuthFields": "Utilize apenas os campos exigidos pelo método de autenticação selecionado.",
+  "error.packageAuthRequired": "Preencha os campos do método de autenticação selecionado.",
+  "error.packageAuthSingleLine": "Os valores de autenticação têm de ser texto numa única linha.",
+  "error.packageBasicUsername": "Um nome de utilizador para autenticação Basic não pode conter dois pontos."
 });

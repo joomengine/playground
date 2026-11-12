@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "ヘッダー値",
   "label.packageHeaders": "追加の HTTP ヘッダー（JSON）",
   "help.packageAccess": "非公開の設定エクスポートには認証情報が含まれます。ダウンロードの認証情報は設定されたホストにのみ送信されます。",
-  "error.packageHeaders": "HTTP ヘッダー名とテキスト値を含む JSON オブジェクトを入力してください。"
+  "error.packageHeaders": "HTTP ヘッダー名とテキスト値を含む JSON オブジェクトを入力してください。",
+  "error.packageUrl": "有効な HTTP または HTTPS のパッケージ URL を入力してください。",
+  "error.packageApiBase": "クエリ、フラグメント、ユーザー名、パスワードを含まないプロバイダー API URL を入力してください。",
+  "error.packageUrlCredentials": "パッケージの認証情報は URL ではなく「認証」に入力してください。",
+  "error.packageHeaderName": "アプリケーションレベルの有効な HTTP ヘッダー名を使用してください。",
+  "error.packageObject": "拡張機能パッケージはオブジェクトである必要があります。",
+  "error.packageProvider": "対応しているパッケージプロバイダーを選択してください。",
+  "error.packageAuthObject": "パッケージの認証設定はオブジェクトである必要があります。",
+  "error.packageAuthMethod": "対応しているパッケージ認証方式を選択してください。",
+  "error.packageAuthFields": "選択した認証方式で必要なフィールドのみを使用してください。",
+  "error.packageAuthRequired": "選択した認証方式のフィールドを入力してください。",
+  "error.packageAuthSingleLine": "認証値は1行のテキストで入力してください。",
+  "error.packageBasicUsername": "Basic 認証のユーザー名にコロンは使用できません。"
 });

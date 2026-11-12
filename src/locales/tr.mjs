@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "Başlık değeri",
   "label.packageHeaders": "Ek HTTP başlıkları (JSON)",
   "help.packageAccess": "Kimlik bilgileri özel yapılandırma dışa aktarımlarına dahil edilir. İndirme kimlik bilgileri yalnızca yapılandırıldıkları sunucuda kullanılır.",
-  "error.packageHeaders": "HTTP başlık adları ve metin değerleri içeren bir JSON nesnesi girin."
+  "error.packageHeaders": "HTTP başlık adları ve metin değerleri içeren bir JSON nesnesi girin.",
+  "error.packageUrl": "Geçerli bir HTTP veya HTTPS paket URL’si girin.",
+  "error.packageApiBase": "Sorgu, parça, kullanıcı adı veya parola içermeyen bir sağlayıcı API URL’si girin.",
+  "error.packageUrlCredentials": "Paket kimlik bilgilerini URL’ye değil, Kimlik doğrulama alanına girin.",
+  "error.packageHeaderName": "Uygulama düzeyinde geçerli bir HTTP başlık adı kullanın.",
+  "error.packageObject": "Bir eklenti paketi nesne olmalıdır.",
+  "error.packageProvider": "Desteklenen bir paket sağlayıcısı seçin.",
+  "error.packageAuthObject": "Paket kimlik doğrulaması nesne olmalıdır.",
+  "error.packageAuthMethod": "Desteklenen bir paket kimlik doğrulama yöntemi seçin.",
+  "error.packageAuthFields": "Yalnızca seçilen kimlik doğrulama yönteminin gerektirdiği alanları kullanın.",
+  "error.packageAuthRequired": "Seçilen kimlik doğrulama yönteminin alanlarını doldurun.",
+  "error.packageAuthSingleLine": "Kimlik doğrulama değerleri tek satırlık metin olmalıdır.",
+  "error.packageBasicUsername": "Basic kimlik doğrulaması kullanıcı adı iki nokta üst üste içeremez."
 });

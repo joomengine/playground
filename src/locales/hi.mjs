@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "हेडर मान",
   "label.packageHeaders": "अतिरिक्त HTTP हेडर (JSON)",
   "help.packageAccess": "क्रेडेंशियल निजी कॉन्फ़िगरेशन निर्यात में शामिल होते हैं। डाउनलोड क्रेडेंशियल केवल कॉन्फ़िगर किए गए होस्ट को भेजे जाते हैं।",
-  "error.packageHeaders": "HTTP हेडर नाम और टेक्स्ट मान वाला JSON ऑब्जेक्ट दर्ज करें।"
+  "error.packageHeaders": "HTTP हेडर नाम और टेक्स्ट मान वाला JSON ऑब्जेक्ट दर्ज करें।",
+  "error.packageUrl": "पैकेज का मान्य HTTP या HTTPS URL दर्ज करें।",
+  "error.packageApiBase": "प्रदाता का API URL दर्ज करें जिसमें क्वेरी, फ़्रैगमेंट, उपयोगकर्ता नाम या पासवर्ड न हो।",
+  "error.packageUrlCredentials": "पैकेज के प्रवेश विवरण URL में नहीं, प्रमाणीकरण में दर्ज करें।",
+  "error.packageHeaderName": "एप्लिकेशन स्तर का मान्य HTTP हेडर नाम उपयोग करें।",
+  "error.packageObject": "एक्सटेंशन पैकेज एक ऑब्जेक्ट होना चाहिए।",
+  "error.packageProvider": "समर्थित पैकेज प्रदाता चुनें।",
+  "error.packageAuthObject": "पैकेज प्रमाणीकरण एक ऑब्जेक्ट होना चाहिए।",
+  "error.packageAuthMethod": "पैकेज के लिए समर्थित प्रमाणीकरण विधि चुनें।",
+  "error.packageAuthFields": "केवल चुनी गई प्रमाणीकरण विधि के लिए आवश्यक फ़ील्ड उपयोग करें।",
+  "error.packageAuthRequired": "चुनी गई प्रमाणीकरण विधि के फ़ील्ड भरें।",
+  "error.packageAuthSingleLine": "प्रमाणीकरण मान एक पंक्ति के टेक्स्ट होने चाहिए।",
+  "error.packageBasicUsername": "Basic प्रमाणीकरण के उपयोगकर्ता नाम में कोलन नहीं हो सकता।"
 });

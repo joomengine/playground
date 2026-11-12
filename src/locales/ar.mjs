@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "قيمة الترويسة",
   "label.packageHeaders": "ترويسات HTTP إضافية (JSON)",
   "help.packageAccess": "تُضمَّن بيانات الاعتماد في صادرات الإعداد الخاصة. تُرسل بيانات اعتماد التنزيل فقط إلى المضيف المُعدّ لها.",
-  "error.packageHeaders": "أدخل كائن JSON بأسماء ترويسات HTTP وقيم نصية."
+  "error.packageHeaders": "أدخل كائن JSON بأسماء ترويسات HTTP وقيم نصية.",
+  "error.packageUrl": "أدخل عنوان HTTP أو HTTPS صالحًا للحزمة.",
+  "error.packageApiBase": "أدخل عنوان API للمزوّد دون استعلام أو جزء أو اسم مستخدم أو كلمة مرور.",
+  "error.packageUrlCredentials": "أدخل بيانات اعتماد الحزمة في المصادقة، وليس في عنوان URL.",
+  "error.packageHeaderName": "استخدم اسم ترويسة HTTP صالحًا على مستوى التطبيق.",
+  "error.packageObject": "يجب أن تكون حزمة الإضافة كائنًا.",
+  "error.packageProvider": "اختر مزوّد حزم مدعومًا.",
+  "error.packageAuthObject": "يجب أن تكون مصادقة الحزمة كائنًا.",
+  "error.packageAuthMethod": "اختر طريقة مصادقة مدعومة للحزمة.",
+  "error.packageAuthFields": "استخدم فقط الحقول المطلوبة لطريقة المصادقة المحددة.",
+  "error.packageAuthRequired": "أكمل الحقول الخاصة بطريقة المصادقة المحددة.",
+  "error.packageAuthSingleLine": "يجب أن تكون قيم المصادقة نصًا من سطر واحد.",
+  "error.packageBasicUsername": "لا يمكن أن يحتوي اسم المستخدم لمصادقة Basic على نقطتين رأسيتين."
 });

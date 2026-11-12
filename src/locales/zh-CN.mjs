@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "请求头值",
   "label.packageHeaders": "附加 HTTP 请求头（JSON）",
   "help.packageAccess": "私有配置导出中会包含凭据。下载凭据仅用于其配置的主机。",
-  "error.packageHeaders": "请输入包含 HTTP 请求头名称和文本值的 JSON 对象。"
+  "error.packageHeaders": "请输入包含 HTTP 请求头名称和文本值的 JSON 对象。",
+  "error.packageUrl": "请输入有效的 HTTP 或 HTTPS 软件包 URL。",
+  "error.packageApiBase": "请输入不含查询参数、片段、用户名或密码的提供商 API URL。",
+  "error.packageUrlCredentials": "请在“身份验证”中填写软件包凭据，不要放在 URL 中。",
+  "error.packageHeaderName": "请使用有效的应用级 HTTP 请求头名称。",
+  "error.packageObject": "扩展软件包必须是一个对象。",
+  "error.packageProvider": "请选择受支持的软件包提供商。",
+  "error.packageAuthObject": "软件包身份验证必须是一个对象。",
+  "error.packageAuthMethod": "请选择受支持的软件包身份验证方式。",
+  "error.packageAuthFields": "仅使用所选身份验证方式要求的字段。",
+  "error.packageAuthRequired": "请填写所选身份验证方式的字段。",
+  "error.packageAuthSingleLine": "身份验证值必须为单行文本。",
+  "error.packageBasicUsername": "Basic 身份验证的用户名不能包含冒号。"
 });

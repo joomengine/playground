@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "হেডারের মান",
   "label.packageHeaders": "অতিরিক্ত HTTP হেডার (JSON)",
   "help.packageAccess": "ব্যক্তিগত কনফিগারেশন রপ্তানিতে পরিচয়পত্র অন্তর্ভুক্ত থাকে। ডাউনলোডের পরিচয়পত্র শুধু কনফিগার করা হোস্টে পাঠানো হয়।",
-  "error.packageHeaders": "HTTP হেডারের নাম ও টেক্সট মানসহ একটি JSON অবজেক্ট লিখুন।"
+  "error.packageHeaders": "HTTP হেডারের নাম ও টেক্সট মানসহ একটি JSON অবজেক্ট লিখুন।",
+  "error.packageUrl": "প্যাকেজের একটি বৈধ HTTP বা HTTPS URL লিখুন।",
+  "error.packageApiBase": "প্রদানকারীর API URL লিখুন, যাতে কোয়েরি, ফ্র্যাগমেন্ট, ব্যবহারকারীর নাম বা পাসওয়ার্ড নেই।",
+  "error.packageUrlCredentials": "প্যাকেজের প্রবেশতথ্য URL-এ নয়, প্রমাণীকরণে লিখুন।",
+  "error.packageHeaderName": "অ্যাপ্লিকেশন স্তরের একটি বৈধ HTTP হেডারের নাম ব্যবহার করুন।",
+  "error.packageObject": "এক্সটেনশন প্যাকেজ একটি অবজেক্ট হতে হবে।",
+  "error.packageProvider": "সমর্থিত প্যাকেজ প্রদানকারী বেছে নিন।",
+  "error.packageAuthObject": "প্যাকেজের প্রমাণীকরণ একটি অবজেক্ট হতে হবে।",
+  "error.packageAuthMethod": "প্যাকেজের জন্য সমর্থিত প্রমাণীকরণ পদ্ধতি বেছে নিন।",
+  "error.packageAuthFields": "শুধু নির্বাচিত প্রমাণীকরণ পদ্ধতির জন্য প্রয়োজনীয় ঘরগুলো ব্যবহার করুন।",
+  "error.packageAuthRequired": "নির্বাচিত প্রমাণীকরণ পদ্ধতির ঘরগুলো পূরণ করুন।",
+  "error.packageAuthSingleLine": "প্রমাণীকরণের মান এক লাইনের লেখা হতে হবে।",
+  "error.packageBasicUsername": "Basic প্রমাণীকরণের ব্যবহারকারীর নামে কোলন থাকতে পারে না।"
 });

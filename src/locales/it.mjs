@@ -674,5 +674,17 @@ export default Object.freeze({
   "label.packageHeaderValue": "Valore intestazione",
   "label.packageHeaders": "Intestazioni HTTP aggiuntive (JSON)",
   "help.packageAccess": "Le credenziali sono incluse nelle esportazioni private della configurazione. Le credenziali di download restano limitate all’host configurato.",
-  "error.packageHeaders": "Inserisci un oggetto JSON con nomi di intestazioni HTTP e valori di testo."
+  "error.packageHeaders": "Inserisci un oggetto JSON con nomi di intestazioni HTTP e valori di testo.",
+  "error.packageUrl": "Inserisci un URL HTTP o HTTPS valido per il pacchetto.",
+  "error.packageApiBase": "Inserisci un URL API del fornitore senza query, frammento, nome utente o password.",
+  "error.packageUrlCredentials": "Inserisci le credenziali del pacchetto in Autenticazione, non nell’URL.",
+  "error.packageHeaderName": "Usa un nome di intestazione HTTP valido a livello di applicazione.",
+  "error.packageObject": "Un pacchetto di estensione deve essere un oggetto.",
+  "error.packageProvider": "Scegli un fornitore di pacchetti supportato.",
+  "error.packageAuthObject": "L’autenticazione del pacchetto deve essere un oggetto.",
+  "error.packageAuthMethod": "Scegli un metodo di autenticazione del pacchetto supportato.",
+  "error.packageAuthFields": "Usa solo i campi richiesti dal metodo di autenticazione selezionato.",
+  "error.packageAuthRequired": "Compila i campi del metodo di autenticazione selezionato.",
+  "error.packageAuthSingleLine": "I valori di autenticazione devono essere testo su una sola riga.",
+  "error.packageBasicUsername": "Un nome utente per l’autenticazione Basic non può contenere i due punti."
 });
