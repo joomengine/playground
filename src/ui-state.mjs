@@ -1,7 +1,7 @@
 import { createShareURL, createFullDeploymentDocument } from './config.mjs';
 import { ISOLATION_PARAMETER, isolationMarker } from './isolation.mjs';
 const SITE_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
-const PUBLIC_FIELDS = ['restoredSite', 'deployId', 'sourceDeployId', 'joomlaVersion', 'joomlaPackage', 'jcbVersion', 'jcbPackage', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'phpSettings', 'menus', 'template', 'languageTags', 'multilingual', 'content', 'addonExtensions', 'addonStartupCommands', 'addonLanguages', 'addonTemplate'];
+const SAVED_SETUP_FIELDS = ['restoredSite', 'deployId', 'sourceDeployId', 'joomlaVersion', 'joomlaPackage', 'jcbVersion', 'jcbPackage', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'phpSettings', 'menus', 'template', 'languageTags', 'multilingual', 'content', 'addonExtensions', 'addonStartupCommands', 'addonLanguages', 'addonTemplate', 'overlays'];
 
 /** Setup identity preserves command argument boundaries as well as source URLs. */
 export function customSetupDetails(input) {
@@ -9,7 +9,7 @@ export function customSetupDetails(input) {
     ...(input.languages || []).map(item => item.url)].filter(Boolean);
   const commands = (input.startupCommands || []).map(command => [...command]);
   return { sources, commands, extensions: input.extensions || [], template: input.template || null,
-    languages: input.languages || [], content: input.content || null, menus: input.menus || [],
+    overlays: input.overlays || [], languages: input.languages || [], content: input.content || null, menus: input.menus || [],
     joomlaVersion: input.joomlaPackage ? input.joomlaVersion : null,
     joomlaPackage: input.joomlaPackage ? structuredClone(input.joomlaPackage) : null,
     jcbVersion: input.jcbPackage ? input.jcbVersion : null,
@@ -27,11 +27,12 @@ export function defaultSiteKey(deployId, joomlaVersion) {
   return `${name.slice(0, 64 - suffix.length)}${suffix}`;
 }
 
-/** Persist setup preferences, never administrator credentials or runtime objects. */
+/** Persist private browser setup, including package credentials needed for reuse.
+ * Administrator credentials and runtime objects are stored separately. */
 export function publicConfiguration(config) {
-  const result = Object.fromEntries(PUBLIC_FIELDS.filter((name) => config[name] !== undefined).map((name) => [name, structuredClone(config[name])]));
-  result.extensions = (config.extensions || []).map(({ url, sha256, sha512 }) => ({ url, ...(sha256 ? { sha256 } : {}), ...(sha512 ? { sha512 } : {}) }));
-  result.languages = (config.languages || []).map(({ tag, url, sha256 }) => ({ tag, url, ...(sha256 ? { sha256 } : {}) }));
+  const result = Object.fromEntries(SAVED_SETUP_FIELDS.filter((name) => config[name] !== undefined).map((name) => [name, structuredClone(config[name])]));
+  result.extensions = structuredClone(config.extensions || []);
+  result.languages = structuredClone(config.languages || []);
   result.startupCommands = (config.startupCommands || []).map((argv) => [...argv]);
   result.fresh = false;
   if (config.deploymentRecipe) {
@@ -162,13 +163,24 @@ export function runtimeLocation(currentURL, config) {
   params.delete('hideToolbar');
   if (params.has('extensions') || params.has('extension')) {
     params.delete('extension');
-    if (config.extensions?.length) params.set('extensions', JSON.stringify(config.extensions));
-    else params.delete('extensions');
+    params.delete('extensions');
+    if (config.extensions?.length) {
+      try {
+        // The local recipe may now contain private package credentials.
+        createShareURL(currentURL, { extensions: config.extensions });
+        params.set('extensions', JSON.stringify(config.extensions));
+      } catch { /* Private instructions stay in browser storage, never the address bar. */ }
+    }
   }
   if (params.has('commands') || params.has('startupCommands')) {
     params.delete('startupCommands');
-    if (config.startupCommands?.length) params.set('commands', JSON.stringify(config.startupCommands));
-    else params.delete('commands');
+    params.delete('commands');
+    if (config.startupCommands?.length) {
+      try {
+        createShareURL(currentURL, { startupCommands: config.startupCommands });
+        params.set('commands', JSON.stringify(config.startupCommands));
+      } catch { /* Commands containing credentials remain private too. */ }
+    }
   }
   if (isolation) url.searchParams.set(ISOLATION_PARAMETER, `${isolation.version}:${isolation.policy}`);
   return url.href;
@@ -177,7 +189,7 @@ export function runtimeLocation(currentURL, config) {
 /** A changed setup recipe must not silently reopen a site built with older steps. */
 export async function isolateSetup(state, config) {
   const previous = Object.hasOwn(state.sites, config.storageKey) ? state.sites[config.storageKey] : null;
-  const signature = (value) => JSON.stringify({ joomlaPackage: value.joomlaPackage ?? null, jcbVersion: value.jcbVersion ?? null, jcbPackage: value.jcbPackage ?? null, extensions: value.extensions || [], startupCommands: value.startupCommands || [], siteName: value.siteName, menus: value.menus || [], template: value.template || null, languageTags: value.languageTags || [], multilingual: value.multilingual || false, content: value.content || null });
+  const signature = (value) => JSON.stringify({ joomlaPackage: value.joomlaPackage ?? null, jcbVersion: value.jcbVersion ?? null, jcbPackage: value.jcbPackage ?? null, extensions: value.extensions || [], startupCommands: value.startupCommands || [], siteName: value.siteName, menus: value.menus || [], overlays: value.overlays || [], template: value.template || null, languageTags: value.languageTags || [], multilingual: value.multilingual || false, content: value.content || null });
   if (!config.persistence || !previous || signature(previous) === signature(config)) return { configuration: config, changed: false };
   const content = JSON.stringify({ key: config.storageKey, deployId: config.deployId, joomlaVersion: config.joomlaVersion, setup: signature(config) });
   const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content))), (byte) => byte.toString(16).padStart(2, '0')).join('');

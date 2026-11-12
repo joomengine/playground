@@ -1,4 +1,5 @@
 import { networkFetch } from './network-transport.mjs';
+import { hasPackageAuthentication } from './package-sources.mjs';
 
 /** Immutable prepared sites, stored independently from running site databases. */
 const CACHE_VERSION = 1;
@@ -33,7 +34,7 @@ export async function deploymentImageFingerprint(config, manifest, { baseURL = D
   const php = manifest.php?.find(entry => entry.version === config.phpVersion);
   const joomla = config.joomlaPackage || manifest.joomla?.find(entry => entry.version === config.joomlaVersion);
   const fields = ['deployId', 'sourceDeployId', 'joomlaVersion', 'phpVersion', 'jcbVersion', 'jcbPackage', 'language',
-    'languageTags', 'multilingual', 'extensions', 'startupCommands', 'languages', 'menus', 'template', 'content', 'phpSettings'];
+    'languageTags', 'multilingual', 'extensions', 'startupCommands', 'languages', 'menus', 'template', 'content', 'phpSettings', 'overlays'];
   const configuration = Object.fromEntries(fields.filter(key => config[key] !== undefined).map(key => [key, config[key]]));
   // Arbitrary console commands may read the current site/account identity. Keep
   // those builds separate, while ordinary recipes can personalise one base.
@@ -48,6 +49,16 @@ export async function deploymentImageFingerprint(config, manifest, { baseURL = D
     nativeDriver: manifest.nativeDriver, php, joomla,
     baseImage: snapshot ? { url: snapshot.url, sha256: snapshot.sha256, joomlaVersion: snapshot.joomlaVersion } : undefined,
     configuration }))));
+}
+
+// Configuration records may contain tokens or depend on current remote data.
+// Execute them for each new site instead of baking them into a reusable image.
+export function canCacheDeploymentImage(config) {
+  if (config.overlays?.length) return false;
+  const packages = [config.joomlaPackage, config.jcbPackage, config.template,
+    ...(config.extensions ?? []), ...(config.languages ?? [])].filter(Boolean);
+  return !packages.some(entry => hasPackageAuthentication(entry)
+    || /[?&](?:[^=&]*(?:token|password|secret|signature|credential|api[_-]?key)[^=&]*)=/i.test(entry.url ?? ''));
 }
 
 /** An explicit snapshot is authoritative unless its URL identifies a maintained image. */
@@ -67,7 +78,7 @@ export function deploymentSnapshotSource(config, manifest, baseURL = DEFAULT_BAS
 export function completedDeploymentImageConfiguration(config) {
   const restored = { ...config, addonExtensions: [], addonStartupCommands: [], addonLanguages: [] };
   if (config.template) {
-    const { url, sha256, ...template } = config.template;
+    const { url, sha256, sha512, provider, apiBase, authentication, headers, ...template } = config.template;
     restored.template = template;
   }
   return restored;
@@ -230,6 +241,7 @@ export function createDeploymentImageCache({ baseURL = DEFAULT_BASE, storage = c
     },
     getCustom: fingerprint => read(`custom:${fingerprint}`),
     async saveCustom(config, manifest, bytes, { fingerprint, onProgress = () => {}, onWarning } = {}) {
+      if (!canCacheDeploymentImage(config)) return null;
       bytes = imageBytes(bytes);
       fingerprint ||= await deploymentImageFingerprint(config, manifest, { baseURL });
       const sha256 = await digest(bytes);

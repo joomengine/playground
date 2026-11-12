@@ -16,7 +16,7 @@ function deploymentName(value) {
 }
 
 function record(value) {
-  if (!value || !ID.test(value.id) || value.document?.schemaVersion !== 2) throw new TypeError('Invalid saved deployment.');
+  if (!value || !ID.test(value.id) || ![2, 3].includes(value.document?.schemaVersion)) throw new TypeError('Invalid saved deployment.');
   const title = deploymentName(value.document.name);
   parseDeploymentDocument(value.document);
   return { id: value.id, title, document: structuredClone(value.document) };
