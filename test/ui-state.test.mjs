@@ -215,3 +215,21 @@ test('resume falls back for a removed page without replaying action query parame
   assert.equal(await resolveResumePath(async () => new Response(null, { status: 405 }), '/articles', '/'), '/articles', 'A server without HEAD support still receives ordinary browser navigation.');
   assert.equal(await resolveResumePath(async () => { throw new Error('unavailable'); }, '/removed', '/'), '/');
 });
+
+test('private package and overlay credentials survive local saves without entering the runtime URL', async () => {
+  const extension = { url: 'https://example.test/private.zip', provider: 'github', authentication: { type: 'bearer', token: 'temporary-package-token' } };
+  const overlay = { key: 'repository', kind: 'record', component: 'com_componentbuilder', view: 'repository', fields: { token: 'temporary-record-token' } };
+  const input = { ...configuration, extensions: [extension], overlays: [overlay], startupCommands: [['config:set', 'token=temporary-command-token']] };
+  const state = rememberSite(empty(), input);
+  const restored = readSavedState({ getItem: () => JSON.stringify(state) }, 'settings').sites.work;
+  assert.deepEqual(restored.extensions, input.extensions);
+  assert.deepEqual(restored.overlays, input.overlays);
+  const location = new URL(runtimeLocation('https://playground.test/?extensions=[]&commands=[]', input));
+  assert.equal(location.searchParams.has('extensions'), false);
+  assert.equal(location.searchParams.has('commands'), false);
+  assert.doesNotMatch(location.href, /temporary/);
+  const next = structuredClone(input);
+  next.overlays[0].fields.token = 'replacement-record-token';
+  assert.equal((await isolateSetup(state, next)).changed, true);
+  assert.notDeepEqual(customSetupDetails(input), customSetupDetails(next));
+});

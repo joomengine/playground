@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createDeploymentImageCache, deploymentImageFingerprint, maintainedDeploymentImages,
-  completedDeploymentImageConfiguration, deploymentSnapshotSource } from '../src/deployment-images.mjs';
+  completedDeploymentImageConfiguration, deploymentSnapshotSource, canCacheDeploymentImage } from '../src/deployment-images.mjs';
 
 const baseURL = 'https://playground.example/project/';
 const bytes = Uint8Array.of(0x50, 0x4b, 3, 4, 1, 2, 3, 4);
@@ -226,4 +226,23 @@ test('complete local images keep setup data while preventing package and command
 test('maintained image catalog keeps package URLs and rejects conflicting identities', () => {
   assert.equal(maintainedDeploymentImages({ prebuiltDeploys: [{ ...manifest.prebuiltDeploys[0], url: 'https://elsewhere.test/image.zip' }] }, baseURL)[0].url, 'https://elsewhere.test/image.zip');
   assert.throws(() => maintainedDeploymentImages({ prebuiltDeploys: [manifest.prebuiltDeploys[0], manifest.prebuiltDeploys[0]] }, baseURL), /duplicate/);
+});
+
+test('private package downloads and record overlays never become reusable custom images', async () => {
+  const storage = memoryStorage();
+  const cache = createDeploymentImageCache({ baseURL, storage });
+  assert.equal(canCacheDeploymentImage(config), true);
+  const privatePackage = { ...config.extensions[0], authentication: { type: 'bearer', token: 'temporary-token' } };
+  for (const change of [
+    { extensions: [privatePackage] }, { jcbPackage: privatePackage }, { template: { ...privatePackage, element: 'custom' } },
+    { extensions: [{ url: privatePackage.url, headers: { 'x-custom-key': 'temporary' } }] },
+    { extensions: [{ url: `${privatePackage.url}?access_token=temporary` }] },
+    { overlays: [{ key: 'settings', kind: 'component', component: 'com_example', fields: { params: { title: 'Agent' } } }] },
+  ]) {
+    const privateConfig = { ...config, ...change };
+    assert.equal(canCacheDeploymentImage(privateConfig), false);
+    assert.equal(await cache.saveCustom(privateConfig, manifest, bytes), null);
+  }
+  assert.equal(storage.writes, 0);
+  assert.deepEqual(completedDeploymentImageConfiguration({ ...config, template: { ...privatePackage, element: 'custom' } }).template, { element: 'custom' });
 });
