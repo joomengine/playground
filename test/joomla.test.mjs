@@ -457,7 +457,7 @@ test('JCB upgrades inspect package bytes before native CLI installation and veri
   }
 });
 
-test('component overlays run after package installation, retain dependency input, and fail without stopping startup commands', async () => {
+test('component overlays run in separate PHP requests after packages and before startup commands', async () => {
   const { applyJoomlaConfiguration } = await import('../src/joomla/index.mjs');
   const extension = { url: 'https://example.test/component.zip' };
   const overlays = [
@@ -473,10 +473,11 @@ test('component overlays run after package installation, retain dependency input
         const call = runtimePayload(source); calls.push(call);
         if (call.operation === 'status') return operationResult({ ok: true, marker: { state: 'complete', joomlaVersion: '6.2.0' }, configured: true, installerPresent: false });
         if (call.operation === 'overlays') {
-          assert.deepEqual(call.payload.overlays, overlays, 'Forward dependencies must reach PHP together.');
-          return operationResult(failed ? { ok: false, error: 'Private failure: token=do-not-echo' }
-            : { ok: true, results: [{ key: 'server', status: 'applied' }, { key: 'component', status: 'skipped' }],
-              overlayWarnings: ['The optional administrator view is unavailable.'] });
+          assert.equal(call.payload.overlays.length, 1, 'Immutable native component constants require a separate request.');
+          const entry = call.payload.overlays[0];
+          if (entry.key === 'server' && failed) return operationResult({ ok: false, error: 'Private failure: token=do-not-echo' });
+          return operationResult({ ok: true, results: [{ key: entry.key, status: entry.key === 'server' ? 'applied' : 'skipped' }],
+            overlayWarnings: entry.key === 'server' ? [] : ['The optional administrator view is unavailable.'] });
         }
         if (call.operation === 'configure') return operationResult({ ok: true, version: '6.2.0', language: 'en-GB', siteName: 'Configured site' });
         return operationResult({ ok: true });
@@ -484,9 +485,36 @@ test('component overlays run after package installation, retain dependency input
     const result = await applyJoomlaConfiguration(runtime, { ...configuration, extensions: [extension], addonExtensions: [extension], overlays,
       startupCommands: [['cache:clean']] }, { sourceLoader: operationSource, progress: value => progress.push(value) });
     assert.deepEqual(calls.filter(call => call.operation === 'console' || call.operation === 'overlays')
-      .map(call => call.operation === 'console' ? call.payload.argv[0] : call.operation), ['extension:install', 'overlays', 'cache:clean']);
+      .map(call => call.operation === 'console' ? call.payload.argv[0] : call.payload.overlays[0].key),
+      failed ? ['extension:install', 'server', 'cache:clean'] : ['extension:install', 'server', 'component', 'cache:clean']);
     assert.ok(result.extensionWarnings.length);
     assert.equal(progress.at(-1).stage, 'ready');
     assert.doesNotMatch(JSON.stringify(progress), /do-not-echo/);
   }
+});
+
+test('overlay references order current entries, reject failed or cyclic dependencies, and allow persisted bindings', async () => {
+  const { applyJoomlaOverlays } = await import('../src/joomla/index.mjs');
+  const entries = [
+    { key: 'uses-failed', fields: { remote: [{ $ref: 'failed', field: 'guid' }] } },
+    { key: 'cycle-a', dependsOn: ['cycle-b'] },
+    { key: 'uses-source', source: { repository: { $ref: 'repository', field: 'guid' } } },
+    { key: 'failed', fields: {} },
+    { key: 'uses-persisted', fields: { remote: { $ref: 'previous-run', field: 'id' } } },
+    { key: 'repository', fields: {} },
+    { key: 'cycle-b', fields: { peer: { $ref: 'cycle-a' } } },
+  ];
+  const calls = [];
+  const runtime = { runPhp: async source => {
+    const { payload } = runtimePayload(source);
+    const entry = payload.overlays[0]; calls.push(entry.key);
+    return operationResult({ ok: true, results: [{ key: entry.key, status: entry.key === 'failed' ? 'skipped' : 'applied' }] });
+  } };
+  const { results, warnings } = await applyJoomlaOverlays(runtime, entries, { sourceLoader: operationSource });
+  assert.deepEqual(calls, ['failed', 'uses-persisted', 'repository', 'uses-source']);
+  assert.equal(results.find(item => item.key === 'uses-failed').status, 'skipped', 'A previous persisted value cannot bypass failure in this run.');
+  assert.equal(results.find(item => item.key === 'uses-persisted').status, 'applied');
+  assert.equal(results.find(item => item.key === 'cycle-a').status, 'skipped');
+  assert.equal(results.find(item => item.key === 'cycle-b').status, 'skipped');
+  assert.equal(warnings.length, 4);
 });
