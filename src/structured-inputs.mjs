@@ -127,9 +127,9 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
     } else if (type === 'boolean') {
       control = document.createElement('input'); control.type = 'checkbox'; control.checked = current ?? field.default ?? false;
     } else {
-      control = document.createElement(field.ui?.widget === 'textarea' ? 'textarea' : 'input');
+      control = document.createElement(field.ui?.widget === 'textarea' || field.format === 'textarea' ? 'textarea' : 'input');
       if (control.tagName === 'TEXTAREA') control.rows = path.at(-1) === 'introtext' || path.at(-1) === 'fulltext' ? 5 : 3;
-      else control.type = field.ui?.widget === 'password' || /(?:password|token|secret|private_key)/i.test(path.at(-1)) ? 'password'
+      else control.type = field.ui?.widget === 'password' || field.format === 'password' || /(?:password|token|secret|private_key)/i.test(path.at(-1)) ? 'password'
         : isNumber ? 'number' : field.format === 'email' ? 'email' : 'text';
       control.value = current ?? (kind === 'overlays' ? undefined : field.default) ?? '';
       if (isNumber) { control.step = type === 'integer' ? '1' : 'any'; if (field.minimum !== undefined) control.min = String(field.minimum); if (field.maximum !== undefined) control.max = String(field.maximum); }
@@ -176,9 +176,14 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
     if (typeof current === 'string') return { type: 'string', ...(current.includes('\n') ? { ui: { widget: 'textarea' } } : {}) };
     return null;
   }
-  function reference(current, replace, caption) {
+  function linkedChoices(field = {}, path = []) {
+    const link = field['x-joomla-link'];
+    return (Array.isArray(value) ? value : []).filter((entry, index) => index !== path[1] && (!link || entry.kind === 'record' && entry.component === link.component && entry.view === link.entity))
+      .map(entry => ({ const: entry.key, title: entry.fields?.title || entry.fields?.system_name || entry.key }));
+  }
+  function reference(current, replace, caption, field, path) {
     const wrapper = document.createElement('div'); wrapper.className = 'deployment-reference';
-    const choices = (Array.isArray(value) ? value : []).map(entry => ({ const: entry.key, title: entry.fields?.title || entry.fields?.system_name || entry.key }));
+    const choices = linkedChoices(field, path);
     wrapper.append(scalar(current.$ref, { type: 'string', oneOf: choices }, next => { if (next) replace({ ...current, $ref: next }); }, [], `${caption} · ${t('deploymentForm.reference')}`));
     wrapper.append(scalar(current.field || 'id', { type: 'string', enum: ['id', 'guid'] }, next => { if (next) replace({ ...current, field: next }); }, [], t('deploymentForm.referenceField')));
     return wrapper;
@@ -210,7 +215,7 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
         replace(object);
       };
       let rendered;
-      if (record(object[name]) && typeof object[name].$ref === 'string') rendered = reference(object[name], update, caption);
+      if (record(object[name]) && typeof object[name].$ref === 'string') rendered = reference(object[name], update, caption, field, path);
       else if (field.type === 'array') rendered = list(object[name] ?? [], field, update, [...path, name], caption);
       else if (field.type === 'object' || field.properties || record(object[name])) {
         if (!field.properties && !record(object[name])) continue;
@@ -218,6 +223,12 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
         section.append(legend, objectFields(object[name], field, update, [...path, name])); rendered = section;
       } else if (object[name] === null || Array.isArray(object[name])) { preserved = true; continue; }
       else rendered = scalar(object[name], field, update, [...path, name], caption, descriptor.required?.includes(name));
+      if (kind === 'overlays' && field['x-joomla-link'] && !record(object[name])) {
+        const choices = linkedChoices(field, path);
+        if (choices.length) rendered.append(scalar(undefined, { type: 'string', oneOf: choices, ui: { rerender: true } }, next => {
+          if (next) update({ $ref: next, field: field['x-joomla-link'].key === 'guid' ? 'guid' : 'id' });
+        }, [...path, name, '$ref'], `${caption} · ${t('deploymentForm.reference')}`));
+      }
       (field.ui?.advanced ? extra : wrapper).append(rendered);
     }
     for (const name of Object.keys(object)) if (!own(properties, name) && name !== 'key' && name !== 'schema') preserved = true;
@@ -414,7 +425,7 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
       row.append(scalar(command[0] ?? '', { type: 'string' }, next => { command[0] = next; }, [index, 0], t('deploymentForm.command'), true));
       command.slice(1).forEach((argument, number) => {
         const field = document.createElement('div'); field.className = 'structured-actions';
-        field.append(scalar(argument, { type: 'string' }, next => { command[number + 1] = next; }, [index, number + 1], `${t('deploymentForm.argument')} ${number + 1}`),
+        field.append(scalar(argument, { type: 'string', ui: { widget: 'textarea' } }, next => { command[number + 1] = next; }, [index, number + 1], `${t('deploymentForm.argument')} ${number + 1}`),
           button(t('deploymentForm.remove'), () => { command.splice(number + 1, 1); changed(); render(); })); row.append(field);
       });
       row.append(button(t('deploymentForm.addArgument'), () => { command.push(''); changed(); render(); }), button(t('deploymentForm.remove'), () => { value.splice(index, 1); changed(); render(); })); wrapper.append(row);
