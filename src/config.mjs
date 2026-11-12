@@ -254,6 +254,9 @@ export function normalizeJcbPackage(value, baseURL = 'https://playground.invalid
 }
 
 export function normalizeJoomlaPackage(value, baseURL = 'https://playground.invalid/', published) {
+  if (value && ['provider', 'apiBase', 'authentication', 'headers'].some(key => value[key] !== undefined)) {
+    throw new TypeError('Private download settings are supported for extensions, templates and JCB packages, but not Joomla core packages.');
+  }
   const result = parseExtensions([value], baseURL)[0];
   if (!Array.isArray(value.php) || !value.php.length || value.php.length > 30 || value.php.some(version => typeof version !== 'string' || !/^\d+\.\d+$/.test(version))) {
     throw new TypeError('The Joomla package must list its available PHP versions.');
