@@ -76,3 +76,17 @@ export function repositoryFormSchema() {
 export function builtinConfigurationTargets() {
   return [{ kind: 'record', component: 'com_componentbuilder', view: 'repository', title: 'JCB · Repository', schema: repositoryFormSchema() }];
 }
+
+/** Minimal offline request fields verified against Joomla 5.4's layout XML.
+ * Sources: joomla/joomla-cms, components/com_content/tmpl/{article,featured,category}/default.xml.
+ * Native discovery supplies extension layouts and their additional settings.
+ */
+export function builtinMenuTypes() {
+  return ['featured', 'article', 'category'].map(view => ({
+    component: 'com_content', view, layout: 'default',
+    ui: { label: `deploymentForm.menu.${{ featured: 'featuredArticles', article: 'singleArticle', category: 'categoryList' }[view]}` },
+    ...(view === 'featured' ? {} : { querySchema: { type: 'object', properties: {
+      id: { type: 'integer', minimum: 1, ui: { label: `deploymentForm.field.${view === 'article' ? 'articleNumber' : 'categoryNumber'}`, help: 'deploymentForm.help.contentNumber' } },
+    }, required: ['id'] } }),
+  }));
+}

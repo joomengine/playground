@@ -1,5 +1,5 @@
 import { t as translate } from './i18n.mjs';
-import { deploymentFormSchema, builtinConfigurationTargets } from './deployment-form-schema.mjs';
+import { deploymentFormSchema, builtinConfigurationTargets, builtinMenuTypes } from './deployment-form-schema.mjs';
 
 const RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
 const labelOf = key => String(key).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]/g, ' ').replace(/^./, letter => letter.toUpperCase());
@@ -242,7 +242,7 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
   }
   function freshItem(path, descriptor) {
     const name = path.at(-1) || kind;
-    if (name === 'menus') return { key: identifier('menu'), title: '', component: 'com_content', view: 'article', menuType: 'mainmenu', language: '*', published: true };
+    if (name === 'menus') return { key: identifier('menu'), title: '', component: 'com_content', view: 'featured', menuType: 'mainmenu', language: '*', published: true };
     if (name === 'categories') return { key: identifier('category'), title: '', alias: '', language: discovery.language || 'en-GB' };
     if (name === 'articles') return { key: identifier('article'), title: '', alias: '', language: value.categories?.[0]?.language || discovery.language || 'en-GB', category: value.categories?.[0]?.key || '', introtext: '' };
     if (descriptor.type === 'object' || descriptor.properties) return Object.fromEntries(Object.entries(descriptor.properties || {}).filter(([, field]) => field.default !== undefined).map(([key, field]) => [key, structuredClone(field.default)]));
@@ -255,13 +255,26 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
     details.addEventListener('toggle', () => openCards.set(key, details.open));
     return details;
   }
+  function menuTypes() {
+    const key = target => JSON.stringify([target.component, target.view, target.layout || 'default']);
+    const types = new Map(builtinMenuTypes().map(target => [key(target), { ...target, title: message(target.ui.label) }]));
+    for (const target of discovery.menuTypes || []) types.set(key(target), { ...types.get(key(target)), ...target });
+    for (const entry of value) {
+      if (!entry.component || !entry.view) continue;
+      const target = { component: entry.component, view: entry.view, layout: entry.query?.layout || 'default' };
+      if (!types.has(key(target))) types.set(key(target), { ...target,
+        title: `${labelOf(entry.component.replace(/^com_/, ''))} · ${labelOf(entry.view)}${target.layout !== 'default' ? ` · ${labelOf(target.layout)}` : ''}`,
+      });
+    }
+    return [...types.values()];
+  }
   function menuSchema(entry, descriptor) {
-    const available = discovery.menuTypes || [];
+    const available = menuTypes();
     const native = available.find(item => item.component === entry.component && item.view === entry.view && item.layout === (entry.query?.layout || 'default'))
       || available.find(item => item.component === entry.component && item.view === entry.view);
-    if (!native) return descriptor;
     const properties = { ...descriptor.properties };
     for (const name of ['component', 'view']) properties[name] = { ...properties[name], ui: { ...properties[name]?.ui, advanced: true } };
+    if (!native) return { ...descriptor, properties };
     for (const group of ['query', 'params']) {
       const fields = (native.fields || []).filter(field => field.group === group || group === 'query' && field.group === 'request');
       const nativeSchema = native[`${group}Schema`];
@@ -284,19 +297,19 @@ export function createStructuredInputs({ textarea, container, advanced, errorEle
     current.forEach((entry, index) => {
       const title = entry?.title || entry?.system_name || `${message(descriptor.ui?.item) || caption || t('deploymentForm.setting')} ${index + 1}`;
       const item = card(title, entry?.key || `${path.join('.')}.${index}`, current.length === 1);
-      if (kind === 'menus' && discovery.menuTypes?.length) {
-        const picker = document.createElement('select'); picker.setAttribute('aria-label', t('deploymentForm.field.view'));
-        const empty = document.createElement('option'); empty.value = ''; empty.textContent = t('deploymentForm.choose'); picker.append(empty);
-        discovery.menuTypes.forEach((target, number) => { const option = document.createElement('option'); option.value = String(number); option.textContent = target.title || `${target.component} · ${target.view}`; picker.append(option); });
-        const selected = discovery.menuTypes.findIndex(target => target.component === entry.component && target.view === entry.view && (target.layout || 'default') === (entry.query?.layout || 'default'));
-        picker.value = selected < 0 ? '' : String(selected);
-        picker.addEventListener('change', () => {
-          if (picker.value === '') return;
-          const target = discovery.menuTypes[Number(picker.value)]; entry.component = target.component; entry.view = target.view;
+      if (kind === 'menus') {
+        const available = menuTypes();
+        const selected = available.findIndex(target => target.component === entry.component && target.view === entry.view && (target.layout || 'default') === (entry.query?.layout || 'default'));
+        item.append(scalar(selected < 0 ? undefined : selected, { type: 'integer',
+          oneOf: available.map((target, number) => ({ const: number, title: target.title })),
+          ui: { help: 'deploymentForm.help.pageType', rerender: true },
+        }, choice => {
+          if (choice === undefined) return;
+          const target = available[choice]; entry.component = target.component; entry.view = target.view;
           if (target.layout && target.layout !== 'default') { entry.query ||= {}; entry.query.layout = target.layout; }
           else if (entry.query) delete entry.query.layout;
-          replace(current); changed(); render();
-        }); item.append(picker);
+          replace(current);
+        }, [...path, index, 'pageType'], t('deploymentForm.field.pageType'), true));
       }
       const itemSchema = kind === 'menus' ? menuSchema(entry, descriptor.items || {}) : descriptor.items || {};
       const child = record(entry) ? objectFields(entry, itemSchema, next => { current[index] = next; replace(current); item.querySelector('summary').textContent = next.title || title; }, [...path, index])
