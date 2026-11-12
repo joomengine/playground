@@ -654,7 +654,7 @@ function applyAdministrator(value) {
   }
 }
 function matchesInstalledSelection(input) {
-  const source = runtime?.configuration?.storageKey === input.storageKey
+  const source = runtime?.configuration && runtime.configuration.storageKey === input.storageKey
     && runtime.configuration.persistence === input.persistence ? runtime.configuration : savedState.sites[input.storageKey];
   return source && source.deployId === input.deployId && source.joomlaVersion === input.joomlaVersion
     && (source.jcbVersion || 'none') === (input.jcbVersion || 'none')
@@ -723,8 +723,10 @@ async function resolve(input) {
   // A complete recipe for an unchanged installed runtime needs no package lookup.
   // This also lets owners configure a JCB version no longer present in the catalog.
   if (input.deploymentRecipe && matchesInstalledSelection(input)) {
+    const document = input.deploymentRecipe;
     return { configuration: normalizeConfiguration(input, { catalog: catalogForRestoredSite(catalog, input), baseURL: deploymentURL }),
-      deploy: deploymentDescriptor(input.deployId) };
+      deploy: deploymentDescriptor(input.deployId) || { id: input.deployId, title: document.name,
+        joomla: document.requirements.joomla, requirements: document.requirements, configuration: document.configuration } };
   }
   input = customDeploymentInput(input);
   input.joomlaVersion ||= catalog.defaults.joomlaVersion;
