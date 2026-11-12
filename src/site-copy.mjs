@@ -1,3 +1,5 @@
+import { createFullDeploymentDocument } from './config.mjs';
+
 const SETUP_FIELDS = ['siteName', 'language', 'languageTags', 'multilingual', 'extensions', 'startupCommands', 'languages', 'menus', 'template', 'content', 'overlays'];
 
 /** Capture the existing files and database before allocating an independent site. */
@@ -43,8 +45,14 @@ export async function prepareUploadedSiteCopy({ input, sourceConfiguration, runt
       if (input[name] !== undefined) configuration[name] = structuredClone(input[name]);
     }
     const changed = SETUP_FIELDS.some(name => JSON.stringify(changes[name] ?? null) !== JSON.stringify(configuration[name] ?? null));
+    const documentOptions = { name: input.deploymentRecipe?.name || configuration.siteName,
+      requirements: input.deploymentRecipe?.requirements };
+    // Checkpoint arrays already contain the preset. Preserve that distinction on resume.
+    configuration.deploymentRecipe = createFullDeploymentDocument(configuration, documentOptions);
+    changes.admin = structuredClone(configuration.admin);
+    changes.deploymentRecipe = createFullDeploymentDocument(changes, documentOptions);
     return { checkpoint, configuration, rotateAdministrator: administratorEdited, ...(jcbUpgrade ? { jcbUpgrade } : {}),
-      ...(changed ? { changes: { ...changes, admin: configuration.admin } } : {}) };
+      ...(changed ? { changes } : {}) };
   } finally {
     if (!useCurrent) await source.close();
   }
