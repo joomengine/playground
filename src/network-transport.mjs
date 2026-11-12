@@ -122,11 +122,12 @@ export function createNetworkTransport(fetcher = globalThis.fetch.bind(globalThi
       if (!proxyFirst) {
         let response, directMetadata;
         try {
-          if (credentialHeaders.length && redirect === 'follow') {
+          const customCredentials = credentialHeaders.some(name => !['authorization', 'cookie', 'proxy-authorization'].includes(name));
+          if (customCredentials && directInit.redirect === 'follow') {
             // Browser Fetch strips Authorization but forwards custom token headers
             // on redirects. Follow exposed redirects ourselves; an opaque browser
             // redirect falls back to the Worker, which applies the same policy.
-            const result = await cancellable(() => fetchHttpRedirects(fetcher, target,
+            const result = await cancellable(() => fetchHttpRedirects(request => fetcher(request, {}), target,
               new Request(original ?? target.href, directInit), { ...network, redirect, credentialHeaders, cache }, ctx.signal), ctx);
             response = result.response;
             directMetadata = { url: result.url, redirected: result.redirected, redirectCount: result.redirectCount };

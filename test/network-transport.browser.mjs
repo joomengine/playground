@@ -29,6 +29,9 @@ for (const name of names) test(`${name}: direct CORS downloads and anonymous pro
       let denied = false;
       try { await fetch(`${fixtureOrigin}/denied/binary`); } catch { denied = true; }
       const fallback = await hash(await transport(`${fixtureOrigin}/denied/binary`));
+      const privateDownload = await hash(await transport(`${fixtureOrigin}/direct/redirect`, {
+        headers: { 'X-Proof': 'scoped-download-token' }, network: { credentialHeaders: ['X-Proof'] },
+      }));
       const upload = await transport(`${writeOrigin}/denied/echo`, { method: 'PATCH', body: new Uint8Array([0, 255, 65, 128]),
         headers: { Authorization: 'Bearer upstream-fixture', 'Content-Type': 'application/octet-stream', 'X-API-Key': 'custom' } });
       const form = new FormData(); form.append('name', 'Joomla');
@@ -43,7 +46,7 @@ for (const name of names) test(`${name}: direct CORS downloads and anonymous pro
       const integrityCleared = await hash(await transport(new Request(`${fixtureOrigin}/denied/binary`, { integrity: incorrectIntegrity }), { integrity: '' }));
       const status = await transport(`${writeOrigin}/denied/status/500`);
       const post = await transport(`${fixtureOrigin}/denied/echo`, { method: 'POST', body: 'write once', headers: { 'Content-Type': 'text/plain' } });
-      return { direct, browserHeaders, deliveredHeaders, denied, fallback, upload: [...new Uint8Array(await upload.arrayBuffer())],
+      return { direct, browserHeaders, deliveredHeaders, denied, fallback, privateDownload, upload: [...new Uint8Array(await upload.arrayBuffer())],
         status: status.status, post: await post.text(), requestUpload: await requestUpload.text(), formUpload: await formUpload.text(),
         integrityRejected, integrityFallback, integrityOverride, integrityCleared };
     }, { config: fixture.config, fixtureOrigin, writeOrigin, correctIntegrity: `sha256-${Buffer.from(binaryHash, 'hex').toString('base64')}` });
@@ -53,6 +56,10 @@ for (const name of names) test(`${name}: direct CORS downloads and anonymous pro
     assert.equal(fixture.requests.filter(item => item.headers.cookie === 'php_session=exact-cookie').length, 1);
     assert.equal(results.denied, true, 'The browser must enforce CORS before fallback success is accepted.');
     assert.equal(results.fallback, binaryHash); assert.deepEqual(results.upload, [0, 255, 65, 128]);
+    assert.equal(results.privateDownload, binaryHash, 'An opaque browser redirect completes through the scoped Worker route.');
+    assert.ok(fixture.requests.some(item => item.path === '/direct/redirect' && item.headers['x-proof'] === 'scoped-download-token'));
+    assert.equal(fixture.requests.some(item => item.path === '/denied/binary' && item.headers['x-proof'] === 'scoped-download-token'), false,
+      'The download token must never reach the redirected origin.');
     assert.equal(results.status, 500); assert.equal(results.post, 'write once');
     assert.match(results.requestUpload, /name="name"[\s\S]*Joomla/);
     assert.match(results.formUpload, /name="name"[\s\S]*Joomla/);

@@ -74,6 +74,15 @@ test('real workerd streams anonymous binary downloads/uploads, compression and r
     assert.equal(metadata(redirect).url, 'https://another-host.example/final?value=one%26two');
     assert.equal(metadata(redirect).redirectCount, 1);
     assert.deepEqual(Buffer.from(await redirect.arrayBuffer()), original);
+    const authenticated = await send('/redirect', { version: 2,
+      headers: [['PRIVATE-TOKEN', 'gitlab-token'], ['X-Download-Key', 'custom-token']], credentialHeaders: ['X-Download-Key'] });
+    assert.equal(metadata(authenticated).version, 2);
+    assert.equal(authenticated.headers.get('cache-control'), 'no-store');
+    assert.equal(received.at(-2).headers['private-token'], 'gitlab-token');
+    assert.equal(received.at(-2).headers['x-download-key'], 'custom-token');
+    assert.equal(received.at(-1).headers['private-token'], undefined);
+    assert.equal(received.at(-1).headers['x-download-key'], undefined);
+    assert.deepEqual(Buffer.from(await authenticated.arrayBuffer()), original);
   } finally { await mf.dispose(); upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve)); }
 });
 

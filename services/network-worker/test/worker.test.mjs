@@ -75,6 +75,22 @@ test('redirects follow arbitrary hosts, honor caller limits and remove cross-ori
   assert.equal((await limited.json()).error.code, 'TOO_MANY_REDIRECTS');
 });
 
+test('v2 private downloads scope custom credentials and remain uncached, while v1 clients still receive v1', async () => {
+  for (const version of [1, 2]) {
+    const calls = [];
+    const worker = createRelayWorker({ fetcher: async upstream => {
+      calls.push(upstream);
+      return calls.length === 1 ? new Response(null, { status: 302, headers: { Location: 'https://cdn.example/archive.zip' } }) : new Response('zip');
+    } });
+    const response = await worker.fetch(request('https://git.example/download', { version,
+      headers: [['PRIVATE-TOKEN', 'provider-secret'], ['X-Download-Key', 'custom-secret']], credentialHeaders: ['X-Download-Key'] }));
+    assert.equal(metadata(response).version, version); assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(calls[0].headers.get('x-download-key'), 'custom-secret');
+    for (const name of ['private-token', 'x-download-key']) assert.equal(calls[1].headers.has(name), false);
+    assert.equal(calls[1].cache, 'no-store'); assert.equal(await response.text(), 'zip');
+  }
+});
+
 test('manual redirects preserve original status and location without following', async () => {
   let calls = 0;
   const worker = createRelayWorker({ fetcher: async () => { calls++; return new Response(null, { status: 307, headers: { Location: '/next' } }); } });
@@ -122,7 +138,7 @@ test('preflight and health require no state store or configured secrets', async 
   assert.equal(preflight.status, 204);
   assert.equal(preflight.headers.get('Access-Control-Allow-Headers'), 'x-playground-request');
   const health = await worker.fetch(new Request(`${endpoint}healthz`));
-  assert.deepEqual(await health.json(), { version: 1, mode: 'anonymous' });
+  assert.deepEqual(await health.json(), { version: 2, mode: 'anonymous' });
 });
 
 
