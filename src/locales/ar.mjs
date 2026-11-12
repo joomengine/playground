@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "استخدم فقط الحقول المطلوبة لطريقة المصادقة المحددة.",
   "error.packageAuthRequired": "أكمل الحقول الخاصة بطريقة المصادقة المحددة.",
   "error.packageAuthSingleLine": "يجب أن تكون قيم المصادقة نصًا من سطر واحد.",
-  "error.packageBasicUsername": "لا يمكن أن يحتوي اسم المستخدم لمصادقة Basic على نقطتين رأسيتين."
+  "error.packageBasicUsername": "لا يمكن أن يحتوي اسم المستخدم لمصادقة Basic على نقطتين رأسيتين.",
+  "deploymentForm.field.pageType": "نوع الصفحة",
+  "deploymentForm.menu.singleArticle": "مقال واحد",
+  "deploymentForm.menu.featuredArticles": "مقالات مميزة",
+  "deploymentForm.menu.categoryList": "قائمة الفئة",
+  "deploymentForm.field.articleNumber": "رقم المقال",
+  "deploymentForm.field.categoryNumber": "رقم الفئة",
+  "deploymentForm.help.pageType": "اختر نوع الصفحة التي يفتحها عنصر القائمة هذا. شغّل الموقع لاكتشاف أنواع الصفحات التي توفرها الإضافات المثبتة.",
+  "deploymentForm.help.contentNumber": "أدخل الرقم المعروض لهذا المقال أو هذه الفئة في Joomla."
 });

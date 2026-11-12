@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "Використовуйте лише поля, потрібні для вибраного способу автентифікації.",
   "error.packageAuthRequired": "Заповніть поля для вибраного способу автентифікації.",
   "error.packageAuthSingleLine": "Значення автентифікації мають бути однорядковим текстом.",
-  "error.packageBasicUsername": "Ім’я користувача для автентифікації Basic не може містити двокрапку."
+  "error.packageBasicUsername": "Ім’я користувача для автентифікації Basic не може містити двокрапку.",
+  "deploymentForm.field.pageType": "Тип сторінки",
+  "deploymentForm.menu.singleArticle": "Окрема стаття",
+  "deploymentForm.menu.featuredArticles": "Вибрані статті",
+  "deploymentForm.menu.categoryList": "Список категорії",
+  "deploymentForm.field.articleNumber": "Номер статті",
+  "deploymentForm.field.categoryNumber": "Номер категорії",
+  "deploymentForm.help.pageType": "Виберіть тип сторінки, яку відкриває цей пункт меню. Запустіть сайт, щоб знайти типи сторінок установлених розширень.",
+  "deploymentForm.help.contentNumber": "Введіть номер цієї статті або категорії, показаний у Joomla."
 });

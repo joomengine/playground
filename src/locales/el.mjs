@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "Χρησιμοποιήστε μόνο τα πεδία που απαιτεί η επιλεγμένη μέθοδος ελέγχου ταυτότητας.",
   "error.packageAuthRequired": "Συμπληρώστε τα πεδία της επιλεγμένης μεθόδου ελέγχου ταυτότητας.",
   "error.packageAuthSingleLine": "Οι τιμές ελέγχου ταυτότητας πρέπει να είναι κείμενο μίας γραμμής.",
-  "error.packageBasicUsername": "Το όνομα χρήστη για έλεγχο ταυτότητας Basic δεν μπορεί να περιέχει άνω και κάτω τελεία."
+  "error.packageBasicUsername": "Το όνομα χρήστη για έλεγχο ταυτότητας Basic δεν μπορεί να περιέχει άνω και κάτω τελεία.",
+  "deploymentForm.field.pageType": "Τύπος σελίδας",
+  "deploymentForm.menu.singleArticle": "Μεμονωμένο άρθρο",
+  "deploymentForm.menu.featuredArticles": "Προβεβλημένα άρθρα",
+  "deploymentForm.menu.categoryList": "Λίστα κατηγορίας",
+  "deploymentForm.field.articleNumber": "Αριθμός άρθρου",
+  "deploymentForm.field.categoryNumber": "Αριθμός κατηγορίας",
+  "deploymentForm.help.pageType": "Επιλέξτε τον τύπο σελίδας που ανοίγει αυτό το στοιχείο μενού. Ξεκινήστε τον ιστότοπο για να βρείτε τύπους σελίδων από τις εγκατεστημένες επεκτάσεις.",
+  "deploymentForm.help.contentNumber": "Εισαγάγετε τον αριθμό που εμφανίζεται για αυτό το άρθρο ή την κατηγορία στο Joomla."
 });

@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "শুধু নির্বাচিত প্রমাণীকরণ পদ্ধতির জন্য প্রয়োজনীয় ঘরগুলো ব্যবহার করুন।",
   "error.packageAuthRequired": "নির্বাচিত প্রমাণীকরণ পদ্ধতির ঘরগুলো পূরণ করুন।",
   "error.packageAuthSingleLine": "প্রমাণীকরণের মান এক লাইনের লেখা হতে হবে।",
-  "error.packageBasicUsername": "Basic প্রমাণীকরণের ব্যবহারকারীর নামে কোলন থাকতে পারে না।"
+  "error.packageBasicUsername": "Basic প্রমাণীকরণের ব্যবহারকারীর নামে কোলন থাকতে পারে না।",
+  "deploymentForm.field.pageType": "পাতার ধরন",
+  "deploymentForm.menu.singleArticle": "একটি নিবন্ধ",
+  "deploymentForm.menu.featuredArticles": "নির্বাচিত নিবন্ধ",
+  "deploymentForm.menu.categoryList": "বিভাগের তালিকা",
+  "deploymentForm.field.articleNumber": "নিবন্ধের নম্বর",
+  "deploymentForm.field.categoryNumber": "বিভাগের নম্বর",
+  "deploymentForm.help.pageType": "এই মেনু আইটেমটি যে ধরনের পাতা খুলবে তা বেছে নিন। ইনস্টল করা এক্সটেনশনের পাতার ধরন খুঁজতে সাইট চালু করুন।",
+  "deploymentForm.help.contentNumber": "Joomla-তে এই নিবন্ধ বা বিভাগের জন্য দেখানো নম্বরটি লিখুন।"
 });

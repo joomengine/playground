@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "選択した認証方式で必要なフィールドのみを使用してください。",
   "error.packageAuthRequired": "選択した認証方式のフィールドを入力してください。",
   "error.packageAuthSingleLine": "認証値は1行のテキストで入力してください。",
-  "error.packageBasicUsername": "Basic 認証のユーザー名にコロンは使用できません。"
+  "error.packageBasicUsername": "Basic 認証のユーザー名にコロンは使用できません。",
+  "deploymentForm.field.pageType": "ページの種類",
+  "deploymentForm.menu.singleArticle": "単一記事",
+  "deploymentForm.menu.featuredArticles": "注目記事",
+  "deploymentForm.menu.categoryList": "カテゴリー一覧",
+  "deploymentForm.field.articleNumber": "記事番号",
+  "deploymentForm.field.categoryNumber": "カテゴリー番号",
+  "deploymentForm.help.pageType": "このメニュー項目で開くページの種類を選択してください。サイトを起動すると、インストール済みの拡張機能が提供するページの種類を取得できます。",
+  "deploymentForm.help.contentNumber": "Joomla でこの記事またはカテゴリーに表示されている番号を入力してください。"
 });

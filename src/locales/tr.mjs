@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "Yalnızca seçilen kimlik doğrulama yönteminin gerektirdiği alanları kullanın.",
   "error.packageAuthRequired": "Seçilen kimlik doğrulama yönteminin alanlarını doldurun.",
   "error.packageAuthSingleLine": "Kimlik doğrulama değerleri tek satırlık metin olmalıdır.",
-  "error.packageBasicUsername": "Basic kimlik doğrulaması kullanıcı adı iki nokta üst üste içeremez."
+  "error.packageBasicUsername": "Basic kimlik doğrulaması kullanıcı adı iki nokta üst üste içeremez.",
+  "deploymentForm.field.pageType": "Sayfa türü",
+  "deploymentForm.menu.singleArticle": "Tek makale",
+  "deploymentForm.menu.featuredArticles": "Öne çıkan makaleler",
+  "deploymentForm.menu.categoryList": "Kategori listesi",
+  "deploymentForm.field.articleNumber": "Makale numarası",
+  "deploymentForm.field.categoryNumber": "Kategori numarası",
+  "deploymentForm.help.pageType": "Bu menü öğesinin açacağı sayfa türünü seçin. Yüklü eklentilerin sağladığı sayfa türlerini keşfetmek için siteyi başlatın.",
+  "deploymentForm.help.contentNumber": "Joomla’da bu makale veya kategori için gösterilen numarayı girin."
 });

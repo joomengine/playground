@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "Verwende nur die Felder, die die gewählte Authentifizierungsmethode benötigt.",
   "error.packageAuthRequired": "Fülle die Felder für die gewählte Authentifizierungsmethode aus.",
   "error.packageAuthSingleLine": "Authentifizierungswerte müssen einzeiliger Text sein.",
-  "error.packageBasicUsername": "Ein Benutzername für Basic-Authentifizierung darf keinen Doppelpunkt enthalten."
+  "error.packageBasicUsername": "Ein Benutzername für Basic-Authentifizierung darf keinen Doppelpunkt enthalten.",
+  "deploymentForm.field.pageType": "Seitentyp",
+  "deploymentForm.menu.singleArticle": "Einzelner Beitrag",
+  "deploymentForm.menu.featuredArticles": "Hauptbeiträge",
+  "deploymentForm.menu.categoryList": "Kategorieliste",
+  "deploymentForm.field.articleNumber": "Beitragsnummer",
+  "deploymentForm.field.categoryNumber": "Kategorienummer",
+  "deploymentForm.help.pageType": "Wähle die Art der Seite, die dieser Menüeintrag öffnet. Starte die Website, um Seitentypen installierter Erweiterungen zu laden.",
+  "deploymentForm.help.contentNumber": "Gib die Nummer ein, die Joomla für diesen Beitrag oder diese Kategorie anzeigt."
 });

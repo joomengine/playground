@@ -686,5 +686,13 @@ export default Object.freeze({
   "error.packageAuthFields": "仅使用所选身份验证方式要求的字段。",
   "error.packageAuthRequired": "请填写所选身份验证方式的字段。",
   "error.packageAuthSingleLine": "身份验证值必须为单行文本。",
-  "error.packageBasicUsername": "Basic 身份验证的用户名不能包含冒号。"
+  "error.packageBasicUsername": "Basic 身份验证的用户名不能包含冒号。",
+  "deploymentForm.field.pageType": "页面类型",
+  "deploymentForm.menu.singleArticle": "单篇文章",
+  "deploymentForm.menu.featuredArticles": "精选文章",
+  "deploymentForm.menu.categoryList": "分类列表",
+  "deploymentForm.field.articleNumber": "文章编号",
+  "deploymentForm.field.categoryNumber": "分类编号",
+  "deploymentForm.help.pageType": "选择此菜单项打开的页面类型。启动站点后，可发现已安装扩展提供的页面类型。",
+  "deploymentForm.help.contentNumber": "请输入 Joomla 中此文章或分类显示的编号。"
 });
