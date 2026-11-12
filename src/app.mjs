@@ -1658,8 +1658,10 @@ async function useDeployment() {
   try {
     let input = formInput();
     const storageKey = `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`;
-    const sourceSite = savedState.sites[input.storageKey] || (runtime?.configuration?.storageKey === input.storageKey ? runtime.configuration : null);
-    if (input.restoredSite || sourceSite) {
+    const sourceSite = runtime?.configuration && runtime.configuration.storageKey === input.storageKey ? runtime.configuration : savedState.sites[input.storageKey];
+    const changesInstalledJcb = sourceSite && input.joomlaVersion === sourceSite.joomlaVersion
+      && input.jcbVersion && input.jcbVersion !== 'none' && input.jcbVersion !== (sourceSite.jcbVersion || 'none');
+    if (input.restoredSite || changesInstalledJcb) {
       if (input.jcbVersion && input.jcbVersion !== 'none' && !input.jcbPackage) {
         await prepareDynamicInput(input);
         const pin = [...pinnedJcb.values()].find(item => item.version === input.jcbVersion);

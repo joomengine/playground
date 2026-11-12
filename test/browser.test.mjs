@@ -496,7 +496,6 @@ async function dismissAutomaticTour(page) {
     if (!response.ok) throw new Error(`Tour-state probe failed: HTTP ${response.status}`);
     return (await response.json())?.state === 'skipped';
   }, probeURL.href, { timeout: requestTimeout, polling: 500 });
-  return { action: 'tour-state', tour: String(tourId), username };
 }
 
 async function previewContract(page, action = 'read', frameId = 'site-frame') {
@@ -506,7 +505,7 @@ async function previewContract(page, action = 'read', frameId = 'site-frame') {
     const prefix = source.pathname.match(/^.*\/__site\/[^/]+\/[^/]+\//)?.[0];
     if (!prefix) throw new Error('The active preview has no site route.');
     const url = new URL(`${prefix}modules/mod_playground_contract/contract.php`, source);
-    for (const [key, value] of Object.entries(typeof action === 'string' ? { action } : action)) url.searchParams.set(key, value);
+    url.searchParams.set('action', action);
     const response = await fetch(url);
     return { status: response.status, text: await response.text() };
   }, { action, frameId }), `Preview data ${action}`);
@@ -1202,7 +1201,7 @@ for (const name of browserNames) {
         page.testStep = 'launch administrator';
         await launchFixture(page, page.locator('#launch-button'));
         await renderedSiteFrame(page);
-        const originalTour = await dismissAutomaticTour(page);
+        await dismissAutomaticTour(page);
         assert.match(await page.frameLocator('#site-frame').locator('html').innerHTML(), /com_cpanel|task=logout|value=["']logout["']/i);
         await mkdir(path.join(root, 'test-results'), { recursive: true });
         await page.screenshot({ path: path.join(root, 'test-results', `interface-${name}.png`), fullPage: true });
@@ -1375,7 +1374,7 @@ for (const name of browserNames) {
         await page.goto(savedURL.href);
         await renderedSiteFrame(page);
         assert.deepEqual(await previewContract(page), afterSwitch, 'Launching an altered link must preserve the original saved site.');
-        page.testStep = 'deployment editor copies the saved site into an independent identity';
+        page.testStep = 'deployment editor creates an independent site and preserves saved sites';
         await showSiteActions(page);
         await page.locator('#deploy-editor-button').click();
         await page.locator('#deploy-dialog').waitFor({ state: 'visible' });
@@ -1394,14 +1393,12 @@ for (const name of browserNames) {
           }, { previous: previousDeploymentFrame, savedKey }, { timeout: requestTimeout });
           await renderedSiteFrame(page);
         } finally { await previousDeploymentFrame?.dispose(); }
-        const copiedKey = await page.locator('#storage-key').inputValue();
-        assert.notEqual(copiedKey, savedKey);
-        const copied = await previewContract(page);
-        assert.deepEqual(copied, afterSwitch, 'Using a saved deployment copies its existing files and database.');
-        assert.equal((await previewContract(page, originalTour)).state, 'skipped', 'The copied administrator retains the dismissed guided tour.');
+        assert.notEqual(await page.locator('#storage-key').inputValue(), savedKey);
+        await dismissAutomaticTour(page);
+        assert.equal((await previewContract(page)).database, null, 'New site must install an independent database.');
         await showQuickSettings(page);
         await stageSavedSite(page, savedKey);
-        assert.deepEqual(await previewContract(page), copied, 'Selecting a saved site does not launch it.');
+        assert.equal((await previewContract(page)).database, null, 'Selecting a saved site does not launch it.');
         page.testStep = 'rename preserves an inactive name draft across route and save updates';
         await page.locator('#saved-site-name').fill('');
         await saveRunningSite(page);
@@ -1420,12 +1417,12 @@ for (const name of browserNames) {
           .filter(([entry]) => entry.startsWith('joomengine:launch:'))
           .some(([, value]) => JSON.parse(value).sites?.[key]?.displayName === 'Renamed original site'), savedKey), true,
         'The renamed label must be persisted under the original site identity.');
-        assert.deepEqual(await previewContract(page), copied, 'Renaming an inactive entry does not change the running files or database.');
+        assert.equal((await previewContract(page)).database, null, 'Renaming an inactive entry does not change the running database.');
         await stageSavedSite(page, freshKey);
         page.once('dialog', dialog => dialog.accept());
         await page.locator('#delete-site-button').click();
         await page.waitForFunction(key => !document.querySelector(`#saved-site option[value="${key}"]`), freshKey);
-        assert.deepEqual(await previewContract(page), copied, 'Deleting an inactive entry never launches it or deletes the running files or database.');
+        assert.equal((await previewContract(page)).database, null, 'Deleting an inactive entry never launches it or deletes the running database.');
         await stageSavedSite(page, savedKey);
         await launchStagedSite(page);
         assert.deepEqual(await previewContract(page), afterSwitch, 'The saved-site selector must reopen the original files and database.');
@@ -1449,12 +1446,6 @@ for (const name of browserNames) {
         const afterReset = await previewContract(page);
         assert.equal(afterReset.database, null, 'Reset must remove the previous MariaDB data.');
         assert.equal(afterReset.file, null, 'Reset must remove the previous site files.');
-        page.testStep = 'resetting the source preserves the independent saved copy';
-        await showQuickSettings(page);
-        await stageSavedSite(page, copiedKey);
-        await launchStagedSite(page);
-        assert.deepEqual(await previewContract(page), copied, 'Resetting the source must leave the copied files and database intact.');
-        assert.equal((await previewContract(page, originalTour)).state, 'skipped', 'The saved copy retains the administrator profile after reopening.');
         page.testStep = 'close site';
         await showSiteActions(page);
         await page.locator('#close-button').click();
@@ -1463,7 +1454,7 @@ for (const name of browserNames) {
         await page.locator('#launch-button:enabled').waitFor();
         await bounded(Promise.allSettled([...page.responseChecks]), 'Read dashboard responses', 10_000);
         await assertCleanConsole(page);
-        records.push({ ...defaultPair, interfaceLaunch: true, interfaceReset: true, phpSwitch: changedPHP, persistedAutomaticResume: true, portableDownload: true, freshPreservesOriginal: true, savedCopyIsolation: true, changedSourceIsolation: true, optionalInstallerWarning: true, savedSiteSelector: true });
+        records.push({ ...defaultPair, interfaceLaunch: true, interfaceReset: true, phpSwitch: changedPHP, persistedAutomaticResume: true, portableDownload: true, freshPreservesOriginal: true, changedSourceIsolation: true, optionalInstallerWarning: true, savedSiteSelector: true });
       } catch (error) {
         await saveBrowserDiagnostics(page, `interface-${name}`, error);
         throw error;

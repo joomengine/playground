@@ -211,7 +211,7 @@ Open a saved administrator record, or select records in its list, then choose **
 
 Installation precedes configuration. Dependent overlays are applied in dependency order, followed by the deployment's Joomla CLI commands. Commands still use argument arrays, such as `[["cache:clean"]]`, and run after JCB and other selected extensions have been installed. Merely reopening a saved site does not rerun startup commands.
 
-When **Use** starts from a saved site, Playground checkpoints it into an independent site. Selecting a newer JCB version updates that copy through the normal installer, validates the package version, and verifies the actual installed version. Equal versions need no update; downgrades are rejected. The original site's files and database remain intact.
+Uploaded sites start from an independent copy of their saved data. For ordinary saved sites, **Use** retains its fresh-install behavior unless a different JCB version is selected on the same Joomla release. In that case, Playground checkpoints the site and updates the copy through the normal installer, validates the package version, and verifies the actual installed version. Equal versions need no update; downgrades are rejected. The original site's files and database remain intact.
 
 For an agent handoff, export the configuration, import that file into the other Playground, review the selected runtime and start the deployment. The file describes setup instructions and access, while a complete site download carries existing files and database contents.
 
