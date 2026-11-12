@@ -121,13 +121,13 @@ Use the Rocket deployment editor to select a complete setup, then edit its site 
 
 **Use** starts an independent site; **Apply to this site** changes a running site after a checkpoint. Applying deployment changes does not reinstall Joomla or change its major version. Commands, menu data, template parameters and content have basic forms and an advanced JSON view of the same values.
 
-The portable JSON document uses [document.schema.json](document.schema.json). **Export configuration** writes schema version 2 with `name`, `requirements` and a complete `configuration`, including administrator settings and the provenance of managed versus custom packages. Importing it creates a named custom deployment; a name collision receives a distinct name. Neither a configuration document nor a share link contains the site's files or database.
+The portable JSON document uses [document.schema.json](document.schema.json). **Export configuration** writes schema version 3 with `name`, `requirements` and a complete `configuration`, including administrator settings, private package authentication, component configuration, and the provenance of managed versus custom packages. Importing it creates a named custom deployment; a name collision receives a distinct name. Neither a configuration document nor a share link contains the site's files or database.
 
-Public share links continue using schema version 1 and exclude administrator settings. Existing version 1 documents remain importable. A version 2 recipe looks like this:
+Public share links continue using schema version 1 and exclude administrator settings. Private package credentials and component overlays belong in the exported file, not a public link. Existing version 1 and 2 documents remain importable. A version 3 recipe looks like this:
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "name": "Client demonstration",
   "requirements": { "joomla": ["6"], "jcb": "optional", "php": ["8.4", "8.5"] },
   "configuration": {
@@ -151,11 +151,11 @@ Public share links continue using schema version 1 and exclude administrator set
 }
 ```
 
-The share panel encodes advanced public configurations in a `#deploy=` fragment and shows the URL for copying. Generated links are limited to 16 KiB. Larger public documents can be hosted at a URL and opened with `?config=URL`; retrieval uses the shared HTTP transport. Full version 2 documents are exported and imported through the editor. Documents are limited to 1 MiB.
+The share panel encodes advanced public configurations in a `#deploy=` fragment and shows the URL for copying. Generated links are limited to 16 KiB. Larger public documents can be hosted at a URL and opened with `?config=URL`; retrieval uses the shared HTTP transport. Full version 3 documents are exported and imported through the editor. Documents are limited to 1 MiB.
 
 `createDeploymentSourceURL(location, { url })` creates a hosted-document link containing `config` and `start=1`. Its source object contains only the document URL.
 
-Programmatic consumers can import `createFullDeploymentDocument`, `createDeploymentDocument`, `parseDeploymentDocument`, `loadDeploymentDocument`, `createShareURL` and `createDeploymentSourceURL` from `src/config.mjs`. `createFullDeploymentDocument(config, { name, requirements })` creates the version 2 document. Its requirements declare Joomla majors, optional PHP constraints, explicit Joomla fallbacks and whether JCB is required. Parsing version 2 returns a `deploymentRecipe` alongside the configuration; the resolver uses those complete lists without appending the original preset again. Public shares carry a standalone sanitized recipe for custom deployments, omitting administrator settings and local storage identities.
+Programmatic consumers can import `createFullDeploymentDocument`, `createDeploymentDocument`, `parseDeploymentDocument`, `loadDeploymentDocument`, `createShareURL` and `createDeploymentSourceURL` from `src/config.mjs`. `createFullDeploymentDocument(config, { name, requirements })` creates the version 3 document. Its requirements declare Joomla majors, optional PHP constraints, explicit Joomla fallbacks and whether JCB is required. Parsing version 2 or 3 returns a `deploymentRecipe` alongside the configuration; the resolver uses those complete lists without appending the original preset again. Public shares carry a standalone sanitized recipe for custom deployments, omitting administrator settings and local storage identities.
 
 ## Menus, templates and languages
 
@@ -186,3 +186,35 @@ Maintained images follow the server's current build manifest. Before creating a 
 A successful initial custom build is exported and stored before the site opens for editing. Later sites with the same effective packages, configuration and runtime restore a separate copy, apply their own site name and administrator, and skip packages and commands already included in the image. Builds with failed optional setup steps are not stored as reusable images. Saved sites continue resuming their own state, and later interactive edits are never silently added to a deployment image.
 
 Changes to build inputs or the playground runtime produce a different custom image identity. Console-command recipes also include the configured site and administrator identity in that comparison because commands may depend on those values. The launch display distinguishes building and saving an image from restoring and launching a site. If browser storage cannot save an image, the completed site still opens normally.
+
+
+## Private packages and component configuration
+
+The deployment editor uses the deployment schema for menu and content fields. Installed Joomla forms supply component, module, plugin and template fields. Each area retains an **Advanced JSON** editor; switching views preserves settings the form does not recognize. Short field explanations are available beside the controls and follow the interface language.
+
+Each extension package can select **Direct URL**, **GitHub**, **Gitea** or **GitLab**. Private downloads support a provider token, bearer token, username/password, or named authentication header. Self-hosted services can specify their API base address. Additional headers are scoped to the download origin and stripped on cross-origin redirects. Packages are downloaded through the shared transport and handed to Joomla's CLI as a temporary installable ZIP. Temporary files are removed after installation. Public URL-only packages retain the existing Joomla download path.
+
+The authentication fields are preserved in private configuration exports so another person or agent can import the setup and use the supplied access. Public share links reject authenticated package sources and component overlays. Deployments with credentials or overlays are excluded from reusable custom image caching.
+
+`configuration.overlays` contains configuration entries. Each entry has a stable `key`, a `kind`, a target and `fields`. The target depends on the kind:
+
+| Kind | Target | Operation |
+| --- | --- | --- |
+| `record` | `component`, `view`, optional `guid` or `match` | Create or update an administrator record |
+| `component` | `component` | Save component options through its native model |
+| `plugin` | `folder`, `element` | Save an installed plugin's options and state |
+| `module` | `element`, optional `clientId` and `match` | Create or update a module instance |
+
+Native models run with the site's verified Super User identity and retain their validation rules. A JCB record can supply only a GUID for native repository retrieval, or add field values to update the retrieved/existing record. Repository access credentials can be configured before dependent records are fetched. Dependencies use `dependsOn`; a field can reference a previous result with `{ "$ref": "configuration-key", "field": "id" }` or `"field": "guid"`. Reapplying the same entry updates its bound record. Optional configuration failures appear in Activity and do not stop the deployment. Missing components and views are skipped. JCB Server and FTP/SFTP configuration are outside this feature.
+
+Open a saved administrator record, or select records in its list, then choose **Clone data into deployment**. The runtime reads saved values through the native model and adds editable configuration entries. Save changes in Joomla before cloning. Recognized portable relationships are retained; unsupported site-specific relationships produce notices instead of silently copying numeric identities to another site.
+
+Installation precedes configuration. Dependent overlays are applied in dependency order, followed by the deployment's Joomla CLI commands. Commands still use argument arrays, such as `[["cache:clean"]]`, and run after JCB and other selected extensions have been installed. Merely reopening a saved site does not rerun startup commands.
+
+When **Use** starts from a saved site, Playground checkpoints it into an independent site. Selecting a newer JCB version updates that copy through the normal installer, validates the package version, and verifies the actual installed version. Equal versions need no update; downgrades are rejected. The original site's files and database remain intact.
+
+For an agent handoff, export the configuration, import that file into the other Playground, review the selected runtime and start the deployment. The file describes setup instructions and access, while a complete site download carries existing files and database contents.
+
+### Download service rollout
+
+Deploy the updated network Worker before releasing authenticated downloads. It accepts both transport protocol versions: ordinary public requests continue using version 1, and requests with scoped credentials use version 2. An older Worker cannot safely perform the new authenticated redirect handling and is rejected for those requests. Existing public clients remain compatible.

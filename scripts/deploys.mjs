@@ -12,7 +12,7 @@ export async function stageDeployCatalog({ root, staging, assets, cache, canonic
   const catalogUrl = new URL('deploys/catalog.json', canonicalUrl).href;
   normalizeDeployCatalog(catalog, { baseURL: catalogUrl });
   await mkdir(target, { recursive: true });
-  for (const schema of ['schema.json', 'catalog.schema.json']) {
+  for (const schema of ['schema.json', 'catalog.schema.json', 'document.schema.json']) {
     await cp(path.join(source, schema), path.join(target, schema));
   }
   await mkdir(path.join(assets, 'packages'), { recursive: true });
