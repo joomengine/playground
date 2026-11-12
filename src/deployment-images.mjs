@@ -36,6 +36,10 @@ export async function deploymentImageFingerprint(config, manifest, { baseURL = D
   const fields = ['deployId', 'sourceDeployId', 'joomlaVersion', 'phpVersion', 'jcbVersion', 'jcbPackage', 'language',
     'languageTags', 'multilingual', 'extensions', 'startupCommands', 'languages', 'menus', 'template', 'content', 'phpSettings', 'overlays'];
   const configuration = Object.fromEntries(fields.filter(key => config[key] !== undefined).map(key => [key, config[key]]));
+  // Runtime discovery makes absent JCB explicit after installation. That does
+  // not change the recipe, nor does normalizing an omitted overlay list to [].
+  if (configuration.jcbVersion === 'none') delete configuration.jcbVersion;
+  if (!configuration.overlays?.length) delete configuration.overlays;
   // Arbitrary console commands may read the current site/account identity. Keep
   // those builds separate, while ordinary recipes can personalise one base.
   if (config.startupCommands?.length) {

@@ -194,6 +194,21 @@ test('fingerprints reuse ordinary site copies but isolate changed packages, runt
     await deploymentImageFingerprint(derived, { ...manifest, prebuiltDeploys: [{ ...manifest.prebuiltDeploys[0], sha256: 'd'.repeat(64) }] }, { baseURL }));
 });
 
+test('images saved after runtime metadata discovery match the next equivalent launch', async () => {
+  const storage = memoryStorage();
+  const cache = createDeploymentImageCache({ baseURL, storage });
+  const launch = { ...config, overlays: [] };
+  const installed = { ...launch, jcbVersion: 'none' };
+  const before = await deploymentImageFingerprint(launch, manifest);
+  await cache.saveCustom(installed, manifest, bytes);
+  assert.deepEqual((await cache.getCustom(before))?.bytes, bytes,
+    'Discovering that JCB is absent must not invalidate the image saved from this recipe.');
+  assert.equal(await deploymentImageFingerprint(config, manifest), before,
+    'An omitted overlay list and an empty overlay list describe the same setup.');
+  assert.notEqual(await deploymentImageFingerprint({ ...installed, jcbVersion: '6.2.0' }, manifest), before,
+    'A selected JCB release remains part of the image identity.');
+});
+
 test('explicit snapshots cannot collide with blank images or a different maintained image', async () => {
   const plain = { ...config, deployId: 'jcb' };
   const explicit = { ...plain, snapshot: { url: 'https://example.test/export.zip', sha256: 'c'.repeat(64), joomlaVersion: '6.2.0' } };
