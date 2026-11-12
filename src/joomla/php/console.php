@@ -1,4 +1,10 @@
 <?php
+$cleanupArchive = static function () use ($playground): void {
+    if (isset($playground['archive']) && is_file($playground['archive'])) {
+        @unlink($playground['archive']);
+    }
+};
+register_shutdown_function($cleanupArchive);
 try {
     playgroundInstallationAllowance($playground);
     $root = playgroundRoot($playground);
@@ -37,10 +43,10 @@ try {
         $application->setDatabase($container->get(\Joomla\Database\DatabaseInterface::class));
     }
     $exitCode = playgroundRunConsole($application);
-    if (isset($playground['archive']) && is_file($playground['archive'])) {
-        unlink($playground['archive']);
-    }
-    playgroundFinish(['ok' => $exitCode === 0, 'exitCode' => $exitCode, 'output' => $output->fetch()]);
+    $result = ['ok' => $exitCode === 0, 'exitCode' => $exitCode, 'output' => $output->fetch()];
 } catch (Throwable $error) {
-    playgroundFinish(['ok' => false, 'error' => $error->getMessage(), 'output' => isset($output) ? $output->fetch() : '']);
+    $result = ['ok' => false, 'error' => $error->getMessage(), 'output' => isset($output) ? $output->fetch() : ''];
+} finally {
+    $cleanupArchive();
 }
+playgroundFinish($result);

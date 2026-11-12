@@ -1,8 +1,12 @@
+import { networkCredentialHeaders } from './network-protocol.mjs';
+
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /** Preserve redirect counts, upload semantics and cross-origin credentials consistently. */
 export async function fetchHttpRedirects(fetcher, target, request, options = {}, signal = request.signal) {
   const mode = options.redirect ?? 'follow';
+  const credentialHeaders = networkCredentialHeaders(request.headers, options.credentialHeaders);
+  const cache = options.cache ?? (credentialHeaders.length ? 'no-store' : request.cache);
   // Twenty is Fetch's normal redirect ceiling; PHP can provide its own limit
   // or -1 for unlimited redirects.
   const maxRedirects = options.maxRedirects === -1 ? Infinity
@@ -12,7 +16,8 @@ export async function fetchHttpRedirects(fetcher, target, request, options = {},
   let outgoing = new Request(url, {
     method: request.method, headers: request.headers,
     body: requestBody,
-    signal, redirect: 'manual',
+    signal, redirect: 'manual', cache, credentials: request.credentials,
+    integrity: request.integrity, referrerPolicy: request.referrerPolicy,
     ...(requestBody instanceof ReadableStream ? { duplex: 'half' } : {}),
   });
   // The local CGI server accepts HTTP headers that a browser Request normally
@@ -39,7 +44,7 @@ export async function fetchHttpRedirects(fetcher, target, request, options = {},
     const next = new URL(location, url);
     const headers = new Headers(outgoing.headers);
     if (next.origin !== url.origin) {
-      headers.delete('authorization'); headers.delete('cookie'); headers.delete('proxy-authorization');
+      for (const name of credentialHeaders) headers.delete(name);
     }
     const toGet = response.status === 303 && outgoing.method !== 'HEAD' || [301, 302].includes(response.status) && outgoing.method === 'POST';
     if (toGet) {
@@ -49,7 +54,9 @@ export async function fetchHttpRedirects(fetcher, target, request, options = {},
     await response.body?.cancel();
     const body = toGet || !replay ? null : replay.body ?? await replay.arrayBuffer();
     outgoing = new Request(next, { method: toGet ? 'GET' : outgoing.method, headers,
-      body, signal, redirect: 'manual', ...(body instanceof ReadableStream ? { duplex: 'half' } : {}) });
+      body, signal, redirect: 'manual', cache, credentials: request.credentials,
+      integrity: request.integrity, referrerPolicy: request.referrerPolicy,
+      ...(body instanceof ReadableStream ? { duplex: 'half' } : {}) });
     Object.defineProperty(outgoing, 'headers', { value: headers });
     url = next; redirectCount++;
   }
