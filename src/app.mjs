@@ -550,6 +550,8 @@ async function openImages() {
   } catch (error) { message.textContent = messageOf(error); }
 }
 function showExtensionWarnings(warnings = []) {
+  // Optional component configuration is reported in Activity, without an install alert.
+  warnings = warnings.filter(warning => warning.phase !== 'configuration');
   const panel = $('extension-warnings');
   panel.replaceChildren();
   panel.hidden = warnings.length === 0;
@@ -1093,7 +1095,7 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     selectedSiteId = currentConfig.persistence ? currentConfig.storageKey : null;
     const restoredPath = resumePath
       ? await resolveResumePath((path, init) => runtime.request(path, init), resumePath, currentConfig.initialPath)
-      : runtime.installation?.extensionWarnings?.length
+      : runtime.installation?.extensionWarnings?.some(warning => warning.phase !== 'configuration')
         ? await resolveResumePath((path, init) => runtime.request(path, init), currentConfig.initialPath, '/administrator/index.php')
         : null;
     const siteURL = new URL(restoredPath ? resolveSiteURL(restoredPath, runtime.baseUrl) : runtime.url, location.href);
