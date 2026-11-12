@@ -1,8 +1,9 @@
 import { normalizeNetworkConfig, loadNetworkConfiguration } from './network-config.mjs';
 import {
   NETWORK_PROTOCOL_VERSION, NETWORK_REQUEST_HEADER, NETWORK_RESPONSE_HEADER,
-  NetworkError, encodeNetworkMetadata, decodeNetworkMetadata,
+  NetworkError, encodeNetworkMetadata, decodeNetworkMetadata, networkCredentialHeaders,
 } from './network-protocol.mjs';
+import { fetchHttpRedirects } from './http-redirects.mjs';
 
 const noBodyStatuses = new Set([204, 205, 304]);
 const readMethods = new Set(['GET', 'HEAD']);
@@ -88,6 +89,8 @@ export function createNetworkTransport(fetcher = globalThis.fetch.bind(globalThi
     const method = String(init.method ?? original?.method ?? 'GET').toUpperCase();
     const body = init.body ?? null;
     const network = init.network ?? {};
+    const credentialHeaders = networkCredentialHeaders(init.headers ?? original?.headers, network.credentialHeaders);
+    const cache = credentialHeaders.length ? 'no-store' : network.cache ?? init.cache ?? original?.cache;
     const redirect = network.redirect ?? init.redirect ?? original?.redirect ?? 'follow';
     const timeout = network.timeoutMs;
     if (timeout !== undefined && (!Number.isFinite(timeout) || timeout < 0)) throw new TypeError('Invalid HTTP timeout.');
@@ -95,6 +98,7 @@ export function createNetworkTransport(fetcher = globalThis.fetch.bind(globalThi
     const ctx = requestContext(init.signal ?? original?.signal, deadline, now);
     const { network: _network, ...fetchInit } = init;
     const directInit = { ...fetchInit, redirect: init.redirect ?? original?.redirect ?? redirect, signal: ctx.signal,
+      ...(cache ? { cache } : {}),
       ...(init.body instanceof ReadableStream ? { duplex: 'half' } : {}) };
     let endpoint = configured?.endpoint;
     let resolved = configured !== null;
@@ -116,9 +120,17 @@ export function createNetworkTransport(fetcher = globalThis.fetch.bind(globalThi
       const proxyFirst = (browserHeaderDelivery || !readMethods.has(method) && target.origin !== contextOrigin)
         && await resolveEndpoint();
       if (!proxyFirst) {
-        let response;
+        let response, directMetadata;
         try {
-          response = await cancellable(() => fetcher(original ?? target.href, directInit), ctx);
+          if (credentialHeaders.length && redirect === 'follow') {
+            // Browser Fetch strips Authorization but forwards custom token headers
+            // on redirects. Follow exposed redirects ourselves; an opaque browser
+            // redirect falls back to the Worker, which applies the same policy.
+            const result = await cancellable(() => fetchHttpRedirects(fetcher, target,
+              new Request(original ?? target.href, directInit), { ...network, redirect, credentialHeaders, cache }, ctx.signal), ctx);
+            response = result.response;
+            directMetadata = { url: result.url, redirected: result.redirected, redirectCount: result.redirectCount };
+          } else response = await cancellable(() => fetcher(original ?? target.href, directInit), ctx);
           ctx.check();
           if (response.status === 0 || response.type === 'opaque' || response.type === 'opaqueredirect') {
             void response.body?.cancel().catch(() => {});
@@ -129,7 +141,7 @@ export function createNetworkTransport(fetcher = globalThis.fetch.bind(globalThi
           if (!readMethods.has(method) || !await resolveEndpoint()) throw new NetworkError('DIRECT_NETWORK_FAILED', 'The HTTP request could not be completed.', { cause });
           response = undefined;
         }
-        if (response) return wrapResponse(response, ctx, null, method);
+        if (response) return wrapResponse(response, ctx, directMetadata, method);
       }
 
       const proxyURL = new URL(endpoint);
@@ -165,12 +177,16 @@ export function createNetworkTransport(fetcher = globalThis.fetch.bind(globalThi
           }
         }
       }
-      const metadata = { version: NETWORK_PROTOCOL_VERSION, headers: [...upstreamHeaders], redirect,
+      // Public traffic remains compatible with the deployed v1 Worker during
+      // rollout. Credential-bearing traffic requires the scoped v2 contract.
+      const metadata = { version: credentialHeaders.length ? NETWORK_PROTOCOL_VERSION : 1, headers: [...upstreamHeaders], redirect,
+        ...(credentialHeaders.length ? { credentialHeaders } : {}),
+        ...(cache ? { cache } : {}),
         ...(network.maxRedirects !== undefined ? { maxRedirects: network.maxRedirects } : {}),
         ...(Number.isFinite(deadline) ? { timeoutMs: Math.max(1, deadline - now()) } : {}) };
       const response = await cancellable(() => fetcher(proxyURL.href, {
         method, headers: { [NETWORK_REQUEST_HEADER]: encodeNetworkMetadata(metadata) }, body: proxyBody,
-        signal: ctx.signal, credentials: 'omit', redirect: 'error',
+        signal: ctx.signal, credentials: 'omit', redirect: 'error', ...(cache ? { cache } : {}),
         // The proxy carries the same upstream bytes, so Fetch must enforce the
         // caller's integrity requirement on this route as well as the direct one.
         integrity: init.integrity === undefined ? original?.integrity : init.integrity,

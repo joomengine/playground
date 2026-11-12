@@ -4,6 +4,7 @@ import {
   NETWORK_RESPONSE_HEADER as RESPONSE_HEADER,
   encodeNetworkMetadata as encodeMetadata,
   decodeNetworkMetadata as decodeMetadata,
+  networkCredentialHeaders,
 } from '../../../src/network-protocol.mjs';
 
 export { encodeMetadata, decodeMetadata };
@@ -44,6 +45,7 @@ function responseHeaders(headers, decoded) {
 export function createRelayWorker({ fetcher = globalThis.fetch.bind(globalThis) } = {}) {
   return {
     async fetch(request) {
+      let privateRequest = false;
       try {
         const url = new URL(request.url);
         if (url.pathname === '/healthz' && request.method === 'GET') return cors(Response.json({ version: NETWORK_PROTOCOL_VERSION, mode: 'anonymous' }), request);
@@ -51,23 +53,31 @@ export function createRelayWorker({ fetcher = globalThis.fetch.bind(globalThis) 
         const target = new URL(url.searchParams.get('url'));
         const encoded = request.headers.get(REQUEST_HEADER);
         const options = encoded ? decodeMetadata(encoded) : {};
+        const headers = upstreamHeaders(request, options);
+        privateRequest = networkCredentialHeaders(headers, options.credentialHeaders).length > 0;
+        if (privateRequest) options.cache = 'no-store';
         const signal = options.timeoutMs > 0
           ? AbortSignal.any([request.signal, AbortSignal.timeout(Math.ceil(options.timeoutMs))])
           : request.signal;
-        const result = await fetchHttpRedirects(fetcher, target, new Request(request, { headers: upstreamHeaders(request, options) }), options, signal);
+        const result = await fetchHttpRedirects(fetcher, target, new Request(request, { headers }), options, signal);
         const upstream = result.response;
-        if (!encoded) return cors(upstream, request);
+        if (!encoded) {
+          const response = cors(upstream, request);
+          if (options.cache === 'no-store') response.headers.set('Cache-Control', 'no-store');
+          return response;
+        }
         const hasBody = request.method !== 'HEAD' && ![204, 205, 304].includes(upstream.status) && upstream.body;
         const encoding = upstream.headers.get('content-encoding')?.toLowerCase();
         // Workerd decodes gzip and br. Its deflate response still needs decoding.
         const decoded = hasBody && ['gzip', 'br', 'deflate'].includes(encoding);
         const body = !hasBody ? null : encoding === 'deflate' ? upstream.body.pipeThrough(new DecompressionStream('deflate')) : upstream.body;
-        const metadata = { version: NETWORK_PROTOCOL_VERSION, status: upstream.status, statusText: upstream.statusText,
+        const metadata = { version: options.version ?? NETWORK_PROTOCOL_VERSION, status: upstream.status, statusText: upstream.statusText,
           headers: responseHeaders(upstream.headers, decoded), url: result.url, redirected: !!result.redirected, redirectCount: result.redirectCount };
-        return cors(new Response(body, { headers: { [RESPONSE_HEADER]: encodeMetadata(metadata), 'Content-Type': 'application/octet-stream' } }), request);
+        return cors(new Response(body, { headers: { [RESPONSE_HEADER]: encodeMetadata(metadata), 'Content-Type': 'application/octet-stream',
+          ...(options.cache === 'no-store' ? { 'Cache-Control': 'no-store' } : {}) } }), request);
       } catch (error) {
         const aborted = request.signal.aborted;
-        return cors(Response.json({ error: { code: aborted ? 'REQUEST_ABORTED' : error.name === 'TimeoutError' ? 'UPSTREAM_TIMEOUT' : typeof error.code === 'string' ? error.code : 'NETWORK_ERROR', message: error.message } }, { status: aborted ? 499 : 502 }), request);
+        return cors(Response.json({ error: { code: aborted ? 'REQUEST_ABORTED' : error.name === 'TimeoutError' ? 'UPSTREAM_TIMEOUT' : typeof error.code === 'string' ? error.code : 'NETWORK_ERROR', message: privateRequest ? 'The authenticated upstream request could not be completed.' : error.message } }, { status: aborted ? 499 : 502, headers: { 'Cache-Control': 'no-store' } }), request);
       }
     },
   };
