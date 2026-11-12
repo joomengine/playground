@@ -79,6 +79,7 @@ let openingCode;
 let extensionInputs;
 let commandInputs, parameterInputs, menuInputs, contentInputs, overlayInputs;
 let deploymentFormSchemas = {};
+let deploymentSchemaUnavailable = false;
 let discoveredConfiguration;
 let editorConfiguration, editorSourceInput;
 let pinnedJcb = new Map();
@@ -1462,7 +1463,7 @@ function renderEditorLists() {
   for (const editor of [menuInputs, contentInputs, parameterInputs, overlayInputs, commandInputs]) editor?.refresh();
 }
 function updateDeploymentFormContext() {
-  const context = { ...discoveredConfiguration, language: fields.language.value || 'en-GB' };
+  const context = { ...discoveredConfiguration, language: fields.language.value || 'en-GB', schemaUnavailable: deploymentSchemaUnavailable };
   for (const editor of [menuInputs, contentInputs, parameterInputs, overlayInputs]) editor?.setContext(context);
   const template = discoveredConfiguration?.templates?.find(item => item.template === $('template-name').value);
   if (parameterInputs) parameterInputs.setSchema(template?.schema?.properties?.params || template?.schema || deploymentFormSchemas.parameters);
@@ -1748,7 +1749,7 @@ function setupInterface() {
   });
   const structured = (kind, textarea, container, advanced, error, validate) => createStructuredInputs({
     kind, textarea: $(textarea), container: $(container), advanced: $(advanced), errorElement: $(error),
-    validate, schema: deploymentFormSchemas[kind], onChange: markDeploymentEdited,
+    validate, schema: deploymentFormSchemas[kind], context: { schemaUnavailable: deploymentSchemaUnavailable }, onChange: markDeploymentEdited,
     onSchemaRequest: target => runtime?.discoverConfiguration && !runtime.recovery
       ? runtime.discoverConfiguration({ ...target, language: fields.language.value }) : null,
   });
@@ -1977,8 +1978,9 @@ async function initialize() {
 
 async function startInterface() {
   try { deploymentFormSchemas = await loadDeploymentFormSchemas({ fetcher: networkFetch }); }
-  catch { /* Advanced JSON remains available if schema assets cannot be read. */ }
+  catch { deploymentSchemaUnavailable = true; }
   setupInterface();
+  $('deployment-schema-error').hidden = !deploymentSchemaUnavailable;
   setBusy(false);
   await initialize();
 }

@@ -230,6 +230,8 @@ html,body{background:var(--canvas);color:var(--ink)}
 .deployment-card{min-width:0;border:1px solid var(--control-border);border-radius:10px;padding:14px;background:var(--control)}
 .deployment-card>summary{font-size:14px;font-weight:600;overflow-wrap:anywhere}
 .deployment-card[open]>summary{margin-bottom:18px}.deployment-card>.structured-actions{border-block-start:1px solid var(--line);padding-top:12px;margin-top:16px}
+.deployment-card>select,.deployment-card>details>select{width:100%;margin-block:12px;padding:10px 12px;border:1px solid var(--control-border);border-radius:6px;background:var(--paper);color:var(--ink);font-size:13px;line-height:1.5}
+.deployment-card>fieldset{margin-block:16px}.deployment-card>button{margin-top:12px}
 .deployment-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 20px;min-width:0}
 .deployment-form-grid>.deployment-list,.deployment-form-grid>fieldset,.deployment-form-grid>.deployment-form-notice,.deployment-more-options{grid-column:1/-1}
 .deployment-field{display:flex;flex-direction:column;align-items:stretch;gap:7px;min-width:0}

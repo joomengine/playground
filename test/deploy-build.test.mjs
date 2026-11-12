@@ -23,7 +23,7 @@ async function fixture(t) {
   const deploy = { schemaVersion: 1, id: 'sample', title: 'Sample', joomla: ['6'], snapshot,
     configuration: { extensions: [asset], languages: [{ ...asset, tag: 'nl-NL' }], snapshot },
     variants: { '6': { extensions: [asset], languages: [{ ...asset, tag: 'nl-NL' }], snapshot } } };
-  for (const filename of ['schema.json', 'catalog.schema.json']) {
+  for (const filename of ['schema.json', 'catalog.schema.json', 'document.schema.json']) {
     await writeFile(path.join(root, 'deploys', filename), '{}\n');
   }
   const save = async () => {
@@ -50,7 +50,7 @@ test('deploy build stages verified packages once and keeps all deployment paths 
     assert.equal(entry.url, `../assets/packages/${asset.sha256}.zip`);
     assert.equal(entry.sourceUrl, asset.url);
   }
-  for (const schema of ['schema.json', 'catalog.schema.json']) assert.deepEqual(await read(schema), {});
+  for (const schema of ['schema.json', 'catalog.schema.json', 'document.schema.json']) assert.deepEqual(await read(schema), {});
   const baseURL = 'http://localhost:8080/nested/site/deploys/catalog.json';
   const normalized = normalizeDeployCatalog(catalog, { baseURL });
   assert.equal(normalized.languages['6'][0].url, `http://localhost:8080/nested/site/assets/packages/${asset.sha256}.zip`);
