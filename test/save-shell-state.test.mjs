@@ -112,6 +112,7 @@ test('upload configuration receives only the deliberately staged new-site save c
 
 function closeFixture(failure) {
   let writes = 0, redundantClose = 0;
+  const renders = [];
   const handle = { healthy: false, debugger: { state: 'idle' },
     reset: async () => { throw failure; }, close: async () => { redundantClose++; } };
   const context = vm.createContext({
@@ -123,11 +124,12 @@ function closeFixture(failure) {
       'reset-me': { storageKey: 'reset-me' }, retained: { storageKey: 'retained' },
     } },
     forgetSite, writePreferences() { writes++; },
+    renderSavedSites() { renders.push(context.runningSiteId); },
     setBusy(value) { context.busy = value; }, destroyPreview() {}, displayError() {}, activity() {},
     feedback() {}, t: value => value,
   });
   vm.runInContext(functionSource('async function closeSite(', 'async function openSavedSite('), context);
-  return { context, get writes() { return writes; }, get redundantClose() { return redundantClose; } };
+  return { context, renders, get writes() { return writes; }, get redundantClose() { return redundantClose; } };
 }
 
 test('completed reset removes only its erased saved-site entry after a later cleanup failure', async () => {
@@ -141,6 +143,7 @@ test('completed reset removes only its erased saved-site entry after a later cle
   assert.equal(fixture.context.selectedSiteId, null);
   assert.equal(fixture.writes, 1);
   assert.equal(fixture.redundantClose, 0, 'An already closed worker is never closed again.');
+  assert.deepEqual(fixture.renders, [null], 'A closed-error reset clears the stale running label.');
 });
 
 test('failed reset preserves its saved-site entry when storage was not erased', async () => {
@@ -150,6 +153,79 @@ test('failed reset preserves its saved-site entry when storage was not erased', 
   assert.equal(Object.hasOwn(fixture.context.savedState.sites, 'reset-me'), true);
   assert.equal(fixture.writes, 0);
   assert.equal(fixture.redundantClose, 0);
+  assert.deepEqual(fixture.renders, [null]);
+});
+
+test('a delayed close refreshes saved-site running labels only once the runtime actually closes', async () => {
+  const fixture = closeFixture();
+  const { context } = fixture;
+  context.currentConfig.persistence = false;
+  let finishClose;
+  const handle = context.runtime;
+  handle.close = () => new Promise(resolve => { finishClose = resolve; });
+  context.$ = () => ({}); context.clearFeedback = () => {}; context.show = () => {};
+  const closing = context.closeSite();
+  assert.equal(context.busy, true);
+  assert.equal(context.runtime, handle);
+  assert.deepEqual(fixture.renders, [], 'The site remains running while native close is pending.');
+  finishClose();
+  assert.equal(await closing, true);
+  assert.equal(context.runtime, undefined);
+  assert.equal(context.busy, false);
+  assert.deepEqual(fixture.renders, [null]);
+});
+
+test('a rejected save keeps the live saved-site identity when close is canceled', async () => {
+  const fixture = closeFixture();
+  fixture.context.runtime.healthy = true;
+  const handle = fixture.context.runtime;
+  fixture.context.saveSite = async () => false;
+  assert.equal(await fixture.context.closeSite(), false);
+  assert.equal(fixture.context.runtime, handle);
+  assert.equal(fixture.context.runningSiteId, 'reset-me');
+  assert.deepEqual(fixture.renders, []);
+  assert.equal(fixture.redundantClose, 0);
+});
+
+test('Local images waits for lifecycle transitions, refreshes an open list afterwards, and remains usable during autosave', async () => {
+  const nodes = new Map(), rowButton = { disabled: false };
+  const node = id => {
+    if (!nodes.has(id)) nodes.set(id, { disabled: false, open: false, options: [],
+      querySelector: () => ({}), querySelectorAll: () => [rowButton] });
+    return nodes.get(id);
+  };
+  let refreshed = 0;
+  const context = vm.createContext({
+    busy: false, launching: false, closing: false, initialized: true, catalog: {}, deployCatalog: {},
+    runtime: undefined, currentConfig: undefined, dynamicChoicesPending: false, imageListRequest: 0,
+    fields: { persistence: { checked: false }, phpVersion: {}, jcbVersion: {}, storageKey: {}, deployId: {} },
+    savedState: { sites: {} }, selectedSiteId: null, controls: [], savePromise: undefined,
+    customRegistry: { deployments: [] }, openingCode: false, openingDatabase: false,
+    $: node, t: value => value, document: { body: { classList: { toggle() {} } } },
+    updateNavigation() {}, updateSaveState() {}, updateMcpPreview() {}, renderBuildUpdate() {}, updateLaunchReadiness() {},
+    openImages() { refreshed++; },
+  });
+  vm.runInContext(functionSource('function setBusy(', 'async function openImages('), context);
+  node('images-dialog').open = true;
+  context.setBusy(true);
+  assert.equal(node('local-images-button').disabled, true);
+  assert.equal(rowButton.disabled, true);
+  assert.equal(context.imageListRequest, 1, 'An outstanding cache read cannot append stale rows during the transition.');
+  context.setBusy(false);
+  assert.equal(node('local-images-button').disabled, false);
+  assert.equal(refreshed, 1, 'An already-open list is rebuilt with the completed lifecycle state.');
+  context.savePromise = Promise.resolve();
+  context.setBusy(false);
+  assert.equal(node('local-images-button').disabled, false, 'Ordinary autosave does not lock Local images.');
+  assert.equal(refreshed, 1, 'Repeated unlocked updates do not unnecessarily rebuild the open dialog.');
+
+  for (const flag of ['busy', 'launching', 'closing']) {
+    const guard = vm.createContext({ busy: false, launching: false, closing: false, [flag]: true, imageListRequest: 0,
+      openDialog() { throw new Error('A transition must not open the management dialog.'); } });
+    vm.runInContext(functionSource('async function openImages(', 'function showExtensionWarnings('), guard);
+    await guard.openImages();
+    assert.equal(guard.imageListRequest, 0);
+  }
 });
 
 test('a completed save refreshes saved-site controls after publishing its receipt without unlocking a close', async () => {

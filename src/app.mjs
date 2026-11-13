@@ -454,6 +454,7 @@ function updateMcpPreview() {
   $('credentials-mcp-preview').hidden = !runtime || !(runtime.installation?.mcp || (currentConfig?.sourceDeployId || runtime.installation?.deployId) === 'jcb-mcp');
 }
 function setBusy(value) {
+  const wasBusy = busy;
   busy = value;
   const locked = busy || launching;
   const unavailable = !initialized || !catalog || !deployCatalog;
@@ -468,6 +469,11 @@ function setBusy(value) {
   $('launch-button').disabled = locked || unavailable;
   $('embedded-launch').disabled = locked || unavailable;
   $('upload-site-button').disabled = locked || unavailable;
+  $('local-images-button').disabled = locked || closing;
+  if ((locked || closing) && $('images-dialog').open) {
+    imageListRequest++;
+    for (const button of $('deployment-image-list').querySelectorAll('button')) button.disabled = true;
+  }
   $('retry-button').disabled = locked || unavailable;
   $('recover-button').disabled = locked || unavailable || !fields.persistence.checked;
   $('repair-button').hidden = filesOnly || !runtime?.recovery?.configured;
@@ -512,8 +518,10 @@ function setBusy(value) {
   updateMcpPreview();
   renderBuildUpdate();
   updateLaunchReadiness();
+  if (wasBusy && !locked && !closing && $('images-dialog').open) void openImages();
 }
 async function openImages() {
+  if (busy || launching || closing) return;
   const request = ++imageListRequest;
   openDialog('images-dialog');
   const list = $('deployment-image-list');
@@ -1209,7 +1217,11 @@ async function closeSite({ reset = false, save = false } = {}) {
       displayError(error);
     }
     return false;
-  } finally { closing = false; setBusy(false); }
+  } finally {
+    closing = false;
+    if (!runtime) renderSavedSites();
+    setBusy(false);
+  }
 }
 
 async function openSavedSite(key) {
