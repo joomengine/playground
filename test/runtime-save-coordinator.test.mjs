@@ -157,7 +157,7 @@ test('a slow persistence callback keeps the live worker and reservation until co
   await later;
 });
 
-test('checkpoint validation distinguishes missing bytes from invalid or oversized archives', () => {
+test('checkpoint validation distinguishes missing bytes from invalid archives', () => {
   assert.throws(() => validateCheckpointBytes(undefined), /missing or empty/);
   assert.throws(() => validateCheckpointBytes(new Uint8Array()), /missing or empty/);
   assert.throws(() => validateCheckpointBytes(new Uint8Array(22)), /not a valid ZIP/);

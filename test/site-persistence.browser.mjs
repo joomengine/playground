@@ -32,6 +32,11 @@ const archive = zipSync({
 });
 
 async function preview(page) {
+  await page.waitForFunction(() => document.getElementById('site-frame')
+    || (document.getElementById('error-view') && !document.getElementById('error-view').hidden), undefined, { timeout: 240_000 });
+  if (await page.locator('#error-view').isVisible()) {
+    throw new Error(`Site launch failed: ${(await page.locator('#error-message').textContent()).slice(0, 1000)}`);
+  }
   await page.locator('#site-frame').waitFor({ timeout: 240_000 });
   const frame = await (await page.locator('#site-frame').elementHandle()).contentFrame();
   await frame.waitForURL(url => url.pathname.includes('/__site/'), { timeout: 240_000 });
@@ -58,6 +63,14 @@ async function openHarness(page, url) {
   await prepareBrowserEnvironment(page);
 }
 
+async function recordFailure(page, name, phase) {
+  await mkdir('test-results', { recursive: true });
+  await page.screenshot({ path: `test-results/site-persistence-${name}-failure.png`, fullPage: true }).catch(() => {});
+  const status = await page.locator('#status-message').textContent({ timeout: 1000 }).catch(() => null);
+  const error = await page.locator('#error-message').textContent({ timeout: 1000 }).catch(() => null);
+  console.error(JSON.stringify({ browser: name, persistencePhase: phase, status, error }));
+}
+
 for (const name of names) {
   assert.ok(engines[name], `Unknown persistence-test browser: ${name}`);
   test(`${name}: temporary default, visible saved site and recoverable storage failure`, { timeout: 900_000 }, async t => {
@@ -72,14 +85,18 @@ for (const name of names) {
       const page = await context.newPage();
       page.setDefaultTimeout(240_000);
       const errors = [];
-      page.on('pageerror', error => errors.push(error.message));
+      let phase;
+      const step = value => { phase = value; console.log(`${name}: persistence: ${value}`); };
+      page.on('pageerror', error => { errors.push(error.message); console.error(`${name}: persistence page error: ${error.message}`); });
       try {
+        step('open temporary deployment');
         const url = new URL(server.url);
         for (const [key, value] of Object.entries({ deploy: 'blank', start: '0', name: 'Persistence browser proof',
           key: `temporary-${randomUUID()}`, extension: new URL('__persistence_module.zip', server.url).href })) url.searchParams.set(key, value);
         await page.goto(url.href);
-        await page.locator('#embedded-launch:enabled').waitFor();
+        await page.locator('#embedded-launch:enabled').waitFor({ timeout: 30_000 });
         assert.equal(await page.locator('#persistence').isChecked(), false);
+        step('launch temporary Joomla');
         await page.locator('#embedded-launch').click();
         await preview(page);
         assert.match(await page.locator('#save-state').textContent(), /temporary/i);
@@ -92,6 +109,7 @@ for (const name of names) {
         assert.equal(await page.locator('#images-dialog [data-kind="site"]').count(), 0);
         await page.locator('#images-dialog [data-close-dialog]').click();
 
+        step('save files and database through header');
         await page.locator('#header-save-button').click();
         await page.locator('#header-save-button:enabled').waitFor();
         await preview(page);
@@ -108,6 +126,7 @@ for (const name of names) {
         await page.locator('#images-dialog [data-close-dialog]').click();
 
         // A reload without Close proves durability, not a graceful-shutdown save.
+        step('hard reload saved site');
         await page.reload();
         await preview(page);
         assert.equal(await page.locator('#persistence').isChecked(), true);
@@ -117,11 +136,14 @@ for (const name of names) {
         await page.locator('#close-button').click();
         await page.locator('#site-frame').waitFor({ state: 'detached' });
         await page.locator('#local-images-button').click();
+        step('reopen saved Local images entry');
         await page.locator(`#images-dialog [data-site-key="${savedKey}"]`).getByRole('button', { name: /^Open saved site:/ }).click();
         await preview(page);
         assert.deepEqual(await previewProbe(page), marker, 'Opening the saved entry restores the same files and database.');
         assert.equal((await savedStores(page)).length, 2, 'Reopening must not allocate another saved-site copy.');
         assert.deepEqual(errors, []);
+      } catch (error) {
+        await recordFailure(page, name, phase); throw error;
       } finally { await context.close(); await server.close(); }
     });
 
@@ -147,6 +169,8 @@ for (const name of names) {
       const context = await withPinnedCatalog(browser);
       const page = await context.newPage();
       page.setDefaultTimeout(240_000);
+      let phase;
+      const step = value => { phase = value; console.log(`${name}: persistence: ${value}`); };
       const config = { deployId: 'blank', persistence: true, storageKey: `quota-${randomUUID()}`, phpVersion: '8.4',
         admin: { username: 'persisttester', name: 'Persistence Test', email: 'persistence@example.test', password: 'Persistence-test-password-123!' },
         extensions: [{ url: new URL('__persistence_module.zip', server.url).href }] };
@@ -159,9 +183,11 @@ for (const name of names) {
         return { status: response.status, body: await response.json() };
       }, { probePath, method });
       try {
+        step('launch saved quota fixture');
         await openHarness(page, server.url);
         await start();
         assert.deepEqual(await request('POST'), { status: 200, body: { writes: 1, file: 'saved-file-1' } });
+        step('recover one empty-message quota failure by reclaiming maintained cache');
         await page.evaluate(async () => {
           const { createIndexedDBImageStorage } = await import('./src/deployment-images.mjs');
           window.quotaCache = createIndexedDBImageStorage();
@@ -182,6 +208,7 @@ for (const name of names) {
           return window.playground.lastSavedAt;
         });
         const marker = { status: 200, body: { writes: 2, file: 'saved-file-2' } };
+        step('keep PHP response and live site healthy during persistent quota failure');
         assert.deepEqual(await request('POST'), marker, 'A completed application write returns HTTP 200 despite unavailable storage.');
         const failure = await page.evaluate(async () => {
           let error = null;
@@ -192,6 +219,7 @@ for (const name of names) {
         assert.equal(failure.healthy, true, 'A durability failure must leave the runtime available for recovery.');
         assert.equal(failure.lastSavedAt, savedAt, 'A rejected save must not advance the successful-save receipt.');
         assert.deepEqual(await request('GET'), marker, 'The failed save must neither replay nor roll back the completed PHP request.');
+        step('retry save then hard reload exact file and SQL state');
         await page.evaluate(async () => {
           await window.playground.fs.unlink('/tmp/__test_reject_persistence');
           await window.playground.flush();
@@ -200,6 +228,8 @@ for (const name of names) {
         await prepareBrowserEnvironment(page);
         await start();
         assert.deepEqual(await request('GET'), marker, 'Retrying Save must durably retain the exact file and committed SQL state.');
+      } catch (error) {
+        await recordFailure(page, `${name}-quota`, phase); throw error;
       } finally { await context.close(); await server.close(); }
     });
   });

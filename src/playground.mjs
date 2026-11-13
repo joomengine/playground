@@ -1,7 +1,6 @@
-import { catalogWithSelectedJoomlaPackage, normalizeConfiguration, parseCatalog, normalizeInitialPath, resolveSiteURL } from './config.mjs';
+import { catalogWithSelectedJoomlaPackage, normalizeConfiguration, parseCatalog, resolveSiteURL } from './config.mjs';
 import { installJoomla, inspectJoomla, sha256, importJoomlaSnapshot, importJoomlaCheckpoint, readJoomlaMetadata, restoreJoomlaSession, applyJoomlaConfiguration, discoverJoomlaConfiguration, getMcpConnection, readJoomlaAdministrator, repairJoomlaConfiguration, runStartupCommand } from './joomla/index.mjs';
 import { exportSite } from './export.mjs';
-import { serializeRequest, restoreResponse } from './http.mjs';
 import { normalizePhpSettings, phpRequestTimeoutMs } from './php-settings.mjs';
 import { openSiteDatabase } from './saved-site-recovery.mjs';
 import { createPackageFetcher } from './dynamic-packages.mjs';
@@ -15,6 +14,8 @@ import { deploymentConfigurationChanges } from './deployment-changes.mjs';
 import { importJoomlaSiteExport } from './joomla/index.mjs';
 import { serializeWorkerError } from './worker-errors.mjs';
 import { withStorageRecovery } from './storage-recovery.mjs';
+import { closeSiteResources } from './site-close.mjs';
+import { createRuntimeAccess } from './runtime-access.mjs';
 
 const base = new URL('../', import.meta.url);
 const manifestUrl = new URL('assets/manifest.json', base);
@@ -463,15 +464,11 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     workspaceEvent({ type: 'workspace-closed', erased: Boolean(erase) });
     workspaceListeners.clear();
     debugListeners.clear();
-    try {
-      let cleanupError;
-      try { await session?.close(); } catch (error) { cleanupError = error; }
-      try { await database?.close(); } catch (error) { cleanupError ??= error; }
-      // A close-time storage error must not prevent deletion of a failed new
-      // copy. Both workers have had their close attempt before erasing stores.
-      if (erase && config.persistence) await eraseStoredSite(identity);
-      else if (cleanupError) throw cleanupError;
-    } finally { await release(); }
+    return closeSiteResources({
+      closePhp: () => session?.close(), closeDatabase: () => database?.close(),
+      erase: erase && config.persistence ? () => eraseStoredSite(identity) : undefined,
+      release, lastSavedAt: config.persistence ? session?.savedAt ?? null : null,
+    });
   })();
   const restorePrivateCopy = async (saved, kind, persistence = saved.configuration.persistence) => {
     const storageKey = `${kind}-${crypto.randomUUID()}`;
@@ -529,6 +526,11 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         progress({ phase: 'warning', message: `Your changes are available in the running site, but browser storage could not be saved: ${serializeWorkerError(error).error} Keep this tab open and save again.` });
       }
     };
+    const access = createRuntimeAccess({ send: (...args) => session.send(...args), siteUrl,
+      requestTimeout: () => phpRequestTimeoutMs(config.phpSettings),
+      isChanging: () => changing, isClosing: () => Boolean(closePromise), requireDatabase });
+    const debuggerCommand = (command, args) => changing || closePromise
+      ? Promise.reject(new Error('Wait for the current site operation before debugging.')) : session.debugCommand(command, args);
     const handle = {
       url: resolveSiteURL(config.initialPath, siteUrl), baseUrl: siteUrl, isolation,
       documentRoot: '/persist/www', installMarkerPath: '/persist/meta/joomla-install.json', runtimeInfo,
@@ -552,17 +554,17 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
             url: configuration.url || handle.url, headers: configuration.headers || [], destination: configuration.destination });
         },
         subscribe(listener) { debugListeners.add(listener); return () => debugListeners.delete(listener); },
-        setBreakpoints: (path, breakpoints) => session.debugCommand('setBreakpoints', { path, breakpoints }),
-        continue: () => session.debugCommand('continue'),
-        next: () => session.debugCommand('next'),
-        stepIn: () => session.debugCommand('stepIn'),
-        stepOut: () => session.debugCommand('stepOut'),
-        pause: () => session.debugCommand('pause'),
-        stop: () => session.debugCommand('stop'),
-        stackTrace: () => session.debugCommand('stackTrace'),
-        scopes: frameId => session.debugCommand('scopes', { frameId }),
-        variables: (reference, options) => session.debugCommand('variables', { reference, ...options }),
-        evaluate: (expression, frameId) => session.debugCommand('evaluate', { expression, frameId }),
+        setBreakpoints: (path, breakpoints) => debuggerCommand('setBreakpoints', { path, breakpoints }),
+        continue: () => debuggerCommand('continue'),
+        next: () => debuggerCommand('next'),
+        stepIn: () => debuggerCommand('stepIn'),
+        stepOut: () => debuggerCommand('stepOut'),
+        pause: () => debuggerCommand('pause'),
+        stop: () => debuggerCommand('stop'),
+        stackTrace: () => debuggerCommand('stackTrace'),
+        scopes: frameId => debuggerCommand('scopes', { frameId }),
+        variables: (reference, options) => debuggerCommand('variables', { reference, ...options }),
+        evaluate: (expression, frameId) => debuggerCommand('evaluate', { expression, frameId }),
       },
       workspace: {
         id: instanceId,
@@ -585,9 +587,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           return session.withWorkspaceBatch(request => callback({ ...handle.workspace, request, withBatch: undefined }));
         },
       },
-      fs: Object.fromEntries(['mkdir', 'readFile', 'writeFile', 'readdir', 'stat', 'unlink'].map(method => [method,
-        (path, data) => closePromise ? Promise.reject(new Error('This playground is closing.')) : session.send(`fs.${method}`, { path, data })])),
-      runPhp: (source, options = {}) => closePromise ? Promise.reject(new Error('This playground is closing.')) : session.send('runPhp', { source }, options.timeoutMs ?? 180_000),
+      ...access.public,
       async openDatabase() {
         requireDatabase();
         if (changing || closePromise) throw new Error('Wait for the current site operation before opening Database.');
@@ -603,13 +603,6 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         const result = await runStartupCommand(handle, ['cache:clean']);
         await saveRunningSite();
         return result;
-      },
-      async request(path = '/', init = {}) {
-        requireDatabase();
-        if (closePromise) throw new Error('This playground is closing.');
-        const target = normalizeInitialPath(`/${String(path).replace(/^\/+/, '')}`);
-        const request = new Request(resolveSiteURL(target, siteUrl), init);
-        return restoreResponse(await session.send('request', await serializeRequest(request), init.timeoutMs ?? phpRequestTimeoutMs(config.phpSettings)), request.method);
       },
       async flush() {
         requireDatabase();
@@ -633,13 +626,14 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         if (changing || closePromise) throw new Error('Wait for the current site operation before repairing configuration.');
         changing = true; instances.delete(instanceId);
         try {
-          const result = await repairJoomlaConfiguration(handle);
+          const result = await repairJoomlaConfiguration(internalHandle);
           await saveRunningSite();
           progress({ phase: 'recovery', message: 'Debugging and error reporting were reset. The original configuration is backed up; restart to open Joomla.' });
           return result;
         } finally { changing = false; registerSession(); }
       },
-      reset: () => finish(true), close: () => finish(false),
+      reset: () => changing ? Promise.reject(new Error('Wait for the current site operation before resetting.')) : finish(true),
+      close: () => changing ? Promise.reject(new Error('Wait for the current site operation before closing.')) : finish(false),
       async checkpoint(token) {
         requireDatabase();
         if (closePromise) throw new Error('Open the site before creating a checkpoint.');
@@ -648,7 +642,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         if (managePause) { changing = true; instances.delete(instanceId); }
         try {
           if (session.debugState !== 'idle') await session.debugCommand('stop');
-          const archive = await exportSite(handle, { format: 'bundle' });
+          const archive = await exportSite(internalHandle, { format: 'bundle' });
           validateCheckpointBytes(archive.bytes, 'The site checkpoint bundle');
           const filesystem = validateCheckpointBytes(await session.send('checkpoint', {}, 600_000));
           return { archive: archive.bytes, sha256: await sha256(archive.bytes), filesystem, configuration: { ...structuredClone(config), admin: { ...handle.installation.administrator } } };
@@ -694,7 +688,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           progress({ phase: 'saving', message: 'Creating a recovery checkpoint before applying deployment changes…' });
           recoveryCheckpoint = await handle.checkpoint(pausedOperation);
           const changes = deploymentConfigurationChanges(config, next);
-          const result = await applyJoomlaConfiguration(handle, changes.configuration, { progress, fetchPackage,
+          const result = await applyJoomlaConfiguration(internalHandle, changes.configuration, { progress, fetchPackage,
             configureLanguage: changes.configureLanguage });
           Object.assign(config, next);
           handle.url = resolveSiteURL(config.initialPath, siteUrl);
@@ -761,6 +755,9 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         } finally { changing = false; }
       },
     };
+    // Inherit live configuration/installation getters instead of copying their
+    // values; only trusted transition code receives the unblocked operations.
+    const internalHandle = Object.assign(Object.create(handle), access.internal);
     const state = await inspectJoomla(handle, { recovery });
     const pristine = !state.marker && !state.configured && !state.installerPresent;
     if (recovery) {

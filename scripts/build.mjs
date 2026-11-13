@@ -9,6 +9,7 @@ import { phpRuntimeAssetPath, writeBuildIdentity } from './build-identity.mjs';
 import { stageCurl } from './curl.mjs';
 import { stageSodium } from './sodium.mjs';
 import { applyCgiRequestOverlay } from './cgi-request-overlay.mjs';
+import { applyBridgeErrorOverlay, bridgeRuntimeAssetPath } from './bridge-error-overlay.mjs';
 import { stageCodeAssets } from './code-assets.mjs';
 import { stageAdminer } from './prepare-adminer.mjs';
 import { validateCompatibilityConfiguration } from '../src/isolation-bootstrap.mjs';
@@ -44,7 +45,6 @@ const extensionPackages = [
 await mkdir(cache, { recursive: true });
 const staging = await mkdtemp(path.join(cache, 'site-'));
 const assets = path.join(staging, 'assets');
-const bridgeAssetPath = `mariadb/${versions.bridge.version}`;
 
 async function versionNativeArtifact(artifact) {
   const original = artifact.url;
@@ -104,7 +104,7 @@ try {
       throw new Error(`Bridge release source differs from the native driver pin: ${filename}`);
     }
   }
-  const bridgeTarget = path.join(assets, bridgeAssetPath);
+  const bridgeTarget = path.join(assets, 'bridge-staging');
   await mkdir(bridgeTarget, { recursive: true });
   for (const filename of ['vendor', 'patches', 'LICENSE', 'NOTICE']) {
     await cp(path.join(bridgeDirectory, filename), path.join(bridgeTarget, filename), { recursive: true });
@@ -118,6 +118,11 @@ try {
     }
     await cp(path.join(bridgeDirectory, directory), path.join(bridgeTarget, directory), { recursive: true });
   }
+  const bridgeErrorOverlay = await applyBridgeErrorOverlay(bridgeTarget,
+    { manifest: bridgeManifest, upstreamVersion: versions.bridge.version });
+  const bridgeAssetPath = bridgeRuntimeAssetPath(versions.bridge.version, versions.bridge.sha256, bridgeErrorOverlay);
+  await mkdir(path.dirname(path.join(assets, bridgeAssetPath)), { recursive: true });
+  await rename(bridgeTarget, path.join(assets, bridgeAssetPath));
   await rm(bridgeStaging, { recursive: true });
 
   const php = [];
@@ -223,6 +228,7 @@ try {
       moduleUrl: `${bridgeAssetPath}/src/index.mjs`,
       adapterUrl: `${bridgeAssetPath}/adapters/php-wasm.mjs`,
       release: { ...versions.bridge, manifestUrl: `${bridgeAssetPath}/release-manifest.json` },
+      errorOverlay: bridgeErrorOverlay,
       engine: bridgeManifest.engine,
     },
     defaults: versions.defaults,

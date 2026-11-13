@@ -1191,13 +1191,15 @@ async function closeSite({ reset = false, save = false } = {}) {
     activity(reset ? 'Site files and database deleted. Launch to build a fresh site from its deploy.' : 'Site closed. Its saved data remains available.');
     return true;
   } catch (error) {
-    runtime = handle.healthy ? handle : undefined;
+    runtime = !error.closed && handle.healthy ? handle : undefined;
     if (runtime) {
       if (previewRemoved) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
       feedback(error, { error: true, persistent: true });
     } else {
       // Failed workers must still release the storage lock before a recovery retry.
-      try { await handle.close(); } catch (cleanupError) { activity(cleanupError); }
+      if (!error.closed) {
+        try { await handle.close(); } catch (cleanupError) { activity(cleanupError); }
+      }
       try { await databaseHost?.dispose(); databaseHost = undefined; } catch (cleanupError) { activity(cleanupError); }
       try { await codeHost?.dispose(); } catch (cleanupError) { activity(cleanupError); }
       codeHost = undefined; runningSiteId = null; runningAdministrator = null;
