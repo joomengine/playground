@@ -51,6 +51,24 @@ test('external change notification never authorizes overwriting the previous rea
   provider.dispose();
 });
 
+test('a coordinated batch accepts pending durability without losing the live write revision', async () => {
+  const failures = [], revisions = [];
+  const provider = new JoomlaFileSystemProvider({ async request(operation, args) {
+    if (operation === 'read') return { bytes: new Uint8Array([1]), revision: 'original' };
+    revisions.push(args.expectedRevision);
+    return { ok: true, results: [{ operation: 'write', path: args.path, revision: `written-${revisions.length}` }],
+      changes: [], persistence: { enabled: true, saved: false, pending: true } };
+  } }, 'test', { onError: error => failures.push(error) });
+  try {
+    const uri = provider.uri('/file.php');
+    await provider.readFile(uri);
+    await provider.writeFile(uri, new Uint8Array([2]), { create: false, overwrite: true });
+    await provider.writeFile(uri, new Uint8Array([3]), { create: false, overwrite: true });
+    assert.deepEqual(revisions, ['original', 'written-1']);
+    assert.deepEqual(failures, []);
+  } finally { provider.dispose(); }
+});
+
 test('Save All uses the reserved transport and releases it on failure', async () => {
   const calls = [];
   const provider = new JoomlaFileSystemProvider({
