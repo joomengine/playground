@@ -244,6 +244,7 @@ test(`complete site ZIP roundtrip preserves edits and credentials independently 
       assert.notEqual(importedKey, configuration.storageKey);
       await ui.locator('#settings-toggle').click();
       await ui.locator('#credentials-button').click();
+      await ui.locator('#credentials-dialog').waitFor({ state: 'visible' });
       assert.equal(await ui.locator('#credential-username').inputValue(), configuration.admin.username);
       assert.equal(await ui.locator('#credential-password').inputValue(), configuration.admin.password);
       await ui.locator('#credentials-dialog [data-close-dialog]').click();
@@ -304,6 +305,7 @@ test(`complete site ZIP roundtrip preserves edits and credentials independently 
         assert.deepEqual(state, { menu: 'Manual menu settings', template_styles: 'Manual template_styles settings', row: 'Edited database row' });
         if (!await ui.locator('#credentials-button').isVisible()) await ui.locator('#settings-toggle').click();
         await ui.locator('#credentials-button').click();
+        await ui.locator('#credentials-dialog').waitFor({ state: 'visible' });
         assert.equal(await ui.locator('#credential-username').inputValue(), 'copiedadmin');
         assert.equal(await ui.locator('#credential-password').inputValue(), 'Independent-copy-password-567!');
         await ui.locator('#credentials-dialog [data-close-dialog]').click();
