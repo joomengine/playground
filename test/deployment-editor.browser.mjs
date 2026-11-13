@@ -154,8 +154,11 @@ test(`editor Use creates a new instance while dashboard Launch resumes a closed 
         (window.launchedConfigurations ||= []).push(structuredClone(configuration));
         const baseUrl = new URL('./', location.href).href;
         return { configuration, baseUrl, url: new URL('__test__.html', baseUrl).href, healthy: true,
+          lastSavedAt: null, savedCurrentState: false,
           debugger: { state: 'idle' }, installation: { siteName: configuration.siteName, administrator: configuration.admin },
-          async request() { return new Response('Ready'); }, async flush() {}, async close() {}, async reset() {} };
+          async request() { return new Response('Ready'); },
+          async flush() { this.lastSavedAt = new Date().toISOString(); this.savedCurrentState = true; },
+          async close() {}, async reset() {} };
       }`,
   } });
   let browser;
@@ -165,7 +168,7 @@ test(`editor Use creates a new instance while dashboard Launch resumes a closed 
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto(`${server.url}?deploy=blank`);
+    await page.goto(`${server.url}?deploy=blank&persist=1`);
     await page.locator('#launch-countdown:not([hidden])').waitFor();
     for (const id of ['stop-countdown', 'stop-countdown-button']) {
       assert.equal(await page.locator(`#${id}`).getAttribute('aria-label'), 'Stop countdown');
@@ -184,12 +187,22 @@ test(`editor Use creates a new instance while dashboard Launch resumes a closed 
     await page.locator('#settings-toggle').click();
     await page.locator('#close-button:enabled').click();
     await page.locator('#welcome:not([hidden])').waitFor();
+    // The previous saved identity does not opt an independent deployment in.
+    // Deliberately choose persistence for the new instance asserted below.
+    await page.locator('label[for="persistence"]').click();
+    assert.equal(await page.locator('#persistence').isChecked(), false);
+    await page.locator('label[for="persistence"]').click();
+    assert.equal(await page.locator('#persistence').isChecked(), true);
     await page.locator('#deploy-editor-button').click();
     const originalName = await page.locator('#site-name').inputValue();
     await page.locator('#use-deploy').click();
     await page.locator('#site-frame').waitFor();
+    await page.locator('#header-save-button:enabled').click();
+    await page.locator('#header-save-button:enabled').waitFor();
+    assert.match(await page.locator('#save-state').textContent(), /saved locally/i);
     const launches = await page.evaluate(() => window.launchedConfigurations);
     assert.equal(launches.length, 3);
+    assert.ok(launches.every(configuration => configuration.persistence), 'Each asserted saved identity is explicitly retained.');
     assert.equal(launches[0].storageKey, launches[1].storageKey, 'Dashboard Launch reopens the closed saved identity.');
     assert.notEqual(launches[1].storageKey, launches[2].storageKey, 'Use creates a separate identity even without edits or a running runtime.');
     assert.equal(launches[2].siteName, originalName);
