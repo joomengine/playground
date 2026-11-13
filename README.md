@@ -360,10 +360,18 @@ parameters. Invalid JSON remains visible until corrected.
   packages or applying configuration. If an operation fails, the recovery action
   restores that checkpoint as a separate site. Removing a package from the editor
   does not uninstall an already installed extension.
-- **Keep this site** stages the persistence choice for the next launch. **Save**
-  saves the running site's files and database. Saving a temporary site copies its
+- New sites are temporary by default. **Save this site** in the header saves the
+  running site's files and database; selecting **Keep this site** for the running
+  temporary site starts the same save. Before launch, the choice applies to the
+  next site. Previously saved sites retain persistence when reopened.
+  Saving a temporary site copies its
   current state into persistent storage, including credentials, and transfers the
   open Code session and recoverable drafts to that saved identity.
+  **Local images** lists saved sites separately from reusable deployment images.
+  A saved-site entry opens its existing files and database; a deployment image
+  starts an independent installation. The saved timestamp appears only after
+  both the files and database complete their durable save. A storage failure
+  leaves the running site available for another save or a complete-site download.
 - **Restart** restarts PHP with the current settings while preserving the site,
   including a temporary site's files and database.
 - **Close** shuts down the workers and releases the site lock. Closing a temporary
@@ -417,13 +425,25 @@ A successful Save can therefore be reopened after a
 whole-page reload without using Close first. Checkpoint or storage errors remain
 visible save failures; they do not advance the saved-state indicator.
 
-The interface opens the site before its first background checkpoint. Saving starts
-as soon as the runtime is idle, then repeats about a minute after each completed
-save. Saves run in the filesystem and database workers, keep the surrounding
-controls usable, and never overlap. Close waits for an active save and completes
-the first checkpoint if it has not started. Launch uses published prepared images
+For sites explicitly configured to persist, the interface opens the site before
+its first background save. The save joins the runtime queue promptly, then repeats
+about a minute after each completed save; ordinary requests cannot starve it by
+keeping the runtime busy. Filesystem and database saves share one queue reservation,
+keep the surrounding controls usable, and never overlap. Adjacent saves of the same
+completed state reuse the successful receipt. PHP requests do not independently
+sync browser storage after producing their response. A storage failure therefore
+does not turn successfully generated Joomla output into an HTTP 500 response.
+Close waits for an active save and completes the first save if it has not started.
+Launch uses published prepared images
 or compatible images already cached locally; it does not delay first use to export
 a new reusable image. Saved sites still resume from their own files and database.
+
+If the browser rejects a save with a quota error, Playground can reclaim downloaded
+maintained deployment images and retry the storage operation once. It never deletes
+saved sites or custom images to make room, and it never replays the Joomla request.
+Storage usage estimates are advisory diagnostics. If the retry cannot complete,
+the last successful timestamp remains unchanged and the running site remains
+available for another save or export.
 
 The credentials dialog shows the generated administrator login details, including
 when automatic login is disabled. Each fresh site receives new credentials;
@@ -634,7 +654,8 @@ The interface recognizes these query parameters:
 | `php=8.5` | Select the PHP minor whose patch version is pinned in the catalog |
 | `path=/administrator/` | Initial page inside Joomla |
 | `toolbar=0` | Hide the header and footer together, with edge tabs to restore them |
-| `persist=0` | Use a temporary site |
+| `persist=0` | Use a temporary site (the default for a new site) |
+| `persist=1` | Save this site's files and database in this browser |
 | `language=en-GB` | Select the Joomla language; another supported tag installs its pack |
 | `uiLanguage=af` | Select Rocket's interface language independently |
 | `name=Client%20demo` | Set the Joomla site name |

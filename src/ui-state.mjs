@@ -1,6 +1,7 @@
 import { createShareURL, createFullDeploymentDocument } from './config.mjs';
 import { ISOLATION_PARAMETER, isolationMarker } from './isolation.mjs';
 const SITE_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
+const SAVED_STATE_VERSION = 3;
 const PUBLIC_FIELDS = ['restoredSite', 'deployId', 'sourceDeployId', 'joomlaVersion', 'joomlaPackage', 'jcbVersion', 'jcbPackage', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'phpSettings', 'menus', 'template', 'languageTags', 'multilingual', 'content', 'addonExtensions', 'addonStartupCommands', 'addonLanguages', 'addonTemplate'];
 
 /** Setup identity preserves command argument boundaries as well as source URLs. */
@@ -46,16 +47,20 @@ export function publicConfiguration(config) {
 }
 
 export function readSavedState(storage, key) {
-  const empty = () => ({ schemaVersion: 2, active: null, sites: Object.create(null) });
+  const empty = () => ({ schemaVersion: SAVED_STATE_VERSION, active: null, sites: Object.create(null) });
   try {
     const value = JSON.parse(storage.getItem(key));
-    if (![1, 2].includes(value?.schemaVersion) || !value.sites || typeof value.sites !== 'object' || Array.isArray(value.sites)) return empty();
+    if (![1, 2, SAVED_STATE_VERSION].includes(value?.schemaVersion) || !value.sites || typeof value.sites !== 'object' || Array.isArray(value.sites)) return empty();
     const result = empty();
     for (const [name, site] of Object.entries(value.sites)) {
       if (!SITE_KEY.test(name) || !site || typeof site !== 'object' || site.storageKey !== name || site.persistence !== true
           || !Array.isArray(site.extensions) || !Array.isArray(site.startupCommands)) continue;
       try {
-        result.sites[name] = { ...publicConfiguration(site), displayName: savedSiteName(site.displayName || site.siteName), lastPath: safeSavedRoute(site.lastPath, site.initialPath) };
+        const lastSavedAt = savedTimestamp(site.lastSavedAt);
+        const legacySaved = value.schemaVersion < SAVED_STATE_VERSION || site.legacySaved === true;
+        if (!lastSavedAt && !legacySaved) continue;
+        result.sites[name] = { ...publicConfiguration(site), displayName: savedSiteName(site.displayName || site.siteName),
+          lastPath: safeSavedRoute(site.lastPath, site.initialPath), lastSavedAt, legacySaved };
       } catch { /* A damaged entry must not hide the other saved installations. */ }
     }
     if (typeof value.active === 'string' && Object.hasOwn(result.sites, value.active)) result.active = value.active;
@@ -65,19 +70,55 @@ export function readSavedState(storage, key) {
 
 export function rememberSite(state, config) {
   if (!config.persistence || !SITE_KEY.test(config.storageKey)) return state;
+  const previous = state.sites[config.storageKey];
+  if (!previous) return state;
+  // A launch may select an existing saved identity and remember navigation. Its
+  // runtime configuration is durable only after a completed coordinated save.
+  return { ...state, active: config.storageKey, sites: { ...state.sites, [config.storageKey]: {
+    ...previous, displayName: savedSiteName(config.displayName || previous.displayName || previous.siteName),
+    lastPath: safeSavedRoute(config.lastPath || previous.lastPath, previous.initialPath),
+  } } };
+}
+
+function savedSiteState(state, config, lastSavedAt) {
   const sites = { ...state.sites };
   delete sites[config.storageKey];
   const previous = state.sites[config.storageKey];
   sites[config.storageKey] = { ...publicConfiguration(config),
     displayName: savedSiteName(config.displayName || previous?.displayName || config.siteName),
-    lastPath: safeSavedRoute(config.lastPath || previous?.lastPath, config.initialPath) };
-  return { schemaVersion: 2, active: config.storageKey, sites };
+    lastPath: safeSavedRoute(config.lastPath || previous?.lastPath, config.initialPath),
+    lastSavedAt, legacySaved: false };
+  return { schemaVersion: SAVED_STATE_VERSION, active: config.storageKey, sites };
+}
+
+function savedTimestamp(value) {
+  if (!(value instanceof Date) && typeof value !== 'string') return null;
+  const timestamp = value instanceof Date ? value.getTime() : Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
+/** Record a completed files-and-database save against the existing native site. */
+export function rememberSavedSite(state, config, savedAt) {
+  if (!config.persistence || !SITE_KEY.test(config.storageKey)) return state;
+  const lastSavedAt = savedTimestamp(savedAt);
+  if (!lastSavedAt) throw new TypeError('A completed site save requires its save time.');
+  return savedSiteState(state, config, lastSavedAt);
+}
+
+/** Local images point to saved native stores; saving never duplicates a site ZIP. */
+export function savedSiteImages(state) {
+  return Object.values(state.sites).filter(site => site.lastSavedAt || site.legacySaved === true).map(site => ({
+    key: `site:${site.storageKey}`, kind: 'site', storageKey: site.storageKey,
+    title: site.displayName || site.siteName || 'Joomla site',
+    joomlaVersion: site.joomlaVersion, jcbVersion: site.jcbVersion, phpVersion: site.phpVersion,
+    lastSavedAt: site.lastSavedAt || null, legacy: !site.lastSavedAt,
+  })).sort((left, right) => (right.lastSavedAt || '').localeCompare(left.lastSavedAt || ''));
 }
 
 export function forgetSite(state, storageKey) {
   const sites = { ...state.sites };
   delete sites[storageKey];
-  return { schemaVersion: 2, active: state.active === storageKey ? null : state.active, sites };
+  return { schemaVersion: SAVED_STATE_VERSION, active: state.active === storageKey ? null : state.active, sites };
 }
 
 

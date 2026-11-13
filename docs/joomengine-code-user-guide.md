@@ -40,7 +40,7 @@ Keep the Playground owner tab open: detachment does not transfer PHP or MariaDB 
 
 ## Saving and recovering work
 
-Saved sites keep saved file changes under Playground's persistence policy. Temporary sites remain temporary until you explicitly select **Save**. Keeping a temporary site transfers the open Code session, models and drafts to the saved runtime; unsaved buffers remain unsaved rather than being silently written into Joomla files. **Keep this site** in the dashboard stages the persistence choice for the next launch.
+New sites are temporary by default. Saved sites keep saved file changes under Playground's persistence policy. **Save this site** in the header saves the running site's files and database. Enabling **Keep this site** for a running temporary site starts the same operation; before launch it selects persistence for the next site. Keeping a temporary site transfers the open Code session, models and drafts to the saved runtime; unsaved buffers remain unsaved rather than being silently written into Joomla files. Saved sites appear in **Local images** separately from reusable deployment images. A failed browser-storage save leaves the current files available for retry or download.
 
 For persisted sites, editor drafts are stored separately from Joomla files and restored when the editor reopens for that site. The current draft record is bounded to 128 documents and 8 MiB of draft text. A draft is not a saved Joomla file or a portable site backup. If a draft cannot reopen because its file is missing, use **JoomEngine Code: Recover missing drafts** from the command palette, then explicitly save the recovered content.
 

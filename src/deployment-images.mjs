@@ -106,7 +106,7 @@ export function createIndexedDBImageStorage({ indexedDB = globalThis.indexedDB, 
       if (!database.objectStoreNames.contains('images')) database.createObjectStore('images', { keyPath: 'key' });
       if (!database.objectStoreNames.contains('archives')) database.createObjectStore('archives');
     };
-    request.onerror = () => reject(new Error('Local image storage is unavailable.'));
+    request.onerror = () => reject(request.error || new Error('Local image storage is unavailable.'));
     request.onblocked = () => { abandoned = true; reject(new Error('Close other playground tabs before managing local images.')); };
     request.onsuccess = () => {
       const database = request.result;
@@ -121,7 +121,7 @@ export function createIndexedDBImageStorage({ indexedDB = globalThis.indexedDB, 
       const tx = database.transaction(['images', 'archives'], mode);
       let result;
       tx.oncomplete = () => resolve(result);
-      tx.onerror = tx.onabort = () => reject(new Error('Local image storage could not complete the operation.'));
+      tx.onerror = tx.onabort = event => reject(tx.error || event?.target?.error || new Error('Local image storage could not complete the operation.'));
       operation(tx, value => { result = value; });
     });
   };
@@ -199,6 +199,23 @@ export function createDeploymentImageCache({ baseURL = DEFAULT_BASE, storage = c
         ...records.filter(record => record.kind === 'custom').map(record => publicRecord(record))];
     },
     remove: key => storage.remove(key),
+    async reclaimMaintained() {
+      // Finish background downloads/writes before deleting their archives. A
+      // late cache write must not consume the space recovered for a site save.
+      const inFlight = [...pending.values()];
+      await Promise.allSettled(inFlight.map(async shared => {
+        await shared.operation;
+        await shared.writing;
+      }));
+      let removed = 0, bytes = 0;
+      for (const record of await storage.list()) {
+        if (record.kind !== 'server') continue;
+        await storage.remove(record.key);
+        removed++;
+        if (Number.isSafeInteger(record.size) && record.size > 0) bytes += record.size;
+      }
+      return { removed, bytes };
+    },
     reconcile,
     maintained: (config, manifest) => deploymentSnapshotSource(config, manifest, baseURL)?.maintained ?? null,
     async getMaintained(entry, { onProgress = () => {}, onWarning } = {}) {

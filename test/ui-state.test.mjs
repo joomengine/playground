@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { customSetupDetails, defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, runtimeLocation, savedStateKey } from '../src/ui-state.mjs';
+import { customSetupDetails, defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSavedSite, rememberSite, runtimeLocation, savedStateKey } from '../src/ui-state.mjs';
 import { createFullDeploymentDocument, parseDeploymentDocument } from '../src/config.mjs';
 
 const configuration = {
@@ -13,6 +13,7 @@ const configuration = {
   runtime: { internal: 'Do not save runtime state' },
 };
 const empty = () => readSavedState({ getItem() { return null; } }, 'settings');
+const saved = (state, config) => rememberSavedSite(state, config, '2026-11-13T20:00:00.000Z');
 
 test('custom deployment approval distinguishes commands with colliding display text', () => {
   const reviewed = { startupCommands: [['config:set', 'sitename', 'Demo Site']] };
@@ -43,7 +44,7 @@ test('saved custom sites retain an independent complete recipe without administr
   const document = createFullDeploymentDocument({ ...configuration, deployId: 'custom-saved', sourceDeployId: 'jcb', addonExtensions: [],
     addonStartupCommands: [], addonLanguages: [] }, { name: 'My saved deployment', requirements: { joomla: ['6'], jcb: 'required' } });
   const input = { ...configuration, ...parseDeploymentDocument(document) };
-  const remembered = rememberSite(empty(), input);
+  const remembered = saved(empty(), input);
   const restored = readSavedState({ getItem: () => JSON.stringify(remembered) }, 'settings').sites.work;
   assert.equal(restored.deploymentRecipe.name, document.name);
   assert.equal(restored.deploymentRecipe.configuration.sourceDeployId, 'jcb');
@@ -61,14 +62,14 @@ test('saved custom sites retain an independent complete recipe without administr
 test('local custom persistence does not require a recipe to be suitable for a public share', () => {
   const input = { ...configuration, startupCommands: [['user:add', '--password=local-command-password']] };
   input.deploymentRecipe = createFullDeploymentDocument(input, { name: 'Local setup' });
-  const site = rememberSite(empty(), input).sites.work;
+  const site = saved(empty(), input).sites.work;
   assert.deepEqual(site.deploymentRecipe.configuration.startupCommands, input.startupCommands);
   assert.equal(site.deploymentRecipe.configuration.admin, undefined);
 });
 
 test('persistent sites remember the active key while reset preserves other sites', () => {
-  const first = rememberSite(empty(), configuration);
-  const both = rememberSite(first, { ...configuration, deployId: 'blank', storageKey: 'second' });
+  const first = saved(empty(), configuration);
+  const both = saved(first, { ...configuration, deployId: 'blank', storageKey: 'second' });
   assert.equal(both.active, 'second');
   assert.deepEqual(Object.keys(both.sites), ['work', 'second']);
   const restored = readSavedState({ getItem() { return JSON.stringify(both); } }, 'settings');
@@ -114,7 +115,7 @@ test('location follows runtime choices, consumes fresh and keeps private setup o
 });
 
 test('changed setup instructions create an independent stable site and preserve the original', async () => {
-  const original = rememberSite(empty(), configuration);
+  const original = saved(empty(), configuration);
   const input = { ...configuration, startupCommands: [['cache:clean'], ['config:set', 'offline', '1']] };
   const changed = await isolateSetup(original, input);
   assert.equal(changed.changed, true);
@@ -122,7 +123,7 @@ test('changed setup instructions create an independent stable site and preserve 
   assert.notEqual(changed.configuration.storageKey, configuration.storageKey);
   assert.match(changed.configuration.storageKey, /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/);
   assert.equal(input.storageKey, configuration.storageKey);
-  const both = rememberSite(original, changed.configuration);
+  const both = saved(original, changed.configuration);
   assert.deepEqual(both.sites.work.startupCommands, configuration.startupCommands);
   assert.deepEqual(both.sites[changed.configuration.storageKey].startupCommands, input.startupCommands);
   assert.equal((await isolateSetup(both, input)).configuration.storageKey, changed.configuration.storageKey);
@@ -133,7 +134,7 @@ test('changed setup instructions create an independent stable site and preserve 
 });
 
 test('identical setup, PHP changes and new or temporary sites keep their requested identity', async () => {
-  const state = rememberSite(empty(), configuration);
+  const state = saved(empty(), configuration);
   for (const input of [
     structuredClone(configuration),
     { ...configuration, phpVersion: '8.3' },
@@ -175,7 +176,7 @@ test('legacy metadata migrates all sites and rename keeps immutable setup identi
     return [storageKey, { ...configuration, storageKey }];
   }));
   const state = readSavedState({ getItem: () => JSON.stringify({ schemaVersion: 1, active: 'legacy-0', sites }) });
-  assert.equal(state.schemaVersion, 2);
+  assert.equal(state.schemaVersion, 3);
   assert.equal(Object.keys(state.sites).length, 65);
   assert.equal(state.active, 'legacy-0');
   const renamed = renameSavedSite(state, 'legacy-0', 'My renamed workspace');
@@ -196,7 +197,7 @@ test('resume routes exclude actions, tokens, external paths and credentials', as
   for (const value of ['https://outside.test/', '//outside.test/', '/%2foutside.test/', '/a/../secret', '/%2e%2e/a', '/a\\b', '/a%00b']) {
     assert.equal(safeSavedRoute(value, '/administrator/'), '/administrator/');
   }
-  const state = rememberSite(empty(), configuration);
+  const state = saved(empty(), configuration);
   const navigated = rememberSiteRoute(state, 'work', '/articles?view=article&id=12&token=secret');
   assert.equal(navigated.sites.work.lastPath, '/articles?view=article&id=12');
   assert.equal(navigated.sites.work.initialPath, '/administrator/');

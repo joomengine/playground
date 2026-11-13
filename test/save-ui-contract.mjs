@@ -1,9 +1,21 @@
 import assert from 'node:assert/strict';
 
+async function writePendingFixtureChanges(page) {
+  const frame = await (await page.locator('#site-frame').elementHandle()).contentFrame();
+  const status = await frame.evaluate(async () => {
+    const base = location.href.match(/^.*\/__site\/[^/]+\/[^/]+\//)[0];
+    const response = await fetch(new URL('modules/mod_playground_contract/contract.php?action=seed', base), { method: 'POST' });
+    await response.arrayBuffer();
+    return response.status;
+  });
+  assert.equal(status, 200, 'The save contract must start with pending real files and database changes.');
+}
+
 /** Hold the actual persistence operation to test the shell during a slow save. */
 export async function assertResponsiveSave(page) {
   if (!await page.locator('#settings').isVisible()) await page.locator('#settings-toggle').click();
   await page.locator('#save-button:enabled').waitFor();
+  await writePendingFixtureChanges(page);
   await page.evaluate(() => {
     const original = Worker.prototype.postMessage;
     window.__restoreSaveIntercept = () => { Worker.prototype.postMessage = original; };
@@ -43,6 +55,7 @@ export async function assertResponsiveSave(page) {
 
   // The settings stay editable while saving. A storage failure must not roll
   // back a staged Keep choice that belongs to the next launch.
+  await writePendingFixtureChanges(page);
   await page.evaluate(() => {
     const original = Worker.prototype.postMessage;
     window.__restoreSaveIntercept = () => { Worker.prototype.postMessage = original; };

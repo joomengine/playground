@@ -264,6 +264,11 @@ jobs:
       - name: Validate custom URL installation and reusable images
         if: ${{ !cancelled() && steps.browser_install.outcome == 'success' && matrix.suite == 'runtime' && matrix.browser == 'chromium' }}
         run: node --test test/custom-extension-url.browser.mjs
+      - name: Validate opt-in saving and storage recovery
+        if: ${{ !cancelled() && steps.browser_install.outcome == 'success' && matrix.suite == 'runtime' }}
+        env:
+          PLAYGROUND_BROWSERS: ${{ matrix.browser }}
+        run: node --test test/site-persistence.browser.mjs
       - name: Validate portable site upload and independent copies
         if: ${{ !cancelled() && steps.browser_install.outcome == 'success' && matrix.suite == 'runtime' && matrix.browser == 'chromium' }}
         env:

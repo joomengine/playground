@@ -111,7 +111,7 @@ test('imported provenance cannot turn an arbitrary extension into a managed core
 
 test('versioned packages survive public configuration and share links with their checksums', async () => {
   const joomlaPackage = { url: 'https://example.org/joomla-full.zip', sha256: 'b'.repeat(64), php: ['8.3', '8.4'] };
-  const config = normalizeConfiguration({ admin, deployId: 'jcb', joomlaVersion: '7.0.0-alpha1-dev', joomlaPackage, jcbVersion: '6.2.1-alpha1', jcbPackage: dynamicJcb }, { catalog, baseURL });
+  const config = normalizeConfiguration({ admin, persistence: true, deployId: 'jcb', joomlaVersion: '7.0.0-alpha1-dev', joomlaPackage, jcbVersion: '6.2.1-alpha1', jcbPackage: dynamicJcb }, { catalog, baseURL });
   const result = readURLConfiguration(createShareURL(baseURL, config)).config;
   assert.deepEqual(result.joomlaPackage, joomlaPackage);
   assert.deepEqual(result.jcbPackage, dynamicJcb);

@@ -15,7 +15,7 @@ export const DEFAULTS = Object.freeze({
   joomlaVersion: '6.2.0',
   siteName: 'Joomla Playground',
   initialPath: '/',
-  persistence: true,
+  persistence: false,
   storageKey: 'default',
   autoLogin: true,
   hideToolbar: false,
@@ -342,7 +342,7 @@ export function createShareURL(location, config, { immediate = false } = {}) {
   if (config.phpVersion) url.searchParams.set('php', config.phpVersion);
   if (config.initialPath && config.initialPath !== '/') url.searchParams.set('path', config.initialPath);
   if (config.hideToolbar) url.searchParams.set('toolbar', '0');
-  if (config.persistence === false) url.searchParams.set('persist', '0');
+  if (typeof config.persistence === 'boolean') url.searchParams.set('persist', config.persistence ? '1' : '0');
   if (config.language && config.language !== 'en-GB') url.searchParams.set('language', normalizeLanguage(config.language));
   if (config.autoLogin === false) url.searchParams.set('login', 'no');
   if (config.fresh) url.searchParams.set('fresh', '1');

@@ -13,6 +13,8 @@ import { deploymentImages, deploymentImageFingerprint, deploymentSnapshotSource,
 import { catalogForRestoredSite } from './site-import.mjs';
 import { deploymentConfigurationChanges } from './deployment-changes.mjs';
 import { importJoomlaSiteExport } from './joomla/index.mjs';
+import { serializeWorkerError } from './worker-errors.mjs';
+import { withStorageRecovery } from './storage-recovery.mjs';
 
 const base = new URL('../', import.meta.url);
 const manifestUrl = new URL('assets/manifest.json', base);
@@ -65,6 +67,11 @@ export class PhpSession {
     this.queue = Promise.resolve();
     this.queued = 0;
     this.flushing = 0;
+    this.activityVersion = 0;
+    this.savedVersion = -1;
+    this.savedAt = null;
+    this.lastSave = null;
+    this.persistenceError = null;
     this.failure = null;
     this.workspaceListeners = new Set();
     this.workspaceReads = new Set();
@@ -110,7 +117,7 @@ export class PhpSession {
         const value = await this.database.hostCalls['mariadb.v1'](message.payload);
         if (!this.failure) this.worker.postMessage({ type: 'database-result', id: message.id, value });
       } catch (error) {
-        if (!this.failure) this.worker.postMessage({ type: 'database-result', id: message.id, error: error.message });
+        if (!this.failure) this.worker.postMessage({ type: 'database-result', id: message.id, ...serializeWorkerError(error, 'The database operation failed.') });
       }
       return;
     }
@@ -132,7 +139,10 @@ export class PhpSession {
         // Joomla can retain PDO in its container until late PHP shutdown.
         // The completed CGI request is the definitive connection boundary.
         if (['request', 'runPhp'].includes(pending.operation) && message.value?.databaseUsed !== false) await this.database?.reset();
-        if (message.error) pending.reject(Object.assign(new Error(message.error), { code: message.code }));
+        if (Object.hasOwn(message, 'error')) {
+          const details = serializeWorkerError({ message: message.error, name: message.name, code: message.code });
+          pending.reject(Object.assign(new Error(details.error), { name: details.name, code: details.code }));
+        }
         else pending.resolve(message.value);
       } catch (error) { await this.fail(error); pending.reject(error); }
     }
@@ -149,6 +159,7 @@ export class PhpSession {
       }
     }
     this.queued++;
+    if (!['enablePersistence', 'checkpoint', 'fs.readFile', 'fs.readdir', 'fs.stat', 'close'].includes(operation)) this.activityVersion++;
     const result = this.queue.then(() => {
       if (this.failure) throw this.failure;
       return this.perform(operation, args, timeoutMs);
@@ -161,6 +172,12 @@ export class PhpSession {
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
       const timeout = () => {
+        if (operation === 'flush') {
+          // A slow IDB callback is not evidence that PHP crashed. Keep its live
+          // memory and the queue reservation until the storage operation ends.
+          try { this.onDiagnostic?.('Browser storage is taking longer than expected to save. Keep this tab open; the running site has not been discarded.'); } catch { /* Diagnostics do not own the worker. */ }
+          return;
+        }
         const error = new Error(`PHP ${operation} timed out after ${timeoutMs} ms. Restart the playground; the operation was not replayed.`);
         error.code = 'TIMEOUT';
         this.fail(error);
@@ -175,6 +192,7 @@ export class PhpSession {
   }
   debugCommand(command, args = {}) {
     if (this.failure) return Promise.reject(this.failure);
+    if (['evaluate', 'continue', 'next', 'stepIn', 'stepOut', 'stop'].includes(command)) this.activityVersion++;
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`PHP debugger ${command} did not respond.`)); }, 30_000);
@@ -183,7 +201,7 @@ export class PhpSession {
     });
   }
   workspaceRequest(operation, args = {}) {
-    if (!['read', 'stat', 'list', 'search', 'cancelSearch'].includes(operation)) return this.send(`workspace.${operation}`, args);
+    if (!['read', 'stat', 'list', 'search', 'cancelSearch'].includes(operation)) return this.withWorkspaceBatch(request => request(operation, args));
     if (this.failure) return Promise.reject(this.failure);
     // Paused source inspection must remain available even when HTTP/writes fill
     // the ordinary FIFO. Both lanes remain bounded independently.
@@ -241,43 +259,72 @@ export class PhpSession {
     if (this.failure) return Promise.reject(this.failure);
     if (this.queued >= 64) return Promise.reject(new Error('The PHP request queue is full.'));
     this.queued++;
+    const version = ++this.activityVersion;
     const result = this.queue.then(async () => {
       if (this.failure) throw this.failure;
       let active = true, writes = Promise.resolve();
+      const changes = [];
       const request = (operation, args) => {
         if (!active) return Promise.reject(new Error('This workspace write batch has finished.'));
         if (!/^[a-zA-Z]+$/.test(operation)) return Promise.reject(new TypeError('Invalid workspace operation.'));
-        const pending = writes.then(() => this.perform(`workspace.${operation}`, args));
+        const pending = writes.then(() => this.perform(`workspace.${operation}`, args)).then(value => {
+          if (value?.persistence?.enabled) changes.push(value);
+          return value;
+        });
         writes = pending.catch(() => {});
         return pending;
       };
       try { return await callback(request); }
-      finally { active = false; await writes; }
+      finally {
+        active = false; await writes;
+        if (changes.length) {
+          try {
+            await this.persist(version);
+            for (const value of changes) value.persistence = { enabled: true, saved: true, pending: false };
+          } catch (error) {
+            const details = serializeWorkerError(error, 'The running files could not be saved to browser storage.');
+            for (const value of changes) value.persistence = { enabled: true, saved: false, pending: false, error: details.error };
+            try { this.onDiagnostic?.(`Files changed in the running site, but browser storage could not be saved: ${details.error}`); } catch { /* A view cannot undo a live edit. */ }
+          }
+        }
+      }
     }).finally(() => { this.queued--; });
     // HTTP and persistence work enqueued after Save All cannot split its files.
     this.queue = result.catch(() => {});
     return result;
   }
   get idle() { return !this.failure && !this.queued && !this.flushing && !this.pending.size && this.debugState === 'idle'; }
-  async flushTogether() {
-    this.flushing++;
-    const previous = this.queue;
-    let release;
-    const held = new Promise(resolve => { release = resolve; });
-    // Reserve the queue before yielding so no HTTP request can split the two stores' flush.
-    this.queue = previous.then(() => held).catch(() => {});
+  async persist(version) {
     try {
-      await previous;
+      await withStorageRecovery(async () => {
+        await this.perform('flush');
+        await this.database?.flush();
+      }, { reclaim: () => deploymentImages.reclaimMaintained() });
+    } catch (error) { this.persistenceError = error; throw error; }
+    this.persistenceError = null;
+    this.savedVersion = version;
+    this.savedAt = new Date().toISOString();
+    return { savedAt: this.savedAt };
+  }
+  flushTogether() {
+    if (this.failure) return Promise.reject(this.failure);
+    const version = this.activityVersion;
+    if (this.lastSave?.version === version) return this.lastSave.promise;
+    if (this.savedVersion === version) return Promise.resolve({ savedAt: this.savedAt });
+    this.flushing++;
+    // Reserve one FIFO slot synchronously. All PHP requests, Adminer database
+    // work and editor writes remain outside the paired store checkpoint.
+    const result = this.queue.then(() => {
       if (this.failure) throw this.failure;
-      const id = ++this.sequence;
-      await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => this.fail(new Error('Saving PHP files timed out.')), 180_000);
-        this.pending.set(id, { resolve, reject, timer, operation: 'flush' });
-        try { this.worker.postMessage({ type: 'operation', id, operation: 'flush', args: {} }); }
-        catch (error) { this.fail(error); }
-      });
-      await this.database?.flush();
-    } finally { this.flushing--; release(); }
+      if (this.savedVersion === version) return { savedAt: this.savedAt };
+      return this.persist(version);
+    }).finally(() => {
+      this.flushing--;
+      if (this.lastSave?.promise === result) this.lastSave = null;
+    });
+    this.queue = result.catch(() => {});
+    this.lastSave = { version, promise: result };
+    return result;
   }
   fail(error) {
     if (this.failure) return this.recovery;
@@ -332,6 +379,18 @@ async function eraseStoredSite(identity) {
   await Promise.all([deleteStore(`/joomengine-${identity}`), deleteStore(`/mariadb/idb/joomengine-${identity}`)]);
   const { clearEditorDrafts } = await import('./code/editor-session.mjs');
   await clearEditorDrafts(identity);
+}
+
+/** Validate the private copy before a restart can discard the live filesystem. */
+export function validateCheckpointBytes(value, label = 'The private runtime checkpoint') {
+  const bytes = value instanceof Uint8Array ? value : value instanceof ArrayBuffer ? new Uint8Array(value) : null;
+  if (!bytes || bytes.byteLength === 0) throw new TypeError(`${label} is missing or empty.`);
+  if (bytes.byteLength > 512 * 1024 * 1024) throw new RangeError(`${label} must contain at most 512 MiB.`);
+  const signature = bytes[2] * 256 + bytes[3];
+  if (bytes.byteLength < 22 || bytes[0] !== 0x50 || bytes[1] !== 0x4b || ![0x0304, 0x0506, 0x0708].includes(signature)) {
+    throw new TypeError(`${label} is not a valid ZIP archive.`);
+  }
+  return bytes;
 }
 /** Erase a closed or incompletely installed saved site after user confirmation. */
 export async function resetPlayground({ storageKey = 'default' } = {}) {
@@ -388,14 +447,30 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   const registerSession = () => instances.set(instanceId, {
     send: (operation, args, onProgress) => session.send(operation, args, phpRequestTimeoutMs(config.phpSettings), onProgress),
   });
-  const finish = erase => closePromise ??= (async () => {
+  const finish = (erase, save = true) => closePromise ??= (async () => {
+    const registered = instances.has(instanceId);
     instances.delete(instanceId);
+    // A failed save keeps both live workers and their views available to retry
+    // or export. Reset and failed-launch cleanup intentionally discard them.
+    try {
+      if (save && !erase && session && !session.failure && session.debugState !== 'idle') await session.debugCommand('stop');
+      if (save && !erase && config.persistence && !recovery && !session?.failure) await session?.flushTogether();
+    } catch (error) {
+      closePromise = undefined;
+      if (registered) registerSession();
+      throw error;
+    }
     workspaceEvent({ type: 'workspace-closed', erased: Boolean(erase) });
     workspaceListeners.clear();
     debugListeners.clear();
     try {
-      try { await session?.close(); } finally { await database?.close(); }
+      let cleanupError;
+      try { await session?.close(); } catch (error) { cleanupError = error; }
+      try { await database?.close(); } catch (error) { cleanupError ??= error; }
+      // A close-time storage error must not prevent deletion of a failed new
+      // copy. Both workers have had their close attempt before erasing stores.
       if (erase && config.persistence) await eraseStoredSite(identity);
+      else if (cleanupError) throw cleanupError;
     } finally { await release(); }
   })();
   const restorePrivateCopy = async (saved, kind, persistence = saved.configuration.persistence) => {
@@ -446,6 +521,14 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         sharedLibs: phpEntry.debugger.sharedLibs.map(lib => ({ ...lib, url: resolveAsset(lib.url) })) } : undefined,
     });
     const runtimeInfo = await initializeSession(session);
+    const saveRunningSite = async () => {
+      if (!config.persistence) return;
+      try { await session.flushTogether(); }
+      catch (error) {
+        if (session.failure) throw error;
+        progress({ phase: 'warning', message: `Your changes are available in the running site, but browser storage could not be saved: ${serializeWorkerError(error).error} Keep this tab open and save again.` });
+      }
+    };
     const handle = {
       url: resolveSiteURL(config.initialPath, siteUrl), baseUrl: siteUrl, isolation,
       documentRoot: '/persist/www', installMarkerPath: '/persist/meta/joomla-install.json', runtimeInfo,
@@ -455,7 +538,9 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       get changing() { return changing; },
       get idle() { return !changing && !closePromise && session.idle; },
       recovery: null,
-      lastSavedAt: null,
+      get lastSavedAt() { return config.persistence ? session.savedAt : null; },
+      get savedCurrentState() { return config.persistence && session.savedVersion === session.activityVersion; },
+      get persistenceError() { return session.persistenceError; },
       debugger: {
         capabilities: { conditionalBreakpoints: true },
         get state() { return debugState; },
@@ -501,8 +586,8 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         },
       },
       fs: Object.fromEntries(['mkdir', 'readFile', 'writeFile', 'readdir', 'stat', 'unlink'].map(method => [method,
-        (path, data) => session.send(`fs.${method}`, { path, data })])),
-      runPhp: (source, options = {}) => session.send('runPhp', { source }, options.timeoutMs ?? 180_000),
+        (path, data) => closePromise ? Promise.reject(new Error('This playground is closing.')) : session.send(`fs.${method}`, { path, data })])),
+      runPhp: (source, options = {}) => closePromise ? Promise.reject(new Error('This playground is closing.')) : session.send('runPhp', { source }, options.timeoutMs ?? 180_000),
       async openDatabase() {
         requireDatabase();
         if (changing || closePromise) throw new Error('Wait for the current site operation before opening Database.');
@@ -516,27 +601,28 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         if (changing || closePromise) throw new Error('Wait for the current site operation before clearing Joomla caches.');
         if (debugState === 'paused') throw new Error('Continue or stop the paused PHP request before clearing Joomla caches.');
         const result = await runStartupCommand(handle, ['cache:clean']);
-        await session.flushTogether();
+        await saveRunningSite();
         return result;
       },
       async request(path = '/', init = {}) {
         requireDatabase();
+        if (closePromise) throw new Error('This playground is closing.');
         const target = normalizeInitialPath(`/${String(path).replace(/^\/+/, '')}`);
         const request = new Request(resolveSiteURL(target, siteUrl), init);
         return restoreResponse(await session.send('request', await serializeRequest(request), init.timeoutMs ?? phpRequestTimeoutMs(config.phpSettings)), request.method);
       },
       async flush() {
         requireDatabase();
-        if (changing) throw new Error('Wait for the current site operation before saving.');
+        if (changing || closePromise) throw new Error('Wait for the current site operation before saving.');
         await session.flushTogether();
-        handle.lastSavedAt = config.persistence ? new Date().toISOString() : null;
       },
       exportSite: options => { requireDatabase(); return exportSite(handle, options); },
       async exportRecoveryFiles() {
         if (changing || closePromise) throw new Error('Wait for the current site operation before exporting recovery files.');
         changing = true; instances.delete(instanceId);
         try {
-          const bytes = await session.send('checkpoint', {}, 600_000);
+          if (session.debugState !== 'idle') await session.debugCommand('stop');
+          const bytes = validateCheckpointBytes(await session.send('checkpoint', {}, 600_000));
           return { bytes, filename: `joomengine-recovery-${config.storageKey}.zip`, mimeType: 'application/zip' };
         } finally { changing = false; if (!filesOnly) registerSession(); }
       },
@@ -548,7 +634,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         changing = true; instances.delete(instanceId);
         try {
           const result = await repairJoomlaConfiguration(handle);
-          await session.flushTogether();
+          await saveRunningSite();
           progress({ phase: 'recovery', message: 'Debugging and error reporting were reset. The original configuration is backed up; restart to open Joomla.' });
           return result;
         } finally { changing = false; registerSession(); }
@@ -561,8 +647,10 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         if (managePause && changing) throw new Error('Wait for the current site operation.');
         if (managePause) { changing = true; instances.delete(instanceId); }
         try {
+          if (session.debugState !== 'idle') await session.debugCommand('stop');
           const archive = await exportSite(handle, { format: 'bundle' });
-          const filesystem = await session.send('checkpoint', {}, 600_000);
+          validateCheckpointBytes(archive.bytes, 'The site checkpoint bundle');
+          const filesystem = validateCheckpointBytes(await session.send('checkpoint', {}, 600_000));
           return { archive: archive.bytes, sha256: await sha256(archive.bytes), filesystem, configuration: { ...structuredClone(config), admin: { ...handle.installation.administrator } } };
         } finally { if (managePause) { changing = false; registerSession(); } }
       },
@@ -575,6 +663,14 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           progress({ phase: 'saving', message: 'Saving the temporary site and verifying its files and database…' });
           const saved = await handle.checkpoint(pausedOperation);
           const replacement = await restorePrivateCopy(saved, 'saved', true);
+          try { await replacement.flush(); }
+          catch (error) {
+            // The temporary source is still intact; the unsuccessful copy must
+            // not strand a second inaccessible installation in browser storage.
+            try { await replacement.reset(); }
+            catch (cleanupError) { error.message += ` Partial saved copy cleanup: ${cleanupError.message}`; }
+            throw error;
+          }
           try { await finish(false); }
           catch (cleanupError) { progress({ phase: 'warning', message: `The saved site is ready. Previous runtime cleanup reported: ${cleanupError.message}` }); }
           return replacement;
@@ -603,7 +699,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           Object.assign(config, next);
           handle.url = resolveSiteURL(config.initialPath, siteUrl);
           handle.installation = { ...handle.installation, ...result, administrator: handle.installation.administrator };
-          await session.flushTogether();
+          await saveRunningSite();
           registerSession();
           progress({ phase: 'ready', message: 'Deployment changes applied to the current site.' });
           return result;
@@ -624,12 +720,13 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
         const selected = manifest.php.find(entry => entry.version === version);
         if (!selected || !joomlaEntry.php.includes(version)) throw new Error('This PHP build is not supported by the selected Joomla release.');
         changing = true; instances.delete(instanceId);
-        let filesystem;
+        let filesystem, previousClosed = false;
         try {
           progress({ phase: 'php', message: 'Checkpointing site files before restarting PHP…' });
-          filesystem = await session.send('checkpoint', {}, 600_000);
-          await session.flushTogether();
-          await session.close();
+          if (session.debugState !== 'idle') await session.debugCommand('stop');
+          filesystem = validateCheckpointBytes(await session.send('checkpoint', {}, 600_000));
+          try { await session.close(); }
+          finally { previousClosed = true; }
           phpEntry = selected; config.phpVersion = version;
           session = createSession();
           handle.runtimeInfo = await initializeSession(session, settings);
@@ -639,14 +736,14 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
           // replacement worker; its next navigation or POST must stay usable.
           if (adminerOpened) await session.send('database.install');
           config.phpSettings = settings;
-          await session.flushTogether();
+          await saveRunningSite();
           await session.send('enablePersistence');
           registerSession();
           workspaceEvent({ type: 'workspace-invalidated' });
           progress({ phase: 'ready', message: 'PHP settings applied. Your site files and database are unchanged.' });
           return handle.runtimeInfo;
         } catch (error) {
-          if (filesystem) {
+          if (filesystem && previousClosed) {
             try {
               await session.close().catch(() => {});
               phpEntry = previousEntry; config.phpVersion = previousVersion;
@@ -695,7 +792,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       installed = await importJoomlaCheckpoint(handle, config, {
         archiveBytes: checkpoint.archive, sha256: checkpoint.sha256, progress,
       });
-      await session.send('restoreCheckpoint', { bytes: checkpoint.filesystem }, 600_000);
+      await session.send('restoreCheckpoint', { bytes: validateCheckpointBytes(checkpoint.filesystem) }, 600_000);
       if (rotateAdministrator) {
         installed = { ...installed, ...await readJoomlaMetadata(handle),
           administrator: await restoreJoomlaSession(handle, config, { rotateAdministrator: true }),
@@ -772,14 +869,20 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       if (pristine) progress({ message: 'Launching your site…' });
     }
     imagePhase = undefined;
-    if (!config.persistence || !deferInitialSave) await handle.flush();
+    if (config.persistence && !deferInitialSave) {
+      try { await handle.flush(); }
+      catch (error) {
+        if (session.failure) throw error;
+        progress({ phase: 'warning', message: `Your running site is ready, but its first save did not complete: ${serializeWorkerError(error).error} Keep this tab open and save again.` });
+      }
+    }
     await session.send('enablePersistence');
     handle.installation = installed;
     registerSession();
     progress({ phase: 'ready', message: installed.resumed ? 'Your saved Joomla site is ready.' : 'Joomla is installed and ready.' });
     return handle;
   } catch (error) {
-    try { await finish(false); } catch (cleanupError) { error.message += ` Cleanup: ${cleanupError.message}`; }
+    try { await finish(false, false); } catch (cleanupError) { error.message += ` Cleanup: ${cleanupError.message}`; }
     throw error;
   }
 }

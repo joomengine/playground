@@ -6,7 +6,7 @@ const iconsURL = new URL('./brand/rocket.svg', import.meta.url).href;
 const idMapping = Object.freeze({
   'deploy-editor-button': 'deployment', 'nav-site': 'site', 'nav-admin': 'admin',
   'save-button': 'save-site', 'share-button': 'share-site', 'code-button': 'code', 'database-button': 'database', 'code-refresh-button': 'refresh-site',
-  'download-dialog-button': 'download-site', 'settings-toggle': 'dashboard-toggle',
+  'download-dialog-button': 'download-file', 'settings-toggle': 'dashboard-toggle',
   'restart-button': 'restart-site', 'close-button': 'close-site',
   'credentials-button': 'login-details', 'php-settings-button': 'php-settings', 'reset-button': 'reset-site',
   'launch-button': 'launch', 'embedded-launch': 'launch', 'use-deploy': 'deployment',
@@ -18,7 +18,7 @@ const idMapping = Object.freeze({
   'editor-runtime-button': 'workspace-layout', 'show-password': 'show-password', 'reset-php': 'recommended-settings', 'php-apply-button': 'apply',
   'apply-deploy': 'apply', 'copy-share': 'copy', 'credential-login': 'login-details', 'go-administrator': 'open-administrator',
   'reveal-credentials': 'show-password', 'native-share': 'share-site', 'share-export-config': 'export-configuration',
-  'export-button': 'download-site', 'retry-button': 'retry', 'recover-button': 'recover-site',
+  'export-button': 'download-file', 'retry-button': 'retry', 'recover-button': 'recover-site',
   'repair-button': 'recommended-settings', 'error-reset-button': 'reset-site', 'error-configure': 'deployment',
   'add-package': 'add-item', 'add-menu': 'add-item', 'import-config': 'import-configuration', 'export-config': 'export-configuration',
 });

@@ -92,6 +92,27 @@ test('configuration validates credentials, storage and booleans', () => {
   assert.equal(config.admin.username, 'admin');
 });
 
+test('new sites are temporary unless persistence is explicitly requested', () => {
+  assert.equal(normalizeConfiguration({ admin }).persistence, false);
+  for (const value of ['1', 'true', 'yes']) {
+    const { config } = readURLConfiguration(`https://example.test/?persist=${value}`);
+    assert.equal(normalizeConfiguration({ ...config, admin }).persistence, true);
+  }
+  assert.equal(normalizeConfiguration({ ...readURLConfiguration('https://example.test/').config, admin }).persistence, false);
+  assert.equal(normalizeConfiguration({ admin, storageKey: 'existing-site', persistence: true }).persistence, true,
+    'An existing saved configuration must retain its persistence choice.');
+});
+
+test('share links retain explicit saving choices with temporary defaults', () => {
+  for (const persistence of [false, true]) {
+    for (const advanced of [false, true]) {
+      const config = { deployId: 'blank', persistence, ...(advanced ? { menus: [{ key: 'home', title: 'Home', component: 'com_content', view: 'featured', home: true }] } : {}) };
+      const shared = createShareURL('https://example.test/', config);
+      assert.equal(readURLConfiguration(shared).config.persistence, persistence);
+    }
+  }
+});
+
 test('URL deployment options validate packages and commands while excluding credentials', () => {
   const url = new URL('https://example.test/?deploy=blank&php=8.5&joomla=6.2&language=nl-NL&login=no&fresh=1&path=%2Fadministrator%2F&toolbar=0&persist=0&password=secret');
   url.searchParams.set('extensions', JSON.stringify([{ url: './public-package.zip' }]));

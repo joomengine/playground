@@ -1,7 +1,7 @@
 import { resolveSiteURL, createShareURL, createFullDeploymentDocument, parseDeploymentDocument, loadDeploymentDocument, normalizeConfiguration, parseCatalog, readURLConfiguration, catalogWithSelectedJoomlaPackage, resolveJoomlaVersion, parseStartupCommands } from './config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from './deploys.mjs';
 import { createPlayground, prepareEnvironment, resetPlayground } from './playground.mjs';
-import { defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, rememberSiteRoute, renameSavedSite, safeSavedRoute, resolveResumePath, runtimeLocation, savedStateKey } from './ui-state.mjs';
+import { defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, rememberSavedSite, savedSiteImages, rememberSiteRoute, renameSavedSite, safeSavedRoute, resolveResumePath, runtimeLocation, savedStateKey } from './ui-state.mjs';
 
 import { initializeTheme, setTheme, getThemeState } from './theme.mjs';
 import { observeIcons, decorateAction } from './icons.mjs';
@@ -38,7 +38,7 @@ const fields = {
   language: $('language'), siteName: $('site-name'), initialPath: $('initial-path'), storageKey: $('storage-key'),
   persistence: $('persistence'), autoLogin: $('auto-login'), extensions: $('extensions'), startupCommands: $('startup-commands'),
 };
-const controls = ['save-button', 'restart-button', 'close-button', 'reset-button', 'share-button', 'export-button', 'export-format', 'code-button', 'database-button', 'code-refresh-button'];
+const controls = ['save-button', 'header-save-button', 'restart-button', 'close-button', 'reset-button', 'share-button', 'export-button', 'export-format', 'code-button', 'database-button', 'code-refresh-button'];
 const drafts = new Map();
 let catalog, deployCatalog, runtime, currentConfig, currentInput;
 let busy = false;
@@ -65,10 +65,13 @@ let selectedProfile;
 let hideToolbar = false;
 let initialFocusChoice;
 let pendingFresh = false;
+let persistenceForNewSite = false;
+let persistenceChoiceVersion = 0;
 let resumeLastRoute = true;
 let freshKeyPending = false;
 let automaticLaunchPaused = false;
 let launchManifest, launchReadinessTimer, launchReadinessRequest = 0;
+let imageListRequest = 0;
 const launchRecipeSources = new Map();
 let codeHost;
 let databaseHost, openingDatabase;
@@ -300,14 +303,19 @@ function updateSaveState() {
   let status = t('help.local');
   if (runtime) {
     if (savingSite === runtime) status = t('status.saving');
-    else if (saveFailed) status = t('status.saveFailed');
+    else if (saveFailed || runtime.persistenceError) status = t('status.saveFailed');
     else if (!currentConfig?.persistence) status = t('status.temporary');
     else if (runtime.recovery) status = t('status.saved');
-    else status = lastSavedAt
-      ? t('status.savedAt', { time: lastSavedAt.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) })
+    else status = runtime.lastSavedAt || lastSavedAt
+      ? t('status.savedAt', { time: new Date(runtime.lastSavedAt || lastSavedAt).toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) })
       : t('status.saving');
   }
   $('save-state').textContent = status;
+  const temporary = Boolean(runtime && !currentConfig?.persistence);
+  $('header-save-button').hidden = !runtime || Boolean(runtime.recovery?.filesOnly);
+  $('header-save-button').textContent = t(temporary ? 'action.saveSite' : 'action.save');
+  $('header-save-button').setAttribute('data-i18n', temporary ? 'action.saveSite' : 'action.save');
+  $('temporary-site-reminder').hidden = !temporary;
 }
 
 function destroyPreview() {
@@ -471,7 +479,7 @@ function setBusy(value) {
   for (const id of controls) $(id).disabled = locked || !runtime;
   $('share-button').disabled = locked || unavailable;
   $('reset-button').disabled = locked || (!runtime && (unavailable || !fields.persistence.checked));
-  $('save-button').disabled = locked || !runtime || filesOnly || savingSite === runtime;
+  for (const id of ['save-button', 'header-save-button']) $(id).disabled = locked || !runtime || filesOnly || Boolean(savePromise);
   $('restart-button').disabled = locked || !runtime || filesOnly;
   $('database-button').disabled = locked || !runtime || filesOnly || Boolean(openingCode || openingDatabase);
   $('code-button').disabled = locked || !runtime || Boolean(openingCode || openingDatabase);
@@ -506,11 +514,40 @@ function setBusy(value) {
   updateLaunchReadiness();
 }
 async function openImages() {
+  const request = ++imageListRequest;
   openDialog('images-dialog');
   const list = $('deployment-image-list');
   const message = $('deployment-images-message');
-  message.textContent = 'Loading local images…';
+  message.textContent = 'Loading prepared images…';
   list.replaceChildren();
+  for (const entry of savedSiteImages(savedState)) {
+    const row = document.createElement('li');
+    row.dataset.kind = 'site'; row.dataset.siteKey = entry.storageKey;
+    const description = document.createElement('div'); description.className = 'image-description';
+    const title = document.createElement('strong'); title.textContent = entry.title;
+    const info = document.createElement('small');
+    const saved = entry.lastSavedAt ? new Date(entry.lastSavedAt).toLocaleString(getLocale()) : 'saved time unavailable';
+    const versions = [`Joomla ${entry.joomlaVersion}`, ...(entry.jcbVersion && entry.jcbVersion !== 'none' ? [`JCB ${entry.jcbVersion}`] : []), ...(entry.phpVersion ? [`PHP ${entry.phpVersion}`] : [])];
+    info.textContent = `Saved site · ${versions.join(' · ')} · ${saved}${entry.storageKey === runningSiteId ? ' · Running' : ''}`;
+    description.append(title, info);
+    const open = document.createElement('button');
+    open.type = 'button'; open.className = 'button button-secondary';
+    open.textContent = entry.storageKey === runningSiteId ? 'View' : 'Open';
+    open.setAttribute('aria-label', `${entry.storageKey === runningSiteId ? 'View running site' : 'Open saved site'}: ${entry.title}`);
+    open.disabled = busy || launching;
+    open.addEventListener('click', async () => {
+      if (busy || launching) return;
+      $('images-dialog').close();
+      if (entry.storageKey === runningSiteId && runtime) { setDrawer(false); return; }
+      if (await openSavedSite(entry.storageKey)) await launch();
+    });
+    const remove = document.createElement('button');
+    remove.type = 'button'; remove.className = 'button button-secondary danger'; remove.textContent = 'Delete';
+    remove.setAttribute('aria-label', `Delete saved site: ${entry.title}`);
+    remove.disabled = busy || launching;
+    remove.addEventListener('click', async () => { await deleteSelectedSite({ key: entry.storageKey }); await openImages(); });
+    row.append(description, open, remove); list.append(row);
+  }
   try {
     let manifest;
     try {
@@ -518,26 +555,28 @@ async function openImages() {
       if (response.ok) manifest = await response.json();
     } catch { /* Local images can still be managed offline. */ }
     const images = (await deploymentImages.list(manifest)).filter(entry => entry.available !== false);
-    message.textContent = images.length ? '' : 'No images stored in this browser.';
+    if (request !== imageListRequest || !$('images-dialog').open) return;
+    message.textContent = images.length || list.children.length ? '' : 'No saved sites or prepared images stored in this browser.';
     for (const entry of images) {
       const row = document.createElement('li');
+      row.dataset.kind = 'prepared';
       const description = document.createElement('div'); description.className = 'image-description';
       const title = document.createElement('strong');
       title.textContent = (entry.kind === 'server' && deployCatalog?.deploys.find(item => item.id === entry.deploymentId)?.title) || entry.title || 'Deployment image';
       const info = document.createElement('small');
-      info.textContent = `${entry.kind === 'server' ? 'Maintained' : 'Custom'} · Joomla ${entry.joomlaVersion} · ${(entry.size / 1048576).toFixed(1)} MB`;
+      info.textContent = `Prepared image · ${entry.kind === 'server' ? 'Maintained' : 'Custom'} · Joomla ${entry.joomlaVersion} · ${(entry.size / 1048576).toFixed(1)} MB`;
       description.append(title, info);
       const remove = document.createElement('button');
       remove.type = 'button'; remove.className = 'button button-secondary'; remove.textContent = 'Delete';
       remove.setAttribute('aria-label', `Delete image: ${title.textContent}`);
       remove.addEventListener('click', async () => {
         remove.disabled = true;
-        try { await deploymentImages.remove(entry.key); row.remove(); if (!list.children.length) message.textContent = 'No images stored in this browser.'; }
+        try { await deploymentImages.remove(entry.key); row.remove(); if (!list.children.length) message.textContent = 'No saved sites or prepared images stored in this browser.'; }
         catch (error) { message.textContent = messageOf(error); remove.disabled = false; }
       });
       row.append(description, remove); list.append(row);
     }
-  } catch (error) { message.textContent = messageOf(error); }
+  } catch (error) { if (request === imageListRequest) message.textContent = messageOf(error); }
 }
 function showExtensionWarnings(warnings = []) {
   const panel = $('extension-warnings');
@@ -569,6 +608,7 @@ function showExtensionWarnings(warnings = []) {
 }
 function progress(event) {
   const details = typeof event === 'string' ? { message: event } : event;
+  if (runtime && details?.phase === 'warning') updateSaveState();
   const rawMessage = details?.message || details?.phase || 'Preparing the playground…';
   const message = details?.phase === 'warning' ? presentError(new Error(rawMessage), {
     secrets: [$('admin-password').value, runningAdministrator?.password], fallback: 'PHP reported diagnostic output. Check the browser console for details.',
@@ -892,6 +932,10 @@ function applyConfiguration(config, input = config, deploy) {
     if (config[name] !== undefined) fields[name].value = config[name];
   }
   fields.persistence.checked = config.persistence;
+  // A saved site's preference belongs to that site. Reusing its recipe does
+  // not silently opt a new independent installation into browser persistence.
+  persistenceForNewSite = Boolean(config.persistence && !savedState.sites[config.storageKey]);
+  persistenceChoiceVersion++;
   fields.autoLogin.checked = config.autoLogin;
   const addonUrls = new Set((config.addonExtensions || []).map(item => item.url));
   extensionInputs.setValue(config.extensions || [], { managed: (config.extensions || []).filter(item => !addonUrls.has(item.url)) });
@@ -956,9 +1000,10 @@ function renderSavedSites(selectedKey = selectedSiteId) {
   if (savedSiteNameDraft?.key !== selectedKey || !Object.hasOwn(savedState.sites, selectedKey)) savedSiteNameDraft = null;
   $('saved-site-name').value = savedSiteNameDraft?.value ?? savedState.sites[selectedKey]?.displayName ?? '';
 }
-function rememberCurrentSite() {
+function rememberCurrentSite({ savedAt } = {}) {
   if (currentConfig?.persistence) {
-    savedState = rememberSite(savedState, { ...currentInput, lastPath: safeSavedRoute(currentSitePath, currentConfig.initialPath), ...Object.fromEntries(['deployId', 'joomlaVersion', 'phpVersion', 'siteName', 'storageKey', 'persistence', 'language'].map((name) => [name, currentConfig[name]])) });
+    const input = { ...currentInput, lastPath: safeSavedRoute(currentSitePath, currentConfig.initialPath), ...Object.fromEntries(['deployId', 'joomlaVersion', 'jcbVersion', 'jcbPackage', 'phpVersion', 'phpSettings', 'siteName', 'storageKey', 'persistence', 'language'].map((name) => [name, currentConfig[name]])) };
+    savedState = savedAt ? rememberSavedSite(savedState, input, savedAt) : rememberSite(savedState, input);
   } else {
     // Temporary installations must not replace the last resumable saved site.
     if (!preferences) return true;
@@ -1084,12 +1129,13 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     freshKeyPending = false;
     currentInput.fresh = false;
     resumeLastRoute = true;
-    const resumeSaved = rememberCurrentSite();
+    const resumeSaved = rememberCurrentSite({ savedAt: runtime.lastSavedAt });
     selectedProfile = { deployId: currentConfig.deployId, joomlaVersion: currentConfig.joomlaVersion };
     rememberDraft({ deployId: currentConfig.deployId, joomlaVersion: currentConfig.joomlaVersion });
     activity(recipe.changed ? `Site ready under “${currentConfig.storageKey}”. Your previous site is available in Saved sites.` : currentConfig.persistence
-      ? resumeSaved ? 'Site ready. Reopening this playground will resume your saved site.' : `Site ready. Keep saved site key “${currentConfig.storageKey}” to reopen it.`
-      : 'Temporary site ready. Download your work before closing.');
+      ? !lastSavedAt ? 'Site ready. The first save is queued; wait for Saved locally before closing.'
+        : resumeSaved ? 'Site ready. Reopening this playground will resume your saved site.' : `Site ready. Keep saved site key “${currentConfig.storageKey}” to reopen it.`
+      : 'Temporary site ready. Save this site or download your work before refreshing or closing.');
     if (siteExport) feedback(runtime.installation.contentHashValidated ? 'Package validated.' : 'Package validation is unavailable for this older export.');
   } catch (error) {
     if (!switchingStarted) { feedback(error, { error: true, persistent: true }); return; }
@@ -1123,8 +1169,9 @@ async function closeSite({ reset = false, save = false } = {}) {
     // Background persistence must finish before this owner is closed or reset.
     if (savingSite === handle && !await savePromise) return false;
     // A failed checkpoint must leave the current iframe and unsaved forms intact.
-    if ((save || (!reset && currentConfig.persistence && !handle.lastSavedAt)) && !handle.recovery?.filesOnly) {
-      activity('Saving the current site before closing…'); await handle.flush();
+    if ((save || (!reset && currentConfig.persistence)) && !handle.recovery?.filesOnly) {
+      activity('Saving the current site before closing…');
+      if (!await saveSite({ quiet: true, closingSave: true })) return false;
     }
     destroyPreview(); previewRemoved = true;
     if (reset) await handle.reset();
@@ -1161,7 +1208,7 @@ async function closeSite({ reset = false, save = false } = {}) {
 }
 
 async function openSavedSite(key) {
-  if (busy || launching || !Object.hasOwn(savedState.sites, key)) return;
+  if (busy || launching || !Object.hasOwn(savedState.sites, key)) return false;
   pauseAutomaticLaunch();
   rememberDraft();
   setBusy(true);
@@ -1175,13 +1222,13 @@ async function openSavedSite(key) {
     $('retry-button').hidden = false;
     renderSavedSites(key);
     activity(t('status.siteStaged', { name: savedState.sites[key].displayName || input.siteName }));
-  } catch (error) { feedback(error, { error: true, persistent: true }); }
+    return true;
+  } catch (error) { feedback(error, { error: true, persistent: true }); return false; }
   finally { setBusy(false); }
 }
-async function deleteSelectedSite() {
-  if (busy || launching || !selectedSiteId || !Object.hasOwn(savedState.sites, selectedSiteId)) return;
+async function deleteSelectedSite({ key = selectedSiteId } = {}) {
+  if (busy || launching || !key || !Object.hasOwn(savedState.sites, key)) return;
   pauseAutomaticLaunch();
-  const key = selectedSiteId;
   const name = savedState.sites[key].displayName || savedState.sites[key].siteName;
   if (!confirm(t('confirm.deleteSavedSite', { name }))) return;
   if (runtime && runningSiteId === key && !await closeSite()) return;
@@ -1191,7 +1238,7 @@ async function deleteSelectedSite() {
     // Retain catalog metadata on any failure so deletion can safely be retried.
     await resetPlayground({ storageKey: key });
     savedState = forgetSite(savedState, key);
-    selectedSiteId = null;
+    if (selectedSiteId === key) selectedSiteId = null;
     const metadataSaved = writePreferences();
     // Files are already deleted; report a catalog persistence failure instead
     // of promising a successful saved-site management change after reload.
@@ -1232,7 +1279,7 @@ async function changeProfile({ refreshNightly = false, deploymentChanged = false
     const input = {
       ...(stored || {}), ...target,
       phpVersion: selected.phpVersion,
-      persistence: stored?.persistence ?? fields.persistence.checked,
+      persistence: stored?.persistence ?? persistenceForNewSite,
       hideToolbar,
       ...(!stored && target.deployId === previous?.deployId ? { language: fields.language.value } : {}),
       storageKey: stored?.storageKey || defaultSiteKey(target.deployId, target.joomlaVersion),
@@ -1349,6 +1396,7 @@ async function resetSite({ start = false } = {}) {
   if (reset && start) await launch();
 }
 $('save-button').addEventListener('click', () => void saveSite());
+$('header-save-button').addEventListener('click', () => void saveSite());
 $('upload-site-button').addEventListener('click', () => { pauseAutomaticLaunch(); $('upload-site-file').click(); });
 $('upload-site-file').addEventListener('change', async event => {
   const file = event.target.files?.[0];
@@ -1412,7 +1460,17 @@ for (const select of [fields.joomlaVersion, fields.jcbVersion]) {
 
 fields.initialPath.addEventListener('input', () => { resumeLastRoute = false; });
 fields.phpVersion.addEventListener('change', () => { pauseAutomaticLaunch(); setBusy(busy); });
-fields.persistence.addEventListener('change', () => { pauseAutomaticLaunch(); setBusy(busy); });
+fields.persistence.addEventListener('change', () => {
+  pauseAutomaticLaunch();
+  persistenceForNewSite = fields.persistence.checked;
+  persistenceChoiceVersion++;
+  // Enabling saving for the current temporary site keeps the work already open.
+  // A different staged site still takes effect only when that site is launched.
+  if (runtime && !currentConfig.persistence && fields.persistence.checked
+      && fields.storageKey.value === currentConfig.storageKey && !busy && !launching) {
+    void saveSite();
+  } else setBusy(busy);
+});
 fields.storageKey.addEventListener('change', () => {
   pauseAutomaticLaunch();
   if (busy) return;
@@ -1511,16 +1569,17 @@ async function removeDeployment() {
   } catch (error) { editorError(error); }
 }
 function editorError(error) { $('deploy-error').textContent = messageOf(error); $('deploy-error').hidden = false; }
-function saveSite({ quiet = false } = {}) {
-  if (savePromise && savingSite === runtime) return savePromise;
-  if (!runtime || busy || runtime.recovery?.filesOnly) return Promise.resolve(false);
+function saveSite({ quiet = false, closingSave = false } = {}) {
+  if (savePromise) return savePromise;
+  if (!runtime || (busy && !closingSave) || runtime.recovery?.filesOnly) return Promise.resolve(false);
   const handle = runtime;
   const wasTemporary = !currentConfig.persistence;
   const savingSelected = fields.storageKey.value === currentConfig.storageKey;
+  const savingChoiceVersion = persistenceChoiceVersion;
   savingSite = handle;
   saveFailed = false;
   if (wasTemporary) setBusy(true);
-  else { $('save-button').disabled = true; updateSaveState(); }
+  else { for (const id of ['save-button', 'header-save-button']) $(id).disabled = true; updateSaveState(); }
   if (wasTemporary) { destroyPreview(); show('loading-view'); }
   savePromise = Promise.resolve().then(async () => {
     try {
@@ -1530,16 +1589,28 @@ function saveSite({ quiet = false } = {}) {
         currentConfig = runtime.configuration;
         currentInput = { ...currentInput, persistence: true, storageKey: currentConfig.storageKey };
         runningSiteId = currentConfig.storageKey;
-        if (savingSelected) { fields.storageKey.value = currentConfig.storageKey; fields.persistence.checked = true; selectedSiteId = currentConfig.storageKey; }
+        if (savingSelected) {
+          fields.storageKey.value = currentConfig.storageKey; fields.persistence.checked = true;
+          selectedSiteId = currentConfig.storageKey; persistenceForNewSite = false;
+        }
         mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
         if (databaseHost && !databaseHost.closed) {
           try { await databaseHost.rebindRuntime(runtime); }
           catch (error) { activity(`Site saved, but the database viewer could not reopen: ${messageOf(error)}. Select DB to retry.`); }
         }
       } else await handle.flush();
-      lastSavedAt = new Date(); autosave?.saved(); rememberCurrentSite();
+      if (!runtime.lastSavedAt) throw new Error('The site has not completed its first save. Keep this tab open and retry Save.');
+      lastSavedAt = new Date(runtime.lastSavedAt); autosave?.saved();
+      if (savingSelected && savingChoiceVersion === persistenceChoiceVersion) persistenceForNewSite = false;
+      const catalogSaved = rememberCurrentSite({ savedAt: runtime.lastSavedAt });
       updateRuntimeLocation();
-      if (!quiet) { activity('Files and database saved to browser storage.'); feedback(t('status.savedAt', { time: lastSavedAt.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) })); }
+      if ($('images-dialog').open) void openImages();
+      if (!quiet) {
+        activity('Files and database saved to browser storage.');
+        feedback(catalogSaved ? t('status.savedAt', { time: lastSavedAt.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) })
+          : `Site files and database saved. Keep site key “${currentConfig.storageKey}”; the saved-site list could not be updated.`,
+        { error: !catalogSaved, persistent: !catalogSaved });
+      }
       return true;
     } catch (error) {
       saveFailed = true;
@@ -1555,7 +1626,7 @@ function saveSite({ quiet = false } = {}) {
       // A background save must not unlock a Close/Reset operation that started
       // while the worker was persisting its files and database.
       if (wasTemporary) setBusy(false);
-      else { $('save-button').disabled = busy || launching || !runtime || Boolean(runtime.recovery?.filesOnly); updateSaveState(); }
+      else { for (const id of ['save-button', 'header-save-button']) $(id).disabled = busy || launching || !runtime || Boolean(runtime.recovery?.filesOnly); updateSaveState(); }
     }
   });
   return savePromise;
@@ -1593,7 +1664,7 @@ async function useDeployment() {
   if (busy || launching || !catalog) return;
   $('deploy-error').hidden = true;
   try {
-    let input = formInput();
+    let input = formInput({ persistence: persistenceForNewSite });
     const storageKey = `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`;
     if (input.restoredSite) {
       setBusy(true);
@@ -1641,9 +1712,9 @@ async function applyDeployment() {
     applyConfiguration(currentConfig, currentInput, resolved.deploy);
     runningAdministrator = runtime.installation?.administrator || currentInput.admin;
     applyAdministrator(runningAdministrator);
-    lastSavedAt = currentConfig.persistence ? new Date() : undefined;
-    saveFailed = false;
-    rememberCurrentSite();
+    lastSavedAt = runtime.lastSavedAt ? new Date(runtime.lastSavedAt) : undefined;
+    saveFailed = Boolean(runtime.persistenceError);
+    rememberCurrentSite({ savedAt: runtime.savedCurrentState ? runtime.lastSavedAt : undefined });
     currentSitePath = currentConfig.initialPath;
     mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
     $('deploy-dialog').close(); feedback(t('status.ready'));
@@ -1660,7 +1731,7 @@ async function applyDeployment() {
         selectedSiteId = currentConfig.persistence ? currentConfig.storageKey : null;
         runningAdministrator = runtime.installation?.administrator || currentInput.admin;
         currentInput = { ...currentInput, storageKey: currentConfig.storageKey, persistence: currentConfig.persistence };
-        applyConfiguration(currentConfig, currentInput); rememberCurrentSite();
+        applyConfiguration(currentConfig, currentInput); rememberCurrentSite({ savedAt: runtime.savedCurrentState ? runtime.lastSavedAt : undefined });
         updateRuntimeLocation();
         try { await oldRuntime.close(); } catch (cleanupError) { activity(cleanupError); }
       }
@@ -1825,7 +1896,7 @@ function setupInterface() {
         setBusy(true); destroyPreview(); show('loading-view');
         await runtime.updatePhpSettings(settings);
         currentConfig = runtime.configuration; currentInput = { ...currentInput, phpSettings: settings };
-        rememberCurrentSite(); mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
+        rememberCurrentSite({ savedAt: runtime.savedCurrentState ? runtime.lastSavedAt : undefined }); mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
         updateRuntimeLocation();
       }
       phpSettings = settings; $('php-dialog').close(); feedback(t('status.ready'));
@@ -1843,7 +1914,7 @@ function setupInterface() {
   });
   window.addEventListener('pagehide', () => launchCountdown.stop());
   autosave = startAutosave({
-    canSave: () => runtime?.idle && !runtime.recovery && currentConfig?.persistence
+    canSave: () => runtime?.healthy && !runtime.changing && !runtime.recovery && currentConfig?.persistence
       && !busy && !launching && !savePromise && (!lastSavedAt || document.visibilityState === 'visible'),
     save: () => saveSite({ quiet: true }),
     onError: error => activity(`Autosave failed: ${messageOf(error)}`),

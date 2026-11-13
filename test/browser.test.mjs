@@ -1055,6 +1055,12 @@ for (const name of browserNames) {
         assert.equal(await page.frameLocator('#site-frame').locator('input[name="passwd"]').count(), 0);
         assert.deepEqual(dashboardErrors(await page.frameLocator('#site-frame').locator('html').innerHTML()), [],
           'The default JCB dashboard must be free of missing-runtime requirement alerts.');
+        assert.equal(await page.locator('#persistence').isChecked(), false,
+          'The default JCB launch must remain temporary until the user saves it.');
+        await page.locator('#header-save-button').click();
+        await page.locator('#header-save-button:enabled').waitFor({ timeout: requestTimeout });
+        await renderedSiteFrame(page);
+        assert.equal(await page.locator('#persistence').isChecked(), true);
         proof.push({ id: 'jcb-save-hard-reload', ...(await assertJcbHardReload(page, { redirectProbe: syntheticRedirectProbe })) });
         proof.push({ id: 'joomla-diagnostics', ...(await assertJoomlaDebugConfiguration(page, { redirectProbe: syntheticRedirectProbe })) });
         if (name === 'chromium') {
@@ -1179,6 +1185,7 @@ for (const name of browserNames) {
         url.searchParams.set('joomla', defaultPair.joomlaVersion);
         url.searchParams.set('php', defaultPair.phpVersion);
         url.searchParams.set('deploy', 'blank');
+        url.searchParams.set('persist', '1');
         url.searchParams.set('start', '0');
         await page.goto(url.href);
         await showQuickSettings(page);
@@ -1326,7 +1333,7 @@ for (const name of browserNames) {
         // A distinct source is installed into a separate fresh site without
         // modifying the existing files or database.
         const freshSource = new URL('__test_fresh_extension.zip', server.url).href;
-        for (const [key, value] of Object.entries({ deploy: 'blank', joomla: defaultPair.joomlaVersion, php: changedPHP, key: savedKey, fresh: '1', start: '0', extension: freshSource })) freshURL.searchParams.set(key, value);
+        for (const [key, value] of Object.entries({ deploy: 'blank', joomla: defaultPair.joomlaVersion, php: changedPHP, key: savedKey, fresh: '1', persist: '1', start: '0', extension: freshSource })) freshURL.searchParams.set(key, value);
         await page.goto(freshURL.href);
         await launchFixtureLink(page, freshSource);
         await renderedSiteFrame(page);
@@ -1396,6 +1403,8 @@ for (const name of browserNames) {
         assert.notEqual(await page.locator('#storage-key').inputValue(), savedKey);
         await dismissAutomaticTour(page);
         assert.equal((await previewContract(page)).database, null, 'New site must install an independent database.');
+        assert.equal(await page.locator('#persistence').isChecked(), false,
+          'An independent deployment must not inherit saving merely because the previous site was saved.');
         await showQuickSettings(page);
         await stageSavedSite(page, savedKey);
         assert.equal((await previewContract(page)).database, null, 'Selecting a saved site does not launch it.');
@@ -1517,8 +1526,6 @@ for (const name of browserNames) {
         assert.equal(await page.locator('#persistence').isChecked(), false);
         page.testStep = 'checkpoint temporary site into browser storage';
         await setPersistence(page, true);
-        assert.deepEqual(await previewContract(page), marker, 'Keep setting is staged without replacing the temporary runtime.');
-        await page.locator('#save-button').click();
         await page.locator('#save-button:enabled').waitFor({ timeout: requestTimeout });
         await renderedSiteFrame(page);
         assert.equal(await page.locator('#persistence').isChecked(), true);
@@ -1532,6 +1539,7 @@ for (const name of browserNames) {
         await assertResponsiveSave(page);
         page.testStep = 'a failed save keeps the running site available';
         const savedFrameURL = await page.locator('#site-frame').getAttribute('src');
+        await previewContract(page, 'seed');
         await page.evaluate(() => {
           const original = Worker.prototype.postMessage;
           window.__flushFailureInjected = false;
