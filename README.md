@@ -404,9 +404,9 @@ parameters. Invalid JSON remains visible until corrected.
   controls and scrolls to its corresponding header or footer without restarting
   or transferring the site.
 
-Persistence is enabled by default. Joomla files, session data, cookies and the
-MariaDB database are kept in IndexedDB. A site key identifies saved data on this
-origin. Returning normally to the domain stages the last saved site and restores
+Browser persistence is opt-in for new sites. Once saved, Joomla files, session
+data, cookies and the MariaDB database are kept in IndexedDB. A site key identifies
+saved data on this origin. Returning normally to the domain stages the last saved site and restores
 its last safe in-site route when the startup countdown or Launch opens it. Route
 metadata excludes action/security parameters and credentials; a missing resumed
 page falls back to the initial route. Explicit URL or edited initial-page choices

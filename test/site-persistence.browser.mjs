@@ -126,7 +126,13 @@ for (const name of names) {
         await page.locator('#images-dialog [data-close-dialog]').click();
 
         // A reload without Close proves durability, not a graceful-shutdown save.
+        // start=0 only held the initial form open; remove that explicit pause
+        // before testing the normal automatic saved-site resume on reload.
         step('hard reload saved site');
+        await page.evaluate(() => {
+          const url = new URL(location.href); url.searchParams.delete('start');
+          history.replaceState(null, '', url);
+        });
         await page.reload();
         await preview(page);
         assert.equal(await page.locator('#persistence').isChecked(), true);
