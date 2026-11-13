@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { customSetupDetails, defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSavedSite, rememberSite, runtimeLocation, savedStateKey } from '../src/ui-state.mjs';
-import { createFullDeploymentDocument, parseDeploymentDocument } from '../src/config.mjs';
+import { customSetupDetails, defaultSiteKey, forgetSite, initialSiteSelection, isolateSetup, publicConfiguration, readSavedState, rememberSavedSite, rememberSite, runtimeLocation, savedStateKey } from '../src/ui-state.mjs';
+import { createFullDeploymentDocument, parseDeploymentDocument, readURLConfiguration } from '../src/config.mjs';
 
 const configuration = {
   deployId: 'jcb', joomlaVersion: '6.2.0', phpVersion: '8.4', siteName: 'Saved work',
@@ -14,6 +14,21 @@ const configuration = {
 };
 const empty = () => readSavedState({ getItem() { return null; } }, 'settings');
 const saved = (state, config) => rememberSavedSite(state, config, '2026-11-13T20:00:00.000Z');
+
+test('fresh keyed launches default to temporary while saved resumes and explicit opt-in retain persistence', () => {
+  const state = saved(empty(), configuration);
+  const select = query => initialSiteSelection(state, readURLConfiguration(`https://example.test/?${query}`).config,
+    { hasOptions: Boolean(query) });
+  const fresh = select('key=work&fresh=1').input;
+  assert.equal(fresh.persistence, false);
+  assert.equal(fresh.joomlaVersion, configuration.joomlaVersion, 'The fresh site keeps the selected recipe and runtime.');
+  assert.equal(fresh.fresh, true);
+  assert.equal(select('key=work&fresh=1&persist=1').input.persistence, true);
+  assert.equal(select('key=work&fresh=1&persist=0').input.persistence, false);
+  assert.equal(select('key=work').input.persistence, true);
+  assert.equal(select('').input.persistence, true, 'Ordinary return resumes the existing saved site.');
+  assert.equal(state.sites.work.persistence, true, 'Fresh launch choices never alter the original saved profile.');
+});
 
 test('custom deployment approval distinguishes commands with colliding display text', () => {
   const reviewed = { startupCommands: [['config:set', 'sitename', 'Demo Site']] };

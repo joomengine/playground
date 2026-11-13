@@ -28,6 +28,16 @@ export function defaultSiteKey(deployId, joomlaVersion) {
   return `${name.slice(0, 64 - suffix.length)}${suffix}`;
 }
 
+/** Resume saved choices without carrying their saving preference into a fresh site. */
+export function initialSiteSelection(state, configuration, { hasOptions = false } = {}) {
+  const keyed = configuration.storageKey && Object.hasOwn(state.sites, configuration.storageKey)
+    ? state.sites[configuration.storageKey] : null;
+  const previous = keyed || (!hasOptions && state.active ? state.sites[state.active] : null);
+  const input = { ...(previous || {}), ...configuration };
+  if (configuration.fresh && configuration.persistence === undefined) input.persistence = false;
+  return { previous, input };
+}
+
 /** Persist setup preferences, never administrator credentials or runtime objects. */
 export function publicConfiguration(config) {
   const result = Object.fromEntries(PUBLIC_FIELDS.filter((name) => config[name] !== undefined).map((name) => [name, structuredClone(config[name])]));

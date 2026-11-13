@@ -1,7 +1,7 @@
 import { resolveSiteURL, createShareURL, createFullDeploymentDocument, parseDeploymentDocument, loadDeploymentDocument, normalizeConfiguration, parseCatalog, readURLConfiguration, catalogWithSelectedJoomlaPackage, resolveJoomlaVersion, parseStartupCommands } from './config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from './deploys.mjs';
 import { createPlayground, prepareEnvironment, resetPlayground } from './playground.mjs';
-import { defaultSiteKey, forgetSite, isolateSetup, publicConfiguration, readSavedState, rememberSite, rememberSavedSite, savedSiteImages, rememberSiteRoute, renameSavedSite, safeSavedRoute, resolveResumePath, runtimeLocation, savedStateKey } from './ui-state.mjs';
+import { defaultSiteKey, forgetSite, initialSiteSelection, isolateSetup, publicConfiguration, readSavedState, rememberSite, rememberSavedSite, savedSiteImages, rememberSiteRoute, renameSavedSite, safeSavedRoute, resolveResumePath, runtimeLocation, savedStateKey } from './ui-state.mjs';
 
 import { initializeTheme, setTheme, getThemeState } from './theme.mjs';
 import { observeIcons, decorateAction } from './icons.mjs';
@@ -1192,6 +1192,12 @@ async function closeSite({ reset = false, save = false } = {}) {
     return true;
   } catch (error) {
     runtime = !error.closed && handle.healthy ? handle : undefined;
+    if (error.closed && error.erased) {
+      savedState = forgetSite(savedState, currentConfig.storageKey);
+      if (selectedSiteId === currentConfig.storageKey) selectedSiteId = null;
+      writePreferences();
+      pendingFresh = false; freshKeyPending = false;
+    }
     if (runtime) {
       if (previewRemoved) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
       feedback(error, { error: true, persistent: true });
@@ -1202,7 +1208,7 @@ async function closeSite({ reset = false, save = false } = {}) {
       }
       try { await databaseHost?.dispose(); databaseHost = undefined; } catch (cleanupError) { activity(cleanupError); }
       try { await codeHost?.dispose(); } catch (cleanupError) { activity(cleanupError); }
-      codeHost = undefined; runningSiteId = null; runningAdministrator = null;
+      codeHost = undefined; runningSiteId = null; runningAdministrator = null; previewDirty = false;
       displayError(error);
     }
     return false;
@@ -1627,8 +1633,7 @@ function saveSite({ quiet = false, closingSave = false } = {}) {
       savingSite = undefined; savePromise = undefined;
       // A background save must not unlock a Close/Reset operation that started
       // while the worker was persisting its files and database.
-      if (wasTemporary) setBusy(false);
-      else { for (const id of ['save-button', 'header-save-button']) $(id).disabled = busy || launching || !runtime || Boolean(runtime.recovery?.filesOnly); updateSaveState(); }
+      setBusy(wasTemporary ? false : busy);
     }
   });
   return savePromise;
@@ -1963,10 +1968,8 @@ async function initialize() {
     fillOptions(fields.phpVersion, catalog.php);
     fillOptions(fields.deployId, deployCatalog.deploys);
     const hasOptions = Boolean(parsed.document) || new URL(location.href).hash.startsWith('#deploy=') || ['deploy', 'joomla', 'jcb', 'php', 'language', 'login', 'fresh', 'key', 'persist', 'path', 'initialPath', 'extensions', 'extension', 'commands', 'startupCommands', 'name', 'phpSettings', 'languageTags', 'menus', 'template'].some((name) => params.has(name));
-    const keyed = parsed.config.storageKey && Object.hasOwn(savedState.sites, parsed.config.storageKey)
-      ? savedState.sites[parsed.config.storageKey] : null;
-    const previous = keyed || (!hasOptions && savedState.active ? savedState.sites[savedState.active] : null);
-    let input = { ...(previous || {}), ...(previous?.deployId ? { deployId: previous.deployId } : {}), ...parsed.config, admin: administrator() };
+    const { previous, input: selectedInput } = initialSiteSelection(savedState, parsed.config, { hasOptions });
+    let input = { ...selectedInput, admin: administrator() };
     // Shared exact package configurations retain their identity; plain version
     // links resolve against the small catalog published with this deployment.
     if ((input.joomlaVersion && !input.joomlaPackage && !pinnedJoomlaVersion(input.joomlaVersion))
@@ -1989,7 +1992,7 @@ async function initialize() {
     setBusy(false);
     void refreshDynamicCatalog();
     setInterval(() => { if (!$('settings').hidden && !busy && !launching) void refreshDynamicCatalog(); }, catalogRefreshInterval);
-    const shouldResume = Boolean(previous) && (!params.has('start') || parsed.autostart);
+    const shouldResume = Boolean(previous) && !parsed.config.fresh && (!params.has('start') || parsed.autostart);
     activity(shouldResume ? 'Reopening your saved site…' : 'Ready to launch. Choose a starting point and your runtime versions.');
     if ((!params.has('start') || parsed.autostart) && !automaticLaunchPaused && !document.hidden) {
       if (parsed.immediate) void launch();
