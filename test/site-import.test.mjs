@@ -99,7 +99,7 @@ test('restored configuration preserves the login and opening page with a fresh i
   assert.equal(first.siteName, 'Saved edited site');
   assert.equal(first.phpVersion, '8.5');
   assert.equal(first.deployId, 'blank');
-  assert.equal(first.persistence, true);
+  assert.equal(first.persistence, false);
   assert.equal(first.fresh, false);
   assert.match(first.storageKey, /^import-/);
   assert.notEqual(first.storageKey, original.storageKey);
@@ -107,6 +107,16 @@ test('restored configuration preserves the login and opening page with a fresh i
   for (const name of ['joomlaPackage', 'jcbPackage', 'snapshot', 'deploymentRecipe']) assert.equal(name in first, false, name);
   assert.deepEqual(first.restoredSite, { joomlaVersion: '6.2.0', php: ['8.4', '8.5'] });
   assert.equal(input.metadata.playground.configuration.storageKey, 'original-site', 'Import never modifies the export metadata.');
+});
+
+test('an uploaded site stays temporary unless its new owner explicitly chooses persistence', async () => {
+  const input = await read(bundle({ configuration: { admin, persistence: true } }));
+  assert.equal(configurationForSiteExport(input, catalog).persistence, false,
+    'The exported source saving preference does not opt the independent upload in.');
+  assert.equal(configurationForSiteExport(input, catalog, { persistence: false }).persistence, false);
+  assert.equal(configurationForSiteExport(input, catalog, { persistence: true }).persistence, true);
+  assert.equal(input.metadata.playground.configuration.persistence, true, 'Choosing upload persistence does not mutate the export.');
+  assert.throws(() => configurationForSiteExport(input, catalog, { persistence: 'true' }), /must be true or false/);
 });
 
 test('old releases and nightlies restore from site files while using an available PHP runtime', async () => {

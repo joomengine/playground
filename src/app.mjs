@@ -1069,10 +1069,7 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
       setDrawer(false); $('site-frame')?.focus(); feedback(t('status.alreadyRunning')); return;
     }
     if (runtime) {
-      if (!currentConfig.persistence && (siteExport || checkpoint)) {
-        setBusy(false);
-        if (!await saveSite({ quiet: true })) return;
-      } else if (!currentConfig.persistence && !confirm(t('confirm.temporary'))) return;
+      if (!currentConfig.persistence && !confirm(t('confirm.temporary'))) return;
       setBusy(false);
       if (!await closeSite({ save: currentConfig.persistence })) return;
     }
@@ -1415,7 +1412,9 @@ $('upload-site-file').addEventListener('change', async event => {
   let siteExport, importedConfiguration;
   try {
     siteExport = await readSiteExport(file);
-    importedConfiguration = configurationForSiteExport(siteExport, catalog, { baseURL: deploymentURL, admin: administrator() });
+    importedConfiguration = configurationForSiteExport(siteExport, catalog, {
+      baseURL: deploymentURL, admin: administrator(), persistence: persistenceForNewSite,
+    });
   } catch (error) { feedback(error, { error: true, persistent: true }); return; }
   finally { setBusy(false); }
   await launch({ siteExport, importedConfiguration });
@@ -1483,7 +1482,10 @@ fields.storageKey.addEventListener('change', () => {
   pauseAutomaticLaunch();
   if (busy) return;
   if (Object.hasOwn(savedState.sites, fields.storageKey.value)) void openSavedSite(fields.storageKey.value);
-  else { selectedSiteId = null; renderSavedSites(); setBusy(false); }
+  else {
+    fields.persistence.checked = persistenceForNewSite;
+    selectedSiteId = null; renderSavedSites(); setBusy(false);
+  }
 });
 
 function parseEditorJSON(id, fallback) {

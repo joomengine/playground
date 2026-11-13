@@ -51,7 +51,7 @@ export function catalogForRestoredSite(catalog, input) {
     { version: joomlaVersion, label: `Joomla ${joomlaVersion}`, php: [...php], channel: 'saved' }] };
 }
 
-export function configurationForSiteExport(siteExport, catalog, { baseURL, admin, storageKey = `import-${crypto.randomUUID()}` } = {}) {
+export function configurationForSiteExport(siteExport, catalog, { baseURL, admin, storageKey = `import-${crypto.randomUUID()}`, persistence = false } = {}) {
   const { metadata, phpMinimum } = siteExport;
   const original = metadata.playground?.configuration ?? {};
   const exact = catalog.joomla.find(entry => entry.version === metadata.joomlaVersion);
@@ -73,7 +73,7 @@ export function configurationForSiteExport(siteExport, catalog, { baseURL, admin
   const input = { ...original, joomlaVersion: metadata.joomlaVersion, phpVersion: php.includes(preferred) ? preferred : php[0],
     siteName: metadata.siteName || original.siteName || 'Imported Joomla site', initialPath: original.initialPath || '/administrator/',
     admin: siteExport.preserveAdministrator ? original.admin : admin, deployId: 'blank', jcbVersion: original.jcbVersion ?? 'none', storageKey,
-    restoredSite: { joomlaVersion: metadata.joomlaVersion, php }, persistence: true, fresh: false };
+    restoredSite: { joomlaVersion: metadata.joomlaVersion, php }, persistence, fresh: false };
   // These packages are already installed, including edited files and database
   // state. Importing or resuming must never resolve or download the recipe again.
   for (const name of ['joomlaPackage', 'jcbPackage', 'snapshot', 'deploymentRecipe']) delete input[name];

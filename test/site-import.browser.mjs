@@ -3,7 +3,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { chromium } from 'playwright';
+import { chromium, firefox } from 'playwright';
 import { createStaticServer, prepareBrowserEnvironment } from './server.mjs';
 import { withPinnedCatalog } from './dynamic-catalog-fixture.mjs';
 
@@ -11,13 +11,16 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const directory = path.resolve(process.env.PLAYGROUND_DIST || path.join(root, 'dist'));
 const manifest = JSON.parse(await readFile(path.join(directory, 'assets/manifest.json'), 'utf8'));
 
-test('complete site ZIP roundtrip preserves edits and credentials independently', { timeout: 900000 }, async t => {
+for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium').split(',').map(name => name.trim())) {
+  assert.ok(['chromium', 'firefox'].includes(browserName), `Unsupported import-test browser: ${browserName}`);
+test(`complete site ZIP roundtrip preserves edits and credentials independently (${browserName})`, { timeout: 900000 }, async t => {
   const fixtures = {};
   const server = await createStaticServer({ directory, fixtures });
   let browser;
   t.after(async () => { await browser?.close(); await server.close(); });
-  const executablePath = process.env.PLAYGROUND_CHROMIUM_EXECUTABLE;
-  browser = await chromium.launch({ headless: true, args: ['--no-sandbox'], ...(executablePath ? { executablePath } : {}) });
+  const executablePath = process.env[`PLAYGROUND_${browserName.toUpperCase()}_EXECUTABLE`];
+  browser = await { chromium, firefox }[browserName].launch({ headless: true,
+    ...(browserName === 'chromium' ? { args: ['--no-sandbox'] } : {}), ...(executablePath ? { executablePath } : {}) });
   const context = await withPinnedCatalog(browser);
   const page = await context.newPage();
   page.setDefaultTimeout(240000);
@@ -79,7 +82,7 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
     // local and central headers, which can disagree during a large ZIP copy.
     const siteExport = await readSiteExport(zipSync(files, { mtime: new Date() }));
     const catalog = parseCatalog(await (await fetch('./assets/manifest.json')).json());
-    window.importConfig = configurationForSiteExport(siteExport, catalog, { baseURL: location.href });
+    window.importConfig = configurationForSiteExport(siteExport, catalog, { baseURL: location.href, persistence: true });
     const requests = [];
     const originalFetch = window.fetch;
     window.fetch = (...args) => { requests.push(String(args[0])); return originalFetch(...args); };
@@ -168,7 +171,7 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
       files['export.json'] = strToU8(JSON.stringify(metadata));
       const siteExport = await readSiteExport(zipSync(files, { mtime: new Date() }));
       const catalog = parseCatalog(await (await fetch('./assets/manifest.json')).json());
-      const configuration = configurationForSiteExport(siteExport, catalog);
+      const configuration = configurationForSiteExport(siteExport, catalog, { persistence: true });
       const site = await createPlayground(configuration, { siteExport });
       const unavailable = site.installation.administratorUnavailable;
       await site.applyConfiguration({ siteName: 'Renamed without replacing the account' });
@@ -227,6 +230,16 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
       }, blobURL);
       await ready('dashboard upload completed');
       assert.equal(await ui.locator('#header-feedback').textContent(), 'Package validated.');
+      assert.equal(await ui.locator('#persistence').isChecked(), false, 'Uploading does not inherit the saved source preference.');
+      assert.match(await ui.locator('#save-state').textContent(), /temporary/i);
+      const temporaryImportKey = await ui.locator('#storage-key').inputValue();
+      assert.equal(await ui.evaluate(({ baseURL, key }) => Boolean(JSON.parse(localStorage.getItem(`joomengine:launch:${baseURL}`))?.sites?.[key]),
+        { baseURL: server.url, key: temporaryImportKey }), false, 'An unsaved upload must not appear as a saved site.');
+      await ui.locator('#header-save-button:enabled').click();
+      await ui.locator('#header-save-button:enabled').waitFor();
+      await ready('uploaded site explicitly saved', { previousKey: temporaryImportKey });
+      assert.equal(await ui.locator('#persistence').isChecked(), true);
+      assert.match(await ui.locator('#save-state').textContent(), /saved locally/i);
       const importedKey = await ui.locator('#storage-key').inputValue();
       assert.notEqual(importedKey, configuration.storageKey);
       await ui.locator('#settings-toggle').click();
@@ -246,6 +259,12 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
         }
         const sourceKey = await ui.locator('#storage-key').inputValue();
         const previousFrameURL = await ui.evaluate(() => document.getElementById('site-frame')?.getAttribute('src'));
+        // These copies are reopened after Close below, so deliberately retain
+        // each new copy instead of inheriting its source's saved preference.
+        if (!await ui.locator('#settings').isVisible()) await ui.locator('#settings-toggle').click();
+        if (await ui.locator('#persistence').isChecked()) await ui.locator('label[for="persistence"]').click();
+        await ui.locator('label[for="persistence"]').click();
+        assert.equal(await ui.locator('#persistence').isChecked(), true);
         await ui.locator('#deploy-editor-button').click();
         await ui.locator('#site-name').fill(sourceOpen ? 'Copy from open upload' : 'Copy from closed upload');
         if (sourceOpen) {
@@ -277,6 +296,7 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
           await ready(sourceOpen ? 'open-source copy completed' : 'closed-source copy completed', { previousKey: sourceKey, previousFrameURL });
         } finally { clearTimeout(checkTimer); releaseCheck?.(); delete fixtures['build.json']; }
         assert.notEqual(await ui.locator('#storage-key').inputValue(), sourceKey);
+        assert.equal(await ui.locator('#persistence').isChecked(), true, 'The independent copy uses the explicit saving choice.');
         const copiedURL = new URL(await ui.locator('#site-frame').getAttribute('src'));
         const copiedProof = new URL('roundtrip-proof.txt', new URL('./', copiedURL.href.replace(/administrator\/.*$/, ''))).href;
         assert.equal(await ui.evaluate(async url => (await fetch(url)).text(), copiedProof), 'Edited source file');
@@ -310,7 +330,7 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
         deploymentError: document.getElementById('deploy-error')?.textContent,
         progress: document.getElementById('loading-message')?.textContent, feedback: document.getElementById('header-feedback')?.textContent })).catch(() => ({}));
       await mkdir('test-results', { recursive: true });
-      await ui.screenshot({ path: 'test-results/site-import-ui-failure.png' }).catch(() => {});
+      await ui.screenshot({ path: `test-results/site-import-ui-failure-${browserName}.png` }).catch(() => {});
       error.message += `\nUI stage: ${stage}\nState: ${JSON.stringify(state)}\nPage errors: ${errors.join(' | ')}\nConsole: ${consoleErrors.join(' | ').slice(0, 2500)}`;
       throw error;
     } finally {
@@ -319,3 +339,4 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
     }
   });
 });
+}

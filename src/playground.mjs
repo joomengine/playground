@@ -879,7 +879,20 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     progress({ phase: 'ready', message: installed.resumed ? 'Your saved Joomla site is ready.' : 'Joomla is installed and ready.' });
     return handle;
   } catch (error) {
-    try { await finish(false, false); } catch (cleanupError) { error.message += ` Cleanup: ${cleanupError.message}`; }
+    // Opted-in installations remain recoverable even when provisioning fails.
+    // Closing workers no longer implicitly commits PHP files on their own.
+    if (config.persistence && !recovery && session && !session.failure) {
+      try { await session.flushTogether(); }
+      catch (saveError) {
+        try { error.recoverySaveError = saveError; } catch { /* The original error may be immutable. */ }
+        try { progress({ phase: 'warning', message: `Recovery save did not complete: ${serializeWorkerError(saveError).error}` }); } catch { /* Preserve the original deployment error. */ }
+      }
+    }
+    try { await finish(false, false); }
+    catch (cleanupError) {
+      try { error.cleanupError = cleanupError; } catch { /* The original error may be immutable. */ }
+      try { progress({ phase: 'warning', message: `Failed launch cleanup: ${serializeWorkerError(cleanupError).error}` }); } catch { /* Preserve the original deployment error. */ }
+    }
     throw error;
   }
 }

@@ -396,7 +396,9 @@ parameters. Invalid JSON remains visible until corrected.
   without launching it. Locked or failed deletion retains its management entry
   so it can be retried.
 - **Download** exports the complete site, its files, or its SQL database.
-- **Upload** opens a complete site export ZIP as a new, independent saved site.
+- **Upload** opens a complete site export ZIP as a new, independent temporary
+  site. Select **Keep this site** before uploading or **Save this site** afterward
+  to retain it in this browser.
 - **Hide controls** in either the header or footer hides both bars, settings and
   activity together. Joomla keeps the same running iframe, current page and
   unsaved work. Small restore tabs occupy the top-left and bottom-left document
@@ -501,7 +503,9 @@ database. Private runtime files, browser sessions, and generated caches are
 excluded. Complete site downloads include the runtime settings, opening page,
 and known sandbox administrator credentials in `export.json`. **Upload** restores
 the installed files and database, including subsequent edits, with those same
-credentials and opening page under a new saved-site identity. It does not rerun
+credentials and opening page under a new identity. Uploads start temporary unless
+you explicitly choose to keep them; the exported source's saving preference does
+not carry over. Upload does not rerun
 extension installation or deployment commands. Ordinary extension ZIPs and
 incomplete exports are rejected.
 
