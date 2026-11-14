@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "Imagem de implantação armazenada",
   "storage.configuration": "Configuração de implantação",
   "storage.preferences": "Preferências de interface salvas",
-  "storage.unassigned": "Dados do Playground não atribuídos"
+  "storage.unassigned": "Dados do Playground não atribuídos",
+  "lifecycle.transitionBlocked": "Outra visualização tem trabalho não salvo ou não está respondendo. Verifique ou feche essa visualização e tente novamente."
 });

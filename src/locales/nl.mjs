@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "Opgeslagen implementatie-image",
   "storage.configuration": "Implementatieconfiguratie",
   "storage.preferences": "Opgeslagen interfacevoorkeuren",
-  "storage.unassigned": "Niet-toegewezen Playground-gegevens"
+  "storage.unassigned": "Niet-toegewezen Playground-gegevens",
+  "lifecycle.transitionBlocked": "Een andere weergave bevat niet-opgeslagen werk of reageert niet. Controleer of sluit die weergave en probeer het opnieuw."
 });

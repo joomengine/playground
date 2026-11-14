@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "Depolanmış dağıtım görüntüsü",
   "storage.configuration": "Dağıtım yapılandırması",
   "storage.preferences": "Kaydedilmiş arayüz tercihleri",
-  "storage.unassigned": "Atanmamış Playground verileri"
+  "storage.unassigned": "Atanmamış Playground verileri",
+  "lifecycle.transitionBlocked": "Başka bir görünümde kaydedilmemiş çalışma var veya görünüm yanıt vermiyor. O görünümü kontrol edin ya da kapatın, sonra yeniden deneyin."
 });

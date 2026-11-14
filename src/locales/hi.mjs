@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "संग्रहीत परिनियोजन इमेज",
   "storage.configuration": "परिनियोजन कॉन्फ़िगरेशन",
   "storage.preferences": "सहेजी गई इंटरफ़ेस प्राथमिकताएँ",
-  "storage.unassigned": "असाइन न किया गया Playground डेटा"
+  "storage.unassigned": "असाइन न किया गया Playground डेटा",
+  "lifecycle.transitionBlocked": "किसी अन्य दृश्य में बिना सहेजा काम है या वह प्रतिक्रिया नहीं दे रहा है। उस दृश्य की जाँच करें या उसे बंद करें, फिर दोबारा कोशिश करें।"
 });

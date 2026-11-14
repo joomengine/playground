@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "תמונת פריסה מאוחסנת",
   "storage.configuration": "תצורת פריסה",
   "storage.preferences": "העדפות ממשק שמורות",
-  "storage.unassigned": "נתוני Playground שלא שויכו"
+  "storage.unassigned": "נתוני Playground שלא שויכו",
+  "lifecycle.transitionBlocked": "בתצוגה אחרת יש עבודה שלא נשמרה או שהיא אינה מגיבה. בדקו או סגרו אותה, ואז נסו שוב."
 });

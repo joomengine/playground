@@ -34,7 +34,7 @@ import { readSiteExport, configurationForSiteExport, catalogForRestoredSite } fr
 import { networkFetch } from './network-transport.mjs';
 import { createSiteBackups } from './site-backups.mjs';
 import { createBackupPanel } from './backup-panel.mjs';
-import { createStorageManagement } from './storage-management.mjs';
+import { createStorageManagement, createRuntimeStorageAdapter } from './storage-management.mjs';
 import { createRuntimeViewHost, attachRuntimeView, readRuntimeViewURL, readActiveRuntimeView, runtimeViewURL } from './runtime-views.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -73,7 +73,12 @@ const managedStorage = createStorageManagement({ baseURL: deploymentURL,
   getKnownSites: () => savedState.sites,
   getProtectedKeys: () => [...protectedLiveKeys()],
   getProtectedIds: () => [runtime?.workspace.storageId].filter(Boolean),
+  databaseStorage: createRuntimeStorageAdapter(globalThis.indexedDB, { onBlocked: storageRemovalBlocked }),
 });
+function storageRemovalBlocked() {
+  const message = 'Storage cleanup is waiting for another window to release the data. Close that window to finish removing it.';
+  activity(message); feedback(message, { persistent: true });
+}
 const liveMetadataKey = `joomengine-live:${new URL(deploymentURL).pathname}`;
 function readLiveMetadata() {
   try { return JSON.parse(localStorage.getItem(liveMetadataKey) || 'null'); } catch { return null; }
@@ -330,9 +335,9 @@ function setFocusMode(hidden, { focus = false, edge = 'top' } = {}) {
 function updateSaveState() {
   let status = t('help.local');
   if (runtime) {
-    if (saveFailed || runtime.persistenceError) status = t('lifecycle.unsaved');
+    if (runtime.recovery) status = t('status.saved');
+    else if (saveFailed || runtime.persistenceError) status = t('lifecycle.unsaved');
     else if (savingSite === runtime || runtime.persistencePending) status = t('lifecycle.persisting');
-    else if (runtime.recovery) status = t('status.saved');
     else status = lastSavedAt
       ? t('status.savedAt', { time: lastSavedAt.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) })
       : t('status.saving');
@@ -366,7 +371,11 @@ function destroyPreview() {
 }
 function updateRuntimeLocation() {
   if (!runtime || !currentInput || runtime.isRemoteView) return;
-  history.replaceState(null, '', runtimeLocation(location.href, { ...currentInput, initialPath: safeSavedRoute(currentSitePath, currentInput.initialPath) }));
+  const url = new URL(runtimeLocation(location.href, { ...currentInput, initialPath: safeSavedRoute(currentSitePath, currentInput.initialPath) }));
+  // A landing-page opt-out is consumed by the user's manual launch/upload.
+  // Reloading the now-running live site should resume it automatically.
+  url.searchParams.delete('start');
+  history.replaceState(null, '', url.href);
 }
 function updateNavigation() {
   const available = Boolean(runtime?.healthy && !runtime?.recovery && !busy && !launching);
@@ -661,7 +670,7 @@ async function removeManagedEntry(entry) {
     if (entry.key) { savedState = forgetSite(savedState, entry.key); writePreferences(); }
   } else if (entry.id.startsWith('site:')) {
     if (liveKeys.has(entry.key)) throw new Error(t('backups.retained'));
-    await resetPlayground({ storageKey: entry.key });
+    await resetPlayground({ storageKey: entry.key, onBlocked: storageRemovalBlocked });
     savedState = forgetSite(savedState, entry.key); writePreferences();
   } else if (entry.id.startsWith('image:')) await deploymentImages.remove(entry.key);
   else if (entry.id.startsWith('preference:')) preferences?.removeItem(entry.key);
@@ -1197,7 +1206,7 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     input = recipe.configuration;
     if (recipe.changed) {
       fields.storageKey.value = input.storageKey;
-      activity(`Changed setup steps use a separate site key, “${input.storageKey}”. Your previous site is preserved.`);
+      activity('Changed deployment configuration will start a new live site.');
     }
     const resolved = checkpoint || resumeOnly
       ? { configuration: normalizeConfiguration(input, { catalog: catalogForRestoredSite(catalog, input), baseURL: deploymentURL }), deploy: deploymentDescriptor(input.deployId) }
@@ -1291,7 +1300,7 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     hostRuntimeViews();
     selectedProfile = { deployId: currentConfig.deployId, joomlaVersion: currentConfig.joomlaVersion };
     rememberDraft({ deployId: currentConfig.deployId, joomlaVersion: currentConfig.joomlaVersion });
-    activity(recipe.changed ? `Site ready under “${currentConfig.storageKey}”. Your previous site is available in Saved sites.` : currentConfig.persistence
+    activity(currentConfig.persistence
       ? resumeSaved ? 'Site ready. Reopening this playground will resume your saved site.' : `Site ready. Keep saved site key “${currentConfig.storageKey}” to reopen it.`
       : 'Temporary site ready. Download your work before closing.');
     if (siteExport) feedback(runtime.installation.contentHashValidated ? 'Package validated.' : 'Package validation is unavailable for this older export.');
@@ -1300,7 +1309,7 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     if (previousManaged?.managed && previousLiveKey && previousLiveKey !== currentConfig.storageKey && !checkpoint) {
       try {
         await runtime.flush();
-        await resetPlayground({ storageKey: previousLiveKey });
+        await resetPlayground({ storageKey: previousLiveKey, onBlocked: storageRemovalBlocked });
         savedState = forgetSite(savedState, previousLiveKey); writePreferences();
       } catch (error) { activity(error); }
     }
@@ -1309,7 +1318,22 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     if (!switchingStarted) { feedback(error, { error: true, persistent: true }); return false; }
     destroyPreview();
     if (runtime) {
-      try { await runtime.close(); } catch (closeError) { activity(closeError); }
+      const handle = runtime;
+      try { await handle.close(); }
+      catch (closeError) {
+        activity(closeError);
+        if (handle.healthy) {
+          // A rejected durability check leaves this runtime alive. Keep its
+          // handle and controls available so the user can download or retry.
+          runtime = handle;
+          runningSiteId = currentConfig.storageKey;
+          runningAdministrator = handle.installation?.administrator || currentInput.admin;
+          mountPreview(resolveSiteURL(safeSavedRoute(currentSitePath, currentConfig.initialPath), handle.baseUrl));
+          watchLivePersistence(); hostRuntimeViews();
+          feedback(error, { error: true, persistent: true });
+          return false;
+        }
+      }
       runtime = undefined;
       runningSiteId = null;
     }
@@ -1332,7 +1356,9 @@ async function closeSite({ reset = false, save = false } = {}) {
   closing = true;
   setBusy(true);
   try {
-    if (runtimeViewHost && !await runtimeViewHost.prepareTransition(reset ? 'reset' : 'stop')) return false;
+    if (runtimeViewHost && !await runtimeViewHost.prepareTransition(reset ? 'reset' : 'stop')) {
+      feedback(t('lifecycle.transitionBlocked'), { error: true, persistent: true }); return false;
+    }
     if (previewDirty && !confirm(t('confirm.unsavedSiteForm'))) return false;
     if (handle.debugger.state !== 'idle') await handle.debugger.stop();
     if (codeHost && !codeHost.closed && !await codeHost.beforeClose()) return false;
@@ -1419,7 +1445,7 @@ async function deleteSelectedSite() {
   try {
     // Locks, files, database and Code drafts all use the selected identity.
     // Retain catalog metadata on any failure so deletion can safely be retried.
-    await resetPlayground({ storageKey: key });
+    await resetPlayground({ storageKey: key, onBlocked: storageRemovalBlocked });
     savedState = forgetSite(savedState, key);
     selectedSiteId = null;
     const metadataSaved = writePreferences();
@@ -1562,7 +1588,9 @@ async function restartOrStart({ confirmed = false } = {}) {
   }
   if (runtime.recovery?.filesOnly || (!confirmed && !confirm(t('lifecycle.restartConfirm')))) return false;
   if (previewDirty && !confirm(t('confirm.unsavedSiteForm'))) return false;
-  if (runtimeViewHost && !await runtimeViewHost.prepareTransition('restart')) return false;
+  if (runtimeViewHost && !await runtimeViewHost.prepareTransition('restart')) {
+    feedback(t('lifecycle.transitionBlocked'), { error: true, persistent: true }); return false;
+  }
   setBusy(true); destroyPreview(); show('loading-view');
   try {
     await runtime.updatePhpSettings(runtime.configuration.phpSettings || DEFAULT_PHP_SETTINGS);
@@ -1600,7 +1628,7 @@ async function resetSite({ confirmed = false } = {}) {
   setBusy(true);
   let ready = false;
   try {
-    if (!resetByRuntime) await resetPlayground({ storageKey: targetKey });
+    if (!resetByRuntime) await resetPlayground({ storageKey: targetKey, onBlocked: storageRemovalBlocked });
     savedState = forgetSite(savedState, targetKey); writePreferences();
     stoppedSite = undefined; sourceBackupId = undefined;
     preferences?.removeItem(liveMetadataKey);
@@ -1783,7 +1811,10 @@ async function saveDeployment({ copy = false } = {}) {
     $('deployment-save-status').textContent = `Saved “${saved.entry.title}”.`;
     $('deployment-save-status').hidden = false;
     feedback($('deployment-save-status').textContent);
-  } catch (error) { editorError(error); }
+  } catch (error) {
+    editorError(error);
+    if (!$('deploy-dialog').open) feedback(error, { error: true, persistent: true });
+  }
   finally { setBusy(false); }
 }
 async function removeDeployment() {
@@ -2009,13 +2040,16 @@ function hostRuntimeViews() {
       throw new Error('This site action is unavailable.');
     },
     onState(snapshot) {
-      if (!runtime || runtime.isRemoteView || !currentConfig || !snapshot?.configuration) return;
+      if (!runtime || runtime.isRemoteView || !currentConfig || !snapshot?.configuration || snapshot.changing) return;
       // Runtime PHP controls are available in every view. Preserve unfinished
       // deployment form choices while keeping live runtime metadata current.
+      const changed = currentConfig.phpVersion !== snapshot.configuration.phpVersion
+        || JSON.stringify(currentConfig.phpSettings) !== JSON.stringify(snapshot.configuration.phpSettings);
       currentConfig = { ...currentConfig, phpVersion: snapshot.configuration.phpVersion,
         phpSettings: snapshot.configuration.phpSettings };
       currentInput = { ...currentInput, phpVersion: currentConfig.phpVersion, phpSettings: currentConfig.phpSettings };
       lastSavedAt = snapshot.lastSavedAt ? new Date(snapshot.lastSavedAt) : lastSavedAt;
+      if (changed) rememberCurrentSite();
     },
     onError: error => activity(error),
   });
@@ -2047,8 +2081,19 @@ function applyCompanionSnapshot(snapshot, { unavailable = false } = {}) {
   lastSavedAt = snapshot.lastSavedAt ? new Date(snapshot.lastSavedAt) : undefined;
   saveFailed = Boolean(snapshot.persistenceError);
   if (changed) {
-    if (currentConfig.restoredSite) catalog = catalogForRestoredSite(catalog, currentConfig);
-    applyConfiguration(currentConfig, currentInput, deploymentDescriptor(currentConfig.deployId));
+    // Attaching an existing runtime must not resolve or deploy its recipe again.
+    // Retain its exact package and recipe solely to populate the configuration UI.
+    catalog = currentConfig.restoredSite ? catalogForRestoredSite(catalog, currentConfig)
+      : catalogWithSelectedJoomlaPackage(catalog, currentConfig, deploymentURL);
+    const release = catalog.joomla.find(entry => entry.version === currentConfig.joomlaVersion);
+    if (release) selectedJoomlaPackages.set(release.version, { ...release });
+    fillJoomlaOptions();
+    const document = currentConfig.deploymentRecipe;
+    const deploy = deploymentDescriptor(currentConfig.deployId) || (document ? {
+      id: currentConfig.deployId, title: document.name, joomla: document.requirements.joomla,
+      requirements: document.requirements, configuration: document.configuration,
+    } : undefined);
+    applyConfiguration(currentConfig, currentInput, deploy);
   }
   if (running) {
     const hadRuntime = Boolean(runtime);
@@ -2268,7 +2313,7 @@ function setupInterface() {
   });
   window.addEventListener('focus', () => { if (!document.hidden) void buildUpdates.check(); });
   window.addEventListener('beforeunload', event => {
-    if (!runtime || runtime.isRemoteView || (!runtime.persistencePending && !runtime.persistenceError && !previewDirty)) return;
+    if (!runtime || runtime.isRemoteView || (runtime.idle !== false && !runtime.persistencePending && !runtime.persistenceError && !previewDirty)) return;
     event.preventDefault(); event.returnValue = '';
   });
   $('reload-build').addEventListener('click', () => {

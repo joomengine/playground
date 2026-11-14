@@ -10,7 +10,7 @@ Select **DB** or **JoomEngine Code** to switch tools. Only one tool can occupy t
 
 Use the panel's layout selector for left, right, bottom, floating, or full workspace. Each tool remembers its own layout. Maximizing hides the site preview visually; restoring returns to the previous arrangement. On narrow viewports, side docks display beneath the site so controls remain usable.
 
-Database changes operate on the active site's actual data. Use **Refresh site** when you want Joomla to display the effect of a change. Refreshing the site does not submit unfinished Adminer forms or run SQL.
+Database changes operate on the active site's actual data. Use **Refresh site** in Code, or the toolbar **Reload** action while Code is open, when you want Joomla to display the effect of a change. This refresh does not restart PHP, submit unfinished Adminer forms or run SQL.
 
 ## Detached database window
 
@@ -22,6 +22,10 @@ Choose **Return to owner tab**, or close the detached window, to return its curr
 
 ## Saving and exporting
 
-Use the Playground's existing save and download controls for site persistence and backups. A temporary site stays temporary until saved. Database viewer application files are staged in the runtime's internal tool directory, outside the Joomla document root, and are not added to portable site exports.
+Completed database changes persist automatically with the live site. Playground's **Save** stores deployment configuration only. **Backup** opens the Backups panel, where you can deliberately create a complete site archive while the site keeps running, update an existing backup, or restore, download and delete backups. **Download** retains its complete-site, files-only and SQL choices; filenames include UTC date and time. An uploaded complete site becomes the persisted live site, without automatically adding a backup.
 
-Showing, hiding, docking, or detaching the viewer never saves a database form implicitly. Complete intended changes inside Adminer. Closing the site prompts before discarding unfinished editable database forms.
+Browser backups require the archive's actual size plus a 10 MiB margin. If storage cannot accept it, the panel states that no new backup was saved and offers the archive for download. The panel also manages other removable Playground data; unassigned stores require individual confirmation, and the live site is protected. Database viewer application files remain outside the Joomla document root and portable site exports.
+
+Showing, hiding, docking, or detaching the viewer never submits a database form implicitly. Complete intended changes inside Adminer. **Stop** preserves the live data and changes Restart to **Start**; **Restart** restarts the same PHP runtime without redeployment. **Reset** confirms before replacing the live site with the default JCB deployment. Save or discard unfinished database forms when prompted before a runtime transition.
+
+Ctrl-click, Command-click or middle-click **Site** or **Admin** to open another full Playground view, including DB and Code controls, against the same live runtime. Keep its original owner window open; a plain Joomla link opens only the site.

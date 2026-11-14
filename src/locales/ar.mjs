@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "صورة نشر مخزنة",
   "storage.configuration": "إعداد النشر",
   "storage.preferences": "تفضيلات الواجهة المحفوظة",
-  "storage.unassigned": "بيانات Playground غير المعيّنة"
+  "storage.unassigned": "بيانات Playground غير المعيّنة",
+  "lifecycle.transitionBlocked": "تحتوي طريقة عرض أخرى على عمل غير محفوظ أو لا تستجيب. تحقق منها أو أغلقها، ثم أعد المحاولة."
 });

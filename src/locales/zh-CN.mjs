@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "已存储的部署镜像",
   "storage.configuration": "部署配置",
   "storage.preferences": "已保存的界面偏好设置",
-  "storage.unassigned": "未分配的 Playground 数据"
+  "storage.unassigned": "未分配的 Playground 数据",
+  "lifecycle.transitionBlocked": "另一个视图有未保存的工作或没有响应。请检查或关闭该视图，然后重试。"
 });

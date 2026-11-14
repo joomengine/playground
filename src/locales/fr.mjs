@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "Image de déploiement stockée",
   "storage.configuration": "Configuration de déploiement",
   "storage.preferences": "Préférences d’interface enregistrées",
-  "storage.unassigned": "Données Playground non attribuées"
+  "storage.unassigned": "Données Playground non attribuées",
+  "lifecycle.transitionBlocked": "Une autre vue contient du travail non enregistré ou ne répond pas. Vérifiez ou fermez cette vue, puis réessayez."
 });

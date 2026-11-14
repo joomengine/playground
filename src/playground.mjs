@@ -17,7 +17,7 @@ import { withStorageRecovery } from './storage-recovery.mjs';
 import { closeSiteResources } from './site-close.mjs';
 import { createRuntimeAccess } from './runtime-access.mjs';
 import { createLivePersistence } from './live-persistence.mjs';
-import { rememberRuntimeStorage, forgetRuntimeStorage } from './storage-management.mjs';
+import { rememberRuntimeStorage, forgetRuntimeStorage, createRuntimeStorageAdapter } from './storage-management.mjs';
 
 const base = new URL('../', import.meta.url);
 const manifestUrl = new URL('assets/manifest.json', base);
@@ -444,16 +444,14 @@ async function acquireSiteLock(identity) {
   await ready;
   return async () => { release(); await done; };
 }
-async function deleteStore(name) {
-  await new Promise((resolve, reject) => {
-    const request = indexedDB.deleteDatabase(name);
-    const timer = setTimeout(() => reject(new Error('Saved storage is still in use. Close other playground tabs and try again.')), 10_000);
-    request.onsuccess = () => { clearTimeout(timer); resolve(); };
-    request.onerror = () => { clearTimeout(timer); reject(request.error); };
-  });
-}
-async function eraseStoredSite(identity) {
-  await Promise.all([deleteStore(`/joomengine-${identity}`), deleteStore(`/mariadb/idb/joomengine-${identity}`)]);
+async function eraseStoredSite(identity, onBlocked) {
+  const storage = createRuntimeStorageAdapter(indexedDB, { onBlocked });
+  // IndexedDB deletion cannot be cancelled. Keep the site lock until each
+  // request settles, including when another tab delays closing its connection.
+  // Sequential requests also prevent one rejection releasing the lock while a
+  // concurrent deletion is still queued against a future reopened runtime.
+  await storage.removeDatabase(`/joomengine-${identity}`);
+  await storage.removeDatabase(`/mariadb/idb/joomengine-${identity}`);
   const { clearEditorDrafts } = await import('./code/editor-session.mjs');
   await clearEditorDrafts(identity);
   forgetRuntimeStorage({ baseURL: base.href, identity });
@@ -478,10 +476,12 @@ export function validateResumedInstallation(state) {
   throw error;
 }
 /** Erase a closed or incompletely installed saved site after user confirmation. */
-export async function resetPlayground({ storageKey = 'default' } = {}) {
+export async function resetPlayground({ storageKey = 'default', onBlocked = () => {
+  console.warn('Saved storage is still in use. Close other playground tabs so its removal can complete.');
+} } = {}) {
   const identity = await storageIdentity(storageKey);
   const release = await acquireSiteLock(identity);
-  try { await eraseStoredSite(identity); } finally { await release(); }
+  try { await eraseStoredSite(identity, onBlocked); } finally { await release(); }
 }
 
 /** Create a real Joomla installation backed by upstream PHP and MariaDB WASM. */
@@ -555,7 +555,8 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     debugListeners.clear();
     return closeSiteResources({
       closePhp: () => session?.close(), closeDatabase: () => database?.close(),
-      erase: erase && config.persistence ? () => eraseStoredSite(identity) : undefined,
+      erase: erase && config.persistence ? () => eraseStoredSite(identity, () => progress({ phase: 'warning',
+        message: 'Saved storage is still in use. Close other playground tabs so its removal can complete.' })) : undefined,
       release, lastSavedAt: config.persistence ? session?.savedAt ?? null : null,
     });
   })();

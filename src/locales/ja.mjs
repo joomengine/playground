@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "保存済みのデプロイイメージ",
   "storage.configuration": "デプロイ設定",
   "storage.preferences": "保存済みの画面設定",
-  "storage.unassigned": "未割り当ての Playground データ"
+  "storage.unassigned": "未割り当ての Playground データ",
+  "lifecycle.transitionBlocked": "別のビューに未保存の作業があるか、そのビューが応答していません。そのビューを確認するか閉じてから、再試行してください。"
 });
