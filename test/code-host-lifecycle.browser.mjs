@@ -51,7 +51,17 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
         window.mockLayoutMount = async options => {
           window.boundWorkspace = options.workspace;
           window.layoutCounts.mounted++;
-          return { layout() {}, hasDirty: () => false, getActivePath: () => '/', isDirty: () => false,
+          const frame = document.querySelector('.jec-workbench-frame');
+          let retainedScroll;
+          window.completedMockLayouts = 0;
+          // The native workbench owns view state independently of DOM rendering.
+          // Firefox discards raw iframe scroll offsets while its ancestor is hidden.
+          window.captureMockEditorView = () => { retainedScroll = frame.contentDocument.getElementById('buffer').scrollTop; };
+          return { layout() {
+            if (retainedScroll === undefined || !frame.getClientRects().length) return;
+            frame.contentDocument.getElementById('buffer').scrollTop = retainedScroll;
+            window.completedMockLayouts++;
+          }, hasDirty: () => false, getActivePath: () => '/', isDirty: () => false,
             async dispose() { window.layoutCounts.disposed++; },
             async rebindStorage(id) { window.savedEditorStorageId = id; },
             // Exercise the layout's real blocked-popup fallback contract.
@@ -69,6 +79,7 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
         const buffer = frame.contentDocument.getElementById('buffer');
         buffer.value = Array.from({ length: 60 }, (_, i) => `Unsaved draft line ${i}`).join('\n');
         buffer.setSelectionRange(11, 29, 'forward'); buffer.scrollTop = 170;
+        window.captureMockEditorView();
         window.editorState = { value: buffer.value, start: buffer.selectionStart, end: buffer.selectionEnd,
           scroll: buffer.scrollTop, identity: frame.contentWindow.documentIdentity };
       });
@@ -211,8 +222,10 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await panel.waitFor({ state: 'visible' });
       await page.evaluate(() => window.layoutHost.toggle());
       await panel.waitFor({ state: 'hidden' });
+      const completedLayouts = await page.evaluate(() => window.completedMockLayouts);
       await page.evaluate(() => window.layoutHost.toggle());
       await panel.waitFor({ state: 'visible' });
+      await page.waitForFunction(previous => window.completedMockLayouts > previous, completedLayouts);
       await assertDocuments();
 
       await page.setViewportSize({ width: 390, height: 540 });
