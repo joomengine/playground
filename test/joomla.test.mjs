@@ -97,6 +97,10 @@ test('multilingual content requires real categories and a unique home in each la
   assert.throws(() => validateContent({ ...content, articles: [...articles, { ...articles[0], key: 'second-home' }] }), /one home/);
   assert.throws(() => validateContent({ ...content, categories: [...categories, categories[0]] }), /unique/);
   assert.throws(() => validateContent({ ...content, articles: [{ ...articles[0], introtext: 'x'.repeat(32769) }, articles[1]] }), /introduction/);
+  const single = validateInstallOptions({ ...configuration, multilingual: false,
+    content: { ...content, categories: [categories[0]], articles: [articles[0]] } });
+  assert.equal(single.multilingual, false);
+  assert.equal(single.content.multilingual, false);
 });
 
 test('provisioning accepts only an explicit successful PHP envelope', async () => {

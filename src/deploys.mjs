@@ -73,7 +73,7 @@ function normalizeSnapshot(value, baseURL) {
     format: value.format, schemaVersion: value.schemaVersion, joomlaVersion: value.joomlaVersion };
 }
 
-function normalizeContent(value) {
+function normalizeContent(value, multilingual = value?.multilingual ?? false) {
   object(value, 'Deploy content');
   properties(value, ['multilingual', 'categories', 'articles'], 'Deploy content');
   if (value.multilingual !== undefined && typeof value.multilingual !== 'boolean') throw new TypeError('multilingual must be true or false.');
@@ -111,7 +111,7 @@ function normalizeContent(value) {
     }
     return result;
   });
-  return validateContent({ multilingual: value.multilingual ?? false, categories, articles });
+  return validateContent({ multilingual, categories, articles });
 }
 
 function normalizeSetup(value = {}, baseURL, requireIntegrity) {
@@ -142,7 +142,7 @@ function normalizeSetup(value = {}, baseURL, requireIntegrity) {
   if (value.overlays !== undefined) result.overlays = normalizeDeploymentOverlays(value.overlays);
   if (value.template !== undefined) result.template = parseTemplate(value.template, baseURL);
   if (value.phpSettings !== undefined) result.phpSettings = normalizePhpSettings(value.phpSettings);
-  if (value.content !== undefined) result.content = normalizeContent(value.content);
+  if (value.content !== undefined) result.content = value.content === null ? null : normalizeContent(value.content, value.multilingual);
   if (value.snapshot !== undefined) result.snapshot = normalizeSnapshot(value.snapshot, baseURL);
   return result;
 }
@@ -341,7 +341,7 @@ async function resolveMaterializedDeployment(input, { catalog, deployCatalog, ba
     });
   }
   setup.addonLanguages = setup.languages;
-  if (setup.content) setup.content = normalizeContent(setup.content);
+  if (setup.content) setup.content = normalizeContent(setup.content, setup.multilingual);
   const tags = new Set([setup.language ?? DEFAULTS.language, ...(setup.languageTags ?? []),
     ...(setup.menus ?? []).map(entry => entry.language).filter(tag => tag && tag !== '*'),
     ...(setup.content?.categories ?? []).map(entry => entry.language), ...(setup.content?.articles ?? []).map(entry => entry.language)]);
@@ -384,7 +384,7 @@ export async function resolveDeployConfiguration(input = {}, {
   if (setup.phpVersion !== undefined && !supportedPhp.includes(setup.phpVersion)) throw new TypeError(`${deploy.title} does not support PHP ${setup.phpVersion} with Joomla ${release}.`);
   setup.phpVersion ??= supportedPhp.includes(catalog.defaults.phpVersion) ? catalog.defaults.phpVersion : supportedPhp[0];
   if (common.phpSettings || variant.phpSettings || input.phpSettings) setup.phpSettings = normalizePhpSettings({ ...common.phpSettings, ...variant.phpSettings, ...input.phpSettings });
-  if (setup.content) setup.content = normalizeContent(setup.content);
+  if (setup.content) setup.content = normalizeContent(setup.content, setup.multilingual);
   setup.addonExtensions = parseUserExtensions(input.extensions ?? [], baseURL);
   setup.addonTemplate = input.template?.url ? parseUserTemplate(input.template, baseURL) : null;
   if (setup.addonTemplate) setup.template = setup.addonTemplate;

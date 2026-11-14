@@ -302,7 +302,10 @@
           }
         },
         "content": {
-          "$ref": "#/$defs/content"
+          "anyOf": [
+            { "$ref": "#/$defs/content" },
+            { "type": "null" }
+          ]
         },
         "snapshot": {
           "$ref": "#/$defs/snapshot"

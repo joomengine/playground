@@ -43,6 +43,15 @@ function requireBoolean(value, name) {
   return value;
 }
 
+function requireUsername(value) {
+  requireText(value, 'Administrator username', 30);
+  if (value.length < 2) throw new TypeError('Administrator username must contain 2–30 characters.');
+  if (/[<>"'%;()&\\]/.test(value) || value.includes('../') || value.trim() !== value) {
+    throw new TypeError('Administrator username contains characters Joomla does not accept.');
+  }
+  return value;
+}
+
 export function normalizeInitialPath(value = '/') {
   requireText(value, 'Initial page', 2048);
   if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\')) {
@@ -209,7 +218,7 @@ export function normalizeConfiguration(input = {}, { catalog, baseURL = 'https:/
     config.jcbPackage = normalizeJcbPackage(config.jcbPackage, baseURL);
   }
   config.admin.name = requireText(config.admin.name, 'Administrator name', 100);
-  config.admin.username = requireText(config.admin.username, 'Administrator username', 100);
+  config.admin.username = requireUsername(config.admin.username);
   config.admin.email = requireText(config.admin.email, 'Administrator email', 254);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.admin.email)) throw new TypeError('Enter a valid administrator email address.');
   config.admin.password = requireText(config.admin.password ?? '', 'Administrator password', 128);
@@ -224,7 +233,8 @@ export function normalizeConfiguration(input = {}, { catalog, baseURL = 'https:/
     ? userTemplate : parseTemplate(config.template, baseURL);
   config.addonTemplate = addonTemplate?.url ? addonTemplate : null;
   config.languageTags = parseLanguageTags(config.languageTags ?? []);
-  config.multilingual = requireBoolean(config.content?.multilingual === true ? true : (config.multilingual ?? false), 'multilingual');
+  config.multilingual = requireBoolean(config.multilingual ?? config.content?.multilingual ?? false, 'multilingual');
+  if (config.content) config.content = { ...config.content, multilingual: config.multilingual };
   // Direct callers supply custom URLs unless a resolved recipe explicitly
   // separates managed packages from additions. Strip custom checksum metadata
   // before strict managed-package validation at this runtime boundary.
@@ -543,14 +553,15 @@ function parseDocumentConfiguration(value, { baseURL, full, publicOnly }) {
   if (value.phpSettings !== undefined) result.phpSettings = normalizePhpSettings(value.phpSettings);
   if (value.content !== undefined) {
     // Detailed category/article validation occurs when resolving the selected deploy.
-    if (!value.content || typeof value.content !== 'object' || Array.isArray(value.content)) throw new TypeError('Deployment content must be an object.');
+    if (value.content !== null && (typeof value.content !== 'object' || Array.isArray(value.content))) throw new TypeError('Deployment content must be an object or null.');
     result.content = JSON.parse(JSON.stringify(value.content));
   }
   if (value.admin !== undefined) {
     if (!value.admin || typeof value.admin !== 'object' || Array.isArray(value.admin)) throw new TypeError('Deployment administrator must be an object.');
     for (const key of Object.keys(value.admin)) if (!['name', 'username', 'email', 'password'].includes(key)) throw new TypeError(`Deployment administrator contains unsupported property ${key}.`);
     result.admin = {};
-    for (const [key, limit] of Object.entries({ name: 100, username: 100, email: 254, password: 128 })) if (value.admin[key] !== undefined) result.admin[key] = requireText(value.admin[key], `Administrator ${key}`, limit);
+    for (const [key, limit] of Object.entries({ name: 100, email: 254, password: 128 })) if (value.admin[key] !== undefined) result.admin[key] = requireText(value.admin[key], `Administrator ${key}`, limit);
+    if (value.admin.username !== undefined) result.admin.username = requireUsername(value.admin.username);
     if (result.admin.email !== undefined && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.admin.email)) throw new TypeError('Enter a valid administrator email address.');
     if (result.admin.password !== undefined && result.admin.password.length < 12) throw new TypeError('Administrator password must contain at least 12 characters.');
   }

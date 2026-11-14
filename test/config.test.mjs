@@ -92,6 +92,32 @@ test('configuration validates credentials, storage and booleans', () => {
   assert.equal(config.admin.username, 'admin');
 });
 
+test('administrator usernames follow the runtime rules before saving or launching', () => {
+  for (const username of ['x', 'x'.repeat(31), 'bad<name', 'bad&name', '../admin', ' admin', 'admin ']) {
+    assert.throws(() => normalizeConfiguration({ admin: { ...admin, username } }), /username/i);
+    assert.throws(() => createFullDeploymentDocument({ admin: { ...admin, username } }), /username/i);
+  }
+  for (const username of ['ab', 'x'.repeat(30), 'site.admin']) {
+    assert.equal(normalizeConfiguration({ admin: { ...admin, username } }).admin.username, username);
+  }
+});
+
+test('cleared content and explicit multilingual choices survive saving a full recipe', () => {
+  const old = createFullDeploymentDocument({ content: { multilingual: true, categories: [], articles: [] } }, { name: 'Saved content' });
+  const cleared = createFullDeploymentDocument({ deploymentRecipe: old, content: null });
+  assert.equal(parseDeploymentDocument(cleared).content, null);
+  assert.equal(createFullDeploymentDocument(parseDeploymentDocument(cleared)).configuration.content, null);
+  const content = { multilingual: true, categories: [], articles: [] };
+  const disabled = normalizeConfiguration({ admin, multilingual: false, content });
+  assert.equal(disabled.multilingual, false);
+  assert.equal(disabled.content.multilingual, false);
+  assert.equal(content.multilingual, true, 'Normalization must not mutate the open form draft.');
+  const saved = createFullDeploymentDocument(disabled);
+  const reopened = normalizeConfiguration(parseDeploymentDocument(saved));
+  assert.equal(reopened.multilingual, false);
+  assert.equal(reopened.content.multilingual, false);
+});
+
 test('URL deployment options validate packages and commands while excluding credentials', () => {
   const url = new URL('https://example.test/?deploy=blank&php=8.5&joomla=6.2&language=nl-NL&login=no&fresh=1&path=%2Fadministrator%2F&toolbar=0&persist=0&password=secret');
   url.searchParams.set('extensions', JSON.stringify([{ url: './public-package.zip' }]));

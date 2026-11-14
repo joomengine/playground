@@ -80,6 +80,7 @@ export function validateInstallOptions(config) {
   const version = checkedString(config.joomlaVersion, 'Joomla version', { maximum: 32 });
   if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)) throw new TypeError('Select an exact Joomla release.');
   const admin = config.admin ?? {};
+  const multilingual = config.multilingual ?? config.content?.multilingual ?? false;
   const result = {
     joomlaVersion: version,
     siteName: checkedString(config.siteName ?? 'Joomla Playground', 'Site name'),
@@ -96,8 +97,8 @@ export function validateInstallOptions(config) {
     language: languageTag(config.language ?? 'en-GB'),
     languages: config.languages ?? [],
     languageTags: parseLanguageTags(config.languageTags ?? []),
-    multilingual: config.content?.multilingual === true ? true : (config.multilingual ?? false),
-    content: validateContent(config.content),
+    multilingual,
+    content: validateContent(config.content ? { ...config.content, multilingual } : config.content),
     menus: parseMenus(config.menus ?? []),
     template: parseTemplate(isCustomTemplate(config) ? { ...config.template, sha256: undefined } : config.template),
     autoLogin: config.autoLogin !== false,
@@ -334,7 +335,7 @@ async function installOptionalExtension(runtime, extension, index, warnings, sou
 
 async function configureDeployment(runtime, options, config, warnings, sourceLoader, progress, extra = {}) {
   const configured = await execute(runtime, 'configure', {
-    ...paths(runtime), menus: options.menus, template: options.template,
+    ...paths(runtime), menus: options.menus, menuReferences: parseMenus(config.menuReferences ?? []), template: options.template,
     languageTags: options.languageTags, multilingual: options.multilingual,
     allowMissingDependencies: warnings.some(warning => warning.phase === 'installation'),
     optionalTemplate: isCustomTemplate(config), ...extra,
@@ -657,7 +658,7 @@ export async function installJoomla(runtime, config, {
   if ((options.sourceDeployId ?? options.deployId) === 'jcb-mcp') await getMcpConnection(runtime, { sourceLoader, admin: administrator, initialize: true });
   await runtime.fs.writeFile(location.marker, JSON.stringify({
     state: 'complete', joomlaVersion: options.joomlaVersion, language: metadata.language, deployId: options.deployId,
-    extensionWarnings, installedAt: new Date().toISOString(),
+    content: metadata.content, extensionWarnings, installedAt: new Date().toISOString(),
   }));
   progress({ stage: 'ready', message: 'Joomla is ready.' });
   return { resumed: false, version: installed.version, siteName: metadata.siteName, language: metadata.language, deployId: options.deployId,
@@ -850,7 +851,11 @@ export async function applyJoomlaConfiguration(runtime, config, {
   }
   progress({ stage: 'configure', message: 'Applying the site settings, menus and template…' });
   const identity = await execute(runtime, 'administrator', { ...location, mode: 'read' }, sourceLoader);
-  if (configureLanguage) await execute(runtime, 'customize', { ...location, language: options.language, content: null, admin: identity.administrator, languageTags: options.languageTags, multilingual: options.multilingual }, sourceLoader);
+  const customized = configureLanguage || options.content ? await execute(runtime, 'customize', {
+    ...location, language: options.language, content: options.content, contentBindings: state.marker.content,
+    contentReferences: validateContent(config.contentReferences),
+    configureLanguage, admin: identity.administrator, languageTags: options.languageTags, multilingual: options.multilingual,
+  }, sourceLoader) : null;
   const configured = await configureDeployment(runtime, options, config, extensionWarnings, sourceLoader, progress, {
     siteName: options.siteName,
     // Validate homes when changing their setup, without rejecting later manual
@@ -859,7 +864,8 @@ export async function applyJoomlaConfiguration(runtime, config, {
   });
   await applyJoomlaOverlays(runtime, options.overlays, { sourceLoader, progress, warnings: extensionWarnings, admin: options.admin });
   await runDeploymentCommands(runtime, options.startupCommands, config, extensionWarnings, sourceLoader, progress);
-  await runtime.fs.writeFile(location.marker, JSON.stringify({ ...state.marker, language: configured.language, extensionWarnings, updatedAt: new Date().toISOString() }));
+  await runtime.fs.writeFile(location.marker, JSON.stringify({ ...state.marker, language: configured.language,
+    ...(options.content ? { content: customized.content } : {}), extensionWarnings, updatedAt: new Date().toISOString() }));
   const session = config.restoredSite ? await restoreUploadedSiteSession(runtime, options, sourceLoader, progress)
     : { administrator: await restoreJoomlaSession(runtime, { ...options, admin: identity.administrator ?? options.admin }, { sourceLoader }) };
   progress({ stage: 'ready', message: 'The site changes have been applied.' });
