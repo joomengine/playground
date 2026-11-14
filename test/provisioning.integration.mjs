@@ -163,13 +163,22 @@ for (const major of ['5', '6']) {
 
       const globalHome = renamedMenus.find(item => item.language === '*' && Number(item.home) === 1);
       assert.ok(globalHome);
+      const languagePlugin = await runtime.runPhp(`<?php
+        require '/persist/www/configuration.php';
+        $configuration = new JConfig();
+        $database = new PDO('mysql:dbname=' . $configuration->db . ';charset=utf8mb4', $configuration->user, $configuration->password, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        echo json_encode((int) $database->query("SELECT extension_id FROM " . $configuration->dbprefix . "extensions WHERE type = 'plugin' AND folder = 'system' AND element = 'languagefilter'")->fetchColumn(), JSON_THROW_ON_ERROR);
+      `);
+      assert.equal(languagePlugin.status, 200, languagePlugin.text);
+      const languagePluginId = JSON.parse(languagePlugin.text);
+      assert.ok(languagePluginId > 0, 'The installed language filter must have a native extension ID.');
       let languageConfiguration = renamed;
       for (const multilingual of [false, true]) {
         const next = normalizeConfiguration({ ...languageConfiguration, multilingual }, { catalog, baseURL: runtime.assetBaseUrl });
         const languageDelta = deploymentConfigurationChanges(languageConfiguration, next);
         assert.equal(languageDelta.configuration.content.multilingual, multilingual, 'The real form toggle includes normalized content.');
         await applyJoomlaConfiguration(runtime, languageDelta.configuration, { ...options, configureLanguage: languageDelta.configureLanguage });
-        const plugin = await captureJoomlaData(runtime, { kind: 'plugin', folder: 'system', element: 'languagefilter' }, options);
+        const plugin = await captureJoomlaData(runtime, { kind: 'plugin', id: languagePluginId }, options);
         assert.equal(Number(plugin.overlay.fields.enabled), multilingual ? 1 : 0, 'The multilingual setting must reach the installed language plugin.');
         const toggledMenus = (await discoverJoomlaConfiguration(runtime, options)).menus;
         assert.equal(toggledMenus.find(item => item.language === '*' && Number(item.home) === 1)?.id, globalHome.id, 'Toggling multilingual mode preserves the global home page.');
