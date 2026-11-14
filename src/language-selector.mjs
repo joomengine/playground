@@ -76,6 +76,8 @@ export function createLanguageSelector(input, { multiple = false, t, getLocale =
     listeners.push(() => target.removeEventListener(event, handler, options));
   };
   const signal = () => {
+    if (!multiple && input.value === synchronizedValue) return;
+    if (!multiple) synchronizedValue = input.value;
     internal = true;
     try {
       input.dispatchEvent(new window.Event('input', { bubbles: true }));
@@ -207,7 +209,7 @@ export function createLanguageSelector(input, { multiple = false, t, getLocale =
         synchronizedValue = input.value;
       }
       renderChips();
-    }
+    } else synchronizedValue = input.value;
     validity(); updateNote();
     if (open) renderChoices({ all: true });
   }
@@ -247,7 +249,7 @@ export function createLanguageSelector(input, { multiple = false, t, getLocale =
   on(wrapper, 'focusout', event => {
     if (!wrapper.contains(event.relatedTarget)) { commit(); hide(); }
   });
-  on(document, 'pointerdown', event => { if (!wrapper.contains(event.target)) { commit(); hide(); } });
+  on(document, 'pointerdown', event => { if (open && !wrapper.contains(event.target)) hide(); });
   on(input, 'change', () => { if (!internal) refresh(); });
   const form = input.form || wrapper.closest('form');
   if (form) on(form, 'submit', event => {

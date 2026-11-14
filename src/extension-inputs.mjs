@@ -10,6 +10,8 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
   let controls = [];
   let source = 'rows';
   let jsonError;
+  let jsonDirty = false;
+  let sequence = 0;
   let visibleError;
   const headerDrafts = new WeakMap();
   const withIntegrity = (entry, managed) => ({ ...entry,
@@ -26,11 +28,8 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
     jsonError = error;
     textarea.setAttribute('aria-invalid', String(Boolean(error)));
     textarea.setCustomValidity(message(error));
-    for (const control of controls) {
-      for (const input of control.inputs) input.disabled = Boolean(error);
-    }
-    addButton.disabled = Boolean(error);
   };
+  const showMode = () => { rows.hidden = addButton.hidden = advanced.open; };
   const rowError = () => {
     for (const [index, entry] of entries.entries()) {
       const value = entry.url.trim();
@@ -48,7 +47,6 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
   };
   const refresh = () => {
     addButton.textContent = t('action.addExtensionUrl');
-    addButton.disabled = Boolean(jsonError);
     for (const [index, control] of controls.entries()) {
       const number = index + 1;
       const id = index ? `extension-url-${number}` : 'package-url';
@@ -72,8 +70,8 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
     showError(rowError()?.error);
     onChange();
   };
-  const renderRows = () => {
-    controls = entries.map((entry, index) => {
+  const createRow = entry => {
+      const identifier = ++sequence;
       const row = document.createElement('div'); row.className = 'extension-url-row';
       const field = document.createElement('div'); field.className = 'field';
       const label = document.createElement('label');
@@ -94,7 +92,7 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
       const addField = (key, type = 'text') => {
         const wrapper = document.createElement('label'); wrapper.className = 'field';
         const caption = localized(document.createElement('span'), key);
-        caption.id = `extension-access-${index + 1}-${key.replaceAll('.', '-')}`;
+        caption.id = `extension-access-${identifier}-${key.replaceAll('.', '-')}`;
         const control = document.createElement(type === 'select' ? 'select' : type === 'textarea' ? 'textarea' : 'input');
         control.setAttribute('aria-labelledby', caption.id);
         if (control.tagName === 'INPUT') control.type = type;
@@ -136,7 +134,7 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
         name.wrapper.hidden = value.wrapper.hidden = type !== 'header';
       };
       const writeAccess = () => {
-        if (jsonError) return;
+        if (jsonDirty || jsonError || advanced.open) return;
         if (provider.control.value) entry.provider = provider.control.value; else delete entry.provider;
         if (apiBase.control.value.trim()) entry.apiBase = apiBase.control.value.trim(); else delete entry.apiBase;
         const type = authentication.control.value;
@@ -158,7 +156,7 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
       for (const control of result.inputs.slice(2)) control.addEventListener(control.tagName === 'SELECT' ? 'change' : 'input', writeAccess);
       showAuthentication();
       input.addEventListener('input', () => {
-        if (jsonError) return;
+        if (jsonDirty || jsonError || advanced.open) return;
         // A digest belongs to the exact configured source. Never carry a stale
         // checksum into a different package when editing its URL.
         if (input.value.trim() !== entry.url) { delete entry.sha256; delete entry.sha512; }
@@ -169,19 +167,33 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
         if (event.key === 'Enter') event.preventDefault();
       });
       remove.addEventListener('click', () => {
-        if (jsonError) return;
+        if (jsonDirty || jsonError || advanced.open) return;
+        const index = entries.indexOf(entry);
         entries.splice(index, 1);
-        if (!entries.length) entries.push({ url: '' });
-        renderRows(); writeRows();
+        controls.splice(index, 1); row.remove();
+        if (!entries.length) { const blank = { url: '' }; entries.push(blank); const control = createRow(blank); controls.push(control); rows.append(control.row); }
+        refresh(); writeRows();
         controls[Math.min(index, controls.length - 1)].input.focus();
       });
       field.append(label, input); row.append(field, remove, access);
       return result;
-    });
+  };
+  const renderRows = () => {
+    controls = entries.map(createRow);
     rows.replaceChildren(...controls.map(control => control.row));
     refresh(); markJson(jsonError);
   };
+  const commitJson = () => {
+    if (!jsonDirty) return;
+    const parsed = parse(textarea.value);
+    entries = parsed.length ? parsed : [{ url: '' }];
+    jsonDirty = false; markJson(null); showError(null); renderRows();
+  };
   const read = () => {
+    if (jsonDirty) {
+      try { commitJson(); }
+      catch (error) { markJson(error); showError(error); advanced.open = true; showMode(); textarea.focus(); throw error; }
+    }
     if (source === 'rows') {
       const invalid = rowError();
       if (invalid) {
@@ -195,7 +207,7 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
       return result;
     } catch (error) {
       source = 'json'; markJson(error); showError(error);
-      advanced.open = true; textarea.focus();
+      advanced.open = true; showMode(); textarea.focus();
       throw error;
     }
   };
@@ -206,31 +218,27 @@ export function createExtensionInputs({ textarea, rows, addButton, advanced, err
     managedEntries = nextManaged;
     entries = parsed.length ? parsed : [{ url: '' }];
     textarea.value = JSON.stringify(parsed, null, 2);
-    source = 'rows'; jsonError = undefined; showError(null);
-    renderRows(); markJson(null);
+    source = 'rows'; jsonError = undefined; jsonDirty = false; showError(null);
+    renderRows(); markJson(null); showMode();
   };
 
   addButton.addEventListener('click', () => {
-    if (jsonError) return;
-    entries.push({ url: '' }); renderRows(); writeRows();
+    if (jsonDirty || jsonError || advanced.open) return;
+    const entry = { url: '' }; entries.push(entry); const control = createRow(entry); controls.push(control); rows.append(control.row);
+    refresh(); writeRows();
     controls.at(-1).input.focus();
   });
   textarea.addEventListener('input', () => {
-    source = 'json';
-    try {
-      const parsed = parse(textarea.value);
-      entries = parsed.length ? parsed : [{ url: '' }];
-      markJson(null); showError(null); renderRows();
-    } catch (error) {
-      // Keep both the exact JSON draft and the last valid URL rows. Mutating
-      // stale rows here would silently overwrite the user's unfinished JSON.
-      markJson(error); showError(error);
-    }
+    source = 'json'; jsonDirty = true; markJson(null); showError(null); showMode();
     onChange();
   });
   advanced.addEventListener('toggle', () => {
-    if (!advanced.open && jsonError) { advanced.open = true; showError(jsonError); }
+    if (!advanced.open) {
+      try { commitJson(); source = 'rows'; }
+      catch (error) { markJson(error); showError(error); advanced.open = true; }
+    }
+    showMode();
   });
   setValue(parseUserExtensions(textarea.value || '[]', baseURL));
-  return { setValue, read, refresh };
+  return { setValue, read, peek: () => parse(textarea.value), refresh };
 }

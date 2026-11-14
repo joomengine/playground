@@ -64,8 +64,10 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       assert.equal(await json.isVisible(), false, 'JSON is optional and collapsed initially.');
       assert.deepEqual(await read(), []);
       await inputs.first().fill('https://packages.example.test/first.zip');
+      const firstControl = await inputs.first().elementHandle();
       assert.deepEqual(await read(), [{ url: 'https://packages.example.test/first.zip' }]);
       await add.click();
+      assert.equal(await firstControl.evaluate(control => control.isConnected), true, 'Adding a package preserves the existing URL field.');
       assert.equal(await inputs.count(), 2);
       assert.deepEqual(await read(), [{ url: 'https://packages.example.test/first.zip' }], 'An extra blank row is not an install instruction.');
       await inputs.nth(1).fill('http://packages.example.test/second.zip');
@@ -96,6 +98,7 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       assert.deepEqual(JSON.parse(await json.inputValue()), [{ url: 'https://packages.example.test/original.zip', sha256: checksum }]);
       const edited = [{ url: 'https://packages.example.test/json.zip', sha256: checksum }, { url: 'http://packages.example.test/another.zip' }];
       await json.fill(JSON.stringify(edited, null, 2));
+      assert.deepEqual(await inputValues(), ['https://packages.example.test/original.zip'], 'JSON typing does not rebuild URL rows.');
       assert.deepEqual(await read(), edited.map(({ url }) => ({ url })));
       assert.deepEqual(await inputValues(), edited.map(entry => entry.url));
       await advanced.locator('summary').click();
@@ -109,8 +112,8 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await json.fill(broken);
       assert.equal(await json.inputValue(), broken);
       assert.deepEqual(await inputValues(), lastRows, 'Malformed JSON does not replace the last editable package rows.');
-      assert.equal(await add.isDisabled(), true);
-      assert.ok((await inputs.evaluateAll(nodes => nodes.every(node => node.disabled || node.readOnly))), 'Row changes cannot overwrite malformed JSON.');
+      assert.equal(await add.isHidden(), true);
+      assert.equal(await page.locator('#package-list').isHidden(), true, 'The JSON mode keeps stale URL rows out of the editing flow.');
       const invalidJson = await page.evaluate(() => { try { window.extensionInputs.read(); return ''; } catch (error) { return error.message; } });
       assert.ok(invalidJson);
       await advanced.locator('summary').click();
@@ -122,6 +125,7 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       assert.deepEqual(await read(), []);
       assert.equal(await add.isEnabled(), true);
       assert.equal(await inputs.count(), 1);
+      await advanced.locator('summary').click();
 
       await inputs.first().fill('https://github.com/team/private/releases/download/v1/extension.zip');
       const access = page.locator('.extension-package-access').first();
@@ -156,6 +160,7 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await page.evaluate(() => window.extensionInputs.setValue([]));
 
       const packages = Array.from({ length: 40 }, (_, index) => ({ url: `https://packages.example.test/${index}.zip` }));
+      await advanced.locator('summary').click();
       await json.fill(JSON.stringify(packages));
       assert.equal((await read()).length, 40);
       assert.equal(await add.isEnabled(), true);

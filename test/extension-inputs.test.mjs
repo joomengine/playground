@@ -8,10 +8,11 @@ class Element {
   constructor(document, tag = 'div') {
     this.ownerDocument = document; this.tag = tag; this.listeners = new Map();
     this.tagName = tag.toUpperCase(); this.classList = { add: (...names) => { this.className = [this.className, ...names].filter(Boolean).join(' '); } };
-    this.attributes = new Map(); this.children = []; this.value = ''; this.open = false;
+    this.attributes = new Map(); this.children = []; this.value = ''; this.open = false; this.disabled = false;
   }
-  append(...children) { this.children.push(...children); }
-  replaceChildren(...children) { this.children = children; }
+  append(...children) { this.children.push(...children); for (const child of children) child.parentElement = this; }
+  replaceChildren(...children) { this.children = []; this.append(...children); }
+  remove() { const parent = this.parentElement; if (parent) parent.children.splice(parent.children.indexOf(this), 1); this.parentElement = null; }
   setAttribute(name, value) { this.attributes.set(name, value); }
   getAttribute(name) { return this.attributes.get(name); }
   setCustomValidity(message) { this.validationMessage = message; }
@@ -46,7 +47,7 @@ function fixture() {
   const input = index => rows.children[index].children[0].children[1];
   const remove = index => rows.children[index].children[1];
   const type = (index, value) => { input(index).value = value; input(index).dispatch('input'); };
-  const json = value => { textarea.value = value; textarea.dispatch('input'); };
+  const json = value => { advanced.open = true; advanced.dispatch('toggle'); textarea.value = value; textarea.dispatch('input'); };
   return { ...controller, textarea, rows, addButton, advanced, errorElement, input, remove, type, json, document, changes: () => changes };
 }
 
@@ -55,7 +56,9 @@ test('URL rows add, edit, remove and ignore unused blank rows without JSON knowl
   assert.equal(editor.rows.children.length, 1);
   assert.deepEqual(editor.read(), []);
   editor.type(0, 'https://example.test/one.zip');
+  const first = editor.input(0);
   editor.addButton.dispatch('click');
+  assert.equal(editor.input(0), first, 'Adding a package keeps existing controls in place.');
   assert.equal(editor.rows.children.length, 2);
   assert.deepEqual(editor.read(), [{ url: 'https://example.test/one.zip' }]);
   editor.type(1, 'http://example.test/two.zip');
@@ -80,6 +83,8 @@ test('managed URL checksums are retained while custom checksum metadata is ignor
   const draft = '[\n {"url":"./advanced.zip","sha256":"' + sha256 + '"}\n]';
   editor.json(draft);
   assert.equal(editor.textarea.value, draft, 'A valid JSON draft must retain its formatting until edited through rows.');
+  assert.equal(editor.input(0).value, 'https://playground.test/replacement.zip', 'Typing JSON does not rebuild the form.');
+  assert.equal(editor.read()[0].sha256, undefined);
   assert.equal(editor.input(0).value, 'https://playground.test/path/advanced.zip');
   assert.equal(editor.read()[0].sha256, undefined);
   editor.json('[{"url":"https://example.test/custom.zip","sha256":"not-a-digest"}]');
@@ -92,8 +97,8 @@ test('malformed or unsupported JSON remains intact and cannot be overwritten thr
     editor.json(malformed);
     assert.equal(editor.textarea.value, malformed);
     assert.equal(editor.input(0).value, 'https://example.test/one.zip');
-    assert.equal(editor.input(0).disabled, true);
-    assert.equal(editor.addButton.disabled, true);
+    assert.equal(editor.rows.hidden, true);
+    assert.equal(editor.addButton.hidden, true);
     editor.addButton.dispatch('click'); editor.remove(0).dispatch('click');
     assert.equal(editor.textarea.value, malformed);
     editor.advanced.open = false; editor.advanced.dispatch('toggle');
@@ -107,6 +112,8 @@ test('malformed or unsupported JSON remains intact and cannot be overwritten thr
   assert.equal(editor.addButton.disabled, false);
   assert.equal(editor.errorElement.hidden, true);
   assert.equal(editor.read()[0].url, 'https://example.test/repaired.zip');
+  editor.advanced.open = false; editor.advanced.dispatch('toggle');
+  assert.equal(editor.rows.hidden, false);
 });
 
 test('simple URL errors stay in the URL editor while relative URLs resolve normally', () => {
