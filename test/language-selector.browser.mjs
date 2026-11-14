@@ -17,13 +17,14 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await page.goto(`${server.url}__test__.html`);
       await page.evaluate(async () => {
         const { createLanguageSelector } = await import('./src/language-selector.mjs');
-        document.querySelector('main').innerHTML = '<form><label for="language">Joomla language</label><input id="language" value="en-GB" required><label for="languages">Site languages</label><input id="languages" value="en-GB"><button id="submit" type="submit">Launch</button></form>';
-        const style = document.createElement('style'); style.textContent = '.language-options[hidden]{display:none}.language-option{padding:8px;cursor:pointer}.language-input-row{display:flex}.language-tags{display:flex;gap:8px}.language-note{font-size:12px}'; document.head.append(style);
+        document.querySelector('main').innerHTML = '<form><label for="language">Joomla language</label><input id="language" value="en-GB" required><label for="languages">Site languages</label><input id="languages" value="en-GB"><label for="other">Deployment name</label><input id="other"><button id="outside" type="button">Add menu</button><button id="submit" type="submit">Launch</button></form>';
+        const style = document.createElement('style'); style.textContent = '.language-selector{position:relative}.language-options{position:absolute;background:white;z-index:1}.language-options[hidden]{display:none}.language-option{padding:8px;cursor:pointer}.language-input-row{display:flex}.language-tags{display:flex;gap:8px}.language-note{font-size:12px}'; document.head.append(style);
         const messages = { 'language.show': 'Show available languages', 'language.add': 'Add a language', 'language.invalid': 'Use a valid Joomla language tag.',
           'language.remove': 'Remove {tag}', 'language.custom': 'Use custom tag {tag}', 'language.customPackage': 'Custom language: {tags}. Configure its package before launch.',
           'language.singleHelp': 'Choose or type a language', 'language.multipleHelp': 'Choose languages and press Enter', 'language.noMatches': 'No catalog matches', 'language.limit': 'At most 30 languages' };
         const t = (key, values = {}) => (messages[key] || key).replace(/\{(\w+)\}/g, (_, key) => values[key] || '');
         window.languageEvents = []; window.languageSubmissions = 0;
+        window.outsideClicks = 0; document.getElementById('outside').addEventListener('click', () => window.outsideClicks++);
         document.querySelector('form').addEventListener('change', event => window.languageEvents.push({ id: event.target.id, value: event.target.value }));
         document.querySelector('form').addEventListener('submit', event => { event.preventDefault(); window.languageSubmissions++; });
         window.singleLanguage = createLanguageSelector(document.getElementById('language'), { t });
@@ -31,9 +32,18 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
         for (const selector of [window.singleLanguage, window.multiLanguage]) selector.setCatalog(['af-ZA', 'fr-FR', 'de-DE']);
       });
       const single = page.locator('#language');
+      await page.locator('#outside').click();
+      await page.locator('#other').click();
+      assert.deepEqual(await page.evaluate(() => window.languageEvents), [], 'Clicks outside a closed selector never invent language changes.');
+      assert.equal(await page.evaluate(() => window.outsideClicks), 1);
+      assert.equal(await page.locator('#other').evaluate(input => input === document.activeElement), true);
       await single.focus();
       assert.equal(await page.locator('#language-choices').isVisible(), true);
       assert.equal(await page.locator('#language-choices [role="option"]').count(), 4, 'Existing values do not hide the catalog when focused.');
+      await page.locator('#outside').click();
+      assert.deepEqual(await page.evaluate(() => window.languageEvents), [], 'Leaving an unchanged open selector does not dispatch a change.');
+      assert.equal(await page.evaluate(() => window.outsideClicks), 2);
+      await single.focus();
       await single.fill('French');
       assert.equal(await page.locator('#language-choices [role="option"]').count(), 1);
       await single.press('ArrowDown');

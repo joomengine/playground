@@ -12,6 +12,9 @@ for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox'
       const executablePath = process.env[`PLAYGROUND_${browserName.toUpperCase()}_EXECUTABLE`];
       browser = await { chromium, firefox }[browserName].launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
       const page = await browser.newPage();
+      const errors = [];
+      page.on('pageerror', error => errors.push(error.message));
+      page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
       await page.goto(`${server.url}__test__.html`);
       await page.evaluate(async () => {
         const { createStructuredInputs } = await import('./src/structured-inputs.mjs');
@@ -40,11 +43,11 @@ for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox'
       await page.locator('#parameters-fields').getByRole('textbox', { name: 'Template title', exact: true }).fill('Updated');
       assert.deepEqual(await page.evaluate(() => window.parameters.read()), { title: 'Updated', count: 3, future: { kept: [false, null, 'item'] } });
       assert.deepEqual(await page.evaluate(() => {
+        const original = document.activeElement;
         document.activeElement.setSelectionRange(1, 4);
         window.parameters.setContext({ language: 'en-GB' });
-        window.parameters.refresh();
-        return [document.activeElement.getAttribute('aria-label'), document.activeElement.selectionStart, document.activeElement.selectionEnd];
-      }), ['Template title', 1, 4]);
+        return [document.activeElement === original, document.activeElement.getAttribute('aria-label'), document.activeElement.selectionStart, document.activeElement.selectionEnd];
+      }), [true, 'Template title', 1, 4]);
       const count = page.locator('#parameters-fields').getByRole('spinbutton', { name: 'Count', exact: true });
       await count.fill(''); await count.press('-');
       assert.ok(await page.evaluate(() => { try { window.parameters.read(); return false; } catch { return true; } }));
@@ -58,7 +61,9 @@ for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox'
       const category = page.locator('#content-fields .deployment-card').first();
       await category.getByRole('textbox', { name: 'Title', exact: true }).fill('News');
       assert.equal(await category.getByRole('textbox', { name: 'URL name', exact: true }).inputValue(), 'news');
+      const originalCategory = await category.getByRole('textbox', { name: 'Title', exact: true }).elementHandle();
       await page.locator('#content-fields').getByRole('button', { name: 'Add article', exact: true }).click();
+      assert.equal(await originalCategory.evaluate(control => control.isConnected), true, 'Adding an article preserves the existing category controls.');
       const article = page.locator('#content-fields .deployment-card').nth(1);
       await article.getByRole('textbox', { name: 'Title', exact: true }).fill('Welcome');
       const content = await page.evaluate(() => window.content.read());
@@ -66,12 +71,24 @@ for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox'
       assert.equal(content.articles[0].alias, 'welcome');
       assert.equal(content.articles[0].category, content.categories[0].key);
       assert.equal(content.articles[0].introtext, '');
+      assert.deepEqual(await category.getByRole('combobox', { name: 'Language', exact: true }).evaluate(control => [...control.list.options].map(option => option.value)), ['en-GB']);
 
       await page.locator('#menus-fields').getByRole('button', { name: 'Add menu item', exact: true }).click();
       await page.locator('#menus-fields').getByRole('combobox', { name: 'Page type', exact: true }).selectOption({ label: 'Single article' });
       await page.locator('#menus-fields').getByRole('textbox', { name: 'Title', exact: true }).fill('Read news');
       await page.locator('#menus-fields').getByRole('spinbutton', { name: 'Article number', exact: true }).fill('7');
       assert.equal(await page.evaluate(() => window.menus.read()[0].query.id), 7);
+      const firstMenu = await page.locator('#menus-fields').getByRole('textbox', { name: 'Title', exact: true }).elementHandle();
+      await page.locator('#menus-fields').getByRole('button', { name: 'Add menu item', exact: true }).click();
+      const secondMenu = page.locator('#menus-fields .deployment-card').nth(1);
+      await secondMenu.getByRole('textbox', { name: 'Title', exact: true }).fill('Second menu');
+      assert.equal(await firstMenu.evaluate(control => control.isConnected), true);
+      await secondMenu.getByRole('button', { name: 'Move up', exact: true }).click();
+      assert.deepEqual(await page.evaluate(() => window.menus.read().map(item => item.title)), ['Second menu', 'Read news']);
+      assert.equal(await firstMenu.evaluate(control => control.isConnected), true, 'Moving a menu retains the other menu controls.');
+      await page.locator('#menus-fields .deployment-card').nth(1).getByRole('button', { name: /^Remove / }).click();
+      await page.locator('#menus-fields').getByRole('textbox', { name: 'Title', exact: true }).fill('Renamed after removal');
+      assert.deepEqual(await page.evaluate(() => window.menus.read().map(item => item.title)), ['Renamed after removal']);
       await page.evaluate(() => {
         window.menus.setContext({ menuTypes: [] });
         window.menus.setValue([{ title: 'Directory', component: 'com_service_directory', view: 'directory', query: { existing: 'kept' } }]);
@@ -109,6 +126,13 @@ for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox'
       }]));
       await page.locator('#overlays-fields').getByRole('textbox', { name: 'Module title', exact: true }).fill('Updated module');
       assert.deepEqual(await page.evaluate(() => window.overlays.read()[0].fields), { title: 'Updated module' });
+      assert.equal(await page.evaluate(() => {
+        const original = document.activeElement;
+        window.overlays.setRecordSchema({ kind: 'module', element: 'mod_custom', clientId: 0 }, {
+          type: 'object', properties: { title: { type: 'string', title: 'Module title' }, note: { type: 'string', title: 'Module note' } },
+        });
+        return document.activeElement === original && original.isConnected;
+      }), true, 'A late record schema cannot replace the field being edited.');
       await page.evaluate(() => {
         window.parameters.setSchema({ type: 'object', properties: { key: { type: 'string', title: 'Template key' } } });
         window.parameters.setValue({ key: 'Original' });
@@ -122,7 +146,18 @@ for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox'
       });
       assert.deepEqual(nativeSubform, { rows: { row0: { name: 'ORIGINAL' } } });
       await page.locator('#parameters-fields').getByRole('textbox', { name: 'Placeholder name', exact: true }).fill('UPDATED');
-      assert.deepEqual(await page.evaluate(() => window.parameters.read()), { rows: [{ name: 'UPDATED' }] });
+      assert.deepEqual(await page.evaluate(() => window.parameters.read()), { rows: { row0: { name: 'UPDATED' } } });
+      assert.deepEqual(await page.evaluate(async () => {
+        const { siteParameters } = await import('./src/site-configuration.mjs');
+        return siteParameters(window.parameters.read());
+      }), { rows: { row0: { name: 'UPDATED' } } }, 'Edited native subforms are accepted by the runtime parser.');
+      await page.evaluate(() => window.parameters.setValue({}));
+      await page.locator('#parameters-fields').getByRole('button', { name: 'Add configuration', exact: true }).click();
+      await page.locator('#parameters-fields').getByRole('textbox', { name: 'Placeholder name', exact: true }).fill('NEW');
+      assert.deepEqual(await page.evaluate(async () => {
+        const { siteParameters } = await import('./src/site-configuration.mjs');
+        return siteParameters(window.parameters.read());
+      }), { rows: { row0: { name: 'NEW' } } }, 'New template subforms use the same keyed-row contract.');
       await page.evaluate(() => {
         window.parameters.setSchema({ type: 'object', properties: { title: { type: 'string', title: 'Template title' } } });
         window.parameters.setValue({ title: 'Updated' });
@@ -130,15 +165,35 @@ for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox'
 
       // An unfinished JSON draft cannot be replaced by old form controls.
       await page.getByText('parameters JSON', { exact: true }).click();
+      const beforeJson = await page.locator('#parameters-fields input').first().elementHandle();
       await page.locator('#parameters-json').fill('{"unfinished":');
-      assert.equal(await page.locator('#parameters-fields input').first().isDisabled(), true);
+      assert.equal(await page.locator('#parameters-fields').isHidden(), true);
+      assert.equal(await beforeJson.evaluate(control => control.isConnected), true, 'Typing JSON does not rebuild the form.');
       await page.evaluate(() => window.parameters.refresh());
       assert.equal(await page.locator('#parameters-json').inputValue(), '{"unfinished":');
       assert.ok(await page.evaluate(() => { try { window.parameters.read(); return false; } catch { return true; } }));
       const restored = { title: 'Restored', nested: { retained: [1, 'two', false, null] } };
       await page.locator('#parameters-json').fill(JSON.stringify(restored));
+      await page.getByText('parameters JSON', { exact: true }).click();
       assert.deepEqual(await page.evaluate(() => window.parameters.read()), restored);
-      assert.equal(await page.locator('#parameters-fields input').first().isDisabled(), false);
+      assert.equal(await page.locator('#parameters-fields').isVisible(), true);
+
+      // Schema regex keeps its own semantics and never becomes an invalid HTML pattern.
+      await page.evaluate(() => {
+        window.parameters.setSchema({ type: 'object', properties: {
+          slug: { type: 'string', title: 'Pattern key', pattern: '^[a-z0-9][a-z0-9-]{0,63}$' },
+          fragment: { type: 'string', title: 'Pattern fragment', pattern: '[a-z]+' },
+        } });
+        window.parameters.setValue({ slug: 'valid-key', fragment: '12abc34' });
+      });
+      assert.deepEqual(await page.evaluate(() => window.parameters.read()), { slug: 'valid-key', fragment: '12abc34' });
+      const key = page.getByRole('textbox', { name: 'Pattern key', exact: true });
+      assert.equal(await key.getAttribute('pattern'), null);
+      await key.fill('INVALID');
+      assert.equal(await key.evaluate(control => control.validity.valid), false);
+      await key.fill('valid-again');
+      assert.equal(await key.evaluate(control => control.validity.valid), true);
+      assert.deepEqual(errors, []);
     } finally {
       try { await browser?.close(); } finally { await server.close(); }
     }
