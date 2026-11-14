@@ -256,6 +256,7 @@ jobs:
       - name: Validate the exact candidate build
         if: ${{ !cancelled() && steps.browser_install.outcome == 'success' && steps.scenarios.outputs.scenarios != '' }}
         env:
+          DEBUG: pw:browser
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
           PLAYGROUND_SCENARIOS: ${{ steps.scenarios.outputs.scenarios }}
           PLAYGROUND_PHP_VERSIONS: ${{ needs.checks.outputs.php }}
