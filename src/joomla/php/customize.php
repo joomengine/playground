@@ -154,11 +154,13 @@ try {
                 if (!$menu->id) $menu->load(['menutype' => 'playground-' . strtolower($reference['language']),
                     'link' => 'index.php?option=com_content&view=article&id=' . $articleId]);
                 if (!$menu->id) $menu->setLocation(1, 'last-child');
+                // Disabling the language filter keeps existing language homes
+                // intact, so enabling it again does not replace the global home.
                 playgroundStoreTable($menu, [
                     'menutype' => $menuType, 'title' => $entry['title'], 'alias' => $entry['alias'],
                     'type' => 'component', 'link' => 'index.php?option=com_content&view=article&id=' . $articleId,
                     'component_id' => $componentId, 'published' => 1, 'parent_id' => 1,
-                    'home' => 1, 'language' => $multilingual ? $entry['language'] : '*',
+                    'home' => 1, 'language' => $multilingual || ($menu->id && $menu->language !== '*') ? $entry['language'] : '*',
                     'client_id' => 0, 'access' => 1, 'params' => '{}',
                 ]);
                 $created['menus'][$entry['language']] = (int) $menu->id;

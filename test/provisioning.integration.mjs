@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { createNodeRuntime } from '../scripts/node-runtime.mjs';
-import { parseCatalog } from '../src/config.mjs';
+import { normalizeConfiguration, parseCatalog } from '../src/config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
 import { exportSite } from '../src/export.mjs';
 import { managedDatabaseSource } from '../src/joomla/managed-database.mjs';
@@ -112,10 +112,10 @@ for (const major of ['5', '6']) {
       content.categories.push({ key: 'extra-news', title: 'Extra news', alias: 'extra-news', language: 'en-GB' });
       content.articles.push({ key: 'extra-article', title: 'Extra article', alias: 'extra-article', language: 'en-GB',
         category: 'extra-news', introtext: '<p>Created through Apply.</p>', fulltext: '', featured: false, home: false });
-      const changes = { ...configuration, language: 'nl-NL', siteName: 'Configured heritage', extensions: [], startupCommands: [],
+      const changes = normalizeConfiguration({ ...configuration, language: 'nl-NL', siteName: 'Configured heritage', extensions: [], startupCommands: [],
         content,
         menus: [{ key: 'featured-demo', title: 'Featured demo', alias: 'featured-demo', component: 'com_content', view: 'featured', home: true }],
-        template: { element: 'cassiopeia', params: { fluidContainer: 1 } } };
+        template: { element: 'cassiopeia', params: { fluidContainer: 1 } } }, { catalog, baseURL: runtime.assetBaseUrl });
       const edited = deploymentConfigurationChanges(configuration, changes);
       const configured = await applyJoomlaConfiguration(runtime, edited.configuration, { ...options, configureLanguage: edited.configureLanguage });
       assert.equal(configured.siteName, 'Configured heritage');
@@ -148,11 +148,40 @@ for (const major of ['5', '6']) {
       const menu = await captureJoomlaData(runtime, { kind: 'record', component: 'com_menus', view: 'item', id: configured.menus['featured-demo'] }, options);
       assert.equal(Number(menu.overlay.fields.template_style_id), assigned.templateStyle);
 
-      const languageOnly = { ...changes, menus: [], template: null, content: null, multilingual: false };
-      await applyJoomlaConfiguration(runtime, languageOnly, options);
-      const disabled = await captureJoomlaData(runtime, { kind: 'plugin', folder: 'system', element: 'languagefilter' }, options);
-      assert.equal(Number(disabled.overlay.fields.enabled), 0, 'Disabling multilingual mode must reach the installed language plugin.');
-      await applyJoomlaConfiguration(runtime, { ...languageOnly, multilingual: true }, options);
+      const renamed = { ...assignment, menus: assignment.menus.map(item => ({ ...item, title: 'Renamed featured menu', alias: 'renamed-featured-menu' })) };
+      const renameDelta = deploymentConfigurationChanges(assignment, renamed);
+      const renamedResult = await applyJoomlaConfiguration(runtime, renameDelta.configuration, { ...options, configureLanguage: renameDelta.configureLanguage });
+      assert.equal(renamedResult.menus['featured-demo'], configured.menus['featured-demo'], 'Changing title and alias updates the same installed menu.');
+      const renamedMenus = (await discoverJoomlaConfiguration(runtime, options)).menus;
+      assert.equal(renamedMenus.length, after.menus.length, 'Renaming a deployment menu must not create a duplicate.');
+      assert.equal(renamedMenus.filter(item => item.alias === 'featured-demo').length, 0);
+      const renamedMenu = renamedMenus.find(item => item.alias === 'renamed-featured-menu');
+      assert.equal(Number(renamedMenu.id), configured.menus['featured-demo']);
+      assert.equal(renamedMenu.title, 'Renamed featured menu');
+      const renamedRecord = await captureJoomlaData(runtime, { kind: 'record', component: 'com_menus', view: 'item', id: configured.menus['featured-demo'] }, options);
+      assert.equal(Number(renamedRecord.overlay.fields.template_style_id), assigned.templateStyle, 'Renaming a menu must retain its template assignment.');
+
+      const globalHome = renamedMenus.find(item => item.language === '*' && Number(item.home) === 1);
+      assert.ok(globalHome);
+      let languageConfiguration = renamed;
+      for (const multilingual of [false, true]) {
+        const next = normalizeConfiguration({ ...languageConfiguration, multilingual }, { catalog, baseURL: runtime.assetBaseUrl });
+        const languageDelta = deploymentConfigurationChanges(languageConfiguration, next);
+        assert.equal(languageDelta.configuration.content.multilingual, multilingual, 'The real form toggle includes normalized content.');
+        await applyJoomlaConfiguration(runtime, languageDelta.configuration, { ...options, configureLanguage: languageDelta.configureLanguage });
+        const plugin = await captureJoomlaData(runtime, { kind: 'plugin', folder: 'system', element: 'languagefilter' }, options);
+        assert.equal(Number(plugin.overlay.fields.enabled), multilingual ? 1 : 0, 'The multilingual setting must reach the installed language plugin.');
+        const toggledMenus = (await discoverJoomlaConfiguration(runtime, options)).menus;
+        assert.equal(toggledMenus.find(item => item.language === '*' && Number(item.home) === 1)?.id, globalHome.id, 'Toggling multilingual mode preserves the global home page.');
+        const toggledContent = (await inspectJoomla(runtime, options)).marker.content;
+        assert.deepEqual(toggledContent.menus, savedContent.menus, 'Toggling multilingual mode preserves each content home ID.');
+        for (const [tag, id] of Object.entries(savedContent.menus)) {
+          const home = toggledMenus.find(item => Number(item.id) === id);
+          assert.equal(home?.language, tag, 'Tagged home pages retain their language when multilingual mode is disabled.');
+          assert.equal(Number(home.home), 1);
+        }
+        languageConfiguration = next;
+      }
 
       const exported = await runtime.withExclusive((raw) => exportSite(raw, {}, { sourceLoader: exportSource }));
       assert.equal(exported.metadata.joomlaVersion, release.version);

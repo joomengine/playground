@@ -19,7 +19,8 @@ export function deploymentConfigurationChanges(previous, next) {
   if (template?.url && samePackage(template, previous.template)) {
     for (const key of packageFields) delete template[key];
   }
-  const menuReferences = next.menus.filter(entry => template?.menuKeys?.includes(entry.key));
+  const menuReferences = next.menus.filter(entry => menus.length || template?.menuKeys?.includes(entry.key))
+    .flatMap(entry => previous.menus.filter(item => item.key === entry.key));
   return { configuration: { ...next, extensions, startupCommands, languages, menus, menuReferences, template, content,
     contentReferences: content ? previous.content : null, overlays }, configureLanguage };
 }
