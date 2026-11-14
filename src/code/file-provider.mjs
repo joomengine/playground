@@ -137,7 +137,9 @@ export class JoomlaFileSystemProvider {
       throw new FileSystemProviderError(message, FileSystemProviderErrorCode.Unknown);
     }
     await this.onSave(result);
-    if (result.persistence?.enabled && result.persistence.saved === false) {
+    // A Save All batch commits once through the runtime owner after its live
+    // writes finish. Pending durability is not a failed editor write.
+    if (result.persistence?.enabled && result.persistence.saved === false && !result.persistence.pending) {
       const message = `Files changed in the running site, but durable storage failed: ${result.persistence.error || 'storage unavailable'}. Keep this tab open and save the site again.`;
       this.onError({ ...result, message });
       throw new FileSystemProviderError(message, FileSystemProviderErrorCode.Unavailable);

@@ -1,10 +1,9 @@
 /** Preserve application files when upstream replaces PHP after a failed CGI request. */
-export function installPhpRecovery(php, { currentBinary, prepare, beforeRefresh = async () => {}, restored = () => {}, roots = ['/persist', '/config', '/tmp', '/internal'] }) {
+export function installPhpRecovery(php, { currentBinary, prepare, restored = () => {}, roots = ['/persist', '/config', '/tmp', '/internal'] }) {
   const refresh = php.refresh.bind(php);
   php.refresh = () => {
     const previous = currentBinary();
     const replacement = Promise.resolve().then(async () => {
-      await beforeRefresh(previous);
       const pending = refresh();
       // Upstream assigns its own promise; callers must wait for file restoration too.
       php.binary = replacement;
@@ -28,22 +27,51 @@ export function installPhpRecovery(php, { currentBinary, prepare, beforeRefresh 
 
 function copyContents(source, target, directory) {
   target.mkdirTree(directory);
-  for (const name of source.readdir(directory)) {
-    if (name === '.' || name === '..') continue;
+  const names = new Set(source.readdir(directory).filter(name => name !== '.' && name !== '..'));
+  // Hydration can restore an older disk generation. Do not resurrect files
+  // deleted in memory since the last successful checkpoint.
+  for (const name of target.readdir(directory)) {
+    if (name !== '.' && name !== '..' && !names.has(name)) removeTree(target, `${directory}/${name}`);
+  }
+  for (const name of names) {
     const path = `${directory}/${name}`;
     const stat = source.lstat(path);
+    let existing;
+    try { existing = target.lstat(path); }
+    catch (error) { if (error?.errno !== 44 && error?.code !== 'ENOENT') throw error; }
+    if (existing && (stat.mode & 0o170000) !== (existing.mode & 0o170000)) {
+      removeTree(target, path);
+      existing = undefined;
+    }
+    let written = false;
     if (source.isDir(stat.mode)) copyContents(source, target, path);
     else if (source.isLink(stat.mode)) {
-      if (target.analyzePath(path).exists) target.unlink(path);
-      target.symlink(source.readlink(path), path);
+      const link = source.readlink(path);
+      if (existing && target.readlink(path) !== link) { target.unlink(path); existing = undefined; }
+      if (!existing) target.symlink(link, path);
     } else if (source.isFile(stat.mode)) {
-      // Copy one file at a time, without retaining a second complete filesystem archive.
-      if (target.analyzePath(path).exists) target.chmod(path, stat.mode | 0o200);
-      target.writeFile(path, source.readFile(path, { encoding: 'binary' }));
+      // Compare one file at a time. Rewriting unchanged hydrated files would
+      // dirty the entire saved site and turn the next retry into a full rewrite.
+      const bytes = source.readFile(path, { encoding: 'binary' });
+      const saved = existing && existing.size === stat.size ? target.readFile(path, { encoding: 'binary' }) : null;
+      if (!saved || bytes.some((byte, index) => byte !== saved[index])) {
+        if (existing) target.chmod(path, stat.mode | 0o200);
+        target.writeFile(path, bytes);
+        written = true;
+      }
     } else continue;
     if (!source.isLink(stat.mode)) {
-      target.chmod(path, stat.mode);
-      target.utime(path, stat.atime, stat.mtime);
+      const current = written || source.isDir(stat.mode) ? target.lstat(path) : existing;
+      if (current.mode !== stat.mode) target.chmod(path, stat.mode);
+      if (+current.atime !== +stat.atime || +current.mtime !== +stat.mtime) target.utime(path, stat.atime, stat.mtime);
     }
   }
+}
+
+function removeTree(fs, path) {
+  const stat = fs.lstat(path);
+  if (fs.isDir(stat.mode)) {
+    for (const name of fs.readdir(path)) if (name !== '.' && name !== '..') removeTree(fs, `${path}/${name}`);
+    fs.rmdir(path);
+  } else fs.unlink(path);
 }

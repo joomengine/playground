@@ -32,130 +32,57 @@ function memoryStorage() {
   };
 }
 
-const settled = () => new Promise(resolve => setImmediate(resolve));
 function deferred() {
-  let resolve, reject;
-  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
-  return { promise, resolve, reject };
+  let resolve;
+  const promise = new Promise(yes => { resolve = yes; });
+  return { promise, resolve };
 }
 
-test('verified maintained images launch before cache writes finish and share immutable downloads while writing', { timeout: 2_000 }, async t => {
+test('maintained downloads share only concurrent bytes and never persist installation archives', async () => {
   const storage = memoryStorage();
-  const write = deferred();
-  t.after(() => write.resolve());
-  const originalPut = storage.put.bind(storage);
-  storage.put = async (record, blob) => { await write.promise; return originalPut(record, blob); };
+  const response = deferred();
   let downloads = 0;
-  const cache = createDeploymentImageCache({ baseURL, storage, fetcher: async () => { downloads++; return new Response(bytes); } });
-  const entry = maintainedDeploymentImages(manifest, baseURL)[0];
-  const first = await cache.getMaintained(entry);
-  assert.deepEqual(first.bytes, bytes);
-  assert.equal(storage.records.size, 0, 'Installation starts without waiting for IndexedDB.');
-  first.bytes.fill(0);
-  structuredClone(first.bytes.buffer, { transfer: [first.bytes.buffer] });
-  const second = await cache.getMaintained(entry);
-  assert.deepEqual(second.bytes, bytes, 'A later caller receives verified bytes even if the importer detached its buffer.');
-  second.bytes.fill(9);
-  assert.deepEqual((await cache.getMaintained(entry)).bytes, bytes);
-  assert.equal(downloads, 1, 'The verified download stays shared until its cache write settles.');
-  write.resolve();
-  await settled();
-  const cached = await cache.getMaintained(entry);
-  assert.equal(cached.cached, true);
-  assert.deepEqual(cached.bytes, bytes, 'Only the immutable verified snapshot reaches storage.');
+  const cache = createDeploymentImageCache({ baseURL, storage,
+    fetcher: async () => { downloads++; await response.promise; return new Response(bytes); } });
+  const entry = cache.maintained(maintainedConfig, manifest);
+  const first = cache.getMaintained(entry), second = cache.getMaintained(entry);
+  response.resolve();
+  const [left, right] = await Promise.all([first, second]);
+  assert.deepEqual(left.bytes, bytes);
+  left.bytes.fill(0);
+  assert.deepEqual(right.bytes, bytes, 'Each importer owns independent bytes.');
   assert.equal(downloads, 1);
+  assert.equal(storage.writes, 0);
+  assert.equal(storage.records.size, 0);
+  assert.equal((await cache.getMaintained(entry)).cached, false);
+  assert.equal(downloads, 2, 'A later fresh launch downloads the base again.');
 });
 
-test('a delayed cache failure reports once without another launch phase, then a later launch can retry', { timeout: 2_000 }, async t => {
-  const storage = memoryStorage();
-  const write = deferred();
-  t.after(() => write.resolve());
-  const originalPut = storage.put.bind(storage);
-  storage.put = () => write.promise;
-  const warnings = [], progress = [];
-  let downloads = 0;
-  const cache = createDeploymentImageCache({ baseURL, storage, fetcher: async () => { downloads++; return new Response(bytes); } });
-  const entry = maintainedDeploymentImages(manifest, baseURL)[0];
-  const first = await cache.getMaintained(entry, { onWarning: message => warnings.push(message), onProgress: event => progress.push(event.phase) });
-  assert.deepEqual(first.bytes, bytes);
+test('fresh deployment downloads do not access failing browser archive storage', async () => {
+  const cache = createDeploymentImageCache({ baseURL,
+    storage: { get() { throw new Error('Quota storage must not be consulted'); }, put() { throw new Error('Quota storage must not be written'); } },
+    fetcher: async () => new Response(bytes) });
+  const warnings = [];
+  assert.deepEqual((await cache.getMaintained(cache.maintained(maintainedConfig, manifest), { onWarning: warning => warnings.push(warning) })).bytes, bytes);
   assert.deepEqual(warnings, []);
-  assert.deepEqual((await cache.getMaintained(entry)).bytes, bytes);
-  assert.equal(downloads, 1);
-  write.reject(new Error('Quota exceeded'));
-  await settled();
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /could not be saved locally/);
-  assert.deepEqual(progress, ['download-image'], 'A completed launch never receives a late save/ready progress transition.');
-  storage.put = originalPut;
-  assert.deepEqual((await cache.getMaintained(entry)).bytes, bytes);
-  await settled();
-  assert.equal(downloads, 2);
-  assert.equal(storage.records.size, 1);
 });
 
-test('optional last-used metadata never delays a verified cached image', { timeout: 2_000 }, async t => {
+test('maintained downloads reject corrupt bytes before returning to installation', async () => {
+  const cache = createDeploymentImageCache({ baseURL, storage: memoryStorage(), fetcher: async () => new Response(Uint8Array.of(...bytes, 9)) });
+  await assert.rejects(cache.getMaintained(cache.maintained(maintainedConfig, manifest)), /integrity/);
+});
+
+test('legacy archives remain visible for removal and reclamation never removes user custom images', async () => {
   const storage = memoryStorage();
-  const touch = deferred();
-  t.after(() => touch.resolve());
   const entry = maintainedDeploymentImages(manifest, baseURL)[0];
   await storage.put(entry, bytes);
-  storage.touch = () => touch.promise;
-  const warnings = [];
-  const cache = createDeploymentImageCache({ baseURL, storage, fetcher: () => { throw new Error('No download is required'); } });
-  assert.deepEqual((await cache.getMaintained(entry, { onWarning: message => warnings.push(message) })).bytes, bytes);
-  touch.reject(new Error('Metadata storage unavailable'));
-  await settled();
-  assert.match(warnings[0], /cached image is available/);
-  assert.equal(storage.records.size, 1);
-});
-
-test('maintained images reuse verified bytes and replace stale hashes before reuse', async () => {
-  const storage = memoryStorage();
-  let downloads = 0, served = bytes;
-  const cache = createDeploymentImageCache({ baseURL, storage,
-    fetcher: async () => { downloads++; return new Response(served); } });
-  const entry = cache.maintained(maintainedConfig, manifest);
-  const [first, concurrent] = await Promise.all([cache.getMaintained(entry), cache.getMaintained(entry)]);
-  assert.deepEqual(first.bytes, bytes);
-  assert.deepEqual(concurrent.bytes, bytes);
-  assert.equal(downloads, 1);
-  assert.equal((await cache.getMaintained(entry)).cached, true);
-  assert.equal(storage.writes, 1, 'Reading updates metadata without rewriting the ZIP.');
-  const list = await cache.list(manifest);
-  assert.equal(list[0].available, true);
-  assert.equal(list[0].size, bytes.length);
-  assert.equal('url' in list[0], false);
-  assert.equal('sha256' in list[0], false);
-  assert.equal((await cache.list(undefined)).length, 1, 'Offline management retains cached images.');
-
-  served = Uint8Array.of(...bytes, 9);
-  const updated = { ...manifest, prebuiltDeploys: [{ ...manifest.prebuiltDeploys[0], sha256: await hash(served), size: served.length }] };
-  assert.equal((await cache.list(updated))[0].available, false);
-  assert.equal(storage.records.size, 0, 'Old server bytes are invalidated when the authoritative hash changes.');
-  const latest = await cache.getMaintained(cache.maintained(maintainedConfig, updated));
-  assert.deepEqual(latest.bytes, served);
-  assert.equal(downloads, 2);
-  await cache.remove(entry.key);
-  assert.equal((await cache.list(updated))[0].available, false);
-});
-
-test('corrupt cached images are discarded and quota failure does not block launch', async () => {
-  const storage = memoryStorage();
-  const entry = maintainedDeploymentImages(manifest, baseURL)[0];
-  await storage.put(entry, Uint8Array.of(9, 9, 9));
-  let downloads = 0;
-  const cache = createDeploymentImageCache({ baseURL, storage, fetcher: async () => { downloads++; return new Response(bytes); } });
-  assert.deepEqual((await cache.getMaintained(entry)).bytes, bytes);
-  assert.equal(downloads, 1);
-  await settled();
-  await cache.remove(entry.key);
-  const warnings = [];
-  storage.put = async () => { throw new Error('Quota exceeded'); };
-  const result = await cache.getMaintained(entry, { onWarning: value => warnings.push(value) });
-  assert.deepEqual(result.bytes, bytes);
-  await settled();
-  assert.equal(warnings.length, 1);
-  assert.doesNotMatch(warnings[0], /https?:/);
+  await storage.put({ ...entry, key: 'custom:kept', kind: 'custom' }, bytes);
+  const cache = createDeploymentImageCache({ baseURL, storage });
+  assert.equal((await cache.list()).length, 2);
+  assert.deepEqual(await cache.reclaimMaintained(), { removed: 1, bytes: bytes.length });
+  assert.deepEqual((await cache.list()).map(record => record.key), ['custom:kept']);
+  await cache.remove('custom:kept');
+  assert.equal((await cache.list()).length, 0);
 });
 
 test('custom images persist independently, expose no credentials, and survive server reconciliation', async () => {
