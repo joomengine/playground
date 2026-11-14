@@ -116,10 +116,11 @@ function appFixture({ valid = true, runtime, check = async () => true, resolve, 
   };
   $(runtime ? 'site-mount' : 'welcome').hidden = false;
   fixture.document.querySelector = () => ({ classList: { toggle() {} } });
-  const input = { storageKey: 'launch-media-test', persistence: false, deployId: 'blank', joomlaVersion: '6.0', phpVersion: '8.4' };
+  const input = { storageKey: 'launch-media-test', persistence: true, deployId: 'blank', joomlaVersion: '6.0', phpVersion: '8.4' };
   const context = vm.createContext({
     $, document: fixture.document, launchMedia: fixture.media,
     busy: false, launching: false, initialized: true, catalog: {}, deployCatalog: {}, runtime,
+    stoppedSite: undefined, readLiveMetadata: () => null, backupPanel: null, requireOwnerForReplacement: () => true,
     launchCountdown: { stop() {} }, buildUpdates: { check },
     setBusy(value) { context.busy = value; }, setDrawer() {}, openDialog() {},
     clearFeedback() {}, feedback() {}, activity() {}, t: value => value, messageOf: String,

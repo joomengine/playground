@@ -1,8 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PhpSession, validateCheckpointBytes } from '../src/playground.mjs';
+import { PhpSession, validateCheckpointBytes, validateResumedInstallation } from '../src/playground.mjs';
 
 const drain = () => new Promise(resolve => setImmediate(resolve));
+
+test('Start accepts only a complete saved installation, without authorizing a fresh deployment fallback', () => {
+  const saved = { marker: { state: 'complete' }, configured: true, installerPresent: false };
+  assert.doesNotThrow(() => validateResumedInstallation(saved));
+  for (const state of [{}, { ...saved, marker: null }, { ...saved, configured: false },
+    { ...saved, installerPresent: true }, { ...saved, markerError: 'corrupt' }]) {
+    assert.throws(() => validateResumedInstallation(state), error => error.code === 'SAVED_SITE_UNAVAILABLE');
+  }
+});
 
 function fixture(t, database = {}, diagnostic) {
   const previous = globalThis.Worker;

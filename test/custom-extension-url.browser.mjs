@@ -44,6 +44,7 @@ async function start(page, configuration, options = {}) {
     }
     window.validationProgress = [];
     window.playground = await createPlayground(configuration, { ...options, onProgress: event => window.validationProgress.push(event) });
+    const initialSavedAt = window.playground.lastSavedAt;
     const frontend = await window.playground.request('/');
     const administrator = await window.playground.request('/administrator/');
     const marker = JSON.parse(new TextDecoder().decode(await window.playground.fs.readFile('/persist/meta/joomla-install.json')));
@@ -63,7 +64,7 @@ async function start(page, configuration, options = {}) {
     return { installation, identity: { username: identity.username, name: identity.name, email: identity.email }, account,
       frontendStatus: frontend.status, administratorStatus: administrator.status, markerWarnings: marker.extensionWarnings,
       module, commands: structuredClone(window.observedConsoleCommands), progress: window.validationProgress,
-      lastSavedAt: window.playground.lastSavedAt };
+      initialSavedAt, lastSavedAt: window.playground.lastSavedAt };
   }, { configuration, options });
 }
 
@@ -110,7 +111,7 @@ test('browser Joomla CLI custom URLs launch directly and retain compatible local
     const config = configuration(extensionURL, { persistence: true, storageKey: 'deferred-save-contract' });
     const first = await start(page, config, { deferInitialSave: true });
     assertHealthy(first);
-    assert.equal(first.lastSavedAt, null, 'Ready must not claim storage completion before the background checkpoint.');
+    assert.equal(first.initialSavedAt, null, 'Ready must not claim storage completion before the background checkpoint.');
     const savedAt = await page.evaluate(async () => { await window.playground.flush(); return window.playground.lastSavedAt; });
     assert.ok(Number.isFinite(Date.parse(savedAt)));
     const before = downloads;
@@ -151,6 +152,8 @@ test('browser Joomla CLI custom URLs launch directly and retain compatible local
     assert.deepEqual(first.installation.extensionWarnings, []);
     assert.ok(!first.progress.some(event => /Preparing the image for reuse|Saving the prepared image/.test(event.message)),
       'A custom site must open before any optional archive export.');
+    assert.deepEqual(await page.evaluate(async () => (await import('./src/deployment-images.mjs')).deploymentImages.list()), [],
+      'Launching a custom site must not store a second complete archive automatically.');
     await cacheInstalledImage(page);
     const before = downloads;
     await closeSite(page);

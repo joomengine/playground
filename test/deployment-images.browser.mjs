@@ -13,7 +13,7 @@ const manifest = bytes => ({ prebuiltDeploys: [{ id: 'jcb', joomlaVersion: '6.2.
   url: `snapshots/${hash(bytes)}.zip`, sha256: hash(bytes), size: bytes.length }] });
 
 for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split(',')) {
-  test(`deployment images survive reload and replace an outdated server image (${name})`, { timeout: 60_000 }, async () => {
+  test(`fresh deployments download maintained images without storing duplicate archives (${name})`, { timeout: 60_000 }, async () => {
     const server = await createStaticServer({ directory, fixtures: {
       'image-cache-fixture.html': '<!doctype html><title>Image cache persistence</title>',
       [`assets/snapshots/${hash(archive)}.zip`]: archive,
@@ -53,13 +53,13 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       }, catalog);
       const first = await load(manifest(archive));
       assert.equal(first.cached, false);
-      assert.equal(first.rows[0].available, true);
+      assert.equal(first.rows[0].available, false);
       assert.equal(downloads.length, 1);
       await page.reload();
       const resumed = await load(manifest(archive));
-      assert.equal(resumed.cached, true);
+      assert.equal(resumed.cached, false);
       assert.deepEqual(resumed.bytes, [...archive]);
-      assert.equal(downloads.length, 1, 'A page reload reuses IndexedDB bytes without downloading the ZIP again.');
+      assert.equal(downloads.length, 2, 'A fresh deployment downloads its base; only the running site is persisted.');
 
       const outdated = await page.evaluate(async manifest => {
         const { deploymentImages } = await import('./src/deployment-images.mjs');
@@ -69,14 +69,13 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       const updated = await load(manifest(replacement));
       assert.equal(updated.cached, false);
       assert.deepEqual(updated.bytes, [...replacement]);
-      assert.equal(downloads.length, 2);
+      assert.equal(downloads.length, 3);
       const removed = await page.evaluate(async () => {
         const { deploymentImages } = await import('./src/deployment-images.mjs');
         const records = await deploymentImages.list();
-        await deploymentImages.remove(records[0].key);
-        return deploymentImages.list();
+        return records;
       });
-      assert.deepEqual(removed, []);
+      assert.deepEqual(removed, [], 'Neither a fresh deployment nor a changed published base creates a browser backup or cached archive.');
     } finally { await browser?.close(); await server.close(); }
   });
 }
