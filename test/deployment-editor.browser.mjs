@@ -1,4 +1,5 @@
 import { continueLiveReplacement } from './live-replacement-contract.mjs';
+import { assertExtensionFormValidation } from './extension-form-contract.mjs';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -51,6 +52,10 @@ test(`Configure a deployment supports stable editing and saved copies for ${pres
     page.on('console', message => { if (message.type() === 'error' || /Unable to check|invalid.*(?:regexp|regular expression)/i.test(message.text())) diagnostics.consoleErrors.push(message.text()); });
     await page.goto(`${server.url}?deploy=${preset}&start=0`);
     await page.locator('#embedded-launch:enabled').waitFor();
+    if (preset === 'blank') {
+      if (await page.locator('#settings').isHidden()) await page.locator('#settings-toggle').click();
+      await assertExtensionFormValidation(page);
+    }
     await page.locator('#deploy-editor-button').click();
     assert.equal(await page.locator('#editor-deployment').inputValue(), preset);
     const originalName = await page.locator('#site-name').inputValue();

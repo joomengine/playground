@@ -1170,6 +1170,8 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
   $('dashboard-countdown').hidden = true;
   try {
     if (!siteExport && !checkpoint && !importedConfiguration && !resumeOnly && !$('launch-form').checkValidity()) { setDrawer(true); openDialog('deploy-dialog'); $('advanced-settings').open = true; $('launch-form').reportValidity(); return; }
+    // Commit pending JSON while controls can still reveal and focus errors.
+    let input = { ...(importedConfiguration || formInput()), persistence: true };
     // Reserve the transition before checking the network. Validate first:
     // disabled form controls do not participate in native form validation.
     setBusy(true);
@@ -1184,7 +1186,6 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
       show('loading-view');
     }
     if (await buildUpdates.check({ force: true })) return;
-    let input = { ...(importedConfiguration || formInput()), persistence: true };
     const nightly = dynamicMetadata.joomla.find(entry => entry.version === input.joomlaVersion && entry.source === 'nightly');
     if (!resumeOnly && nightly && input.joomlaPackage && refreshNightlyOnNextLaunch) {
       setBusy(true);
@@ -1313,7 +1314,10 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     }
     return true;
   } catch (error) {
-    if (!switchingStarted) { feedback(error, { error: true, persistent: true }); return false; }
+    if (!switchingStarted) {
+      $('launch-form').reportValidity();
+      feedback(error, { error: true, persistent: true }); return false;
+    }
     destroyPreview();
     if (runtime) {
       const handle = runtime;
