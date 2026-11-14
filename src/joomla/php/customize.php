@@ -5,6 +5,12 @@ try {
     $selected = $playground['language'] ?? 'en-GB';
     $content = $playground['content'] ?? null;
     $multilingual = $playground['multilingual'] ?? $content['multilingual'] ?? false;
+    $configureLanguage = $playground['configureLanguage'] ?? true;
+    $bindings = $playground['contentBindings'] ?? [];
+    $references = [];
+    foreach (['categories', 'articles'] as $kind) {
+        foreach ($playground['contentReferences'][$kind] ?? [] as $entry) $references[$kind][$entry['key']] = $entry;
+    }
     $tags = [$selected, ...($playground['languageTags'] ?? [])];
     foreach ($content['categories'] ?? [] as $entry) {
         $tags[] = $entry['language'];
@@ -17,17 +23,41 @@ try {
             throw new RuntimeException('Install the site and administrator language package for ' . $tag . ' before selecting it.');
         }
     }
-    $languageComponent = new \Joomla\CMS\Table\Extension($database);
-    if (!$languageComponent->load(['type' => 'component', 'element' => 'com_languages'])) {
-        throw new RuntimeException('Joomla language configuration is unavailable.');
+    if ($configureLanguage) {
+        $languageComponent = new \Joomla\CMS\Table\Extension($database);
+        if (!$languageComponent->load(['type' => 'component', 'element' => 'com_languages'])) {
+            throw new RuntimeException('Joomla language configuration is unavailable.');
+        }
+        $parameters = new \Joomla\Registry\Registry($languageComponent->params);
+        $parameters->set('site', $selected);
+        $parameters->set('administrator', $selected);
+        playgroundStoreTable($languageComponent, ['params' => (string) $parameters]);
+        if (array_key_exists('multilingual', $playground)) {
+            foreach (['languagefilter', 'languagecode'] as $element) {
+                $plugin = new \Joomla\CMS\Table\Extension($database);
+                if (!$plugin->load(['type' => 'plugin', 'folder' => 'system', 'element' => $element])) {
+                    throw new RuntimeException('Joomla language plugin is unavailable: ' . $element);
+                }
+                $parameters = new \Joomla\Registry\Registry($plugin->params);
+                if ($multilingual && $element === 'languagefilter') {
+                    $parameters->set('detect_browser', 0);
+                    $parameters->set('automatic_change', 1);
+                    $parameters->set('item_associations', 1);
+                    $parameters->set('remove_default_prefix', 0);
+                }
+                playgroundStoreTable($plugin, ['enabled' => $multilingual ? 1 : 0, 'params' => (string) $parameters]);
+            }
+            if (!$multilingual) {
+                $module = new \Joomla\CMS\Table\Module($database);
+                if ($module->load(['module' => 'mod_languages', 'client_id' => 0, 'language' => '*'])) {
+                    playgroundStoreTable($module, ['published' => 0]);
+                }
+            }
+        }
     }
-    $parameters = new \Joomla\Registry\Registry($languageComponent->params);
-    $parameters->set('site', $selected);
-    $parameters->set('administrator', $selected);
-    playgroundStoreTable($languageComponent, ['params' => (string) $parameters]);
 
     $created = ['categories' => [], 'articles' => [], 'menus' => []];
-    if ($content !== null || $multilingual) {
+    if ($content !== null || ($configureLanguage && $multilingual)) {
         foreach ($tags as $languageOrder => $tag) {
             $metadata = $siteLanguages[$tag]->metadata;
             $table = new \Joomla\CMS\Table\Language($database);
@@ -48,22 +78,6 @@ try {
                 'ordering' => $languageOrder + 1,
             ]);
         }
-        if ($multilingual) {
-            foreach (['languagefilter', 'languagecode'] as $element) {
-                $plugin = new \Joomla\CMS\Table\Extension($database);
-                if (!$plugin->load(['type' => 'plugin', 'folder' => 'system', 'element' => $element])) {
-                    throw new RuntimeException('Joomla language plugin is unavailable: ' . $element);
-                }
-                $parameters = new \Joomla\Registry\Registry($plugin->params);
-                if ($element === 'languagefilter') {
-                    $parameters->set('detect_browser', 0);
-                    $parameters->set('automatic_change', 1);
-                    $parameters->set('item_associations', 1);
-                    $parameters->set('remove_default_prefix', 0);
-                }
-                playgroundStoreTable($plugin, ['enabled' => 1, 'params' => (string) $parameters]);
-            }
-        }
         $username = $playground['admin']['username'];
         $administratorId = (int) $database->setQuery(
             'SELECT id FROM #__users WHERE username = ' . $database->quote($username)
@@ -76,13 +90,19 @@ try {
         foreach ($content['categories'] ?? [] as $entry) {
             $category = new \Joomla\CMS\Table\Category($database);
             $category->setCurrentUser($administrator);
-            $category->setLocation(1, 'last-child');
+            $reference = $references['categories'][$entry['key']] ?? $entry;
+            $id = (int) ($bindings['categories'][$entry['key']] ?? 0);
+            if ($id) $category->load($id);
+            if (!$category->id) $category->load(['extension' => 'com_content', 'alias' => $reference['alias'], 'language' => $reference['language']]);
+            if (!$category->id) $category->setLocation(1, 'last-child');
             playgroundStoreTable($category, [
-                'parent_id' => 1, 'extension' => 'com_content', 'title' => $entry['title'],
-                'alias' => $entry['alias'], 'language' => $entry['language'], 'published' => 1,
+                'extension' => 'com_content', 'title' => $entry['title'],
+                'alias' => $entry['alias'], 'language' => $entry['language'],
+            ] + ($category->id ? [] : [
+                'parent_id' => 1, 'published' => 1,
                 'access' => 1, 'description' => '', 'params' => '{}', 'metadata' => '{}',
                 'created_user_id' => $administratorId,
-            ]);
+            ]));
             $created['categories'][$entry['key']] = (int) $category->id;
         }
         $componentId = (int) $database->setQuery("SELECT extension_id FROM #__extensions WHERE type = 'component' AND element = 'com_content'")->loadResult();
@@ -90,17 +110,32 @@ try {
         define('JPATH_COMPONENT_ADMINISTRATOR', JPATH_COMPONENT);
         define('JPATH_COMPONENT_SITE', JPATH_SITE . '/components/com_content');
         foreach ($content['articles'] ?? [] as $entry) {
+            $reference = $references['articles'][$entry['key']] ?? $entry;
+            $articleId = (int) ($bindings['articles'][$entry['key']] ?? 0);
+            $table = new \Joomla\CMS\Table\Content($database);
+            if (!$articleId || !$table->load($articleId)) {
+                $category = $references['categories'][$reference['category']] ?? null;
+                $categoryId = $created['categories'][$reference['category']] ?? 0;
+                if (!$categoryId && $category) {
+                    $categoryId = (int) $database->setQuery('SELECT id FROM #__categories WHERE extension = \'com_content\' AND alias = ' . $database->quote($category['alias']) . ' AND language = ' . $database->quote($category['language']))->loadResult();
+                }
+                $categoryId = $categoryId ?: $created['categories'][$entry['category']];
+                $table->load(['alias' => $reference['alias'], 'catid' => $categoryId, 'language' => $reference['language']]);
+                $articleId = (int) $table->id;
+            }
             $model = $application->bootComponent('com_content')->getMVCFactory()->createModel('Article', 'Administrator', ['ignore_request' => true]);
             $model->setCurrentUser($administrator);
             if (!$model->save([
-                'id' => 0, 'title' => $entry['title'], 'alias' => $entry['alias'],
+                'id' => $articleId, 'title' => $entry['title'], 'alias' => $entry['alias'],
                 'catid' => $created['categories'][$entry['category']], 'language' => $entry['language'],
                 'introtext' => $entry['introtext'], 'fulltext' => $entry['fulltext'],
+                'featured' => $entry['featured'] ? 1 : 0,
+            ] + ($articleId ? [] : [
                 'state' => 1, 'access' => 1, 'created_by' => $administratorId,
-                'featured' => $entry['featured'] ? 1 : 0, 'images' => '{}', 'urls' => '{}',
+                'images' => '{}', 'urls' => '{}',
                 'attribs' => '{}', 'metadata' => '{}',
-            ])) {
-                throw new RuntimeException('Cannot create deploy article: ' . $model->getError());
+            ]))) {
+                throw new RuntimeException('Cannot save deploy article: ' . $model->getError());
             }
             $articleId = (int) $model->getState('article.id');
             $created['articles'][$entry['key']] = $articleId;
@@ -114,7 +149,11 @@ try {
                     ]);
                 }
                 $menu = new \Joomla\CMS\Table\Menu($database);
-                $menu->setLocation(1, 'last-child');
+                $menuId = (int) ($bindings['menus'][$entry['language']] ?? 0);
+                if ($menuId) $menu->load($menuId);
+                if (!$menu->id) $menu->load(['menutype' => 'playground-' . strtolower($reference['language']),
+                    'link' => 'index.php?option=com_content&view=article&id=' . $articleId]);
+                if (!$menu->id) $menu->setLocation(1, 'last-child');
                 playgroundStoreTable($menu, [
                     'menutype' => $menuType, 'title' => $entry['title'], 'alias' => $entry['alias'],
                     'type' => 'component', 'link' => 'index.php?option=com_content&view=article&id=' . $articleId,
@@ -135,7 +174,7 @@ try {
                 if (!$model->save($data)) throw new RuntimeException('Cannot associate language home pages: ' . $model->getError());
             }
         }
-        if ($multilingual) {
+        if ($configureLanguage && $multilingual) {
             $module = new \Joomla\CMS\Table\Module($database);
             $module->load(['module' => 'mod_languages', 'client_id' => 0, 'language' => '*']);
             playgroundStoreTable($module, [

@@ -68,11 +68,12 @@ try {
             if ($xml && isset($xml->config)) {
                 $application->getLanguage()->load('tpl_' . $template['template'], JPATH_SITE);
                 $application->getLanguage()->load('tpl_' . $template['template'], dirname($path));
-                $form = \Joomla\CMS\Form\Form::getInstance('playground.template.' . $template['id'], (string) $xml->config->asXML(), ['control' => 'jform']);
+                $form = \Joomla\CMS\Form\Form::getInstance('playground.template.' . $template['id'], (string) $xml->config->asXML(), ['control' => 'jform'], true, '//config');
                 $template['schema'] = playgroundDataSchema($form, null, true);
             }
         } catch (Throwable $error) {
             // Custom template field types may require their own model. Other targets remain usable.
+            $template['schemaUnavailable'] = true;
         }
     }
     unset($template);

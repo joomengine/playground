@@ -602,8 +602,8 @@
         },
         "username": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 100
+          "minLength": 2,
+          "maxLength": 30
         },
         "email": {
           "type": "string",
@@ -831,7 +831,10 @@
           }
         },
         "content": {
-          "$ref": "#/$defs/content"
+          "anyOf": [
+            { "$ref": "#/$defs/content" },
+            { "type": "null" }
+          ]
         },
         "languageTags": {
           "type": "array",

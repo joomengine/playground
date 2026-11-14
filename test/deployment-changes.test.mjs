@@ -48,6 +48,30 @@ test('deliberately changing language defaults enables customization and checks r
   }
 });
 
+test('template assignment resolves unchanged menus without replaying their settings', () => {
+  const installed = previous();
+  installed.menus[0].key = 'existing-home';
+  const next = structuredClone(installed);
+  next.template.menuKeys = ['existing-home'];
+  const { configuration } = deploymentConfigurationChanges(installed, next);
+  assert.deepEqual(configuration.menus, []);
+  assert.deepEqual(configuration.menuReferences, installed.menus);
+  assert.deepEqual(configuration.template.menuKeys, ['existing-home']);
+});
+
+test('content changes apply independently while unchanged content preserves native edits', () => {
+  const installed = previous();
+  installed.content = { categories: [{ key: 'news', title: 'News', alias: 'news', language: 'en-GB' }],
+    articles: [{ key: 'welcome', title: 'Welcome', alias: 'welcome', language: 'en-GB', category: 'news', introtext: 'Original' }] };
+  const next = structuredClone(installed);
+  assert.equal(deploymentConfigurationChanges(installed, next).configuration.content, null);
+  next.content.articles[0].introtext = 'Updated';
+  const changes = deploymentConfigurationChanges(installed, next);
+  assert.equal(changes.configureLanguage, false);
+  assert.deepEqual(changes.configuration.content, next.content);
+  assert.deepEqual(changes.configuration.contentReferences, installed.content, 'Older installations can resolve renamed records without saved native IDs.');
+});
+
 test('changed credentials and overlay values apply while unchanged instructions and form metadata do not replay', () => {
   const installed = previous();
   installed.extensions[0].authentication = { type: 'bearer', token: 'old-token' };

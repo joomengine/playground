@@ -30,6 +30,12 @@ try {
     $warn = static function (string $package, string $message) use (&$warnings): void {
         $warnings[] = ['package' => $package, 'message' => $message];
     };
+    // Template assignments may refer to menus that did not change in this apply.
+    foreach ($playground['menuReferences'] ?? [] as $entry) {
+        $id = (int) $database->setQuery('SELECT id FROM #__menu WHERE client_id = 0 AND menutype = ' . $database->quote($entry['menuType'])
+            . ' AND alias = ' . $database->quote($entry['alias']) . ' AND language = ' . $database->quote($entry['language']))->loadResult();
+        if ($id) $created[$entry['key']] = $id;
+    }
     foreach ($playground['menus'] ?? [] as $entry) {
         $component = $entry['component'];
         if (!preg_match('/^com_[a-z0-9_]+$/', $component)) {

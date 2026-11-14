@@ -6,7 +6,8 @@ import { parseCatalog } from '../src/config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
 import { exportSite } from '../src/export.mjs';
 import { managedDatabaseSource } from '../src/joomla/managed-database.mjs';
-import { applyJoomlaConfiguration, discoverJoomlaConfiguration, readJoomlaMetadata, importJoomlaSnapshot, inspectJoomla, installJoomla, requestJoomlaPage, runStartupCommand, sha256 } from '../src/joomla/index.mjs';
+import { deploymentConfigurationChanges } from '../src/deployment-changes.mjs';
+import { applyJoomlaConfiguration, captureJoomlaData, discoverJoomlaConfiguration, readJoomlaMetadata, importJoomlaSnapshot, inspectJoomla, installJoomla, requestJoomlaPage, runStartupCommand, sha256 } from '../src/joomla/index.mjs';
 
 const sourceLoader = (name) => readFile(new URL(`../src/joomla/php/${name}.php`, import.meta.url), 'utf8');
 const exportSource = () => readFile(new URL('../src/export/site.php', import.meta.url), 'utf8');
@@ -98,19 +99,60 @@ for (const major of ['5', '6']) {
       assert.ok(discovered.menuTypes.some((item) => item.component === 'com_content' && item.view === 'featured'));
       const cassiopeia = discovered.templates.find((item) => item.template === 'cassiopeia');
       assert.ok(cassiopeia);
+      assert.ok(cassiopeia.schema.properties.params.properties.brand, 'Installed template fields must load from the native config XML.');
+      assert.equal(cassiopeia.schema.properties.params.properties.fluidContainer.oneOf.length, 2);
+      const { content: originalContent, ...legacyMarker } = (await inspectJoomla(runtime, options)).marker;
+      await runtime.fs.writeFile('/persist/meta/joomla-install.json', JSON.stringify(legacyMarker));
+      const content = structuredClone(configuration.content);
+      content.categories[0].title = 'Edited heritage category';
+      content.categories[0].alias = 'edited-heritage-category';
+      content.articles[0].title = 'Edited heritage article';
+      content.articles[0].alias = 'edited-heritage-article';
+      content.articles[0].introtext = '<p>Saved through Configure a deployment.</p>';
+      content.categories.push({ key: 'extra-news', title: 'Extra news', alias: 'extra-news', language: 'en-GB' });
+      content.articles.push({ key: 'extra-article', title: 'Extra article', alias: 'extra-article', language: 'en-GB',
+        category: 'extra-news', introtext: '<p>Created through Apply.</p>', fulltext: '', featured: false, home: false });
       const changes = { ...configuration, language: 'nl-NL', siteName: 'Configured heritage', extensions: [], startupCommands: [],
+        content,
         menus: [{ key: 'featured-demo', title: 'Featured demo', alias: 'featured-demo', component: 'com_content', view: 'featured', home: true }],
         template: { element: 'cassiopeia', params: { fluidContainer: 1 } } };
-      const configured = await applyJoomlaConfiguration(runtime, changes, options);
+      const edited = deploymentConfigurationChanges(configuration, changes);
+      const configured = await applyJoomlaConfiguration(runtime, edited.configuration, { ...options, configureLanguage: edited.configureLanguage });
       assert.equal(configured.siteName, 'Configured heritage');
       assert.ok(configured.menus['featured-demo'] > 0);
       const again = await applyJoomlaConfiguration(runtime, changes, { ...options, installPackages: false });
       assert.equal(again.menus['featured-demo'], configured.menus['featured-demo'], 'Applying the same menu updates it rather than duplicating it.');
+      const savedContent = (await inspectJoomla(runtime, options)).marker.content;
+      for (const kind of ['categories', 'articles']) {
+        for (const [key, id] of Object.entries(originalContent[kind])) assert.equal(savedContent[kind][key], id, `${kind}/${key} must retain its native ID.`);
+        assert.equal(Object.keys(savedContent[kind]).length, Object.keys(originalContent[kind]).length + 1);
+      }
+      const article = await captureJoomlaData(runtime, { kind: 'record', component: 'com_content', view: 'article', id: savedContent.articles[content.articles[0].key] }, options);
+      assert.equal(article.overlay.fields.title, content.articles[0].title);
+      assert.equal(article.overlay.fields.alias, content.articles[0].alias);
+      assert.equal(article.overlay.fields.introtext, content.articles[0].introtext);
+      const added = await captureJoomlaData(runtime, { kind: 'record', component: 'com_content', view: 'article', id: savedContent.articles['extra-article'] }, options);
+      assert.match(added.overlay.fields.introtext, /Created through Apply/);
       const after = await discoverJoomlaConfiguration(runtime, options);
       assert.equal(after.menus.filter((item) => item.alias === 'featured-demo').length, 1);
       assert.equal(Number(after.menus.find((item) => item.alias === 'featured-demo').home), 1);
       assert.equal(after.templates.filter((item) => String(item.home) === '1').length, 1);
       await page(runtime, `index.php?option=com_content&view=featured&Itemid=${configured.menus['featured-demo']}`);
+
+      const assignment = { ...changes, template: { ...changes.template, menuKeys: ['featured-demo'] } };
+      const delta = deploymentConfigurationChanges(changes, assignment);
+      assert.deepEqual(delta.configuration.menus, []);
+      assert.equal(delta.configuration.content, null);
+      const assigned = await applyJoomlaConfiguration(runtime, delta.configuration, { ...options, configureLanguage: delta.configureLanguage });
+      assert.equal(assigned.menus['featured-demo'], configured.menus['featured-demo'], 'Template assignment finds the unchanged installed menu.');
+      const menu = await captureJoomlaData(runtime, { kind: 'record', component: 'com_menus', view: 'item', id: configured.menus['featured-demo'] }, options);
+      assert.equal(Number(menu.overlay.fields.template_style_id), assigned.templateStyle);
+
+      const languageOnly = { ...changes, menus: [], template: null, content: null, multilingual: false };
+      await applyJoomlaConfiguration(runtime, languageOnly, options);
+      const disabled = await captureJoomlaData(runtime, { kind: 'plugin', folder: 'system', element: 'languagefilter' }, options);
+      assert.equal(Number(disabled.overlay.fields.enabled), 0, 'Disabling multilingual mode must reach the installed language plugin.');
+      await applyJoomlaConfiguration(runtime, { ...languageOnly, multilingual: true }, options);
 
       const exported = await runtime.withExclusive((raw) => exportSite(raw, {}, { sourceLoader: exportSource }));
       assert.equal(exported.metadata.joomlaVersion, release.version);

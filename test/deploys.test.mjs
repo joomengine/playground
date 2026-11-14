@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { parseCatalog } from '../src/config.mjs';
+import { createFullDeploymentDocument, parseCatalog, parseDeploymentDocument } from '../src/config.mjs';
 import { loadDeployCatalog, normalizeDeploy, normalizeDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
 
 const root = new URL('../deploys/', import.meta.url);
@@ -85,6 +85,22 @@ test('heritage includes all requested languages with Afrikaans first and default
   assert.deepEqual(new Set(configuration.languages.map((entry) => entry.tag)), new Set(deployCatalog.languages['6'].map((entry) => entry.tag)));
   assert.deepEqual(configuration.startupCommands, [['cache:clean']]);
   assert.equal(configuration.snapshot, undefined);
+});
+
+test('a customized heritage recipe keeps content cleared and multilingual explicitly disabled', async () => {
+  const { configuration } = await resolveDeployConfiguration({ admin, deployId: 'heritage-demo' }, options);
+  const content = { ...configuration.content, categories: configuration.content.categories.slice(0, 1),
+    articles: configuration.content.articles.slice(0, 1) };
+  const { configuration: disabled } = await resolveDeployConfiguration({ ...configuration, multilingual: false, content }, options);
+  assert.equal(disabled.multilingual, false);
+  assert.equal(disabled.content.multilingual, false);
+  const saved = createFullDeploymentDocument(disabled, { name: 'One language' });
+  const { configuration: reopened } = await resolveDeployConfiguration(parseDeploymentDocument(saved), options);
+  assert.equal(reopened.multilingual, false);
+  assert.equal(reopened.content.articles.length, 1);
+  const cleared = createFullDeploymentDocument({ ...reopened, content: null });
+  const { configuration: empty } = await resolveDeployConfiguration(parseDeploymentDocument(cleared), options);
+  assert.equal(empty.content, null);
 });
 
 test('snapshots require exact Joomla compatibility and fresh bypasses them', async () => {
