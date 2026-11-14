@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "Збережений образ розгортання",
   "storage.configuration": "Конфігурація розгортання",
   "storage.preferences": "Збережені налаштування інтерфейсу",
-  "storage.unassigned": "Неприв’язані дані Playground"
+  "storage.unassigned": "Неприв’язані дані Playground",
+  "lifecycle.transitionBlocked": "В іншому поданні є незбережена робота або воно не відповідає. Перевірте чи закрийте це подання, а потім повторіть спробу."
 });

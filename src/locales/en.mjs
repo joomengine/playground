@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "Stored deployment image",
   "storage.configuration": "Deployment configuration",
   "storage.preferences": "Saved interface preferences",
-  "storage.unassigned": "Unassigned Playground data"
+  "storage.unassigned": "Unassigned Playground data",
+  "lifecycle.transitionBlocked": "Another view has unsaved work or is not responding. Check or close that view, then try again."
 });

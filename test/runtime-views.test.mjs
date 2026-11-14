@@ -158,15 +158,46 @@ test('owner Stop and Start update companion identity without launching independe
 test('owner loss disables companions, clears discovery, and does not create a fallback runtime', async t => {
   const state = setup(t); let lost = false;
   const first = await state.attach({ onUnavailable() { lost = true; } });
+  const events = [];
+  first.workspace.subscribe(event => events.push(event));
   assert.equal(readActiveRuntimeView({ storage: state.local, baseURL: base }).token, token);
   assert.equal([...state.local.values.values()].join('').includes('private'), false);
   state.host.dispose();
   await new Promise(resolve => queueMicrotask(resolve));
   assert.equal(lost, true);
   assert.equal(first.healthy, false);
+  assert.deepEqual(events, [{ type: 'workspace-unavailable', ownerUnavailable: true }], 'Unexpected loss must not dispose editor buffers through workspace-closed.');
   assert.equal(readActiveRuntimeView({ storage: state.local, baseURL: base }), null);
   await assert.rejects(first.workspace.request('write', { path: '/index.php', contents: 'lost' }), /no longer available/);
   assert.equal(state.runtime().writes, 0);
+});
+
+test('an owner which disappears without pagehide becomes unavailable without starting another runtime', async t => {
+  const state = setup(t), timers = [];
+  const first = await state.attach({
+    setTimer(callback, delay) { const timer = { callback, delay }; timers.push(timer); return timer; },
+    clearTimer() {}, ownerTimeoutMs: 90_000,
+  });
+  assert.equal(first.healthy, true);
+  timers.findLast(timer => timer.delay === 90_000).callback();
+  assert.equal(first.healthy, false);
+  await assert.rejects(first.action('start'), /no longer available/);
+  assert.deepEqual(state.actions, []);
+  assert.equal(state.runtime().healthy, true, 'A connection timeout must never close or replace the authoritative runtime.');
+});
+
+test('persistence progress and failures remain visible in companion save status', async t => {
+  const state = setup(t), first = await state.attach();
+  state.runtime().persistencePending = true;
+  state.runtime().persistenceState = 'saving';
+  state.host.update();
+  await new Promise(resolve => queueMicrotask(resolve));
+  assert.equal(first.persistencePending, true);
+  assert.equal(first.persistenceState, 'saving');
+  state.runtime().persistenceError = Object.assign(new Error('Storage full'), { name: 'QuotaExceededError' });
+  state.host.update();
+  await new Promise(resolve => queueMicrotask(resolve));
+  assert.equal(first.persistenceError.name, 'QuotaExceededError');
 });
 
 test('portable exports report progress and preserve archive bytes over the tool channel', async t => {

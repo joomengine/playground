@@ -98,3 +98,25 @@ test('replacement entry points reject companion writers before creating or prepa
     assert.ok(guard > declaration && guard < declaration + 350, `${name} must guard its entry before any runtime mutation`);
   }
 });
+
+test('owner metadata follows completed companion PHP changes without overwriting its deployment path', () => {
+  const helper = source.slice(source.indexOf('function hostRuntimeViews() {'), source.indexOf('\nfunction openRuntimeView('));
+  let callbacks, saves = 0;
+  const context = {
+    runtime: {}, runtimeViewHost: null, preferences: {}, deploymentURL: base, lastSavedAt: undefined,
+    currentConfig: { ...liveSite, initialPath: '/administrator/', phpSettings: { memoryLimit: '128M' } },
+    currentInput: { ...liveSite }, registerRuntimeViewLifecycle() {},
+    createRuntimeViewHost(options) { callbacks = options; return {}; },
+    activity() {}, rememberCurrentSite() { saves++; },
+    JSON, Date,
+  };
+  runInNewContext(helper + '\nhostRuntimeViews();', context);
+  callbacks.onState({ changing: true, configuration: { phpVersion: '8.5', phpSettings: { memoryLimit: '256M' }, initialPath: '/last-visited/' } });
+  assert.equal(context.currentConfig.phpVersion, '8.4');
+  assert.equal(saves, 0);
+  callbacks.onState({ changing: false, configuration: { phpVersion: '8.5', phpSettings: { memoryLimit: '256M' }, initialPath: '/last-visited/' } });
+  assert.equal(context.currentConfig.phpVersion, '8.5');
+  assert.equal(context.currentInput.phpSettings.memoryLimit, '256M');
+  assert.equal(context.currentConfig.initialPath, '/administrator/');
+  assert.equal(saves, 1);
+});

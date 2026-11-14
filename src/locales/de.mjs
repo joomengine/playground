@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "Gespeichertes Bereitstellungsabbild",
   "storage.configuration": "Bereitstellungskonfiguration",
   "storage.preferences": "Gespeicherte Oberflächeneinstellungen",
-  "storage.unassigned": "Nicht zugeordnete Playground-Daten"
+  "storage.unassigned": "Nicht zugeordnete Playground-Daten",
+  "lifecycle.transitionBlocked": "Eine andere Ansicht enthält ungespeicherte Arbeit oder reagiert nicht. Prüfen oder schließen Sie diese Ansicht und versuchen Sie es dann erneut."
 });

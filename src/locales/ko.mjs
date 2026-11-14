@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "저장된 배포 이미지",
   "storage.configuration": "배포 구성",
   "storage.preferences": "저장된 인터페이스 설정",
-  "storage.unassigned": "할당되지 않은 Playground 데이터"
+  "storage.unassigned": "할당되지 않은 Playground 데이터",
+  "lifecycle.transitionBlocked": "다른 보기에 저장하지 않은 작업이 있거나 해당 보기가 응답하지 않습니다. 해당 보기를 확인하거나 닫은 후 다시 시도하세요."
 });

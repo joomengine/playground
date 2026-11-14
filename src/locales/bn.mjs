@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "সংরক্ষিত ডিপ্লয়মেন্ট ইমেজ",
   "storage.configuration": "ডিপ্লয়মেন্ট কনফিগারেশন",
   "storage.preferences": "সংরক্ষিত ইন্টারফেস পছন্দ",
-  "storage.unassigned": "কোনো সাইটে বরাদ্দ না করা Playground ডেটা"
+  "storage.unassigned": "কোনো সাইটে বরাদ্দ না করা Playground ডেটা",
+  "lifecycle.transitionBlocked": "অন্য একটি ভিউতে অসংরক্ষিত কাজ আছে অথবা সেটি সাড়া দিচ্ছে না। সেই ভিউ পরীক্ষা করুন বা বন্ধ করুন, তারপর আবার চেষ্টা করুন।"
 });

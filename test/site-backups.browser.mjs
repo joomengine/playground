@@ -254,6 +254,38 @@ for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox'
           assert.deepEqual(companionWorkers, [], 'Opening a companion view does not start PHP or MariaDB workers.');
           assert.equal(await companion.locator('#code-button').isEnabled(), true, 'The shared view retains its Code tools.');
           assert.equal(await companion.locator('#database-button').isEnabled(), true, 'The shared view retains its database tools.');
+          const shared = await companion.evaluate(async () => {
+            const { readActiveRuntimeView, attachRuntimeView } = await import('./src/runtime-views.mjs');
+            const view = await attachRuntimeView(readActiveRuntimeView());
+            try {
+              const bytes = new TextEncoder().encode('Saved through the companion editor queue');
+              await view.workspace.withBatch(async workspace => {
+                await workspace.request('write', { path: '/companion-proof.txt', bytes,
+                  create: true, overwrite: false, expectedRevision: null, expectedCanonicalPath: '/companion-proof.txt' });
+              });
+              const file = await view.workspace.request('read', { path: '/companion-proof.txt' });
+              return { file: new TextDecoder().decode(file.bytes), state: await (await view.request('/backup-state.php')).json(),
+                database: await view.openDatabase(), baseUrl: view.baseUrl };
+            } finally { view.dispose(); }
+          });
+          assert.equal(shared.file, 'Saved through the companion editor queue');
+          assert.deepEqual(shared.state, recovery.state, 'Companion PHP requests read the same MariaDB records.');
+          assert.ok(shared.database.url.startsWith(shared.baseUrl), 'The database tool belongs to the existing owner route.');
+          assert.equal(await ui.evaluate(async base => (await fetch(new URL('companion-proof.txt', base))).text(), shared.baseUrl), shared.file,
+            'A write through the remote editor appears immediately in the owner filesystem.');
+          assert.deepEqual(companionWorkers, [], 'Using remote editor and database tools does not start a second runtime.');
+          const popupPromise = uiContext.waitForEvent('page');
+          await ui.locator('#nav-site').click({ modifiers: ['Control'] });
+          const popup = await popupPromise;
+          const popupWorkers = [];
+          popup.on('worker', worker => popupWorkers.push(worker.url()));
+          try {
+            await popup.locator('#site-frame:not([hidden])').waitFor({ timeout: 240_000 });
+            await popup.waitForFunction(() => !document.getElementById('credentials-button').disabled);
+            assert.ok(new URL(popup.url()).searchParams.has('view'), 'Modified navigation opens a complete companion shell.');
+            assert.equal(await popup.locator('#site-frame').getAttribute('src'), shared.baseUrl);
+            assert.deepEqual(popupWorkers, [], 'An explicit companion link attaches without runtime workers.');
+          } finally { await popup.close(); }
         } finally { await companion.close(); }
         if (!await ui.locator('#settings').isVisible()) await ui.locator('#settings-toggle').click();
         ui.once('dialog', dialog => dialog.accept());

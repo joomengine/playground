@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "Αποθηκευμένη εικόνα ανάπτυξης",
   "storage.configuration": "Διαμόρφωση ανάπτυξης",
   "storage.preferences": "Αποθηκευμένες προτιμήσεις διεπαφής",
-  "storage.unassigned": "Μη αντιστοιχισμένα δεδομένα Playground"
+  "storage.unassigned": "Μη αντιστοιχισμένα δεδομένα Playground",
+  "lifecycle.transitionBlocked": "Μια άλλη προβολή έχει μη αποθηκευμένη εργασία ή δεν αποκρίνεται. Ελέγξτε ή κλείστε την προβολή και δοκιμάστε ξανά."
 });

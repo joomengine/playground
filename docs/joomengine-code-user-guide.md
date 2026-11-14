@@ -6,11 +6,11 @@ This guide describes the current implementation. The [experience roadmap](roadma
 
 ## Open and edit
 
-1. Select a saved site or configure a new one, then choose **Launch**. Manual selection stages the target without stopping the running site; normal page entry also offers a cancellable startup countdown.
+1. Select a saved site or configure a new one, then choose **Launch**. Manual selection stages the target without stopping the running site. Normal page entry resumes an existing live site; a first deployment offers a cancellable startup countdown.
 2. Select **JoomEngine Code**. Editor assets load when opened; select it again to hide the same session.
 3. Expand the Explorer folders and open a file. The visible workspace root is the active Joomla document root, currently `/persist/www`; runtime configuration and other sites are outside the editor workspace.
 4. Make changes in tabs or split editor groups. Use the workbench's Save command for the current file or **Save All** in the JoomEngine Code toolbar.
-5. Select **Refresh site** when you want the displayed Joomla page to reload.
+5. Select **Refresh site** in Code or **Reload** in the Playground toolbar when you want the displayed Joomla page to reload. Neither action restarts PHP or saves dirty editor buffers.
 
 Manual saving and manual refresh are the initial behavior. A dirty tab means its buffer has unsaved changes. **Saved changes since last refresh** means files have changed but the current preview has not yet been refreshed. These are separate states.
 
@@ -18,7 +18,7 @@ Save writes to the active site's filesystem. It does not refresh the page in man
 
 Use **Refresh after saving** if you want a debounced refresh after completed saves. Autosave is a separate workbench setting. Automatic refresh is suppressed while PHP is paused in the debugger.
 
-If a file changed outside the editor, resolve the conflict before overwriting it. Read errors, unsupported contents and failed saves should remain visible rather than being treated as successful writes. A browser-storage error can occur after a file was successfully changed in the running site: keep the owner tab open, preserve the affected work and retry saving the site.
+If a file changed outside the editor, resolve the conflict before overwriting it. Read errors, unsupported contents and failed saves should remain visible rather than being treated as successful writes. A browser-storage error can occur after a file was successfully changed in the running site: keep the owner tab open and download the current site or affected files while resolving the storage failure. The main Save button saves a deployment recipe, not runtime data.
 
 **Upload files** adds files to an existing workspace folder, with confirmation before replacing saved files. Save or discard dirty editor changes in affected files first. Limits are 32 MiB per file and 64 MiB per upload. **Download file** downloads saved bytes; save your editor buffer first if you want its changes included. **Preview image** supports PNG, JPEG, GIF and WebP. Other formats, including SVG, remain downloadable without executing their contents.
 
@@ -36,15 +36,21 @@ Detach opens a browser-managed auxiliary editor window. Browser popup rules stil
 
 A successful detach reclaims the embedded editor space. The companion uses the same icons and appearance as the owner; its files, search, code and assistant surfaces have their own scrollable areas. Select **System**, **Light** or **Dark** in Playground's dashboard to update both windows without recreating the editor. The setting is tab-session scoped; System follows live operating-system changes.
 
+Ctrl-click, Command-click or middle-click **Site** or **Admin** to open another full Playground view with Code and DB controls, sharing the existing runtime. This is separate from detaching an editor panel. Keep the original owner window open.
+
 Keep the Playground owner tab open: detachment does not transfer PHP or MariaDB ownership to the new window. The full workbench's settings and Run and Debug views remain in the owner window. The companion search opens matching files and reports its result limit; use the owner workbench Search view for project-wide replacement. The Playground toolbar, file actions, AI panel, detached companion and custom workbench commands/status labels follow the selected interface language across all 20 existing locales. Upstream workbench contributions and some technical error messages may still use English.
 
 ## Saving and recovering work
 
-Saved sites keep saved file changes under Playground's persistence policy. Temporary sites remain temporary until you explicitly select **Save**. Keeping a temporary site transfers the open Code session, models and drafts to the saved runtime; unsaved buffers remain unsaved rather than being silently written into Joomla files. **Keep this site** in the dashboard stages the persistence choice for the next launch.
+The live site automatically persists completed file and database changes. Code's Save and Save All still write editor buffers into Joomla files; unsaved buffers are not silently written. The main Playground **Save** action saves a deployment configuration only, and there is no Keep this site switch.
 
-For persisted sites, editor drafts are stored separately from Joomla files and restored when the editor reopens for that site. The current draft record is bounded to 128 documents and 8 MiB of draft text. A draft is not a saved Joomla file or a portable site backup. If a draft cannot reopen because its file is missing, use **JoomEngine Code: Recover missing drafts** from the command palette, then explicitly save the recovered content.
+**Backup** opens the Backups panel without creating an archive. Choose to back up the current site there to keep a complete copy of its saved files, database and runtime settings while it runs. A restored backup remains in the list; the next backup lets you update it or create a new one. Download and delete actions are available for every backup. Upload restores a complete archive into the live workspace and does not automatically create another backup. Normal Download choices are unchanged, with UTC date and time added to filenames.
 
-Resetting a saved site or deleting its saved entry clears its associated draft record. Renaming the saved entry only changes its display name and preserves its storage identity. Keep the owner tab open if draft storage reports a failure. Use the existing Playground export/download controls for portable site backups; editor drafts and AI credentials are not part of the site export.
+Browser backup storage is checked against the completed archive's size plus 10 MiB. If it cannot be stored, the panel explicitly says that no new backup was saved and offers the same archive for download. Existing backups are retained on a failed update. Other removable Playground data is managed in this panel too; bulk clearing preserves the live site and unassigned entries, which need individual confirmation.
+
+Editor drafts are stored separately from Joomla files and restored when the editor reopens for that site. The current draft record is bounded to 128 documents and 8 MiB of draft text. A draft is not a saved Joomla file or a portable site backup. If a draft cannot reopen because its file is missing, use **JoomEngine Code: Recover missing drafts** from the command palette, then explicitly save the recovered content.
+
+**Stop** preserves the live site's saved files and database; Restart becomes **Start** to resume it. **Restart** restarts PHP without redeploying the site. **Reset** confirms before replacing the live site with the default JCB deployment and clears the old site's draft record. Deleting an inactive legacy saved entry also clears its drafts; renaming it preserves its storage identity. Keep the owner tab open if draft storage reports a failure. Save needed editor buffers before a full backup or download: drafts and AI credentials are not part of the archive.
 
 Use **File recovery** to inspect and restore recent saved-file changes while the site remains open. Recovery retains at most eight snapshots within a 96 MiB budget; older snapshots expire. Review every affected path before restoring: restoring a snapshot can remove files that snapshot created, and later disk changes or dirty editor buffers can prevent restoration. Applied AI proposals also offer **Recover previous files**. Recovery is bounded session history, not an ordinary trash folder or a substitute for a backup.
 

@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "Gestoorde ontplooiingsbeeld",
   "storage.configuration": "Ontplooiingskonfigurasie",
   "storage.preferences": "Gestoorde koppelvlakvoorkeure",
-  "storage.unassigned": "Ontoegewysde Playground-data"
+  "storage.unassigned": "Ontoegewysde Playground-data",
+  "lifecycle.transitionBlocked": "’n Ander aansig het ongestoorde werk of reageer nie. Gaan daardie aansig na of sluit dit, en probeer dan weer."
 });

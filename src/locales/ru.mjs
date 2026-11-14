@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "Сохранённый образ развёртывания",
   "storage.configuration": "Конфигурация развёртывания",
   "storage.preferences": "Сохранённые настройки интерфейса",
-  "storage.unassigned": "Непривязанные данные Playground"
+  "storage.unassigned": "Непривязанные данные Playground",
+  "lifecycle.transitionBlocked": "В другом представлении есть несохранённая работа либо оно не отвечает. Проверьте или закройте его, затем повторите попытку."
 });

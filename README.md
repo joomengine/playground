@@ -169,8 +169,8 @@ retain a complete site export when the exact old build must remain portable.
 
 Playground checks for a new published build on startup, when returning to the tab,
 and before launching. When a build changes, it refreshes this deployment’s cached
-catalogs and offers **Reload Playground**. Close the running site before reloading;
-saved sites, databases, local images and preferences are preserved.
+catalogs and offers **Reload Playground**. Stop the running site before reloading;
+the live files and database, intentional backups and saved preferences are preserved.
 
 ## Build and run locally
 
@@ -295,23 +295,28 @@ before relying on server-specific networking behavior.
 
 ## Using Rocket
 
-On normal entry, Playground selects the last successfully used saved site, or
-JCB when none exists, and shows a ten-second startup countdown. **Stop countdown**
-cancels automatic launch; **Launch** opens the staged target immediately. Opening
-configuration or manually selecting a saved site also cancels the countdown.
-Manual selections wait for Launch and leave the current site running. Use
-`?start=0` to load setup without a countdown; explicit deployment/share links keep
-their own configuration and review requirements.
+On normal entry, Playground connects to an already running live site when its
+owner window is available, or resumes the last live site's persisted files and
+database. A deliberately stopped site stays stopped until **Start**. With no
+existing site, JCB is selected and a ten-second startup countdown begins.
+**Stop countdown** cancels it; **Launch** opens the staged target immediately.
+Opening configuration or manually selecting a saved site also cancels the
+countdown. Manual selections leave the current site running until Launch.
+Use `?start=0` to load setup without automatic startup; explicit deployment/share
+links keep their own configuration and review requirements.
 In Share, **Immediate deployment** adds `immediate=1` to skip that countdown;
 leaving it unchecked preserves the normal startup, and `start=0` still prevents automatic launch.
 The hint beneath Launch updates with your choices: a prepared fast start, a prepared
 base needing additional setup, or a fresh installation that takes longer.
 
-The chevron opens one dashboard containing saved-site management, runtime
-configuration, site actions and appearance. **Site** and **Admin**, beside
-Deployment, navigate the existing preview without reinstalling Joomla or starting
-another runtime. Admin uses the normal Joomla authentication flow. The slim
-header scrolls with the page. The supplied pearl rocket identifies the favicon,
+The chevron opens one dashboard containing runtime configuration, site actions
+and appearance. **Site** and **Admin**, beside Deployment, navigate the existing
+preview without reinstalling Joomla or starting another runtime. Ctrl-click,
+Command-click or middle-click either action to open a full Playground view with
+its Code and DB controls, sharing the same runtime, files and database. Keep the
+original owner window open; a raw Joomla link still opens only the site. Admin
+uses the normal Joomla authentication flow. The slim header scrolls with the page.
+The supplied pearl rocket identifies the favicon,
 Deployment, Launch and progress views. Activity remains below the site; About in
 the footer lists the technology repositories and distributed notices.
 
@@ -346,9 +351,9 @@ retain their published checksums. Basic fields and advanced JSON stay
 synchronized for packages, console commands, menus, content and template
 parameters. Invalid JSON remains visible until corrected.
 
-- **Save** in the deployment editor keeps a named recipe in this browser and
-  adds it to both deployment selectors. Editing a built-in saves a **Custom**
-  copy; the original remains available.
+- **Save** in the main action row or deployment editor keeps a named deployment
+  recipe in this browser and adds it to both deployment selectors. Editing a
+  built-in saves a **Custom** copy; the original remains available.
 - **Save as copy** creates another custom recipe. **Delete** removes only a
   custom recipe, leaving existing saved sites intact.
 - **Export configuration** downloads the complete version 2 recipe, including
@@ -360,17 +365,16 @@ parameters. Invalid JSON remains visible until corrected.
   packages or applying configuration. If an operation fails, the recovery action
   restores that checkpoint as a separate site. Removing a package from the editor
   does not uninstall an already installed extension.
-- **Keep this site** stages the persistence choice for the next launch. **Save**
-  saves the running site's files and database. Saving a temporary site copies its
-  current state into persistent storage, including credentials, and transfers the
-  open Code session and recoverable drafts to that saved identity.
-- **Restart** restarts PHP with the current settings while preserving the site,
-  including a temporary site's files and database.
-- **Close** shuts down the workers and releases the site lock. Closing a temporary
-  site discards its state after confirmation.
-- **Reset** deletes the running site's files and database after confirmation,
-  or the staged saved key when no site is running. It is separate from saved-entry
-  management.
+- **Restart** confirms before restarting PHP with the current settings and the
+  same site files and database. It does not run a fresh deployment.
+- **Stop** confirms before stopping the live runtime in all its views and keeps
+  its files and database. Restart then becomes **Start**, which resumes that site.
+- **Reset**, next to Save, confirms before replacing the current live site with
+  the default JCB deployment. The confirmation offers backup or download first.
+  Existing backups and custom deployment recipes remain available.
+- **Backup** opens and scrolls to the **Backups** panel below the site. The footer
+  **Backups** link opens the same panel; opening it does not create an archive.
+  Choose **Back up current site** there to make an intentional complete backup.
 - **Recover saved site** opens storage without booting Joomla. Download a backup,
   then restore safe error settings if needed; the original configuration is kept
   privately. If MariaDB cannot start, recovery opens the saved PHP files read-only
@@ -381,14 +385,14 @@ parameters. Invalid JSON remains visible until corrected.
   the editor configuration. **Save** keeps the recipe for reuse; dashboard **Launch**
   opens the selected saved site. The current runtime stays open until the new
   launch completes its dirty-work checks.
-- **Rename** changes the selected saved entry's display label, preserving its
-  storage key, Joomla title, files and database.
-- **Delete saved site** names and removes the selected saved entry, files,
-  database and editor drafts after confirmation. An inactive entry is deleted
-  without launching it. Locked or failed deletion retains its management entry
-  so it can be retried.
-- **Download** exports the complete site, its files, or its SQL database.
-- **Upload** opens a complete site export ZIP as a new, independent saved site.
+- Legacy saved-site controls are inside Backups. **Rename** changes a selected
+  entry's display label. **Delete saved site** removes its files, database and
+  editor drafts after confirmation, without launching it. The live site is
+  protected; locked or failed deletion retains the entry so it can be retried.
+- **Download** keeps its existing complete-site, files-only and SQL choices.
+  Download filenames include the UTC date and time to the second.
+- **Upload** restores a complete site ZIP into the live workspace. It persists
+  automatically, but creates no backup unless you explicitly request one.
 - **Hide controls** in either the header or footer hides both bars, settings and
   activity together. Joomla keeps the same running iframe, current page and
   unsaved work. Small restore tabs occupy the top-left and bottom-left document
@@ -396,42 +400,62 @@ parameters. Invalid JSON remains visible until corrected.
   controls and scrolls to its corresponding header or footer without restarting
   or transferring the site.
 
-Persistence is enabled by default. Joomla files, session data, cookies and the
-MariaDB database are kept in IndexedDB. A site key identifies saved data on this
-origin. Returning normally to the domain stages the last saved site and restores
-its last safe in-site route when the startup countdown or Launch opens it. Route
-metadata excludes action/security parameters and credentials; a missing resumed
-page falls back to the initial route. Explicit URL or edited initial-page choices
-remain authoritative. Temporary sites do not replace the last saved-site preference.
+The live site persists automatically in browser-managed storage; there is no
+Keep switch or manual site-save step. This persistence is separate from named
+deployment recipes and intentional backup archives. Returning to a persisted
+site restores its last safe in-site route. Route metadata excludes action/security
+parameters and credentials; a missing page falls back to the initial route.
+Explicit URL or edited initial-page choices remain authoritative.
 
-The saved-site selector, PHP/Joomla controls and deploy choices stage changes;
-Launch validates them before closing the current runtime. Only one tab may own a
-saved site at a time. Applying a staged PHP choice preserves saved content.
-Changing the Joomla release or deploy selects a separate profile, rather than
-upgrading an existing installation. Saved metadata migrates without the previous
-40-entry pruning, and display names remain separate from setup identity.
-MariaDB bridge 0.1.8 checkpoints InnoDB before flushing its filesystem to browser
-storage. Playground reserves the PHP request queue until both the site files and
-database finish saving, including during configuration changes and PHP restarts.
-A successful Save can therefore be reopened after a
-whole-page reload without using Close first. Checkpoint or storage errors remain
-visible save failures; they do not advance the saved-state indicator.
+One window owns the runtime and its storage lock. Additional full Playground
+views share that owner instead of starting PHP or MariaDB again. If the owner
+closes, a companion can explicitly start the last persisted site in its own
+window. This resumes saved data; it cannot recover unfinished work from a closed
+runtime. A missing saved site is reported instead of silently redeploying it.
 
-The interface opens the site before its first background checkpoint. Saving starts
-as soon as the runtime is idle, then repeats about a minute after each completed
-save. Saves run in the filesystem and database workers, keep the surrounding
-controls usable, and never overlap. Close waits for an active save and completes
-the first checkpoint if it has not started. Launch uses published prepared images
-or compatible images already cached locally; it does not delay first use to export
-a new reusable image. Saved sites still resume from their own files and database.
+Completed runtime changes trigger background persistence. File and database
+flushes are serialized together, and failures remain visible instead of advancing
+the saved-state indicator. Stop waits for this work before releasing the runtime.
+A whole-page reload can resume persisted data without a manual Save. Unsaved
+Joomla forms and editor buffers still need their own save or submit action.
+**Reload** in the editor flow remains a preview refresh: it waits for in-flight
+editor saves, does not write dirty buffers, and does not restart PHP.
+
+Backups contain the complete exported site files and database, plus deployment
+and runtime settings such as the PHP version. They do not depend on an older
+published base remaining available. Creating one leaves the running site open.
+The panel lists each backup with its size, timestamp and versions, and offers
+restore, download and delete. Restoring a backup copies it into the live workspace
+and leaves the stored backup intact. The next backup offers **Update this backup**,
+**Create a new backup**, or Cancel. Updates replace the selected archive atomically;
+backups never accumulate automatically.
+
+The archive is prepared first, then its actual size plus a 10 MiB margin is
+compared with the browser's estimated available storage. Existing live data and
+backups already count toward used space. A quota or write failure states that no
+new backup was saved and offers the prepared archive for download; an existing
+backup being updated remains unchanged. Download it to keep that version.
+Browser storage estimates are approximate, and the panel also handles a rejected
+write after a successful estimate.
+
+The Backups panel shows the browser storage estimate and other removable
+Playground data, including previous live sites, legacy stored deployment images,
+custom deployment recipes and saved interface preferences. Its clear action
+preserves the current live site. Unassigned Playground stores require individual
+confirmation and are excluded from bulk clearing. Active or locked stores cannot
+be removed; unrelated origin data is not cleared. Fresh deployments continue to
+use published prepared builds or the selected installation recipe, independently
+of these full backup archives.
 
 The credentials dialog shows the generated administrator login details, including
 when automatic login is disabled. Each fresh site receives new credentials;
 saved sites retain theirs. Credentials stay in private runtime metadata outside
 the webroot and share links. Saved custom recipes, full configuration JSON exports
-and complete site downloads retain the known sandbox administrator. Browser storage can be
-evicted or cleared and is not a backup. A save reports completion only after both
-stores flush; closing a tab cannot guarantee an unfinished save completes.
+and complete site downloads retain the known sandbox administrator. Browser
+storage, including browser-held backups, can be evicted or cleared; download a
+complete archive for a copy outside the browser. Persistence reports completion
+only after both stores flush; closing a tab cannot guarantee unfinished work
+completes.
 
 Extension and template URLs are passed to Joomla's installer. Downloads use the
 shared HTTP transport, including its fallback for browser CORS and mixed-content
@@ -481,7 +505,7 @@ database. Private runtime files, browser sessions, and generated caches are
 excluded. Complete site downloads include the runtime settings, opening page,
 and known sandbox administrator credentials in `export.json`. **Upload** restores
 the installed files and database, including subsequent edits, with those same
-credentials and opening page under a new saved-site identity. It does not rerun
+credentials and opening page under a new live-site identity. It does not rerun
 extension installation or deployment commands. Ordinary extension ZIPs and
 incomplete exports are rejected.
 
@@ -601,10 +625,10 @@ in the interface without changing this repository.
 - [PHP 8.5](https://playground.joomengine.org/?php=8.5)
 - [Start logged out](https://playground.joomengine.org/?login=no)
 
-`fresh=1` creates an independent site key and bypasses prepared snapshots. It
-does not erase another saved site. The flag is consumed after launch and the new
-key stays in the address for subsequent reloads. Use Reset to erase the current
-site explicitly.
+`fresh=1` creates a new live-site key and bypasses prepared snapshots. Replacing
+the current live site offers backup or download first. The flag is consumed after
+launch and the new key stays in the address for subsequent reloads. Use Reset to
+replace the current site with the default JCB deployment after confirmation.
 
 The build stages verified packages on the same origin. For `prebuild: true`
 recipes, `npm run build:deploys` installs real Joomla, exports it, and imports
@@ -634,7 +658,7 @@ The interface recognizes these query parameters:
 | `php=8.5` | Select the PHP minor whose patch version is pinned in the catalog |
 | `path=/administrator/` | Initial page inside Joomla |
 | `toolbar=0` | Hide the header and footer together, with edge tabs to restore them |
-| `persist=0` | Use a temporary site |
+| `persist=0` | Ignored by the Rocket interface; its live site always persists |
 | `language=en-GB` | Select the Joomla language; another supported tag installs its pack |
 | `uiLanguage=af` | Select Rocket's interface language independently |
 | `name=Client%20demo` | Set the Joomla site name |
@@ -876,12 +900,12 @@ node --test test/version-catalog.browser.mjs
 
 The browser suite uses real PHP, native PDO, MariaDB, and Joomla. It exercises
 catalog combinations, administrator access, extension installation, configuration,
-persistence, temporary-site retention, restart, PHP settings, exports, sharing,
+automatic live persistence, restart, PHP settings, exports, sharing,
 live header/footer hide-and-restore controls, responsive layout and timeout recovery.
 The prepared JCB regression creates a Joomla record and changes its configuration
-file, then verifies both and administrator access after two Save → whole-page
-reload cycles without Close. Recovery checks verify that exporting files after
-a database startup failure leaves the saved file and database stores unchanged.
+file, then checks both and administrator access across whole-page reloads.
+Recovery checks verify that exporting files after a database startup failure
+leaves the saved file and database stores unchanged.
 `PLAYGROUND_BROWSERS`, `PLAYGROUND_PHP_VERSIONS`, `PLAYGROUND_JOOMLA_VERSIONS` and
 `PLAYGROUND_SCENARIOS` narrow local investigations.
 

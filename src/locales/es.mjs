@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "Imagen de implementación almacenada",
   "storage.configuration": "Configuración de implementación",
   "storage.preferences": "Preferencias de interfaz guardadas",
-  "storage.unassigned": "Datos de Playground sin asignar"
+  "storage.unassigned": "Datos de Playground sin asignar",
+  "lifecycle.transitionBlocked": "Otra vista tiene trabajo sin guardar o no responde. Revise o cierre esa vista y vuelva a intentarlo."
 });

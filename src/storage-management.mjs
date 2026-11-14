@@ -42,6 +42,9 @@ export function forgetRuntimeStorage({ baseURL = defaultBase, identity, storage 
 
 /** Enumerating storage does not create a database, including when drafts were just deleted. */
 export function createRuntimeStorageAdapter(indexedDB = globalThis.indexedDB, { onBlocked = () => {} } = {}) {
+  const blocked = name => {
+    try { Promise.resolve(onBlocked?.(name)).catch(() => {}); } catch { /* Diagnostics cannot abandon a pending deletion. */ }
+  };
   const withDrafts = async (mode, operation) => {
     if (!(await indexedDB.databases()).some(item => item.name === draftDatabase)) return undefined;
     let disappeared = false;
@@ -50,7 +53,7 @@ export function createRuntimeStorageAdapter(indexedDB = globalThis.indexedDB, { 
       request.onupgradeneeded = () => { disappeared = true; request.transaction.abort(); };
       request.onerror = () => disappeared ? resolve(null) : reject(request.error);
       request.onsuccess = () => resolve(request.result);
-      request.onblocked = () => onBlocked(draftDatabase);
+      request.onblocked = () => blocked(draftDatabase);
     });
     if (!database) return undefined;
     try {
@@ -75,7 +78,7 @@ export function createRuntimeStorageAdapter(indexedDB = globalThis.indexedDB, { 
         request.onerror = () => reject(request.error);
         // A delete request cannot be cancelled. Keep the runtime lock until it
         // settles, so a delayed deletion can never erase a newly opened site.
-        request.onblocked = () => onBlocked(name);
+        request.onblocked = () => blocked(name);
       });
     },
   };

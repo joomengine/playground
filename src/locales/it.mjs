@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "Immagine di distribuzione salvata",
   "storage.configuration": "Configurazione di distribuzione",
   "storage.preferences": "Preferenze dell’interfaccia salvate",
-  "storage.unassigned": "Dati Playground non assegnati"
+  "storage.unassigned": "Dati Playground non assegnati",
+  "lifecycle.transitionBlocked": "Un’altra vista contiene lavoro non salvato o non risponde. Controlla o chiudi quella vista, poi riprova."
 });

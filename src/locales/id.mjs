@@ -762,5 +762,6 @@ export default Object.freeze({
   "storage.image": "Citra penerapan tersimpan",
   "storage.configuration": "Konfigurasi penerapan",
   "storage.preferences": "Preferensi antarmuka tersimpan",
-  "storage.unassigned": "Data Playground yang belum ditetapkan"
+  "storage.unassigned": "Data Playground yang belum ditetapkan",
+  "lifecycle.transitionBlocked": "Tampilan lain memiliki pekerjaan yang belum disimpan atau tidak merespons. Periksa atau tutup tampilan tersebut, lalu coba lagi."
 });
