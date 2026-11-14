@@ -110,7 +110,7 @@
                   <div class="settings-divider" data-i18n="title.admin">Administrator</div>
                   <p class="field-help account-help" data-i18n="help.credentials">Saved sites keep their account. Credentials stay in this browser and are never included in shared links.</p>
                   <div class="field"><label for="admin-name" data-i18n="label.fullName">Full name</label><input id="admin-name" value="Playground Administrator" maxlength="100" required autocomplete="off"></div>
-                  <div class="field"><label for="admin-username" data-i18n="label.username">Username</label><input id="admin-username" value="admin" maxlength="100" required autocomplete="off" autocapitalize="none" spellcheck="false"></div>
+                  <div class="field"><label for="admin-username" data-i18n="label.username">Username</label><input id="admin-username" value="admin" minlength="2" maxlength="30" required autocomplete="off" autocapitalize="none" spellcheck="false"></div>
                   <div class="field"><label for="admin-email" data-i18n="label.email">Email</label><input id="admin-email" type="email" value="admin@example.test" maxlength="254" required autocomplete="off"></div>
                   <div class="field"><label for="admin-password" data-i18n="label.password">Password</label><div class="password-field"><input id="admin-password" type="password" minlength="12" maxlength="128" required autocomplete="new-password"><button type="button" id="show-password" aria-label="Show password" data-i18n-aria-label="a11y.showPassword" aria-pressed="false" data-i18n="action.show">Show</button></div></div>
                 </div>

@@ -69,8 +69,10 @@ export function rememberSite(state, config) {
   const sites = { ...state.sites };
   delete sites[config.storageKey];
   const previous = state.sites[config.storageKey];
+  const displayName = config.displayName && config.displayName !== previous?.siteName ? config.displayName
+    : previous?.displayName && previous.displayName !== previous.siteName ? previous.displayName : config.siteName;
   sites[config.storageKey] = { ...publicConfiguration(config),
-    displayName: savedSiteName(config.displayName || previous?.displayName || config.siteName),
+    displayName: savedSiteName(displayName),
     lastPath: safeSavedRoute(config.lastPath || previous?.lastPath, config.initialPath) };
   return { schemaVersion: 2, active: config.storageKey, sites };
 }

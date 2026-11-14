@@ -101,7 +101,7 @@ let pendingFresh = false;
 let resumeLastRoute = true;
 let freshKeyPending = false;
 let automaticLaunchPaused = false;
-let launchManifest, launchReadinessTimer, launchReadinessRequest = 0;
+let launchManifest, launchReadinessRequest = 0;
 const launchRecipeSources = new Map();
 let codeHost;
 let databaseHost, openingDatabase;
@@ -248,9 +248,9 @@ function pauseAutomaticLaunch() {
   $('stop-countdown-button').disabled = true;
   activity(t('status.countdownPaused'));
 }
-function updateLaunchReadiness() {
+async function updateLaunchReadiness() {
   const request = ++launchReadinessRequest;
-  clearTimeout(launchReadinessTimer);
+  if ($('deploy-dialog').open) return;
   const hint = $('launch-readiness');
   const render = state => {
     const key = `launchReadiness.${state || 'checking'}`;
@@ -260,26 +260,24 @@ function updateLaunchReadiness() {
   };
   if (!initialized || !catalog || !deployCatalog || !launchManifest || busy || launching) { render(null); return; }
   render(null);
-  launchReadinessTimer = setTimeout(async () => {
-    try {
-      const input = formInput();
-      const state = await deploymentLaunchReadiness(input, { manifest: launchManifest,
-        catalog, deployCatalog, baseURL: deploymentURL, fetcher: async url => {
-          const key = String(url);
-          const descriptor = deployCatalog.deploys.find(entry => entry.id === currentDeployRecipe?.id);
-          const currentURL = descriptor && (descriptor.url ?? new URL(descriptor.file, deployCatalog.url).href);
-          if (currentDeployRecipe?.schemaVersion === 1 && key === currentURL) return Response.json(currentDeployRecipe);
-          if (!launchRecipeSources.has(key)) {
-            launchRecipeSources.set(key, networkFetch(url).then(async response => {
-              if (!response.ok) throw new Error('Deployment metadata is unavailable.');
-              return response.text();
-            }).catch(error => { launchRecipeSources.delete(key); throw error; }));
-          }
-          return new Response(await launchRecipeSources.get(key));
-        } });
-      if (request === launchReadinessRequest) render(state);
-    } catch { if (request === launchReadinessRequest) render(null); }
-  }, 150);
+  try {
+    const input = formInput({}, { draft: true });
+    const state = await deploymentLaunchReadiness(input, { manifest: launchManifest,
+      catalog, deployCatalog, baseURL: deploymentURL, fetcher: async url => {
+        const key = String(url);
+        const descriptor = deployCatalog.deploys.find(entry => entry.id === currentDeployRecipe?.id);
+        const currentURL = descriptor && (descriptor.url ?? new URL(descriptor.file, deployCatalog.url).href);
+        if (currentDeployRecipe?.schemaVersion === 1 && key === currentURL) return Response.json(currentDeployRecipe);
+        if (!launchRecipeSources.has(key)) {
+          launchRecipeSources.set(key, networkFetch(url).then(async response => {
+            if (!response.ok) throw new Error('Deployment metadata is unavailable.');
+            return response.text();
+          }).catch(error => { launchRecipeSources.delete(key); throw error; }));
+        }
+        return new Response(await launchRecipeSources.get(key));
+      } });
+    if (request === launchReadinessRequest) render(state);
+  } catch { if (request === launchReadinessRequest) render(null); }
 }
 function openDialog(id) {
   pauseAutomaticLaunch();
@@ -806,7 +804,8 @@ function coreRecipeAdditions(configuration) {
   delete input.deploymentRecipe;
   return input;
 }
-function formInput(overrides = {}) {
+function formInput(overrides = {}, { draft = false } = {}) {
+  const read = editor => draft ? editor.peek() : editor.read();
   const joomlaVersion = overrides.joomlaVersion ?? fields.joomlaVersion.value;
   const unchangedRestoredJcb = (editorConfiguration?.restoredSite || matchesInstalledSelection({
     ...editorConfiguration, deployId: fields.deployId.value, storageKey: fields.storageKey.value,
@@ -824,14 +823,13 @@ function formInput(overrides = {}) {
     initialPath: fields.initialPath.value, storageKey: fields.storageKey.value,
     persistence: true, autoLogin: fields.autoLogin.checked,
     hideToolbar, fresh: pendingFresh, admin: administrator(),
-    extensions: extensionInputs.read(), startupCommands: commandInputs ? commandInputs.read() : fields.startupCommands.value,
+    extensions: read(extensionInputs), startupCommands: commandInputs ? read(commandInputs) : fields.startupCommands.value,
     phpSettings, jcbVersion: fields.jcbVersion.value || 'none', ...jcbInput, multilingual: $('multilingual').checked, languageTags: $('deploy-languages').value.split(',').map(value => value.trim()).filter(Boolean),
-    menus: menuInputs ? menuInputs.read() : parseEditorJSON('deploy-menus', []), template: templateInput(),
-    content: contentInputs ? contentInputs.read() : editorConfiguration?.content,
-    overlays: overlayInputs ? overlayInputs.read() : editorConfiguration?.overlays || [], ...overrides,
+    menus: menuInputs ? read(menuInputs) : parseEditorJSON('deploy-menus', []), template: templateInput({ draft }),
+    content: contentInputs ? read(contentInputs) : editorConfiguration?.content,
+    overlays: overlayInputs ? read(overlayInputs) : editorConfiguration?.overlays || [], ...overrides,
   };
   if (candidate.jcbVersion === 'none' || (editorConfiguration?.jcbVersion !== candidate.jcbVersion && !jcbInput.jcbPackage)) delete candidate.jcbPackage;
-  if (candidate.content == null) delete candidate.content;
   const full = normalizeConfiguration(candidate, { catalog, baseURL: deploymentURL });
   if (full.restoredSite) return full;
   const sameSetup = sameEditorSetup(full, editorConfiguration);
@@ -1089,8 +1087,8 @@ function applyConfiguration(config, input = config, deploy) {
   contentInputs?.setValue(config.content || null);
   overlayInputs?.setValue(input.overlays || config.overlays || []);
   updateDeploymentFormContext();
-  $('multilingual').checked = config.multilingual === true || config.content?.multilingual === true;
-  renderEditorLists();
+  updateTemplateForm();
+  $('multilingual').checked = config.multilingual === true;
   fields.startupCommands.value = JSON.stringify(config.startupCommands || [], null, 2);
   commandInputs?.setValue(config.startupCommands || []);
   pendingFresh = Boolean(config.fresh);
@@ -1152,7 +1150,7 @@ function rememberCurrentSite() {
 }
 function rememberDraft(profile = selectedProfile) {
   if (!profile) return;
-  try { drafts.set(`${profile.deployId}:${profile.joomlaVersion}`, publicConfiguration(formInput(profile))); } catch { /* Invalid unfinished fields stay visible until the user corrects them. */ }
+  try { drafts.set(`${profile.deployId}:${profile.joomlaVersion}`, publicConfiguration(formInput(profile, { draft: true }))); } catch { /* Invalid unfinished fields stay visible until the user corrects them. */ }
 }
 function findProfile(deployId, joomlaVersion) {
   return drafts.get(`${deployId}:${joomlaVersion}`)
@@ -1721,10 +1719,10 @@ function parseEditorJSON(id, fallback) {
   try { return JSON.parse($(id).value.trim() || JSON.stringify(fallback)); }
   catch { throw new TypeError(`${$(id).labels?.[0]?.textContent || id}: ${t('error.configuration')}`); }
 }
-function templateInput() {
+function templateInput({ draft = false } = {}) {
   const element = $('template-name').value.trim(), url = $('template-url').value.trim();
   if (!element && !url) return undefined;
-  const template = { ...templateOptions, params: parameterInputs ? parameterInputs.read() : parseEditorJSON('template-params', {}) };
+  const template = { ...templateOptions, params: parameterInputs ? (draft ? parameterInputs.peek() : parameterInputs.read()) : parseEditorJSON('template-params', {}) };
   if (url !== templateOptions.url) delete template.sha256;
   if (element !== templateOptions.element) delete template.styleId;
   if (url) template.url = url; else delete template.url;
@@ -1735,9 +1733,13 @@ function renderEditorLists() {
   for (const editor of [menuInputs, contentInputs, parameterInputs, overlayInputs, commandInputs]) editor?.refresh();
 }
 function updateDeploymentFormContext() {
-  const context = { ...discoveredConfiguration, language: fields.language.value || 'en-GB', schemaUnavailable: deploymentSchemaUnavailable };
+  const context = { ...discoveredConfiguration, language: fields.language.value || 'en-GB',
+    runningSite: Boolean(runtime), schemaUnavailable: deploymentSchemaUnavailable };
   for (const editor of [menuInputs, contentInputs, parameterInputs, overlayInputs]) editor?.setContext(context);
+}
+function updateTemplateForm() {
   const template = discoveredConfiguration?.templates?.find(item => item.template === $('template-name').value);
+  parameterInputs?.setContext({ schemaUnavailable: Boolean(template?.schemaUnavailable) });
   if (parameterInputs) parameterInputs.setSchema(template?.schema?.properties?.params || template?.schema || deploymentFormSchemas.parameters);
 }
 function updateCaptureAction() {
@@ -1770,26 +1772,40 @@ async function captureDeploymentData() {
     feedback(t('deployment.captureFailed', { message: messageOf(error) }), { error: true });
   } finally { setBusy(false); }
 }
-function openEditor() {
+async function openEditor() {
+  if ($('deploy-dialog').open) return;
+  pauseAutomaticLaunch();
+  if (runtime?.discoverConfiguration && !runtime.recovery && !busy) {
+    const site = runtime;
+    setBusy(true);
+    try {
+      const discovered = await site.discoverConfiguration({ uiLanguage: getLocale() });
+      if (site === runtime) {
+        discoveredConfiguration = discovered;
+        $('template-options').replaceChildren(...[...new Set((discovered.templates || []).map(item => item.template))].map(value => {
+          const option = document.createElement('option'); option.value = value; return option;
+        }));
+        updateDeploymentFormContext();
+      }
+    } catch (error) { activity(error); }
+    finally { setBusy(false); }
+  }
   $('deploy-error').hidden = true;
   $('advanced-settings').open = true;
   $('editor-runtime-summary').textContent = `${deploymentDescriptor(fields.deployId.value)?.title || fields.siteName.value} · Joomla ${fields.joomlaVersion.value} · PHP ${fields.phpVersion.value}`;
   updateMcpPreview();
-  renderEditorLists(); openDialog('deploy-dialog');
+  updateTemplateForm();
+  ++launchReadinessRequest;
+  openDialog('deploy-dialog');
   updateCaptureAction();
-  if (runtime?.discoverConfiguration && !runtime.recovery && !busy) void runtime.discoverConfiguration({ uiLanguage: getLocale() }).then(discovered => {
-    discoveredConfiguration = discovered;
-    $('template-options').replaceChildren(...[...new Set((discovered.templates || []).map(item => item.template))].map(value => { const option = document.createElement('option'); option.value = value; return option; }));
-    updateDeploymentFormContext();
-  }).catch(error => activity(error));
 }
 
 async function saveDeployment({ copy = false } = {}) {
   if (busy || launching || !catalog) return;
   $('deploy-error').hidden = true;
-  setBusy(true);
   try {
     const input = formInput();
+    setBusy(true);
     const resolved = await resolve(input);
     const existing = customRegistry.deployments.find(entry => entry.id === fields.deployId.value);
     const builtInNames = deployCatalog.deploys.map(entry => entry.title);
@@ -1803,11 +1819,23 @@ async function saveDeployment({ copy = false } = {}) {
       id: copy ? undefined : existing?.id, builtInNames,
     });
     customRegistry = saved.registry;
-    const selected = { ...parseDeploymentDocument(saved.entry.document, { baseURL: deploymentURL }),
-      deployId: saved.entry.id, storageKey: fields.storageKey.value };
-    const result = await resolve(selected);
-    applyConfiguration(result.configuration, selected, result.deploy);
-    applyAdministrator(selected.admin);
+    const selected = { ...resolved.configuration, deployId: saved.entry.id, deploymentRecipe: saved.entry.document };
+    editorConfiguration = structuredClone(selected);
+    editorSourceInput = structuredClone(selected);
+    extraDeploymentFields = Object.fromEntries(['content', 'languages', 'joomlaPackage', 'deploymentRecipe', 'restoredSite']
+      .filter(key => selected[key] !== undefined).map(key => [key, structuredClone(selected[key])]));
+    templateOptions = structuredClone(selected.template || {});
+    currentDeployRecipe = deploymentDescriptor(saved.entry.id);
+    jcbSelection = initialJcbSelection({ input: selected, deploy: currentDeployRecipe,
+      major: selected.joomlaVersion.split('.')[0], pinned: pinnedJcb,
+      isSaved: selected.persistence && Object.hasOwn(savedState.sites, selected.storageKey) });
+    selectedProfile = { deployId: saved.entry.id, joomlaVersion: selected.joomlaVersion };
+    renderDeploymentChoices(saved.entry.id);
+    $('deployment-name').value = saved.entry.title;
+    $('editor-runtime-summary').textContent = `${saved.entry.title} · Joomla ${selected.joomlaVersion} · PHP ${selected.phpVersion}`;
+    updateCompatibility({ preserve: true });
+    const noJcb = fields.jcbVersion.querySelector('option[value="none"]');
+    if (noJcb) noJcb.disabled = deploymentRequiresJcb(currentDeployRecipe);
     $('deployment-save-status').textContent = `Saved “${saved.entry.title}”.`;
     $('deployment-save-status').hidden = false;
     feedback($('deployment-save-status').textContent);
@@ -1926,12 +1954,14 @@ async function applyDeployment() {
   if (!requireOwnerForReplacement()) return;
   if (busy || launching || closing || !runtime) return;
   $('deploy-error').hidden = true;
+  let input;
+  try { input = formInput({ storageKey: currentConfig.storageKey, persistence: currentConfig.persistence, fresh: false }); }
+  catch (error) { editorError(error); return; }
   setBusy(true);
   try {
     if (previewDirty && !confirm(t('confirm.unsavedSiteForm'))) return;
     if (codeHost && !codeHost.closed && !await codeHost.beforeClose()) return;
     if (databaseHost && !databaseHost.closed && !await databaseHost.beforeClose()) return;
-    const input = formInput({ storageKey: currentConfig.storageKey, persistence: currentConfig.persistence, fresh: false });
     const resolved = await resolve(input);
     setBusy(true); destroyPreview(); show('loading-view');
     await runtime.applyConfiguration(resolved.configuration);
@@ -2189,8 +2219,8 @@ function setupInterface() {
   contentInputs = structured('content', 'deploy-content', 'content-inputs', 'content-advanced', 'content-input-error');
   overlayInputs = structured('overlays', 'deploy-overlays', 'overlay-inputs', 'overlays-advanced', 'overlay-input-error', normalizeDeploymentOverlays);
   for (const id of ['capture-deployment-data', 'capture-deployment-data-editor']) $(id).addEventListener('click', () => void captureDeploymentData());
-  $('template-name').addEventListener('change', updateDeploymentFormContext);
-  fields.language.addEventListener('change', updateDeploymentFormContext);
+  $('template-name').addEventListener('change', updateTemplateForm);
+  fields.language.addEventListener('change', () => { updateDeploymentFormContext(); void updateLaunchReadiness(); });
   for (const button of document.querySelectorAll('[data-deployment-section]')) button.addEventListener('click', () => {
     $('advanced-settings').open = true;
     $(button.dataset.deploymentSection)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -2306,7 +2336,8 @@ function setupInterface() {
     } catch (error) { $('php-error').textContent = messageOf(error); $('php-error').hidden = false; if (runtime?.healthy) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl)); else if (runtime) displayError(error); }
     finally { setBusy(false); }
   });
-  for (const event of ['input', 'change']) $('launch-form').addEventListener(event, () => { pauseAutomaticLaunch(); updateLaunchReadiness(); });
+  for (const event of ['input', 'change']) $('launch-form').addEventListener(event, pauseAutomaticLaunch);
+  $('deploy-dialog').addEventListener('close', () => void updateLaunchReadiness());
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) pauseAutomaticLaunch();
     else void buildUpdates.check();
