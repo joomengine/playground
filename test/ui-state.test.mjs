@@ -190,6 +190,18 @@ test('legacy metadata migrates all sites and rename keeps immutable setup identi
   assert.throws(() => renameSavedSite(state, 'legacy-0', 'name\nwith control'));
 });
 
+test('applied site names update automatic labels and retain explicitly renamed workspaces', async () => {
+  const { renameSavedSite } = await import('../src/ui-state.mjs');
+  const original = rememberSite(empty(), configuration);
+  const renamedSite = { ...configuration, siteName: 'Updated Joomla site' };
+  const updated = rememberSite(original, renamedSite);
+  assert.equal(updated.sites.work.displayName, 'Updated Joomla site');
+  assert.equal(updated.sites.work.siteName, 'Updated Joomla site');
+  const custom = renameSavedSite(original, 'work', 'My workspace');
+  assert.equal(rememberSite(custom, renamedSite).sites.work.displayName, 'My workspace');
+  assert.equal(rememberSite(original, { ...renamedSite, displayName: configuration.siteName }).sites.work.displayName, 'Updated Joomla site');
+});
+
 test('resume routes exclude actions, tokens, external paths and credentials', async () => {
   const { safeSavedRoute, rememberSiteRoute } = await import('../src/ui-state.mjs');
   assert.equal(safeSavedRoute('/administrator/index.php?option=com_content&view=articles&task=delete&password=secret&abc123=1#items'), '/administrator/index.php?option=com_content&view=articles#items');
