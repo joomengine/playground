@@ -1,9 +1,10 @@
 import { continueLiveReplacement } from './live-replacement-contract.mjs';
 import { assertExtensionFormValidation } from './extension-form-contract.mjs';
+import { assertLaunchReadiness } from './launch-readiness-browser.mjs';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { chromium, firefox } from 'playwright';
 import { createStaticServer } from './server.mjs';
 
@@ -244,6 +245,34 @@ test(`Configure a deployment supports stable editing and saved copies for ${pres
   }
 });
 }
+
+test(`Configure a deployment preserves prepared JCB readiness while settings are unchanged (${browserName})`, { timeout: 45_000 }, async () => {
+  const recipe = JSON.parse(await readFile(new URL('../deploys/jcb.json', import.meta.url), 'utf8'));
+  const snapshot = { url: '../assets/snapshots/jcb-prepared.zip', sha256: 'a'.repeat(64),
+    format: 'joomengine-playground-export', schemaVersion: 1, joomlaVersion: '6.2.0' };
+  recipe.variants['6'].snapshot = snapshot;
+  const manifest = { ...formManifest, php: [{ version: '8.3' }, { version: '8.4' }],
+    joomla: [{ version: '6.2.0', php: ['8.3', '8.4'] }],
+    prebuiltDeploys: [{ id: 'jcb', joomlaVersion: '6.2.0', phpVersion: '8.4',
+      url: 'snapshots/jcb-prepared.zip', sha256: snapshot.sha256, size: 100 }] };
+  const server = await createStaticServer({ directory: fileURLToPath(new URL('../', import.meta.url)), fixtures: {
+    ...formFixtures, 'assets/manifest.json': JSON.stringify(manifest), 'deploys/jcb.json': JSON.stringify(recipe),
+  } });
+  let browser;
+  try {
+    const executablePath = process.env[`PLAYGROUND_${browserName.toUpperCase()}_EXECUTABLE`];
+    browser = await { chromium, firefox }[browserName].launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`${server.url}?deploy=jcb&key=prepared-readiness&immediate=1&start=0`);
+    await page.locator('#embedded-launch:enabled').waitFor();
+    await assertLaunchReadiness(page);
+    assert.deepEqual(errors, []);
+  } finally {
+    try { await browser?.close(); } finally { await server.close(); }
+  }
+});
 
 test(`Configure a deployment loads native fields before editing and applies the complete draft (${browserName})`, { timeout: 45_000 }, async () => {
   let releaseDiscovery;

@@ -830,6 +830,9 @@ function formInput(overrides = {}, { draft = false } = {}) {
     overlays: overlayInputs ? read(overlayInputs) : editorConfiguration?.overlays || [], ...overrides,
   };
   if (candidate.jcbVersion === 'none' || (editorConfiguration?.jcbVersion !== candidate.jcbVersion && !jcbInput.jcbPackage)) delete candidate.jcbPackage;
+  // An empty control does not change a preset that never had content. Keep
+  // explicit null when it clears inherited content or was already saved.
+  if (candidate.content === null && editorConfiguration?.content === undefined) delete candidate.content;
   const full = normalizeConfiguration(candidate, { catalog, baseURL: deploymentURL });
   if (full.restoredSite) return full;
   const sameSetup = sameEditorSetup(full, editorConfiguration);
