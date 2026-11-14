@@ -1,4 +1,4 @@
-/** Save only between runtime operations, with one timer after each completed save. */
+/** Queue one eligible save, with one timer after each completed save. */
 export function startAutosave({ canSave, save, onError = () => {}, intervalMs = 60_000, retryMs = 5_000,
   setTimer = setTimeout, clearTimer = clearTimeout }) {
   let stopped = false, running = false, timer;

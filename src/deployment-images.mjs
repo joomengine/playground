@@ -121,7 +121,7 @@ export function createIndexedDBImageStorage({ indexedDB = globalThis.indexedDB, 
       if (!database.objectStoreNames.contains('images')) database.createObjectStore('images', { keyPath: 'key' });
       if (!database.objectStoreNames.contains('archives')) database.createObjectStore('archives');
     };
-    request.onerror = () => reject(new Error('Local image storage is unavailable.'));
+    request.onerror = () => reject(request.error || new Error('Local image storage is unavailable.'));
     request.onblocked = () => { abandoned = true; reject(new Error('Close other playground tabs before managing local images.')); };
     request.onsuccess = () => {
       const database = request.result;
@@ -136,7 +136,7 @@ export function createIndexedDBImageStorage({ indexedDB = globalThis.indexedDB, 
       const tx = database.transaction(['images', 'archives'], mode);
       let result;
       tx.oncomplete = () => resolve(result);
-      tx.onerror = tx.onabort = () => reject(new Error('Local image storage could not complete the operation.'));
+      tx.onerror = tx.onabort = event => reject(tx.error || event?.target?.error || new Error('Local image storage could not complete the operation.'));
       operation(tx, value => { result = value; });
     });
   };
@@ -214,9 +214,21 @@ export function createDeploymentImageCache({ baseURL = DEFAULT_BASE, storage = c
         ...records.filter(record => record.kind === 'custom').map(record => publicRecord(record))];
     },
     remove: key => storage.remove(key),
+    async reclaimMaintained() {
+      // Only obsolete downloaded installation archives are replaceable. User
+      // backups and custom archives belong to separate lifecycles.
+      let removed = 0, bytes = 0;
+      for (const record of await storage.list()) {
+        if (record.kind !== 'server') continue;
+        await storage.remove(record.key);
+        removed++;
+        if (Number.isSafeInteger(record.size) && record.size > 0) bytes += record.size;
+      }
+      return { removed, bytes };
+    },
     reconcile,
     maintained: (config, manifest) => deploymentSnapshotSource(config, manifest, baseURL)?.maintained ?? null,
-    async getMaintained(entry, { onProgress = () => {}, onWarning } = {}) {
+    async getMaintained(entry, { onProgress = () => {} } = {}) {
       if (pending.has(entry.sha256)) {
         const shared = pending.get(entry.sha256);
         const image = await shared.operation;
@@ -224,24 +236,19 @@ export function createDeploymentImageCache({ baseURL = DEFAULT_BASE, storage = c
       }
       const shared = {};
       shared.operation = (async () => {
-        const stored = await read(entry.key, entry, onWarning);
-        if (stored) {
-          shared.blob = new Blob([stored.bytes], { type: 'application/zip' });
-          onProgress({ phase: 'launch-image', message: 'Restoring the image saved in this browser…' }); return stored;
-        }
         onProgress({ phase: 'download-image', message: 'Downloading the prepared image…' });
         const response = await fetcher(entry.url);
         if (!response.ok) throw new Error('The prepared image could not be downloaded.');
         const bytes = imageBytes(await response.arrayBuffer());
-        const { url, ...metadata } = entry;
+        if (bytes.byteLength !== entry.size || await digest(bytes) !== entry.sha256) throw new Error('The prepared image failed its integrity check.');
         shared.blob = new Blob([bytes], { type: 'application/zip' });
-        shared.writing = Promise.resolve().then(() => storage.put({ ...metadata, createdAt: now(), lastUsedAt: now() }, shared.blob))
-          .catch(() => warning(onWarning)).finally(() => { if (pending.get(entry.sha256) === shared) pending.delete(entry.sha256); });
+        // Keep only the running installation's files. A fresh launch downloads
+        // its base again; browser archives are created only by explicit Backup.
         return { bytes, sha256: entry.sha256, cached: false };
       })();
       pending.set(entry.sha256, shared);
       try { return await shared.operation; }
-      finally { if (!shared.writing && pending.get(entry.sha256) === shared) pending.delete(entry.sha256); }
+      finally { if (pending.get(entry.sha256) === shared) pending.delete(entry.sha256); }
     },
     getCustom: fingerprint => read(`custom:${fingerprint}`),
     async saveCustom(config, manifest, bytes, { fingerprint, onProgress = () => {}, onWarning } = {}) {

@@ -6,6 +6,8 @@ import { createNetworkTransport } from './network-transport.mjs';
 import { createPhpSelfRequestFetch, createPhpRequestWorker, configurePhpCallback } from './php-self-request.mjs';
 import { capturePhpFilesystem, applyPhpFilesystem } from './php-filesystem.mjs';
 import { installPhpRecovery } from './php-recovery.mjs';
+import { flushPhpFilesystem } from './php-persistence.mjs';
+import { serializeWorkerError } from './worker-errors.mjs';
 import { applyJcbRuntimeCompatibility } from './jcb-compatibility.mjs';
 import { staticAssetResponse } from './static-assets.mjs';
 import { installAdminer, withAdminerRequest, adminerRequestPath } from './database/runtime.mjs';
@@ -38,7 +40,9 @@ let activeOperationId;
 async function getDebugOwner() {
   if (!debugOptions) throw new Error('This distribution does not include PHP debugger assets.');
   return debugOwner ??= await (debugOwnerLoading ??= import('./code/debug-owner.mjs').then(({ createPhpDebugOwner }) => createPhpDebugOwner({
-    options: debugOptions, getPhp: () => php, getBinary: () => binary, databaseCall, flush,
+    options: debugOptions, getPhp: () => php, getBinary: () => binary, databaseCall,
+    // Debugger writes join the owner's next files-and-database checkpoint.
+    flush: async () => {},
     onState: state => self.postMessage({ type: 'debug-state', state, requestId: activeOperationId }),
     onEvent: event => self.postMessage({ type: 'debug-event', ...event }),
   })));
@@ -57,11 +61,8 @@ async function workspaceOperation(name, args) {
   }
   const result = await workspaceFiles.handle(name, args);
   if (!['write', 'batch', 'mkdir', 'copy', 'rename', 'delete', 'recover'].includes(name)) return result;
-  // These files already changed in the active runtime. A quota/durability error
-  // must not masquerade as a failed live write, or cause a caller to replay it.
-  let storageError;
-  try { await flush(); } catch (error) { storageError = error.message; }
-  return { ...result, persistence: { enabled: persistent, saved: persistent && !storageError, error: storageError } };
+  // A live edit is complete. Only the owner can commit files and MariaDB together.
+  return { ...result, persistence: { enabled: persistent, saved: false, pending: persistent } };
 }
 
 class FatalRuntimeError extends Error {
@@ -101,7 +102,7 @@ function removeTree(path) {
 
 async function flush() {
   if (persistent && binary && !readOnly) {
-    await new Promise((resolve, reject) => binary.FS.syncfs(false, (error) => error ? reject(error) : resolve()));
+    await flushPhpFilesystem(binary.FS);
   }
 }
 
@@ -258,7 +259,7 @@ async function initialize(args) {
     sharedLibs: args.sharedLibs || [],
     files: [...(args.files || []), ...adapter.files,
       { parent: '/internal', name: 'rocket-http.php', url: new URL('./php-http-stream.php', import.meta.url).href }],
-    // Provisioning commits both stores once before the site becomes available.
+    // The owner coordinates every durable commit with MariaDB, including after launch.
     staticFS: true,
     autoTransaction: false,
     ini: `${adapter.ini}${phpIni(phpSettings)}\nauto_prepend_file=/internal/rocket-http.php\n`,
@@ -296,9 +297,9 @@ async function initialize(args) {
   installPhpRecovery(php, {
     currentBinary: () => binary,
     prepare: prepareFilesystem,
-    beforeRefresh: flush,
-    // Persisted files are hydrated by upstream; temporary sites must copy their files.
-    roots: persistent ? ['/tmp', '/internal'] : ['/persist', '/config', '/tmp', '/internal'],
+    // Disk can lag behind the live site after a failed save. Recover its current
+    // files and deletions from memory without requiring storage to accept a write.
+    roots: ['/persist', '/config', '/tmp', '/internal'],
     restored: next => { binary = next; configurePhpRouting(php, binary); },
   });
   if (exists('/config/.cookies')) php.cookieJar.load(binary.FS.readFile('/config/.cookies', { encoding: 'utf8' }));
@@ -358,10 +359,9 @@ async function operation(name, args = {}) {
     }
     case 'runPhp': return runPhp(args.source ?? args.code);
     case 'flush': await flush(); return null;
-    case 'enablePersistence': php.phpArgs.staticFS = !persistent || readOnly; return null;
+    case 'enablePersistence': php.phpArgs.staticFS = true; return null;
     case 'checkpoint': {
       if (!readOnly) binary.FS.writeFile('/config/.cookies', php.cookieJar.dump());
-      await flush();
       const archive = `/tmp/rocket-checkpoint-${crypto.randomUUID()}.zip`;
       try {
         const response = await runPhp(checkpointSource(archive, { filesOnlyRecovery: readOnly }));
@@ -373,7 +373,8 @@ async function operation(name, args = {}) {
     case 'restoreCheckpoint': {
       if (readOnly) throw new Error('Saved files cannot be replaced in read-only recovery.');
       const bytes = args.bytes instanceof Uint8Array ? args.bytes : args.bytes instanceof ArrayBuffer ? new Uint8Array(args.bytes) : null;
-      if (!bytes || bytes.byteLength === 0 || bytes.byteLength > 512 * 1024 * 1024) throw new RangeError('The private runtime checkpoint must contain at most 512 MiB.');
+      if (!bytes || bytes.byteLength === 0) throw new TypeError('The private runtime checkpoint is missing or empty.');
+      if (bytes.byteLength > 512 * 1024 * 1024) throw new RangeError('The private runtime checkpoint must contain at most 512 MiB.');
       const archive = `/tmp/rocket-checkpoint-${crypto.randomUUID()}.zip`;
       binary.FS.writeFile(archive, bytes);
       try {
@@ -383,11 +384,10 @@ async function operation(name, args = {}) {
         php.cookieJar.cookies.clear();
         if (typeof result.restoredCookies === 'string') php.cookieJar.load(result.restoredCookies);
         binary.FS.writeFile('/config/.cookies', php.cookieJar.dump());
-        await flush();
         return { ok: true, entries: result.entries };
       } finally { if (exists(archive)) binary.FS.unlink(archive); }
     }
-    case 'close': debugOwner?.dispose(); await flush(); terminal = true; return null;
+    case 'close': debugOwner?.dispose(); terminal = true; return null;
     case 'reset': {
       if (readOnly) throw new Error('Saved files cannot be modified in read-only recovery.');
       for (const root of ['/persist', '/config']) {
@@ -425,7 +425,7 @@ self.addEventListener('message', (event) => {
       ? Promise.resolve() : getDebugOwner().then(owner => owner.command(message.command, message.args));
     void command.then(
       value => self.postMessage({ type: 'result', id: message.id, value }),
-      error => self.postMessage({ type: 'result', id: message.id, error: error.message, code: error.code, fatal: false }),
+      error => self.postMessage({ type: 'result', id: message.id, ...serializeWorkerError(error), fatal: false }),
     );
     return;
   }
@@ -443,7 +443,7 @@ self.addEventListener('message', (event) => {
     } catch (error) {
       const fatal = error?.fatal === true || message.operation === 'initialize';
       if (fatal) terminal = true;
-      self.postMessage({ type: 'result', id: message.id, error: error instanceof Error ? error.message : String(error), code: error?.code, fatal,
+      self.postMessage({ type: 'result', id: message.id, ...serializeWorkerError(error), fatal,
         ...(message.operation === 'selfRequest' && binary ? { snapshot: capturePhpFilesystem(binary.FS) } : {}) });
     } finally { activeOperationId = undefined; queued--; }
   });

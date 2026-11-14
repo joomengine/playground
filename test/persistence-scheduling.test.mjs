@@ -13,7 +13,7 @@ function scheduler() {
   };
 }
 
-test('autosave waits for idle and schedules its next interval after saving finishes', async () => {
+test('autosave waits until eligible and schedules its next interval after saving finishes', async () => {
   const timers = scheduler();
   let ready = false, release, calls = 0;
   const { stop } = startAutosave({ canSave: () => ready, save: () => { calls++; return new Promise(resolve => { release = resolve; }); },
@@ -44,7 +44,7 @@ test('autosave reports storage errors and retries on the next interval', async (
   stop();
 });
 
-test('the first checkpoint is requested promptly after launch and still waits for runtime idle', async () => {
+test('the first checkpoint is requested promptly after launch and waits until saving is eligible', async () => {
   const timers = scheduler();
   let ready = false, calls = 0;
   const autosave = startAutosave({ canSave: () => ready, save: async () => { calls++; },
