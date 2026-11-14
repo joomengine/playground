@@ -291,6 +291,7 @@ for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox'
         ui.once('dialog', dialog => dialog.accept());
         await ui.locator('#close-button').click();
         await ui.locator('#site-frame').waitFor({ state: 'detached' });
+        await ui.locator('#restart-button:enabled').waitFor();
         assert.match(await ui.locator('#restart-button').textContent(), /Start/);
         await ui.locator('#restart-button').click();
         await ready();

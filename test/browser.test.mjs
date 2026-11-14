@@ -1367,6 +1367,7 @@ for (const name of browserNames) {
         changedSourceURL.searchParams.set('start', '0');
         await page.goto(changedSourceURL.href);
         await launchFixtureLink(page, missingSource);
+        await continueLiveReplacement(page);
         await renderedSiteFrame(page);
         await dismissAutomaticTour(page);
         assert.notEqual(await page.locator('#storage-key').inputValue(), savedKey,
