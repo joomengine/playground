@@ -175,6 +175,7 @@ for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox'
       const restored = { title: 'Restored', nested: { retained: [1, 'two', false, null] } };
       await page.locator('#parameters-json').fill(JSON.stringify(restored));
       await page.getByText('parameters JSON', { exact: true }).click();
+      await page.locator('#parameters-fields').waitFor({ state: 'visible' });
       assert.deepEqual(await page.evaluate(() => window.parameters.read()), restored);
       assert.equal(await page.locator('#parameters-fields').isVisible(), true);
 

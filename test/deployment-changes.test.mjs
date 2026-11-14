@@ -59,6 +59,22 @@ test('template assignment resolves unchanged menus without replaying their setti
   assert.deepEqual(configuration.template.menuKeys, ['existing-home']);
 });
 
+test('menu edits keep the previous native identity under their stable deployment key', () => {
+  const installed = previous();
+  installed.menus[0] = { ...installed.menus[0], key: 'existing-home', alias: 'original-menu', menuType: 'mainmenu', language: '*', templateStyle: 0 };
+  installed.template.menuKeys = ['existing-home'];
+  const next = structuredClone(installed);
+  next.menus[0].title = 'Renamed menu';
+  next.menus[0].alias = 'renamed-menu';
+  next.menus.push({ key: 'added-menu', title: 'New menu', alias: 'new-menu', component: 'com_content', view: 'featured' });
+  const { configuration } = deploymentConfigurationChanges(installed, next);
+  assert.deepEqual(configuration.menus, next.menus);
+  assert.deepEqual(configuration.menuReferences, installed.menus, 'Only previously declared menus carry a previous identity and template selection.');
+  assert.equal(configuration.menuReferences[0].alias, 'original-menu');
+  assert.equal(configuration.menus[0].alias, 'renamed-menu');
+  assert.equal(configuration.template, null, 'A menu edit preserves the assigned style without replaying unchanged template settings.');
+});
+
 test('content changes apply independently while unchanged content preserves native edits', () => {
   const installed = previous();
   installed.content = { categories: [{ key: 'news', title: 'News', alias: 'news', language: 'en-GB' }],

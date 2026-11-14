@@ -23,6 +23,7 @@ try {
     \Joomla\CMS\Form\Form::addFormPath($root . '/administrator/components/com_templates/forms');
     $menuFactory = $application->bootComponent('com_menus')->getMVCFactory();
     $created = [];
+    $references = [];
     $homes = [];
     $skipped = [];
     $warnings = [];
@@ -30,8 +31,10 @@ try {
     $warn = static function (string $package, string $message) use (&$warnings): void {
         $warnings[] = ['package' => $package, 'message' => $message];
     };
-    // Template assignments may refer to menus that did not change in this apply.
+    // Stable recipe keys retain the installed menu when its alias changes and
+    // let template assignments refer to menus not changed in this apply.
     foreach ($playground['menuReferences'] ?? [] as $entry) {
+        $references[$entry['key']] = $entry;
         $id = (int) $database->setQuery('SELECT id FROM #__menu WHERE client_id = 0 AND menutype = ' . $database->quote($entry['menuType'])
             . ' AND alias = ' . $database->quote($entry['alias']) . ' AND language = ' . $database->quote($entry['language']))->loadResult();
         if ($id) $created[$entry['key']] = $id;
@@ -71,9 +74,16 @@ try {
                 throw new RuntimeException('Cannot create menu: ' . $menuModel->getError());
             }
         }
-        $existing = (int) $database->setQuery('SELECT id FROM #__menu WHERE client_id = 0 AND menutype = ' . $database->quote($entry['menuType'])
+        $existing = $created[$entry['key']] ?? (int) $database->setQuery('SELECT id FROM #__menu WHERE client_id = 0 AND menutype = ' . $database->quote($entry['menuType'])
             . ' AND alias = ' . $database->quote($entry['alias']) . ' AND language = ' . $database->quote($entry['language']))->loadResult();
-        $currentHome = $existing ? (int) $database->setQuery('SELECT home FROM #__menu WHERE id = ' . $existing)->loadResult() : 0;
+        $current = $existing ? $database->setQuery('SELECT home, template_style_id FROM #__menu WHERE id = ' . $existing)->loadAssoc() : [];
+        $currentHome = (int) ($current['home'] ?? 0);
+        $templateStyle = $entry['templateStyle'];
+        if ($existing && isset($references[$entry['key']]) && $references[$entry['key']]['templateStyle'] === $templateStyle) {
+            // Retain assignments made through Template or inside Joomla when
+            // this edit did not change the menu's own template selection.
+            $templateStyle = (int) $current['template_style_id'];
+        }
         $query = ['option' => $component, 'view' => $view] + ($entry['query'] ?? []);
         $link = 'index.php?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
         $model = $menuFactory->createModel('Item', 'Administrator', ['ignore_request' => true]);
@@ -87,10 +97,10 @@ try {
             'id' => $existing, 'menutype' => $entry['menuType'], 'title' => $entry['title'], 'alias' => $entry['alias'],
             'type' => 'component', 'link' => $link, 'component_id' => $componentId, 'parent_id' => 1,
             'menuordering' => -2, 'published' => $entry['published'] ? 1 : 0, 'language' => $entry['language'],
-            'client_id' => 0, 'access' => $entry['access'], 'template_style_id' => $entry['templateStyle'],
+            'client_id' => 0, 'access' => $entry['access'], 'template_style_id' => $templateStyle,
             'params' => $entry['params'], 'request' => $query, 'home' => $currentHome,
         ];
-        if ($entry['templateStyle'] && !(int) $database->setQuery('SELECT id FROM #__template_styles WHERE client_id = 0 AND id = ' . (int) $entry['templateStyle'])->loadResult()) {
+        if ($templateStyle && !(int) $database->setQuery('SELECT id FROM #__template_styles WHERE client_id = 0 AND id = ' . $templateStyle)->loadResult()) {
             if (!$allowMissingDependencies) throw new RuntimeException('The selected menu template style does not exist.');
             $data['template_style_id'] = 0;
             $warn('Menu', 'Menu "' . $entry['title'] . '" uses the current site template because its selected template style is unavailable.');
