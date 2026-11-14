@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { readURLConfiguration } from '../src/config.mjs';
 import { assertLaunchReadiness } from './launch-readiness-browser.mjs';
 
@@ -29,6 +30,10 @@ export async function assertImmediateLaunch(page, baseURL, waitUntilRunning) {
     }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
   });
   const url = new URL(baseURL);
+  // Test a new shared deployment, independently of the deliberately stopped
+  // live site used earlier in this context. Stop must continue to win for it.
+  url.searchParams.set('deploy', 'jcb');
+  url.searchParams.set('key', `immediate-${randomUUID()}`);
   url.searchParams.set('immediate', '1');
   url.searchParams.set('start', '0');
   await page.goto(url.href);

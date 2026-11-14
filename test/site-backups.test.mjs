@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createSiteBackups, backupStorageCapacity, BACKUP_STORAGE_MARGIN, backupFilename, archiveBlob } from '../src/site-backups.mjs';
+import { createSiteBackups, createIndexedDBBackupStorage, backupStorageCapacity, BACKUP_STORAGE_MARGIN, backupFilename, archiveBlob } from '../src/site-backups.mjs';
 
 const archive = (value = 'complete site') => ({ bytes: new TextEncoder().encode(value), metadata: {
   format: 'joomengine-playground-export', createdAt: '2026-11-14T10:23:45+00:00', siteName: 'Authoring site', joomlaVersion: '6.2.0',
@@ -114,6 +114,17 @@ test('an unavailable estimate does not prevent a valid write and never claims gu
   assert.equal(result.saved, true);
   assert.equal(result.capacity.known, false);
   assert.equal(await backups.usage(), null);
+});
+
+test('unavailable browser storage still returns the complete downloadable archive', async () => {
+  const storage = createIndexedDBBackupStorage({ indexedDB: null });
+  const backups = createSiteBackups({ storage, estimate: async () => null });
+  const result = await backups.saveArchive(archive('download without browser storage'));
+  assert.equal(result.saved, false);
+  assert.equal(result.reason, 'storage');
+  assert.match(result.error.message, /backup storage is unavailable/);
+  assert.equal(await result.archive.blob.text(), 'download without browser storage');
+  assert.equal(result.record, undefined);
 });
 
 test('deleted update targets do not silently create an additional backup', async () => {

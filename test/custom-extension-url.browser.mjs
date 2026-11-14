@@ -232,8 +232,10 @@ test('large custom Service Directory launches without export and still reads a c
           window.largeImageDatabase.pending = null;
         }
       };
-      const send = PhpSession.prototype.send;
-      PhpSession.prototype.send = function (operation, args, ...rest) {
+      // Observe dispatched operations, including exports that reserve the queue
+      // with withExclusive and deliberately bypass the public send wrapper.
+      const perform = PhpSession.prototype.perform;
+      PhpSession.prototype.perform = function (operation, args, ...rest) {
         if (operation === 'runPhp') {
           const encoded = /base64_decode\('([^']+)'\)/.exec(args.source)?.[1];
           if (encoded) {
@@ -242,7 +244,7 @@ test('large custom Service Directory launches without export and still reads a c
             if (payload.operation === 'create') window.largeImageCalls.exports.push(payload.executionTimeSeconds);
           }
         }
-        return send.call(this, operation, args, ...rest);
+        return perform.call(this, operation, args, ...rest);
       };
     }
     const progress = window.largeImageProgress = [];

@@ -356,7 +356,7 @@ parameters. Invalid JSON remains visible until corrected.
   built-in saves a **Custom** copy; the original remains available.
 - **Save as copy** creates another custom recipe. **Delete** removes only a
   custom recipe, leaving existing saved sites intact.
-- **Export configuration** downloads the complete version 2 recipe, including
+- **Export configuration** downloads the complete version 3 recipe, including
   administrator details. **Import configuration** adds it as a named custom deployment. Configuration JSON does not contain the site's files or database.
 
 - **Use** starts an independent deployment from the editor's configuration and

@@ -23,7 +23,10 @@ export async function assertBuildUpdate(page, { fixtures, indexHTML, readSite })
     page.once('dialog', dialog => dialog.accept());
     await page.locator('#close-button').click();
     await page.locator('#reload-build:enabled').waitFor({ timeout: 240_000 });
-    const preferences = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)));
+    // The owner-discovery token describes this window, not saved site data.
+    // Its removal on navigation prevents a new window attaching to a dead owner.
+    const discoveryKey = `joomengine-active-runtime-view:${new URL('./', page.url()).pathname}`;
+    const preferences = await page.evaluate(key => Object.fromEntries(Object.entries(localStorage).filter(([name]) => name !== key)), discoveryKey);
 
     const updatedHTML = indexHTML.replace(/(<meta name="joomengine-build" content=")[a-f0-9]{64}(">)/,
       (_, prefix, suffix) => `${prefix}${nextId}${suffix}`);
@@ -31,7 +34,9 @@ export async function assertBuildUpdate(page, { fixtures, indexHTML, readSite })
     await Promise.all([page.waitForNavigation({ waitUntil: 'load' }), page.locator('#reload-build').click()]);
     await page.locator('#embedded-launch:enabled').waitFor();
     assert.equal(await page.locator('#build-update').isVisible(), false);
-    assert.deepEqual(await page.evaluate(() => Object.fromEntries(Object.entries(localStorage))), preferences,
+    assert.equal(await page.evaluate(key => localStorage.getItem(key), discoveryKey), null,
+      'Reloading clears the obsolete runtime owner token.');
+    assert.deepEqual(await page.evaluate(key => Object.fromEntries(Object.entries(localStorage).filter(([name]) => name !== key)), discoveryKey), preferences,
       'Updating application assets does not delete saved-site metadata or preferences.');
     await page.locator('#embedded-launch').click();
     assert.deepEqual(await readSite(), before, 'The site reopens with its saved files and database after the update.');
