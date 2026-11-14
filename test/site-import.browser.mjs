@@ -1,3 +1,4 @@
+import { continueLiveReplacement } from './live-replacement-contract.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -231,6 +232,7 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
       assert.notEqual(importedKey, configuration.storageKey);
       await ui.locator('#settings-toggle').click();
       await ui.locator('#credentials-button').click();
+      await ui.locator('#credentials-dialog').waitFor({ state: 'visible' });
       assert.equal(await ui.locator('#credential-username').inputValue(), configuration.admin.username);
       assert.equal(await ui.locator('#credential-password').inputValue(), configuration.admin.password);
       await ui.locator('#credentials-dialog [data-close-dialog]').click();
@@ -241,6 +243,7 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
       for (const sourceOpen of [true, false]) {
         if (!sourceOpen) {
           if (!await ui.locator('#close-button').isVisible()) await ui.locator('#settings-toggle').click();
+          ui.once('dialog', dialog => dialog.accept());
           await ui.locator('#close-button').click();
           await ui.locator('#launch-button:enabled').waitFor();
         }
@@ -274,6 +277,7 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
           }
           releaseCheck();
           delete fixtures['build.json'];
+          await continueLiveReplacement(ui);
           await ready(sourceOpen ? 'open-source copy completed' : 'closed-source copy completed', { previousKey: sourceKey, previousFrameURL });
         } finally { clearTimeout(checkTimer); releaseCheck?.(); delete fixtures['build.json']; }
         assert.notEqual(await ui.locator('#storage-key').inputValue(), sourceKey);
@@ -284,12 +288,14 @@ test('complete site ZIP roundtrip preserves edits and credentials independently'
         assert.deepEqual(state, { menu: 'Manual menu settings', template_styles: 'Manual template_styles settings', row: 'Edited database row' });
         if (!await ui.locator('#credentials-button').isVisible()) await ui.locator('#settings-toggle').click();
         await ui.locator('#credentials-button').click();
+        await ui.locator('#credentials-dialog').waitFor({ state: 'visible' });
         assert.equal(await ui.locator('#credential-username').inputValue(), 'copiedadmin');
         assert.equal(await ui.locator('#credential-password').inputValue(), 'Independent-copy-password-567!');
         await ui.locator('#credentials-dialog [data-close-dialog]').click();
       }
       assert.deepEqual(errors, []);
       if (!await ui.locator('#close-button').isVisible()) await ui.locator('#settings-toggle').click();
+      ui.once('dialog', dialog => dialog.accept());
       await ui.locator('#close-button').click();
       await ui.locator('#launch-button:enabled').waitFor();
       const source = await page.evaluate(async ({ key, admin, baseURL }) => {

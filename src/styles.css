@@ -252,3 +252,23 @@ html,body{background:var(--canvas);color:var(--ink)}
 .extension-package-access{grid-column:1/-1;min-width:0}.extension-package-access>summary{font-size:12px;color:var(--muted)}
 .extension-access-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}.extension-package-headers{grid-column:1/-1}
 @media(max-width:760px){.deployment-form-grid,.extension-access-fields{grid-template-columns:1fr}.deployment-card{padding:12px}.deployment-section-nav{gap:6px}.deployment-section-nav button{padding:8px 10px}.deployment-field>input,.deployment-field>textarea{flex-basis:auto}}
+
+/* Backups stay in the page, below the live workspace, and never cover Joomla. */
+.backups-panel{padding:24px clamp(18px,5vw,72px) 30px;border-block-start:1px solid var(--line);background:var(--paper);scroll-margin-block-start:24px;min-width:0}
+.backups-panel:focus{outline:none}.backups-panel:focus-visible{outline:2px solid var(--focus);outline-offset:-3px}
+.backups-heading,.backups-toolbar,.backups-storage-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.backups-heading{align-items:flex-start}.backups-heading h2{margin:0 0 8px;font-size:24px}.backups-heading p{margin:0;color:var(--muted);line-height:1.6}
+.backups-toolbar{margin-block:22px 16px}.backups-toolbar>p{font-size:12px;color:var(--muted);line-height:1.6;margin:0;overflow-wrap:anywhere}
+.backups-storage-heading{border-block-start:1px solid var(--line);margin-top:26px;padding-top:20px}.backups-storage-heading h3{font-size:16px;margin:0}
+.backups-panel .danger{color:var(--danger)}.backups-message{padding:12px 14px;border:1px solid var(--line);border-radius:7px;color:var(--ink);background:var(--control);font-size:13px;line-height:1.65;overflow-wrap:anywhere}
+.backups-message[data-error=true]{border-color:var(--danger);background:var(--error-bg)}
+.backup-list,.backup-storage-list{display:grid;gap:12px;list-style:none;padding:0;margin:16px 0}
+.backup-list>li,.backup-storage-list>li{display:flex;align-items:center;gap:16px;padding:16px;border:1px solid var(--line);border-radius:9px;min-width:0;background:var(--panel)}
+.backup-list .backup-description,.backup-storage-list .backup-description,.backup-list .image-description,.backup-storage-list .image-description{flex:1;min-width:0}
+.backup-list strong,.backup-list small,.backup-storage-list strong,.backup-storage-list small{display:block;overflow-wrap:anywhere}
+.backup-list small,.backup-storage-list small{color:var(--muted);font-size:12px;margin-top:6px;line-height:1.5}
+.backup-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;flex:none}
+.backups-panel .button{font-size:12px}.backups-legacy{margin-top:22px;border-block-start:1px solid var(--line);padding-top:16px}.backups-legacy>summary{cursor:pointer;font-size:13px;color:var(--muted)}
+.backups-legacy .site-switcher{margin-top:18px}.backups-legacy .field{min-width:0}.backups-legacy input,.backups-legacy select{background:var(--control);color:var(--ink);border:1px solid var(--control-border);border-radius:6px;padding:10px 12px;width:100%;min-width:0}
+.backups-legacy .field>label{display:block;font-size:12px;color:var(--muted);margin-bottom:7px}
+@media(max-width:760px){.backups-panel{padding:20px 18px 24px}.backups-heading h2{font-size:22px}.backups-toolbar{align-items:stretch}.backups-toolbar>p{flex-basis:100%}.backup-list>li,.backup-storage-list>li{align-items:flex-start;flex-wrap:wrap}.backup-actions{justify-content:flex-start;width:100%}.backups-storage-heading .button{max-width:100%;white-space:normal;text-align:start}}

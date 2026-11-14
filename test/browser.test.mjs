@@ -1,3 +1,4 @@
+import { continueLiveReplacement } from './live-replacement-contract.mjs';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -271,11 +272,6 @@ async function assertCleanConsole(page, { contentImages = false } = {}) {
   assert.deepEqual(page.responseErrors, [], 'AJAX responses must not contain PHP diagnostics or malformed JSON.');
 }
 
-async function setPersistence(page, enabled) {
-  if (await page.locator('#persistence').isChecked() !== enabled) await page.locator('label[for="persistence"]').click();
-  await page.waitForFunction(enabled => document.getElementById('persistence').checked === enabled, enabled, { timeout: 10_000 });
-}
-
 async function showQuickSettings(page) {
   await page.locator('html[data-playground-environment="ready"]').waitFor();
   if (!(await page.locator('#settings').isVisible())) await page.locator('#settings-toggle').click();
@@ -412,6 +408,7 @@ async function launchStagedSite(page) {
   const key = await page.locator('#storage-key').inputValue();
   try {
     await page.locator('#launch-button').click();
+    await continueLiveReplacement(page);
     await page.waitForFunction(({ previous, key }) => {
       if (!document.getElementById('error-view').hidden) return true;
       const frame = document.getElementById('site-frame');
@@ -428,6 +425,8 @@ async function waitForSiteClosed(page) {
 }
 
 async function stageSavedSite(page, key) {
+  if (!await page.locator('#backups-panel').isVisible()) await page.locator('#local-images-button').click();
+  if (await page.locator('#legacy-sites').getAttribute('open') === null) await page.locator('#legacy-sites > summary').click();
   await page.locator('#saved-site').selectOption(key);
   await page.waitForFunction(key => document.getElementById('saved-site').value === key
     && document.getElementById('storage-key').value === key
@@ -436,15 +435,7 @@ async function stageSavedSite(page, key) {
 
 async function saveRunningSite(page) {
   await showSiteActions(page);
-  const previous = await page.locator('#activity-log li').last().elementHandle();
-  try {
-    await page.locator('#save-button').click();
-    await page.waitForFunction(previous => {
-      const entry = document.querySelector('#activity-log li:last-child');
-      return entry !== previous && entry?.textContent.includes('Files and database saved to browser storage.')
-        && !document.getElementById('save-button').disabled;
-    }, previous, { timeout: requestTimeout });
-  } finally { await previous?.dispose(); }
+  await page.locator('#save-state').filter({ hasText: /^Saved locally/i }).waitFor({ timeout: requestTimeout });
 }
 
 async function dismissAutomaticTour(page) {
@@ -1062,6 +1053,7 @@ for (const name of browserNames) {
           await page.screenshot({ path: path.join(root, 'test-results/jcb-desktop.png'), fullPage: true });
         }
         await showSiteActions(page);
+        page.once('dialog', dialog => dialog.accept());
         await page.locator('#close-button').click();
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
@@ -1069,6 +1061,7 @@ for (const name of browserNames) {
         page.testStep = 'immediate shared deployment skips countdown while start=0 still waits';
         proof.push({ id: 'immediate-shared-launch', ...(await assertImmediateLaunch(page, server.url, () => renderedSiteFrame(page))) });
         await showSiteActions(page);
+        page.once('dialog', dialog => dialog.accept());
         await page.locator('#close-button').click();
         for (const [url, requests] of newsFeeds) assert.ok(requests > 0, `The installed JCB must exercise its news feed fixture: ${url}`);
         proof.push({ id: 'jcb-news-feed-fixture', requests: Object.fromEntries(newsFeeds) });
@@ -1289,11 +1282,23 @@ for (const name of browserNames) {
         assert.deepEqual(afterSwitch, { ...marker, php: manifest.php.find((entry) => entry.version === changedPHP).patchVersion });
         page.testStep = 'reopen saved site from origin';
         await showSiteActions(page);
+        page.once('dialog', dialog => dialog.accept());
         await page.locator('#close-button').click();
         await waitForSiteClosed(page);
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
+        // Model a site retained by the previous application version. New live
+        // replacements use one managed slot; this section verifies migration
+        // of the older explicitly selectable saved-site catalog.
+        await page.evaluate(baseURL => {
+          const key = `joomengine-live:${new URL(baseURL).pathname}`;
+          const live = JSON.parse(localStorage.getItem(key));
+          localStorage.setItem(key, JSON.stringify({ ...live, managed: false }));
+        }, server.url);
         await page.goto(server.url);
+        await showQuickSettings(page);
+        assert.equal(await page.locator('#site-frame').count(), 0, 'A stopped site remains stopped after reopening Playground.');
+        await page.locator('#restart-button:enabled').click();
         await renderedSiteFrame(page);
         assert.equal(await page.locator('#php-version').inputValue(), changedPHP);
         assert.equal(await page.locator('#deploy').inputValue(), 'blank');
@@ -1318,6 +1323,7 @@ for (const name of browserNames) {
         page.testStep = 'fresh URL creates an independent saved site';
         const savedKey = await page.locator('#storage-key').inputValue();
         await showSiteActions(page);
+        page.once('dialog', dialog => dialog.accept());
         await page.locator('#close-button').click();
         await waitForSiteClosed(page);
         await showQuickSettings(page);
@@ -1336,6 +1342,7 @@ for (const name of browserNames) {
         assert.equal(new URL(page.url()).searchParams.has('fresh'), false, 'Reloading the new site must resume it instead of repeatedly creating sites.');
         assert.equal((await previewContract(page)).database, null);
         await showSiteActions(page);
+        page.once('dialog', dialog => dialog.accept());
         await page.locator('#close-button').click();
         await waitForSiteClosed(page);
         await showQuickSettings(page);
@@ -1348,6 +1355,7 @@ for (const name of browserNames) {
         assert.deepEqual(await previewContract(page), afterSwitch, 'A fresh URL must leave the original saved site intact.');
         page.testStep = 'changed source launches separately and reports optional installer failure';
         await showSiteActions(page);
+        page.once('dialog', dialog => dialog.accept());
         await page.locator('#close-button').click();
         await waitForSiteClosed(page);
         await page.locator('#embedded-launch:enabled').waitFor();
@@ -1369,6 +1377,7 @@ for (const name of browserNames) {
           'The successful site must retain the optional installer error.');
         assert.equal(await page.locator('#error-view').isVisible(), false, 'An optional extension failure does not replace the site with a fatal error.');
         await showSiteActions(page);
+        page.once('dialog', dialog => dialog.accept());
         await page.locator('#close-button').click();
         await waitForSiteClosed(page);
         await page.goto(savedURL.href);
@@ -1384,6 +1393,7 @@ for (const name of browserNames) {
         const previousDeploymentFrame = await page.locator('#site-frame').elementHandle();
         try {
           await page.locator('#use-deploy').click();
+          await continueLiveReplacement(page);
           await page.waitForFunction(({ previous, savedKey }) => {
             if (!document.getElementById('error-view').hidden) return true;
             const frame = document.getElementById('site-frame');
@@ -1426,28 +1436,22 @@ for (const name of browserNames) {
         await stageSavedSite(page, savedKey);
         await launchStagedSite(page);
         assert.deepEqual(await previewContract(page), afterSwitch, 'The saved-site selector must reopen the original files and database.');
-        page.testStep = 'reset site';
-        page.once('dialog', (dialog) => dialog.accept());
+        page.testStep = 'reset starts the default JCB site after confirmation';
+        const oldFrame = await page.locator('#site-frame').elementHandle();
         await showSiteActions(page);
         await page.locator('#reset-button').click();
-        await waitForSiteClosed(page);
-        await showQuickSettings(page);
-        await page.locator('#launch-button:enabled').waitFor();
-        assert.equal(await page.locator('#site-frame').isVisible(), false);
-        await showDeployEditor(page, { advanced: true });
-        await page.locator('#site-name').fill('Interface installation after reset');
-        await page.locator('#initial-path').fill('/');
-        await closeDeployEditor(page);
-        await showQuickSettings(page);
-        page.testStep = 'launch site after reset';
-        await page.locator('#launch-button').click();
+        await continueLiveReplacement(page);
+        await page.waitForFunction(previous => {
+          const frame = document.getElementById('site-frame');
+          return frame && frame !== previous && !document.getElementById('credentials-button').disabled;
+        }, oldFrame, { timeout: requestTimeout });
+        await oldFrame.dispose();
         await renderedSiteFrame(page);
-        assert.ok((await page.frameLocator('#site-frame').locator('html').innerHTML()).includes('Interface installation after reset'));
-        const afterReset = await previewContract(page);
-        assert.equal(afterReset.database, null, 'Reset must remove the previous MariaDB data.');
-        assert.equal(afterReset.file, null, 'Reset must remove the previous site files.');
+        assert.equal(await page.locator('#deploy').inputValue(), 'jcb');
+        assert.notEqual(await page.locator('#storage-key').inputValue(), savedKey, 'Reset creates a fresh default live site.');
         page.testStep = 'close site';
         await showSiteActions(page);
+        page.once('dialog', dialog => dialog.accept());
         await page.locator('#close-button').click();
         await waitForSiteClosed(page);
         await showQuickSettings(page);
@@ -1514,14 +1518,12 @@ for (const name of browserNames) {
         assert.ok(!link.includes(credentials.password));
         await page.locator('#credentials-dialog [data-close-dialog]').click();
         await showQuickSettings(page);
-        assert.equal(await page.locator('#persistence').isChecked(), false);
-        page.testStep = 'checkpoint temporary site into browser storage';
-        await setPersistence(page, true);
-        assert.deepEqual(await previewContract(page), marker, 'Keep setting is staged without replacing the temporary runtime.');
-        await page.locator('#save-button').click();
-        await page.locator('#save-button:enabled').waitFor({ timeout: requestTimeout });
-        await renderedSiteFrame(page);
         assert.equal(await page.locator('#persistence').isChecked(), true);
+        assert.equal(await page.locator('#persistence').isVisible(), false, 'The live site persists automatically without a Keep switch.');
+        page.testStep = 'automatic persistence retains files, SQL and credentials';
+        const liveURL = await page.locator('#site-frame').getAttribute('src');
+        await saveRunningSite(page);
+        assert.equal(await page.locator('#site-frame').getAttribute('src'), liveURL, 'Automatic persistence must not replace the running runtime.');
         assert.deepEqual(await previewContract(page), marker);
         await showSiteActions(page);
         await page.locator('#credentials-button').click();
@@ -1535,9 +1537,10 @@ for (const name of browserNames) {
         await page.evaluate(() => {
           const original = Worker.prototype.postMessage;
           window.__flushFailureInjected = false;
+          window.__restoreFailedSwitch = () => { Worker.prototype.postMessage = original; };
           Worker.prototype.postMessage = function (message, ...options) {
             if (message?.type === 'operation' && message.operation === 'flush') {
-              Worker.prototype.postMessage = original; window.__flushFailureInjected = true;
+              window.__flushFailureInjected = true;
               queueMicrotask(() => this.dispatchEvent(new MessageEvent('message', { data: { type: 'result', id: message.id, error: 'Simulated storage quota failure', fatal: false } })));
               return;
             }
@@ -1550,6 +1553,7 @@ for (const name of browserNames) {
         await page.locator('#site-name').fill('Unlaunched deployment after save failure');
         assert.deepEqual(await previewContract(page), marker, 'Staging a new site must not flush or close the running one.');
         await page.locator('#use-deploy').click();
+        await continueLiveReplacement(page);
         await page.locator('#header-feedback').filter({ hasText: 'Simulated storage quota failure' }).waitFor();
         assert.equal(await page.evaluate(() => window.__flushFailureInjected), true);
         await renderedSiteFrame(page);
@@ -1557,6 +1561,7 @@ for (const name of browserNames) {
         assert.deepEqual(await previewContract(page), marker);
         assert.equal(await page.locator('#save-button').isEnabled(), true);
         assert.equal(await page.locator('#download-dialog-button').isEnabled(), true);
+        await page.evaluate(() => { window.__restoreFailedSwitch(); delete window.__restoreFailedSwitch; });
         page.testStep = 'apply and verify PHP settings without losing data';
         await showSiteActions(page);
         await page.locator('#php-settings-button').click();

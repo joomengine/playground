@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { probeSyntheticRedirect, startRedirectTrace, recordVerifiedRedirectDiagnostic } from './firefox-redirect-probe.mjs';
 
-/** Reproduce issue #5 through the prepared JCB UI: Save must survive a page reload without Close. */
+/** Reproduce issue #5 through the prepared JCB UI: Automatic persistence must survive a page reload without Stop. */
 export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_000 } = {}) {
   const probe = redirectProbe ?? await probeSyntheticRedirect(page.context().browser());
   const nonce = randomUUID();
@@ -33,6 +33,7 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
   const credentials = async () => {
     if (!(await page.locator('#settings').isVisible())) await page.locator('#settings-toggle').click();
     await page.locator('#credentials-button').click();
+    await page.locator('#credentials-dialog').waitFor({ state: 'visible' });
     const result = { username: await page.locator('#credential-username').inputValue(), password: await page.locator('#credential-password').inputValue() };
     await page.locator('#credentials-dialog [data-close-dialog]').click();
     return result;
@@ -87,16 +88,14 @@ export async function assertJcbHardReload(page, { redirectProbe, timeout = 240_0
   for (let saved = 1; saved <= 2; saved++) {
     page.testStep = `prepared JCB save ${saved} then whole-page reload without Close`;
     if (!await page.locator('#settings').isVisible()) await page.locator('#settings-toggle').click();
-    await page.locator('#save-button').click();
-    await page.locator('#status-message').filter({ hasText: 'Files and database saved to browser storage.' }).waitFor({ timeout });
-    await page.locator('#save-button:enabled').waitFor({ timeout });
+    await page.locator('#save-state').filter({ hasText: /^Saved|Live changes saved/i }).waitFor({ timeout });
     // Intentionally do not click Close or invoke runtime.close(): either would
     // checkpoint MariaDB and conceal the live-persistence regression in issue #5.
     await page.reload({ waitUntil: 'load', timeout });
     await page.waitForFunction(() => document.getElementById('site-frame')
       || (document.getElementById('error-view') && !document.getElementById('error-view').hidden), undefined, { timeout });
     assert.equal(await page.locator('#error-view').isVisible(), false,
-      `A completed Save must reopen without graceful shutdown: ${await page.locator('#error-message').textContent()}`);
+      `An automatically persisted site must reopen without graceful shutdown: ${await page.locator('#error-message').textContent()}`);
     frame = await (await page.locator('#site-frame').elementHandle()).contentFrame();
     await frame.waitForURL(url => url.pathname.includes('/__site/'), { waitUntil: 'load', timeout });
     await frame.locator('body').waitFor();

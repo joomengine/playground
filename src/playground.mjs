@@ -17,6 +17,7 @@ import { withStorageRecovery } from './storage-recovery.mjs';
 import { closeSiteResources } from './site-close.mjs';
 import { createRuntimeAccess } from './runtime-access.mjs';
 import { createLivePersistence } from './live-persistence.mjs';
+import { rememberRuntimeStorage, forgetRuntimeStorage } from './storage-management.mjs';
 
 const base = new URL('../', import.meta.url);
 const manifestUrl = new URL('assets/manifest.json', base);
@@ -455,6 +456,7 @@ async function eraseStoredSite(identity) {
   await Promise.all([deleteStore(`/joomengine-${identity}`), deleteStore(`/mariadb/idb/joomengine-${identity}`)]);
   const { clearEditorDrafts } = await import('./code/editor-session.mjs');
   await clearEditorDrafts(identity);
+  forgetRuntimeStorage({ baseURL: base.href, identity });
 }
 
 /** Validate the private copy before a restart can discard the live filesystem. */
@@ -468,6 +470,13 @@ export function validateCheckpointBytes(value, label = 'The private runtime chec
   }
   return bytes;
 }
+/** Starting an existing live site must never fall through to a fresh deployment. */
+export function validateResumedInstallation(state) {
+  if (state?.marker?.state === 'complete' && state.configured && !state.installerPresent && !state.markerError) return;
+  const error = new Error('The current live site is missing or incomplete in browser storage. Restore a backup, upload its complete export, or choose Reset to start a fresh deployment.');
+  error.code = 'SAVED_SITE_UNAVAILABLE';
+  throw error;
+}
 /** Erase a closed or incompletely installed saved site after user confirmation. */
 export async function resetPlayground({ storageKey = 'default' } = {}) {
   const identity = await storageIdentity(storageKey);
@@ -476,7 +485,7 @@ export async function resetPlayground({ storageKey = 'default' } = {}) {
 }
 
 /** Create a real Joomla installation backed by upstream PHP and MariaDB WASM. */
-export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, siteExport = null, recovery = false, rotateAdministrator = false, deferInitialSave = false, jcbUpgrade = null } = {}) {
+export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, siteExport = null, recovery = false, rotateAdministrator = false, deferInitialSave = false, jcbUpgrade = null, resumeOnly = false } = {}) {
   const environment = await prepareEnvironment();
   if (environment.reloadRequired) throw new Error(environment.reason + ' Complete the controlled page navigation before starting the playground.');
   let imagePhase;
@@ -511,6 +520,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   const identity = await storageIdentity(config.storageKey);
   const clientId = await clientIdentity();
   const release = config.persistence ? await acquireSiteLock(identity) : async () => {};
+  if (config.persistence) rememberRuntimeStorage({ baseURL: base.href, storageKey: config.storageKey, identity });
   const instanceId = crypto.randomUUID();
   let database, session, closePromise, changing = false, databaseError = null, adminerOpened = false;
   const workspaceListeners = new Set();
@@ -892,6 +902,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       return handle;
     }
     let installed;
+    if (resumeOnly && !siteExport && !checkpoint) validateResumedInstallation(state);
     if (siteExport) {
       if (!pristine) throw new Error('Upload a site into a new playground instance.');
       imagePhase = 'launch-image';
@@ -1005,7 +1016,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   } catch (error) {
     // Persistent installations remain recoverable even when provisioning fails.
     // Closing workers no longer implicitly commits PHP files on their own.
-    if (config.persistence && !recovery && session && !session.failure) {
+    if (config.persistence && !recovery && error.code !== 'SAVED_SITE_UNAVAILABLE' && session && !session.failure) {
       try { await session.flushTogether(); }
       catch (saveError) {
         try { error.recoverySaveError = saveError; } catch { /* The original error may be immutable. */ }

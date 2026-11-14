@@ -14,13 +14,13 @@ export async function assertBuildUpdate(page, { fixtures, indexHTML, readSite })
     await page.locator('#launch-button').click();
     await page.locator('#build-update').waitFor({ state: 'visible' });
     assert.equal(await page.locator('#reload-build').isDisabled(), true);
-    assert.match(await page.locator('#build-update-message').innerText(), /Close your running site/);
+    assert.match(await page.locator('#build-update-message').innerText(), /(?:Close|Stop) your running site/);
     // Even a synthetic click cannot bypass the active-site guard.
     await page.locator('#reload-build').dispatchEvent('click');
     assert.equal(await page.locator('#site-frame').getAttribute('src'), frameURL);
     assert.deepEqual(await readSite(), before, 'Detecting a new build keeps the live files and database intact.');
-    await page.locator('#save-button').click();
-    await page.locator('#save-button:enabled').waitFor({ timeout: 240_000 });
+    await page.locator('#save-state').filter({ hasText: /^Saved locally/i }).waitFor({ timeout: 240_000 });
+    page.once('dialog', dialog => dialog.accept());
     await page.locator('#close-button').click();
     await page.locator('#reload-build:enabled').waitFor({ timeout: 240_000 });
     const preferences = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)));

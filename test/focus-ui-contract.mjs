@@ -93,8 +93,12 @@ async function assertShellAppearance(page, capture) {
     }
     assert.equal(await page.locator('#theme-preference').count(), 0, 'Appearance has one toggle and no System selector.');
     assert.equal(await page.locator('.header-actions #save-button, .header-actions #download-dialog-button').count(), 0,
-      'Save and Download belong to the running-site actions.');
+      'Save and Download remain in the dashboard actions.');
     assert.equal(await page.locator('#site-actions #save-button').count(), 1);
+    assert.deepEqual(await page.locator('#site-actions > button').evaluateAll(buttons => buttons.slice(0, 4).map(button => button.id)),
+      ['save-button', 'reset-button', 'upload-site-button', 'download-dialog-button'], 'Deployment Save and Reset sit immediately before Upload and Download.');
+    assert.equal(await page.locator('#persistence').isVisible(), false);
+    assert.equal(await page.locator('#backups-panel #saved-site').count(), 1, 'Legacy stored sites are managed in Backups.');
     assert.equal(await page.locator('#site-actions #download-dialog-button').count(), 1);
     assert.equal(await page.locator('#upload-site-button').evaluate(button => {
       const buttons = [...button.parentElement.querySelectorAll('button')];
@@ -103,7 +107,7 @@ async function assertShellAppearance(page, capture) {
     assert.equal(await page.locator('#edit-deployment svg').count(), 1, 'Edit deployment has one decorated icon.');
     assert.doesNotMatch(await page.locator('#edit-deployment').textContent(), /[✎✏]/);
     assert.equal(await page.locator('#configuration-fields').evaluate(fieldset => fieldset.querySelector('legend').nextElementSibling?.id), 'site-actions',
-      'Site actions are the first dashboard row, above saved-site details.');
+      'Site actions are the first dashboard row, above deployment settings.');
     // Start from a known OS value, then prove a manual toggle only lasts until
     // the OS changes again, even when the first change matches the override.
     await page.emulateMedia({ colorScheme: 'light' });
@@ -127,12 +131,12 @@ async function assertShellAppearance(page, capture) {
         const layout = await page.evaluate(() => {
           const actions = document.getElementById('site-actions');
           return { actionsBottom: actions.getBoundingClientRect().bottom,
-            savedTop: document.querySelector('.site-switcher').getBoundingClientRect().top,
+            settingsTop: document.querySelector('.runtime-controls').getBoundingClientRect().top,
             rightGap: actions.getBoundingClientRect().right - actions.lastElementChild.getBoundingClientRect().right,
             logoContent: getComputedStyle(document.querySelector('.brand img')).content,
             logoBackground: getComputedStyle(document.querySelector('.brand img')).backgroundColor };
         });
-        assert.ok(layout.actionsBottom <= layout.savedTop, 'Site actions appear above saved-site details.');
+        assert.ok(layout.actionsBottom <= layout.settingsTop, 'Site actions appear above deployment settings.');
         assert.ok(Math.abs(layout.rightGap) <= 1, 'Site actions align to the far right of the dashboard.');
         if (mode === 'light') {
           assert.match(layout.logoContent, /joomengine-logo-light\.svg/);

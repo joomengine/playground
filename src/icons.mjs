@@ -1,13 +1,19 @@
 import { ACTION_ICONS } from './icon-data.mjs';
 
-export const ICON_IDS = Object.freeze([...Object.keys(ACTION_ICONS), 'deployment', 'launch']);
+// Keep the download tray unchanged and reflect only its arrow for site uploads.
+const derivedIcons = Object.freeze({
+  'upload-site': ACTION_ICONS['download-site'].replace('M13 10h5l-6 6-6-6h5V3h2v7z', 'M13 9h5l-6-6-6 6h5v7h2V9z'),
+});
+export const DERIVED_ICON_IDS = Object.freeze(Object.keys(derivedIcons));
+export const ICON_IDS = Object.freeze([...Object.keys(ACTION_ICONS), ...DERIVED_ICON_IDS, 'deployment', 'launch']);
 const branded = new Set(['deployment', 'launch']);
 const iconsURL = new URL('./brand/rocket.svg', import.meta.url).href;
 const idMapping = Object.freeze({
   'deploy-editor-button': 'deployment', 'nav-site': 'site', 'nav-admin': 'admin',
   'save-button': 'save-site', 'share-button': 'share-site', 'code-button': 'code', 'database-button': 'database', 'code-refresh-button': 'refresh-site',
-  'download-dialog-button': 'download-site', 'settings-toggle': 'dashboard-toggle',
+  'download-dialog-button': 'download-site', 'upload-site-button': 'upload-site', 'settings-toggle': 'dashboard-toggle',
   'restart-button': 'restart-site', 'close-button': 'close-site',
+  'backup-button': 'saved-sites', 'local-images-button': 'saved-sites', 'backup-current-button': 'save-site',
   'credentials-button': 'login-details', 'php-settings-button': 'php-settings', 'reset-button': 'reset-site',
   'launch-button': 'launch', 'embedded-launch': 'launch', 'use-deploy': 'deployment',
   'stop-countdown': 'stop-countdown', 'stop-countdown-button': 'stop-countdown',
@@ -26,6 +32,8 @@ const keyMapping = Object.freeze({
   'action.fork': 'fork', 'action.star': 'star', 'action.source': 'view-source', 'action.licenses': 'licenses',
   'action.add': 'add-item', 'action.remove': 'remove-item', 'action.apply': 'apply', 'action.cancel': 'cancel',
   'action.copy': 'copy', 'action.show': 'show-password', 'action.hide': 'hide-password',
+  'action.start': 'debug-continue', 'action.restart': 'restart-site', 'action.stop': 'close-site',
+  'action.backup': 'saved-sites', 'action.backups': 'saved-sites',
   'action.import': 'import-configuration', 'action.export': 'export-configuration',
   'action.guide': 'deployment-guide', 'title.advanced': 'workspace-layout', 'action.deploymentGuide': 'deployment-guide', 'action.about': 'about',
   'code.ai': 'ai-assistant', 'code.aiAssistant': 'ai-assistant', 'code.accounts': 'accounts',
@@ -40,7 +48,7 @@ const alwaysIconOnly = new Set(['fork', 'star', 'ai-assistant', 'dashboard-toggl
 
 /** Trusted, bundled artwork only. Credentials/user content never enter this markup. */
 export function iconMarkup(actionId) {
-  const value = ACTION_ICONS[actionId];
+  const value = derivedIcons[actionId] || ACTION_ICONS[actionId];
   if (!value) throw new TypeError(`Unknown monochrome icon action: ${actionId}`);
   return value.replace('<svg ', '<svg class="je-icon" aria-hidden="true" focusable="false" ');
 }
@@ -56,7 +64,7 @@ export function createIcon(actionId, doc = globalThis.document) {
 }
 /** Keep the existing button node, handlers, focus and translatable label intact. */
 export function decorateAction(button, actionId, { iconOnly = alwaysIconOnly.has(actionId) || button?.dataset?.iconOnly === 'true' } = {}) {
-  if (!button?.ownerDocument || (!ACTION_ICONS[actionId] && !branded.has(actionId))) return button;
+  if (!button?.ownerDocument || (!ACTION_ICONS[actionId] && !derivedIcons[actionId] && !branded.has(actionId))) return button;
   const doc = button.ownerDocument;
   const key = button.getAttribute('data-i18n');
   let label = [...button.children].find(node => node.classList.contains('je-action-label'));
@@ -95,7 +103,7 @@ export function decorateIcons(root = globalThis.document) {
   if (root.matches?.(selector)) nodes.unshift(root);
   for (const button of nodes) {
     const key = button.getAttribute('data-i18n') || button.getAttribute('data-i18n-title') || button.getAttribute('data-i18n-aria-label');
-    const changingIcon = ['action.show', 'action.hide', 'code.maximize', 'code.restore'].includes(key) ? keyMapping[key] : null;
+    const changingIcon = ['action.show', 'action.hide', 'action.start', 'action.restart', 'code.maximize', 'code.restore'].includes(key) ? keyMapping[key] : null;
     const action = changingIcon || button.dataset.icon || idMapping[button.id] || keyMapping[key] || (button.hasAttribute('data-close-dialog') ? 'cancel' : null);
     if (action) decorateAction(button, action, button.hasAttribute('data-close-dialog') ? { iconOnly: true } : undefined);
   }

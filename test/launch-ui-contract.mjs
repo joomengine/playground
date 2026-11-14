@@ -1,3 +1,4 @@
+import { continueLiveReplacement } from './live-replacement-contract.mjs';
 import assert from 'node:assert/strict';
 
 /** Pause the visible launch before any runtime download, then start explicitly. */
@@ -72,14 +73,13 @@ export async function assertFailedDeploymentRecovery(page, url) {
   await page.waitForFunction(() => document.getElementById('error-message').textContent.includes('original configuration was backed up'));
 
   if (!(await page.locator('#settings').isVisible())) await page.locator('#settings-toggle').click();
-  const resetDialog = page.waitForEvent('dialog');
-  const resetClick = page.locator('#reset-button').click();
-  await (await resetDialog).accept();
-  await resetClick;
-  await page.locator('#welcome:not([hidden])').waitFor({ timeout: 60_000 });
+  await page.locator('#reset-button').click();
+  await continueLiveReplacement(page);
+  await page.locator('#site-frame:not([hidden])').waitFor({ timeout: 240_000 });
+  await page.waitForFunction(() => !document.getElementById('credentials-button').disabled, undefined, { timeout: 240_000 });
+  assert.equal(await page.locator('#deploy').inputValue(), 'jcb', 'Reset must start the default JCB deployment.');
   assert.equal(await page.locator('#header-feedback').isVisible(), false,
     'A successful reset must remove the previous failure banner.');
   assert.equal(await page.locator('#header-feedback').innerText(), '');
-  assert.equal(await page.locator('#embedded-launch').isEnabled(), true);
   return { noCustomApprovalPrompt: true, failedInstallationRecovered: true, resetClearsError: true };
 }

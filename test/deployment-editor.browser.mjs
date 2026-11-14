@@ -1,3 +1,4 @@
+import { continueLiveReplacement } from './live-replacement-contract.mjs';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -60,7 +61,15 @@ test(`deployment editor clones core recipes, saves reloadable customs and import
     packages.push({ url: 'https://packages.example.test/custom.zip', sha256: 'ignored-user-checksum' });
     await page.locator('#extensions').fill(JSON.stringify(packages));
     await page.locator('#extension-advanced summary').click();
-    await page.locator('#save-deployment').click();
+    await page.locator('#deploy-dialog [data-close-dialog]').click();
+    if (!await page.locator('#settings').isVisible()) await page.locator('#settings-toggle').click();
+    await page.locator('#save-button').click();
+    await page.waitForFunction(() => document.getElementById('deploy').value.startsWith('custom-')
+      && !document.getElementById('save-button').disabled);
+    assert.equal(await page.locator('#site-frame').count(), 0, 'Dashboard Save stores configuration without starting a site.');
+    assert.deepEqual(await page.evaluate(async () => (await import('./src/site-backups.mjs')).createSiteBackups().list()), [],
+      'Dashboard Save does not create a site backup.');
+    await page.locator('#deploy-editor-button').click();
     await page.locator('#deployment-save-status:not([hidden])').waitFor();
     const customId = await page.locator('#editor-deployment').inputValue();
     assert.match(customId, /^custom-/);
@@ -128,6 +137,8 @@ test(`deployment editor clones core recipes, saves reloadable customs and import
     await page.reload();
     await page.locator('#embedded-launch:enabled').waitFor();
     await page.locator('#settings-toggle').click();
+    await page.locator('#local-images-button').click();
+    await page.locator('#legacy-sites > summary').click();
     await page.locator('#saved-site').selectOption('saved-custom-instance');
     await page.locator('#launch-button:enabled').waitFor();
     assert.equal(await page.locator('#deploy').inputValue(), importedId, 'An installed site keeps its standalone recipe after the reusable entry is deleted.');
@@ -159,7 +170,9 @@ test(`editor Use creates a new instance while dashboard Launch resumes a closed 
         sessionStorage.setItem('fixture-launches', JSON.stringify(window.launchedConfigurations));
         const baseUrl = new URL('./', location.href).href;
         return { configuration, baseUrl, url: new URL('__test__.html', baseUrl).href, healthy: true,
-          debugger: { state: 'idle' }, installation: { siteName: configuration.siteName, administrator: configuration.admin },
+          debugger: { state: 'idle', subscribe: () => () => {} },
+          workspace: { id: configuration.storageKey, storageId: configuration.storageKey, root: '/', subscribe: () => () => {} },
+          installation: { siteName: configuration.siteName, administrator: configuration.admin },
           async request() { return new Response('Ready'); }, async flush() {}, async close() {}, async reset() {} };
       }`,
   } });
@@ -183,6 +196,7 @@ test(`editor Use creates a new instance while dashboard Launch resumes a closed 
     await page.locator('#site-frame').waitFor();
     const savedKey = await page.locator('#storage-key').inputValue();
     await page.locator('#settings-toggle').click();
+    page.once('dialog', dialog => dialog.accept());
     await page.locator('#close-button:enabled').click();
     await page.locator('#welcome:not([hidden])').waitFor();
     await page.goto(`${server.url}?key=${encodeURIComponent(savedKey)}&start=0`);
@@ -190,13 +204,19 @@ test(`editor Use creates a new instance while dashboard Launch resumes a closed 
     await page.locator('#embedded-launch').click();
     await page.locator('#site-frame').waitFor();
     await page.locator('#settings-toggle').click();
+    page.once('dialog', dialog => dialog.accept());
     await page.locator('#close-button:enabled').click();
     await page.locator('#welcome:not([hidden])').waitFor();
     await page.locator('#deploy-editor-button').click();
     const originalName = await page.locator('#site-name').inputValue();
     assert.equal(await page.locator('#initial-path').inputValue(), deployment.initialPath, 'Resuming the last visited page must not overwrite the configured initial path.');
+    const stopped = await page.evaluate(({ baseURL, key }) => JSON.parse(localStorage.getItem(`joomengine:launch:${baseURL}`)).sites[key], { baseURL: server.url, key: savedKey });
+    assert.equal(stopped.initialPath, deployment.initialPath, 'The deployment keeps its chosen initial path separately from navigation state.');
+    assert.equal(stopped.lastPath, '/__test__.html');
     await page.locator('#use-deploy').click();
+    await continueLiveReplacement(page);
     await page.locator('#site-frame').waitFor();
+    await page.waitForFunction(() => !document.getElementById('launch-button').disabled);
     const launches = await page.evaluate(() => window.launchedConfigurations);
     assert.equal(launches.length, 3);
     assert.equal(launches[0].storageKey, launches[1].storageKey, 'Dashboard Launch reopens the closed saved identity.');
@@ -206,9 +226,7 @@ test(`editor Use creates a new instance while dashboard Launch resumes a closed 
     assert.equal(launches[2].siteName, originalName);
     assert.deepEqual(launches[1].admin, launches[2].admin, 'The chosen administrator is preserved.');
     const saved = await page.evaluate(baseURL => JSON.parse(localStorage.getItem(`joomengine:launch:${baseURL}`)), server.url);
-    assert.ok(saved.sites[launches[0].storageKey], 'The original saved site remains available.');
-    assert.equal(saved.sites[launches[0].storageKey].initialPath, deployment.initialPath, 'The deployment keeps its chosen initial path separately from navigation state.');
-    assert.equal(saved.sites[launches[0].storageKey].lastPath, '/__test__.html');
+    assert.equal(saved.sites[launches[0].storageKey], undefined, 'Continuing without a backup replaces the prior managed live slot.');
     assert.ok(saved.sites[launches[2].storageKey]);
     assert.deepEqual(errors, []);
   } finally {

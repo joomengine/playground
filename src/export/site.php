@@ -644,7 +644,7 @@ try {
     $size = filesize($path);
     if ($size === false || $size < 1 || $size > PLAYGROUND_DOWNLOAD_LIMIT) throw new RuntimeException('The downloadable export exceeds the 512 MiB limit or could not be written.');
     $stem = trim(preg_replace('/[^a-z0-9]+/', '-', strtolower($configuration->sitename)), '-') ?: 'joomla-site';
-    $filename = substr($stem, 0, 80) . '-' . $format . '-' . gmdate('Y-m-d-His') . ($format === 'database' ? '.sql' : '.zip');
+    $filename = substr($stem, 0, 80) . '-' . $format . '-' . gmdate('Y-m-d-His\\Z') . ($format === 'database' ? '.sql' : '.zip');
     exportFinish(['ok' => true, 'path' => $path, 'size' => $size, 'sha256' => hash_file('sha256', $path), 'filename' => $filename, 'metadata' => $metadata]);
 } catch (Throwable $error) {
     if (isset($directory)) {
