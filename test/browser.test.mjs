@@ -444,7 +444,7 @@ async function saveRunningSite(page) {
   await page.locator('#save-state').filter({ hasText: /^Saved locally/i }).waitFor({ timeout: requestTimeout });
 }
 
-async function dismissAutomaticTour(page, { frame, username } = {}) {
+async function dismissAutomaticTour(page, { frame, username, readProfile } = {}) {
   frame ??= await renderedSiteFrame(page);
   // A new administrator's tour fetch can redirect after document load. Use
   // Joomla's actual Hide forever action, then verify TourModel's persisted
@@ -455,10 +455,19 @@ async function dismissAutomaticTour(page, { frame, username } = {}) {
   assert.ok(Number.isSafeInteger(tourId) && tourId > 0, 'The visible tour has a concrete Joomla tour ID.');
   username ??= await page.locator('#admin-username').inputValue();
   assert.ok(username, 'The persistence probe targets the running administrator.');
-  const prefix = new URL(frame.url()).pathname.match(/^.*\/__site\/[^/]+\/[^/]+\//)?.[0];
-  assert.ok(prefix);
-  const probeURL = new URL(`${prefix}modules/mod_playground_contract/contract.php`, frame.url());
-  probeURL.search = new URLSearchParams({ action: 'tour-state', tour: String(tourId), username }).toString();
+  if (!readProfile) {
+    // The UI scenarios explicitly install this fixture. API harness scenarios
+    // provide a direct PHP reader and do not require an optional extension.
+    const prefix = new URL(frame.url()).pathname.match(/^.*\/__site\/[^/]+\/[^/]+\//)?.[0];
+    assert.ok(prefix);
+    const probeURL = new URL(`${prefix}modules/mod_playground_contract/contract.php`, frame.url());
+    probeURL.search = new URLSearchParams({ action: 'tour-state', tour: String(tourId), username }).toString();
+    readProfile = () => page.evaluate(async url => {
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`Tour-state probe failed: HTTP ${response.status}`);
+      return response.json();
+    }, probeURL.href);
+  }
   // Shepherd centers within Joomla's auto-sized iframe and applies delayed
   // focus after positioning. Wait for its initial focus, then let press focus
   // and activate the native button in one action. Verify the trusted click at
@@ -493,11 +502,7 @@ async function dismissAutomaticTour(page, { frame, username } = {}) {
   const persistenceDeadline = Date.now() + requestTimeout;
   let profile = null;
   while (Date.now() < persistenceDeadline) {
-    profile = await bounded(page.evaluate(async url => {
-      const response = await fetch(url, { cache: 'no-store' });
-      if (!response.ok) throw new Error(`Tour-state probe failed: HTTP ${response.status}`);
-      return response.json();
-    }, probeURL.href), `Read persisted guided-tour ${tourId} state for ${username}`, Math.max(1, persistenceDeadline - Date.now()));
+    profile = await bounded(readProfile(tourId, username), `Read persisted guided-tour ${tourId} state for ${username}`, Math.max(1, persistenceDeadline - Date.now()));
     if (profile?.state === 'skipped') return;
     await new Promise(resolve => setTimeout(resolve, Math.min(500, Math.max(0, persistenceDeadline - Date.now()))));
   }
@@ -570,7 +575,17 @@ async function assertSite(page, config) {
       // interrupted tour fetch leaves origin-shared session state that the next
       // administrator document tries to resume with a missing tour ID.
       if (await frame.evaluate(() => Joomla.getOptions('com_guidedtours.autotour', '') !== '')) {
-        await dismissAutomaticTour(page, { frame, username: config.admin.username });
+        await dismissAutomaticTour(page, {
+          frame, username: config.admin.username,
+          readProfile: (tourId, username) => phpJSON(page, `${PDO}
+            require_once '/persist/www/configuration.php';
+            $prefix = str_replace('\`', '\`\`', (new JConfig())->dbprefix);
+            $query = $db->prepare('SELECT p.profile_value FROM \`' . $prefix . 'user_profiles\` p '
+                . 'JOIN \`' . $prefix . 'users\` u ON u.id = p.user_id WHERE p.profile_key = ? AND u.username = ?');
+            $query->execute(['guidedtour.id.${tourId}', base64_decode('${Buffer.from(username).toString('base64')}')]);
+            $value = $query->fetchColumn();
+            echo json_encode($value === false ? null : json_decode($value, true, 512, JSON_THROW_ON_ERROR), JSON_THROW_ON_ERROR);`),
+        });
       }
     }
     assert.deepEqual(page.failedSiteRequests, [], 'Joomla iframe assets must be served successfully.');
