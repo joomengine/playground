@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { probeSyntheticRedirect, startRedirectTrace, recordVerifiedRedirectDiagnostic } from './firefox-redirect-probe.mjs';
 import { readCapturedBrowserMail } from './mail-browser-contract.mjs';
+import { installJcbUptimeFixture } from './jcb-uptime-fixture.mjs';
 
 // These dependencies are absent from the pinned clean JCB images. The compiler
 // must retrieve them from the real repository network for both Demo targets.
@@ -68,6 +69,34 @@ export async function assertJcbPageAssets(frame, { timeoutMs = 30_000 } = {}) {
   } finally {
     await frame.evaluate(key => { delete window[key]; }, key).catch(() => {});
   }
+}
+
+/** The pinned editor schedules its initial AJAX batches through 3.5 seconds. */
+async function waitForJcbEditorInitialization(page, frame, editURL, timeout) {
+  const url = new URL(editURL);
+  const viewTypes = ['component_admin_views', 'component_custom_admin_views', 'component_site_views'];
+  const buttons = ['component_files_folders', 'component_site_views', 'component_updates',
+    'component_mysql_tweaks', 'component_custom_admin_views', 'component_custom_admin_menus',
+    'component_config', 'component_admin_views'];
+  const expected = [
+    { task: 'ajax.getEditCustomCodeButtons', id: url.searchParams.get('id') },
+    ...viewTypes.map(type => ({ task: 'ajax.getAjaxDisplay', type })),
+    ...buttons.map(type => ({ task: 'ajax.getButtonID', type, size: '1' })),
+    ...viewTypes.map(type => ({ task: 'ajax.getButtonID', type, size: '2' })),
+  ];
+  return Promise.all(expected.map(async parameters => {
+    const response = await page.waitForResponse(response => {
+      const request = response.request(), target = new URL(response.url());
+      return target.origin === url.origin && target.pathname === url.pathname
+        && target.searchParams.get('option') === 'com_componentbuilder'
+        && Object.entries(parameters).every(([name, value]) => target.searchParams.get(name) === value)
+        && request.method() === 'GET' && !request.serviceWorker() && request.frame() === frame;
+    }, { timeout });
+    assert.equal(response.status(), 200, `JCB editor initialization failed: ${JSON.stringify(parameters)}`);
+    assert.equal(await response.finished(), null, `JCB editor initialization was interrupted: ${JSON.stringify(parameters)}`);
+    await response.json();
+    return { ...parameters, status: response.status() };
+  }));
 }
 
 async function readDemoPowerRecords(page) {
@@ -149,7 +178,10 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
   const frame = await element.contentFrame();
   const initial = frame.url();
   let completed = false;
+  let uptimeFixture;
+  let failure;
   try {
+    uptimeFixture = await installJcbUptimeFixture(page);
     page.testStep = `open the actual JCB compiler and choose ${demo}`;
     const response = await frame.goto(new URL('administrator/index.php?option=com_componentbuilder&view=compiler', site).href,
       { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs });
@@ -170,7 +202,8 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
     const editURL = new URL(await edit.getAttribute('href'), frame.url()).href;
     const editFrom = page.consoleErrors?.length ?? 0;
     const editTraceFrom = await startRedirectTrace(page);
-    const [edited] = await Promise.all([
+    const [editorInitialization, edited] = await Promise.all([
+      waitForJcbEditorInitialization(page, frame, editURL, navigationTimeoutMs),
       frame.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs }),
       edit.click(),
     ]);
@@ -344,14 +377,28 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
       durationMs, zipBytes: downloaded.length, entries: proof.entries,
       manifest: proof.manifest, download: true, requiredPowers: proof.powers,
       actionsDefinitions: proof.actionsDefinitions, unresolvedPowers: proof.unresolved,
-      installed: true, dashboard: true, installerAssets, dashboardAssets,
+      installed: true, dashboard: true, editorInitialization, uptimeFixture: uptimeFixture.receipt, installerAssets, dashboardAssets,
       generatedMail: { method: 'DemoEmail::send', helperFile: helperMail.helperFile, captured: true } };
+  } catch (error) {
+    failure = error;
+    throw error;
   } finally {
-    // Preserve a failed form for the browser runner's diagnostic screenshot and HTML.
-    if (completed && owned) await page.locator('#compiler-contract-frame').evaluate(element => element.remove());
-    else if (completed && initial.startsWith(site)) {
-      await frame.goto(initial, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs });
-      await assertJcbPageAssets(frame);
+    try {
+      // Preserve a failed form for the browser runner's diagnostic screenshot and HTML.
+      if (completed && owned) await page.locator('#compiler-contract-frame').evaluate(element => element.remove());
+      else if (completed && initial.startsWith(site)) {
+        await frame.goto(initial, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs });
+        await assertJcbPageAssets(frame);
+      }
+    } catch (error) {
+      failure = error;
+      throw error;
+    } finally {
+      try { await uptimeFixture?.restore(); }
+      catch (error) {
+        if (failure) throw new AggregateError([failure, error], 'JCB acceptance and uptime fixture restoration both failed.', { cause: failure });
+        throw error;
+      }
     }
   }
 }
