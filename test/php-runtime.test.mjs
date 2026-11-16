@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { sha256 } from '../scripts/assets.mjs';
-import { loadPhpRuntime, phpRuntimeSelectionPath, resolvePhpRuntime, validatePhpRuntimeManifest } from '../scripts/php-runtime.mjs';
+import { importCandidatePhpRuntime, loadPhpRuntime, phpRuntimeSelectionPath, readPhpRuntimeCandidate,
+  resolvePhpRuntime, validatePhpRuntimeManifest } from '../scripts/php-runtime.mjs';
 
 const repository = 'joomengine/php-wasm-int64';
 const minor = '8.4';
@@ -29,6 +30,7 @@ async function fixture(t) {
     files[name] = { size: Buffer.byteLength(bytes), sha256: sha256(Buffer.from(bytes)) };
   }
   const manifest = { schemaVersion: 1, name: 'php-wasm-int64', version,
+    capabilities: { mailCapture: 1 },
     php: { minor, version: `${minor}.123`, commit: 'a'.repeat(40) },
     upstream: { repository: 'https://github.com/seanmorris/php-wasm.git', version: 'fixture', commit: 'b'.repeat(40) },
     fingerprint: 'c'.repeat(64), build: { fingerprint: 'c'.repeat(64) },
@@ -52,7 +54,7 @@ async function fixture(t) {
     requests++;
     return new Response(JSON.stringify(release));
   };
-  return { root, manifest, release, versions, fetchImpl, requests: () => requests };
+  return { root, directory, archive, manifest, release, versions, fetchImpl, requests: () => requests };
 }
 
 test('one stable release selects PHP versions and SDK identities from verified manifests', async t => {
@@ -121,6 +123,7 @@ test('manifest validation requires int64 ABI, complete SDK identity and safe fil
   for (const change of [
     manifest => { manifest.abi.integerBits = 32; },
     manifest => { manifest.abi.pointerBits = 64; },
+    manifest => { delete manifest.capabilities; },
     manifest => { manifest.php.version = '8.5.123'; },
     manifest => { manifest.files['../outside'] = { size: 0, sha256: 'a'.repeat(64) }; },
     manifest => { delete manifest.files['include/Zend/zend_long.h']; },
@@ -128,5 +131,96 @@ test('manifest validation requires int64 ABI, complete SDK identity and safe fil
     const manifest = structuredClone(f.manifest);
     change(manifest);
     assert.throws(() => validatePhpRuntimeManifest(manifest, { minor, version }), /incompatible runtime identity|Invalid PHP release inventory|missing/);
+  }
+});
+
+async function candidateFixture(t) {
+  const f = await fixture(t);
+  const sourceRoot = path.join(f.root, 'candidate-source');
+  const archivesDirectory = path.join(f.root, 'candidate-archives');
+  const pins = { php: [f.manifest.php], upstream: f.manifest.upstream,
+    emscripten: f.manifest.emscripten, abi: f.manifest.abi };
+  await mkdir(path.join(sourceRoot, 'scripts'), { recursive: true });
+  await writeFile(path.join(sourceRoot, 'VERSION'), version + '\n');
+  await writeFile(path.join(sourceRoot, 'versions.json'), JSON.stringify(pins));
+  await writeFile(path.join(sourceRoot, 'scripts/common.sh'),
+    'select_php() { BUILD_FINGERPRINT=' + f.manifest.fingerprint + '; }\n');
+  const git = (...args) => execFileSync('git', ['-C', sourceRoot, ...args], { encoding: 'utf8' }).trim();
+  git('init', '--quiet');
+  git('add', '.');
+  git('-c', 'user.name=Runtime fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '-m', 'Pinned fixture');
+  const candidate = { repository, commit: git('rev-parse', 'HEAD') };
+  await mkdir(path.join(f.root, '.github'));
+  const candidateFile = path.join(f.root, '.github/php-runtime-candidate.json');
+  await writeFile(candidateFile, JSON.stringify(candidate));
+  const bytes = Buffer.from(JSON.stringify(pins));
+  await writeFile(path.join(f.directory, 'build-inputs/versions.json'), bytes);
+  f.manifest.files['build-inputs/versions.json'] = { size: bytes.length, sha256: sha256(bytes) };
+  const name = f.release.assets[0].name;
+  const repack = async () => {
+    await writeFile(path.join(f.directory, 'manifest.json'), JSON.stringify(f.manifest));
+    execFileSync('tar', ['-czf', f.archive, '-C', path.dirname(f.directory), path.basename(f.directory)]);
+    await mkdir(archivesDirectory, { recursive: true });
+    await cp(f.archive, path.join(archivesDirectory, name));
+    await writeFile(path.join(archivesDirectory, name + '.sha256'), sha256(await readFile(f.archive)) + '  ' + name + '\n');
+  };
+  await repack();
+  return { ...f, sourceRoot, archivesDirectory, candidate, candidateFile, repack, name };
+}
+
+test('a candidate keeps source provenance distinct from a release and loads only verified local archives', async t => {
+  const f = await candidateFixture(t);
+  const selection = await importCandidatePhpRuntime(f);
+  assert.equal(selection.kind, 'candidate');
+  assert.equal(selection.commit, f.candidate.commit);
+  assert.equal(selection.tag, undefined);
+  assert.equal(selection.url, 'https://github.com/' + repository + '/commit/' + f.candidate.commit);
+  const loaded = await loadPhpRuntime(f);
+  assert.equal(loaded.php[0].runtimeFingerprint, f.manifest.fingerprint);
+  await rm(loaded.php[0].runtimeDirectory, { recursive: true });
+  await loadPhpRuntime(f); // Re-extract from the already-verified local archive.
+  await rm(loaded.php[0].runtimeDirectory, { recursive: true });
+  await rm(path.join(f.root, '.cache/php-int64', selection.archives[0].sha256 + '.tar.gz'));
+  await assert.rejects(loadPhpRuntime(f), /candidate archive is unavailable locally/);
+});
+
+test('candidate inputs reject a dirty or different source checkout and changed pin', async t => {
+  for (const kind of ['dirty', 'commit', 'pin-after-import']) {
+    const f = await candidateFixture(t);
+    if (kind === 'dirty') {
+      await writeFile(path.join(f.sourceRoot, 'VERSION'), '9.9.9');
+      await assert.rejects(importCandidatePhpRuntime(f), /clean and at the exact/);
+    } else if (kind === 'commit') {
+      await writeFile(f.candidateFile, JSON.stringify({ ...f.candidate, commit: 'f'.repeat(40) }));
+      await assert.rejects(importCandidatePhpRuntime(f), /clean and at the exact/);
+    } else {
+      await importCandidatePhpRuntime(f);
+      await writeFile(f.candidateFile, JSON.stringify({ ...f.candidate, commit: 'f'.repeat(40) }));
+      await assert.rejects(loadPhpRuntime(f), /Invalid resolved PHP/);
+    }
+  }
+});
+
+test('candidate import rejects altered archive bytes, missing capture, and incorrect build provenance', async t => {
+  for (const kind of ['checksum', 'capability', 'fingerprint', 'source']) {
+    const f = await candidateFixture(t);
+    if (kind === 'checksum') {
+      await writeFile(path.join(f.archivesDirectory, f.name), 'corrupt archive');
+    } else {
+      if (kind === 'capability') delete f.manifest.capabilities;
+      if (kind === 'fingerprint') f.manifest.fingerprint = f.manifest.build.fingerprint = 'f'.repeat(64);
+      if (kind === 'source') f.manifest.php = { ...f.manifest.php, commit: 'f'.repeat(40) };
+      await f.repack();
+    }
+    await assert.rejects(importCandidatePhpRuntime(f), /checksum|incompatible runtime identity|pinned source inputs/);
+    await assert.rejects(readFile(phpRuntimeSelectionPath(f.root)), { code: 'ENOENT' });
+  }
+});
+
+test('candidate configuration cannot select another repository or a mutable ref', async t => {
+  for (const change of [{ repository: 'unrelated/runtime' }, { commit: 'main' }, { extra: true }]) {
+    const f = await candidateFixture(t);
+    await writeFile(f.candidateFile, JSON.stringify({ ...f.candidate, ...change }));
+    await assert.rejects(readPhpRuntimeCandidate(f.root), /official repository and one exact/);
   }
 });

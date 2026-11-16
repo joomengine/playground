@@ -24,6 +24,7 @@ jobs:
       php: ${{ steps.plan.outputs.php }}
       joomla: ${{ steps.plan.outputs.joomla }}
       bridge: ${{ steps.plan.outputs.bridge }}
+      candidate: ${{ steps.candidate.outputs.commit }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -44,10 +45,94 @@ jobs:
           CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: node scripts/ci-plan.mjs
 
+      - name: Select an explicit PHP candidate for pull-request validation
+        id: candidate
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ -f .github/php-runtime-candidate.json ]; then
+            node --input-type=module <<'JS'
+          import { appendFileSync } from 'node:fs';
+          import { readPhpRuntimeCandidate } from './scripts/php-runtime.mjs';
+          const candidate = await readPhpRuntimeCandidate();
+          appendFileSync(process.env.GITHUB_OUTPUT, 'commit=' + candidate.commit + '\n');
+          JS
+          fi
+
+  candidate-runtime:
+    name: Build pinned PHP candidate (${{ matrix.php }})
+    needs: checks
+    if: needs.checks.outputs.candidate != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4', '8.5']
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: joomengine/php-wasm-int64
+          ref: ${{ needs.checks.outputs.candidate }}
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24.5.0'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Identify exact compiler inputs
+        id: inputs
+        env:
+          PHP_VERSION: ${{ matrix.php }}
+          CANDIDATE_COMMIT: ${{ needs.checks.outputs.candidate }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_COMMIT"
+          source scripts/common.sh
+          select_php "$PHP_VERSION"
+          printf 'fingerprint=%s\n' "$BUILD_FINGERPRINT" >> "$GITHUB_OUTPUT"
+      - name: Restore this exact compiled candidate
+        id: compiled
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: dist/php-${{ matrix.php }}
+          key: php-mail-candidate-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.php }}-${{ steps.inputs.outputs.fingerprint }}
+      - name: Build the pinned PHP source
+        if: steps.compiled.outputs.cache-hit != 'true'
+        run: bash scripts/build.sh '${{ matrix.php }}'
+      - name: Verify candidate identity and contents
+        env:
+          PHP_VERSION: ${{ matrix.php }}
+          EXPECTED_FINGERPRINT: ${{ steps.inputs.outputs.fingerprint }}
+        run: |
+          node scripts/verify-artifact.mjs "dist/php-$PHP_VERSION" "$PHP_VERSION"
+          test "$(jq -er '.fingerprint' "dist/php-$PHP_VERSION/manifest.json")" = "$EXPECTED_FINGERPRINT"
+          test "$(jq -er '.capabilities.mailCapture' "dist/php-$PHP_VERSION/manifest.json")" = 1
+      - name: Cache the verified compiler output
+        if: steps.compiled.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: dist/php-${{ matrix.php }}
+          key: ${{ steps.compiled.outputs.cache-primary-key }}
+      - name: Package candidate for this validation run
+        run: bash scripts/package.sh '${{ matrix.php }}'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: php-mail-candidate-${{ matrix.php }}
+          path: dist/releases/*-php${{ matrix.php }}.tar.gz*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Retain candidate build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: php-mail-candidate-diagnostics-${{ matrix.php }}
+          path: dist/logs/
+          if-no-files-found: ignore
+
   build:
     name: Build and validate native runtime
-    needs: checks
-    if: needs.checks.outputs.build == 'true'
+    needs: [checks, candidate-runtime]
+    if: ${{ !cancelled() && needs.checks.result == 'success' && needs.checks.outputs.build == 'true' && (needs.candidate-runtime.result == 'success' || needs.candidate-runtime.result == 'skipped') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -76,12 +161,30 @@ jobs:
           restore-keys: archives-${{ runner.os }}-
       - name: Install locked JavaScript dependencies
         run: npm ci --ignore-scripts
-      - name: Resolve and verify one stable PHP int64 release
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        if: needs.checks.outputs.candidate != ''
+        with:
+          repository: joomengine/php-wasm-int64
+          ref: ${{ needs.checks.outputs.candidate }}
+          path: external/php-candidate
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.checks.outputs.candidate != ''
+        with:
+          pattern: php-mail-candidate-8.*
+          path: .cache/php-candidate-archives
+          merge-multiple: true
+      - name: Resolve and verify the selected PHP int64 input
         id: runtime
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          PHP_CANDIDATE: ${{ needs.checks.outputs.candidate }}
         run: |
-          npm run prepare:php
+          if [ -n "$PHP_CANDIDATE" ]; then
+            node scripts/php-runtime.mjs import-candidate .cache/php-candidate-archives external/php-candidate
+          else
+            npm run prepare:php
+          fi
           node scripts/ci-plan.mjs --native
       - name: Restore source-matched native extensions
         id: native
@@ -474,7 +577,7 @@ jobs:
 
   validate:
     name: Validate playground
-    needs: [checks, build, browser, interaction, compatibility, version-catalog, jcb-network, network-worker, php-network]
+    needs: [checks, candidate-runtime, build, browser, interaction, compatibility, version-catalog, jcb-network, network-worker, php-network]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -482,6 +585,8 @@ jobs:
       - name: Require all selected checks
         env:
           CHECKS: ${{ needs.checks.result }}
+          CANDIDATE_REQUIRED: ${{ needs.checks.outputs.candidate }}
+          CANDIDATE: ${{ needs.candidate-runtime.result }}
           BUILD_REQUIRED: ${{ needs.checks.outputs.build }}
           BUILD: ${{ needs.build.result }}
           BROWSERS: ${{ needs.browser.result }}
@@ -493,6 +598,7 @@ jobs:
           PHP_NETWORK: ${{ needs.php-network.result }}
         run: |
           test "$CHECKS" = success
+          if [ -n "$CANDIDATE_REQUIRED" ]; then test "$CANDIDATE" = success; fi
           test "$JCB_NETWORK" = success
           test "$NETWORK_WORKER" = success
           test "$PHP_NETWORK" = success

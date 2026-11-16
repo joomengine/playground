@@ -27,7 +27,16 @@ test('live JCB checks wait for other validation and run browsers sequentially ag
   assert.match(gate, /^    name: JCB API and repositories \(\$\{\{ matrix\.browser \}\}\)$/m);
   const needs = /^    needs: \[([^\n]+)\]$/m.exec(gate)?.[1].split(',').map(value => value.trim());
   const jobs = [...validation.slice(validation.indexOf('\njobs:\n')).matchAll(/^  ([\w-]+):$/gm)].map(match => match[1]);
-  assert.deepEqual(needs?.sort(), jobs.filter(id => !['jcb-network', 'validate'].includes(id)).sort(),
+  const awaited = new Set(needs);
+  const visit = id => {
+    const value = /^    needs: (.+)$/m.exec(job(validation, id))?.[1];
+    for (const dependency of (value?.replace(/^\[|\]$/g, '').split(',').map(value => value.trim()) ?? [])) {
+      if (awaited.has(dependency)) continue;
+      awaited.add(dependency); visit(dependency);
+    }
+  };
+  for (const id of needs ?? []) visit(id);
+  assert.deepEqual([...awaited].sort(), jobs.filter(id => !['jcb-network', 'validate'].includes(id)).sort(),
     'Live JCB requests must not overlap other validation jobs.');
   assert.match(gate, /^      max-parallel: 1$/m);
   assert.match(gate, /^      fail-fast: false$/m);
@@ -49,9 +58,15 @@ test('the aggregate fails for a failed, skipped, cancelled or absent JCB gate', 
   assert.match(aggregate, /^          JCB_NETWORK: \$\{\{ needs\.jcb-network\.result \}\}$/m);
   const script = aggregateScript();
   const baseline = { ...process.env, CHECKS: 'success', BUILD_REQUIRED: 'true', BUILD: 'success',
+    CANDIDATE_REQUIRED: '', CANDIDATE: 'skipped',
     BROWSERS: 'success', INTERACTIONS: 'success', COMPATIBILITY: 'success', VERSION_CATALOG: 'success', JCB_NETWORK: 'success', NETWORK_WORKER: 'success', PHP_NETWORK: 'success' };
   const run = env => spawnSync('bash', ['-e', '-c', script], { env: { ...baseline, ...env }, encoding: 'utf8' });
   assert.equal(run({}).status, 0, 'All successful jobs must permit the aggregate.');
+  assert.equal(run({ CANDIDATE_REQUIRED: 'a'.repeat(40), CANDIDATE: 'success' }).status, 0);
+  for (const result of ['failure', 'skipped', 'cancelled', '']) {
+    assert.notEqual(run({ CANDIDATE_REQUIRED: 'a'.repeat(40), CANDIDATE: result }).status, 0,
+      'A selected PHP candidate cannot be skipped or fail while the aggregate succeeds.');
+  }
   for (const gate of ['JCB_NETWORK', 'NETWORK_WORKER', 'PHP_NETWORK']) for (const result of ['failure', 'skipped', 'cancelled', '']) {
     for (const buildRequired of ['true', 'false']) {
       assert.notEqual(run({ [gate]: result, BUILD_REQUIRED: buildRequired }).status, 0,

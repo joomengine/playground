@@ -38,6 +38,13 @@ jobs:
         with:
           name: playground-static
           path: dist
+      - name: Require a released PHP runtime before publication
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs';
+          const manifest = JSON.parse(readFileSync('dist/assets/manifest.json', 'utf8'));
+          if (manifest.runtime?.kind !== 'release') throw new Error('A PHP candidate must not be published to Pages. Build against a verified stable release first.');
+          JS
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: dist
