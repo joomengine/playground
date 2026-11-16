@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { probeSyntheticRedirect, startRedirectTrace, recordVerifiedRedirectDiagnostic } from './firefox-redirect-probe.mjs';
+import { readCapturedBrowserMail } from './mail-browser-contract.mjs';
 
 // These dependencies are absent from the pinned clean JCB images. The compiler
 // must retrieve them from the real repository network for both Demo targets.
@@ -162,6 +163,36 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
     for (const type of Object.keys(requiredDemoPowers)) {
       assert.deepEqual(before[type], [], `The clean Demo fixture must require remote ${type} retrieval; cached records would hide a network regression.`);
     }
+    page.testStep = `enable the native email helper option for ${demo}`;
+    const compilerURL = frame.url();
+    const edit = frame.locator('#component-details a[href*="task=joomla_component.edit"]');
+    await assertJcbPageAssets(frame);
+    await Promise.all([
+      frame.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs }),
+      edit.click(),
+    ]);
+    await frame.getByRole('tab', { name: 'Libs & Helpers', exact: true }).click();
+    const helperOption = frame.locator('input[name="jform[add_email_helper]"][value="1"]');
+    const optionId = await helperOption.getAttribute('id');
+    assert.ok(optionId);
+    await frame.locator(`label[for="${optionId}"]`).click();
+    assert.equal(await helperOption.isChecked(), true);
+    await assertJcbPageAssets(frame);
+    const saveFrom = page.consoleErrors?.length ?? 0;
+    const saveTraceFrom = await startRedirectTrace(page);
+    const [saved] = await Promise.all([
+      frame.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs }),
+      frame.locator('joomla-toolbar-button[task="joomla_component.save"] button').click({ noWaitAfter: true }),
+    ]);
+    assert.equal(saved.status(), 200);
+    if (page.consoleErrors) await recordVerifiedRedirectDiagnostic(page, {
+      probe, kind: 'post303', from: saveFrom, traceFrom: saveTraceFrom,
+      sourceURL: new URL('service-worker.mjs', page.url()).href, step: page.testStep,
+      finalURL: frame.url(), responseStatus: saved.status(), methodAfterRedirect: saved.request().method(),
+    });
+    await assertJcbPageAssets(frame);
+    await frame.goto(compilerURL, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs });
+    await selectJcbCompilerComponent(page, frame, { joomlaVersion });
     await assertJcbPageAssets(frame);
     const started = Date.now();
     page.testStep = `compile ${demo} through the administrator form`;
@@ -200,6 +231,7 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
         $phpEntries = 0;
         $unresolved = [];
         $actionsDefinitions = [];
+        $emailHelper = null;
         for ($i = 0; $i < $zip->numFiles; $i++) {
           $name = $zip->getNameIndex($i);
           if (preg_match('~(^|/)demo\.xml$~', $name)) {
@@ -214,10 +246,15 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
             }
             if (preg_match('~\bclass\s+Actions\b~', $contents)
               && str_contains($contents, '\\Utilities\\Permitted')) $actionsDefinitions[] = $name;
+            if (preg_match('~(?:^|/)admin/src/Helper/DemoEmail\.php$~', $name)) {
+              $emailHelper = ['file' => $name, 'sendMethod' => (bool) preg_match('~public\s+static\s+function\s+send\s*\(~', $contents),
+                'mailerInterfaceImport' => str_contains($contents, 'use Joomla\\CMS\\Mail\\MailerInterface;')];
+            }
           }
         }
         echo json_encode(['hash' => hash_file('sha256', $file), 'entries' => $zip->numFiles, 'manifest' => $manifest,
-          'phpEntries' => $phpEntries, 'unresolved' => $unresolved, 'actionsDefinitions' => $actionsDefinitions], JSON_THROW_ON_ERROR);
+          'phpEntries' => $phpEntries, 'unresolved' => $unresolved, 'actionsDefinitions' => $actionsDefinitions,
+          'emailHelper' => $emailHelper], JSON_THROW_ON_ERROR);
         $zip->close();`;
       const result = await window.playground.runPhp(source);
       if (result.status !== 200) throw new Error(result.text);
@@ -230,6 +267,8 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
     assert.ok(proof.manifest.version);
     proof.powers = await readDemoPowerRecords(page);
     assertDemoDependencies(proof);
+    assert.ok(proof.emailHelper?.sendMethod, 'The generated ZIP must contain the enabled public email helper.');
+    assert.equal(proof.emailHelper.mailerInterfaceImport, true, 'JCB must resolve the Joomla mail interface import.');
     await assertJcbPageAssets(frame);
     const durationMs = Date.now() - started;
     if (page.consoleErrors) await recordVerifiedRedirectDiagnostic(page, {
@@ -264,12 +303,40 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
     assert.match(dashboardBody, /Demo Dashboard/);
     assert.equal(await frame.locator('input[name="passwd"]').count(), 0, 'The installed Demo must open in the authenticated administrator session.');
     const dashboardAssets = await assertJcbPageAssets(frame);
+    page.testStep = `send mail through the installed generated ${demo} helper`;
+    const beforeMail = await page.evaluate(() => window.playground.mail.state.count);
+    const helperMail = await page.evaluate(async () => {
+      const { buildPhpProgram, parseProvisioningResult } = await import('./src/joomla/index.mjs');
+      const source = String.raw`<?php
+        try {
+          [$application] = playgroundApplication('/persist/www', true);
+          $application->bootComponent('com_demo');
+          $class = \Demo\Component\Demo\Administrator\Helper\DemoEmail::class;
+          $sent = $class::send('jcb-recipient@example.invalid', 'Generated JCB mail capture',
+            '<p>Generated JCB HTML body</p>', 'Generated JCB plain body', 1, null, 'mail-capture-jcb',
+            null, null, 'jcb-sender@example.invalid', 'JCB fixture');
+          playgroundFinish(['ok' => true, 'sent' => $sent, 'helperFile' => (new ReflectionClass($class))->getFileName()]);
+        } catch (Throwable $error) { playgroundFinish(['ok' => false, 'error' => $error->getMessage()]); }`;
+      const program = await buildPhpProgram('customize', {}, async name => name === 'common'
+        ? (await fetch('./src/joomla/php/common.php')).text() : source);
+      return parseProvisioningResult(await window.playground.runPhp(program));
+    });
+    assert.equal(helperMail.sent, true, JSON.stringify(helperMail));
+    assert.equal(helperMail.helperFile, '/persist/www/administrator/components/com_demo/src/Helper/DemoEmail.php');
+    const captured = (await readCapturedBrowserMail(page, beforeMail + 1))[0];
+    assert.equal(captured.subject, 'Generated JCB mail capture');
+    assert.equal(captured.parsed.from.address, 'jcb-sender@example.invalid');
+    assert.ok(captured.parsed.to.some(address => address.address === 'jcb-recipient@example.invalid'));
+    assert.match(captured.parsed.text, /Generated JCB plain body/);
+    assert.match(captured.parsed.html, /Generated JCB HTML body/);
+    assert.match(new TextDecoder().decode(Uint8Array.from(captured.raw)), /X-VDMmethodID:\s*mail-capture-jcb/i);
     completed = true;
     return { demo, joomlaVersion, phpVersion, maxExecutionTime, compilerImage: true,
       durationMs, zipBytes: downloaded.length, entries: proof.entries,
       manifest: proof.manifest, download: true, requiredPowers: proof.powers,
       actionsDefinitions: proof.actionsDefinitions, unresolvedPowers: proof.unresolved,
-      installed: true, dashboard: true, installerAssets, dashboardAssets };
+      installed: true, dashboard: true, installerAssets, dashboardAssets,
+      generatedMail: { method: 'DemoEmail::send', helperFile: helperMail.helperFile, captured: true } };
   } finally {
     // Preserve a failed form for the browser runner's diagnostic screenshot and HTML.
     if (completed && owned) await page.locator('#compiler-contract-frame').evaluate(element => element.remove());

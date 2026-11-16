@@ -11,6 +11,7 @@ import { serializeWorkerError } from './worker-errors.mjs';
 import { applyJcbRuntimeCompatibility } from './jcb-compatibility.mjs';
 import { staticAssetResponse } from './static-assets.mjs';
 import { installAdminer, withAdminerRequest, adminerRequestPath } from './database/runtime.mjs';
+import { createMailCaptureClient, SENDMAIL_INI, requireMailCapture } from './mail/channel.mjs';
 
 const MAX_OPERATIONS = 64;
 const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
@@ -36,11 +37,13 @@ let debugOptions;
 let debugOwner;
 let debugOwnerLoading;
 let activeOperationId;
+const mailClient = createMailCaptureClient({ postMessage: message => self.postMessage(message) });
+const onMail = (event, captureId) => mailClient.capture(event, captureId);
 
 async function getDebugOwner() {
   if (!debugOptions) throw new Error('This distribution does not include PHP debugger assets.');
   return debugOwner ??= await (debugOwnerLoading ??= import('./code/debug-owner.mjs').then(({ createPhpDebugOwner }) => createPhpDebugOwner({
-    options: debugOptions, getPhp: () => php, getBinary: () => binary, databaseCall,
+    options: debugOptions, getPhp: () => php, getBinary: () => binary, databaseCall, onMail,
     // Debugger writes join the owner's next files-and-database checkpoint.
     flush: async () => {},
     onState: state => self.postMessage({ type: 'debug-state', state, requestId: activeOperationId }),
@@ -226,7 +229,7 @@ async function initialize(args) {
   globalThis.__joomenginePhpFetch = createPhpSelfRequestFetch({
     siteURL: new URL(routePrefix, self.location.origin),
     transport: createNetworkTransport(globalThis.fetch.bind(globalThis), args.network),
-    request: createPhpRequestWorker({ options: callbackOptions, getFilesystem: () => binary.FS, databaseCall }),
+    request: createPhpRequestWorker({ options: callbackOptions, getFilesystem: () => binary.FS, databaseCall, onMail }),
   });
   phpSettings = normalizePhpSettings(args.phpSettings);
   requestBodyLimit = phpRequestBodyLimit(phpSettings);
@@ -250,6 +253,7 @@ async function initialize(args) {
   };
   php = new PhpCgiWorker({
     ...adapter,
+    onMail,
     ...(args.snapshot ? { requestLockName: `joomengine-php-callback-${crypto.randomUUID()}` } : {}),
     phpArgs: { ...adapter.phpArgs, getRandomValue: runtimeRandomValue },
     version: args.phpVersion,
@@ -262,7 +266,7 @@ async function initialize(args) {
     // The owner coordinates every durable commit with MariaDB, including after launch.
     staticFS: true,
     autoTransaction: false,
-    ini: `${adapter.ini}${phpIni(phpSettings)}\nauto_prepend_file=/internal/rocket-http.php\n`,
+    ini: `${adapter.ini}${phpIni(phpSettings)}\n${SENDMAIL_INI}\nauto_prepend_file=/internal/rocket-http.php\n`,
     types: {
       css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8',
       json: 'application/json', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
@@ -287,6 +291,7 @@ async function initialize(args) {
     for (const path of ['/persist/www', '/persist/sessions', '/persist/meta', '/internal']) fs.mkdirTree(path);
   };
   binary = await php.binary;
+  requireMailCapture(php);
   prepareFilesystem(binary);
   if (args.snapshot) applyPhpFilesystem(binary.FS, capturePhpFilesystem(binary.FS), args.snapshot);
   if (readOnly && exists('/config/.cookies')) {
@@ -300,14 +305,14 @@ async function initialize(args) {
     // Disk can lag behind the live site after a failed save. Recover its current
     // files and deletions from memory without requiring storage to accept a write.
     roots: ['/persist', '/config', '/tmp', '/internal'],
-    restored: next => { binary = next; configurePhpRouting(php, binary); },
+    restored: next => { requireMailCapture(php); binary = next; configurePhpRouting(php, binary); },
   });
   if (exists('/config/.cookies')) php.cookieJar.load(binary.FS.readFile('/config/.cookies', { encoding: 'utf8' }));
   if (args.snapshot) configurePhpCallback(php);
   php.initialized = true;
   php.staticCacheTime = 0;
   php.dynamicCacheTime = 0;
-  return { phpVersion: args.phpVersion, phpSettings };
+  return { phpVersion: args.phpVersion, phpSettings, mailCaptureVersion: php.mailCaptureVersion };
 }
 
 function filesystem(operation, args) {
@@ -387,7 +392,7 @@ async function operation(name, args = {}) {
         return { ok: true, entries: result.entries };
       } finally { if (exists(archive)) binary.FS.unlink(archive); }
     }
-    case 'close': debugOwner?.dispose(); terminal = true; return null;
+    case 'close': debugOwner?.dispose(); terminal = true; mailClient.close(); return null;
     case 'reset': {
       if (readOnly) throw new Error('Saved files cannot be modified in read-only recovery.');
       for (const root of ['/persist', '/config']) {
@@ -396,6 +401,7 @@ async function operation(name, args = {}) {
       php.cookieJar.cookies.clear();
       await flush();
       terminal = true;
+      mailClient.close();
       return null;
     }
     default: throw new TypeError(`Unknown PHP operation: ${name}`);
@@ -404,7 +410,9 @@ async function operation(name, args = {}) {
 
 self.addEventListener('message', (event) => {
   const message = event.data;
+  if (mailClient.receive(message)) return;
   if (message?.type === 'cancel-self-request') {
+    mailClient.close(new Error('The PHP callback request was cancelled.'));
     self.postMessage({ type: 'self-request-cancelling' });
     self.postMessage({ type: 'self-request-cancelled', snapshot: binary ? capturePhpFilesystem(binary.FS) : null });
     return;
@@ -442,7 +450,7 @@ self.addEventListener('message', (event) => {
       self.postMessage({ type: 'result', id: message.id, value });
     } catch (error) {
       const fatal = error?.fatal === true || message.operation === 'initialize';
-      if (fatal) terminal = true;
+      if (fatal) { terminal = true; mailClient.close(error); }
       self.postMessage({ type: 'result', id: message.id, ...serializeWorkerError(error), fatal,
         ...(message.operation === 'selfRequest' && binary ? { snapshot: capturePhpFilesystem(binary.FS) } : {}) });
     } finally { activeOperationId = undefined; queued--; }

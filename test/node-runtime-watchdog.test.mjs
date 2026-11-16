@@ -6,9 +6,12 @@ import { createNodeWorkerClient } from '../scripts/node-runtime-client.mjs';
 function fixture() {
   return new Worker(`
     const { parentPort } = require('node:worker_threads');
+    let held;
     parentPort.postMessage({id: 0, value: {ready: true}});
     parentPort.on('message', ({id, operation, args}) => {
       if (operation === 'block') while (true) {}
+      if (operation === 'hold') { held = id; parentPort.postMessage({type: 'held'}); return; }
+      if (operation === 'release') { parentPort.postMessage({id: held, value: 'released'}); }
       if (operation === 'delay') setTimeout(() => parentPort.postMessage({id, value: args[0]}), args[0]);
       else parentPort.postMessage({id, value: args});
     });
@@ -58,5 +61,24 @@ test('Node deadline starts after queued work completes, including raw concurrent
     const first = client.call('delay', [100], 500);
     const second = client.call('echo', ['queued'], 30);
     assert.deepEqual(await Promise.all([first, second]), [100, ['queued']]);
+  } finally { await client.terminate(); }
+});
+
+test('mail operations bypass a pending PHP call without bypassing host deadlines', { timeout: 5000 }, async () => {
+  const worker = fixture();
+  const held = new Promise(resolve => worker.on('message', message => { if (message.type === 'held') resolve(); }));
+  const client = createNodeWorkerClient(worker);
+  try {
+    await client.ready;
+    let completed = false;
+    const php = client.call('hold', [], 2000).then(value => { completed = true; return value; });
+    await held;
+    assert.deepEqual(await client.callImmediate('mail.list', ['inbox'], 1000), ['inbox']);
+    assert.equal(completed, false, 'The inbox read must not wait for the pending PHP operation.');
+    await client.callImmediate('release');
+    assert.equal(await php, 'released');
+    await assert.rejects(client.callImmediate('mail.get', ['id'], 0), RangeError);
+    await assert.rejects(client.callImmediate('delay', [1000], 30), error => error.code === 'TIMEOUT');
+    await assert.rejects(client.call('echo'), error => error.code === 'TIMEOUT');
   } finally { await client.terminate(); }
 });

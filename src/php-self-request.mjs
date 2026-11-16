@@ -2,6 +2,7 @@ import { createNetworkTransport } from './network-transport.mjs';
 import { fetchHttpRedirects } from './http-redirects.mjs';
 import { capturePhpFilesystem, applyPhpFilesystem } from './php-filesystem.mjs';
 import { restoreResponse, serializeRequest } from './http.mjs';
+import { replyToMailCapture } from './mail/channel.mjs';
 
 /** Independent CGI processes must not wait on their caller's global Web Lock. */
 export function configurePhpCallback(php) {
@@ -54,7 +55,7 @@ export function createPhpSelfRequestFetch({ siteURL, transport, request }) {
 }
 
 /** A child never mounts persisted storage; only its completed delta reaches the owner. */
-export function createPhpRequestWorker({ options, getFilesystem, databaseCall,
+export function createPhpRequestWorker({ options, getFilesystem, databaseCall, onMail,
   workerURL = new URL('./php-worker.mjs', import.meta.url), WorkerType = globalThis.Worker }) {
   return async request => {
     request.signal.throwIfAborted();
@@ -119,6 +120,13 @@ export function createPhpRequestWorker({ options, getFilesystem, databaseCall,
             return finish(request.signal.reason);
           }
           if (request.signal.aborted) return;
+          if (replyToMailCapture(message, {
+            capture: (payload, captureId) => {
+              if (finished || request.signal.aborted) throw new Error('The PHP HTTP callback has ended.');
+              return onMail?.(payload, captureId);
+            },
+            postMessage: value => { if (!finished && !request.signal.aborted) worker.postMessage(value); },
+          })) return;
           if (message?.type === 'database-call') {
             try {
               const value = await callDatabase(message.payload);

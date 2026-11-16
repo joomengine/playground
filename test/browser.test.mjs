@@ -16,6 +16,7 @@ import { assertStaticAssetValidation } from './static-assets-contract.mjs';
 import { assertFrameLayoutStable } from './frame-layout-contract.mjs';
 import { assertJoomlaDebugConfiguration } from './joomla-debug-contract.mjs';
 import { assertJcbCompiler } from './jcb-compiler-contract.mjs';
+import { assertJoomlaMailCapture } from './mail-browser-contract.mjs';
 import { assertLaunchCountdown, assertFailedDeploymentRecovery } from './launch-ui-contract.mjs';
 import { assertLaunchMedia } from './launch-media-browser.mjs';
 import { assertImmediateShareOption, assertImmediateLaunch } from './share-immediate-browser.mjs';
@@ -90,6 +91,11 @@ if (($_GET['action'] ?? '') === 'settings') {
     echo json_encode(array_combine(['upload_max_filesize', 'post_max_size', 'max_execution_time', 'max_input_vars', 'max_input_time', 'memory_limit'], array_map('ini_get', ['upload_max_filesize', 'post_max_size', 'max_execution_time', 'max_input_vars', 'max_input_time', 'memory_limit'])), JSON_THROW_ON_ERROR);
     return;
 }
+if (($_GET['action'] ?? '') === 'mail') {
+    echo json_encode(['accepted' => mail('ui-recipient@example.invalid', 'UI lifecycle mail',
+        'Retained through failed saving and PHP settings replacement', 'From: ui-sender@example.invalid')], JSON_THROW_ON_ERROR);
+    return;
+}
 if (($_GET['action'] ?? '') === 'seed') {
     $db->exec('CREATE TABLE IF NOT EXISTS playground_ui_contract (id INT PRIMARY KEY, marker VARCHAR(100), full_width BIGINT) ENGINE=InnoDB');
     $db->exec("REPLACE INTO playground_ui_contract VALUES (1, 'saved through real MariaDB', 9223372036854775807)");
@@ -118,7 +124,7 @@ function configuration(pair, extra = {}) {
   return {
     ...pair, siteName: `Browser contract ${pair.joomlaVersion}`, initialPath: '/',
     persistence: true, storageKey: `test-${randomUUID()}`, autoLogin: true, hideToolbar: false,
-    admin: { username: 'playgroundtester', name: 'Playground Test Administrator', email: 'playground@example.test', password: 'Playground-test-password-123!' },
+    admin: { username: 'playgroundtester', name: 'Playground Test Administrator', email: 'playground@example.invalid', password: 'Playground-test-password-123!' },
     extensions: [], startupCommands: [], ...extra,
   };
 }
@@ -694,7 +700,7 @@ for (const name of browserNames) {
     const browser = await browsers[name].launch({ headless: true, ...(executablePath ? { executablePath } : {}),
       ...(name === 'chromium' ? { args: ['--no-sandbox'] } : {}),
       env: { ...process.env } });
-    const syntheticRedirectProbe = scenarios.some(value => ['rocket', 'deploys'].includes(value)) ? await probeSyntheticRedirect(browser) : null;
+    const syntheticRedirectProbe = scenarios.some(value => ['matrix', 'rocket', 'deploys'].includes(value)) ? await probeSyntheticRedirect(browser) : null;
     const fixtures = { '__test_extension.zip': extensionArchive, '__test_fresh_extension.zip': extensionArchive, '__test_curl.json': JSON.stringify(curlProof) };
     const server = await createStaticServer({ directory, prefix: '/nested/playground/', fixtures });
     const corsServer = await createStaticServer({ directory, prefix: '/cors/', corsOrigin: new URL(server.url).origin,
@@ -723,6 +729,7 @@ for (const name of browserNames) {
             } finally { await competingPage.close(); }
           }
           await assertSite(page, config);
+          await assertJoomlaMailCapture(page, { redirectProbe: syntheticRedirectProbe });
           await assertBrowserRequestBodies(page);
           const installedExtension = await phpJSON(page, `${PDO} echo json_encode($db->query("SELECT enabled FROM jml_extensions WHERE element='mod_playground_contract' AND type='module' AND client_id=0")->fetchColumn(), JSON_THROW_ON_ERROR);`);
           assert.equal(installedExtension, 1, 'Joomla must register the configured extension through its installer.');
@@ -732,6 +739,8 @@ for (const name of browserNames) {
           await close(page);
           await page.reload();
           const resumed = await start(page, config);
+          assert.equal(await page.evaluate(() => window.playground.mail.state.count), 0,
+            'A new owner must not restore mail from persisted site files.');
           await assertSite(page, config);
           const stored = await phpJSON(page, `${PDO} echo json_encode($db->query('SELECT big, amount FROM playground_contract WHERE id=1')->fetch(PDO::FETCH_ASSOC), JSON_THROW_ON_ERROR);`);
           assert.deepEqual(stored, { big: '18446744073709551615', amount: '123456789012345678.123456' });
@@ -1533,6 +1542,9 @@ for (const name of browserNames) {
         await page.locator('#credentials-dialog [data-close-dialog]').click();
         page.testStep = 'persistent saving leaves the surrounding interface responsive';
         await assertResponsiveSave(page);
+        const retainedMailCount = Number(await page.locator('#mail-count').textContent()) + 1;
+        assert.deepEqual(await previewContract(page, 'mail'), { accepted: true });
+        await page.waitForFunction(count => document.getElementById('mail-count').textContent === String(count), retainedMailCount);
         page.testStep = 'a failed save keeps the running site available';
         const savedFrameURL = await page.locator('#site-frame').getAttribute('src');
         await page.evaluate(() => {
@@ -1562,6 +1574,8 @@ for (const name of browserNames) {
         assert.deepEqual(await previewContract(page), marker);
         assert.equal(await page.locator('#save-button').isEnabled(), true);
         assert.equal(await page.locator('#download-dialog-button').isEnabled(), true);
+        assert.equal(Number(await page.locator('#mail-count').textContent()), retainedMailCount,
+          'An unsuccessful save must keep the current owner inbox.');
         await page.evaluate(() => { window.__restoreFailedSwitch(); delete window.__restoreFailedSwitch; });
         page.testStep = 'apply and verify PHP settings without losing data';
         await showSiteActions(page);
@@ -1581,6 +1595,10 @@ for (const name of browserNames) {
         await page.locator('#php-dialog').waitFor({ state: 'hidden', timeout: requestTimeout });
         await renderedSiteFrame(page);
         assert.deepEqual(await previewContract(page), marker);
+        assert.equal(Number(await page.locator('#mail-count').textContent()), retainedMailCount,
+          'Replacing the PHP worker must retain the owner inbox.');
+        assert.deepEqual(await previewContract(page, 'mail'), { accepted: true });
+        await page.waitForFunction(count => document.getElementById('mail-count').textContent === String(count), retainedMailCount + 1);
         const settings = await previewContract(page, 'settings');
         assert.equal(settings.max_execution_time, '180');
         assert.equal(settings.max_input_vars, '12000');

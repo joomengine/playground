@@ -15,12 +15,43 @@ export async function createNodeRuntime(options = {}) {
     workerData: { ...options, directory },
   });
   const client = createNodeWorkerClient(worker);
+  const mailListeners = new Set();
+  let mailState = Object.freeze({ count: 0, closed: false, error: null, version: 0 });
+  const updateMailState = state => {
+    if (!state || state.version < mailState.version) return;
+    mailState = Object.freeze({ ...state });
+    for (const listener of [...mailListeners]) {
+      try { listener(mailState); } catch { /* Mail views cannot interrupt PHP. */ }
+    }
+    if (mailState.closed) mailListeners.clear();
+  };
+  const closeMail = error => {
+    if (!mailState.closed) updateMailState({ count: 0, closed: true,
+      error: error?.message || null, version: mailState.version + 1 });
+  };
+  worker.on('message', message => {
+    if (message?.type === 'mail-state') updateMailState(message.state);
+  });
   let metadata;
   try { metadata = await client.ready; }
   catch (error) { await client.terminate(); throw error; }
+  updateMailState(metadata.mailState);
+  delete metadata.mailState;
   let queue = Promise.resolve();
   let closing = false;
   let closePromise;
+  worker.on('exit', () => closeMail(closing ? null : client.failed));
+  const mail = Object.freeze({
+    get state() { return mailState; },
+    async list() { return mailState.closed ? [] : client.callImmediate('mail.list'); },
+    async get(id) { return mailState.closed ? null : client.callImmediate('mail.get', [id]); },
+    async clear() { return mailState.closed ? mailState : client.callImmediate('mail.clear'); },
+    subscribe(listener) {
+      if (typeof listener !== 'function') throw new TypeError('Mail listener must be a function.');
+      if (!mailState.closed) mailListeners.add(listener);
+      return () => mailListeners.delete(listener);
+    },
+  });
   const enqueue = operation => {
     if (closing) return Promise.reject(new Error('The Node playground runtime is closing.'));
     const result = queue.then(operation);
@@ -58,7 +89,7 @@ export async function createNodeRuntime(options = {}) {
     if (!/^[a-z-]+$/.test(name)) throw new TypeError('Invalid Joomla provisioning script name.');
     return readFile(path.join(directory, 'src/joomla/php', `${name}.php`), 'utf8');
   };
-  const raw = { ...metadata, fs, runPhp, request, fetchAsset, sourceLoader, flush: () => client.call('flush') };
+  const raw = { ...metadata, mail, fs, runPhp, request, fetchAsset, sourceLoader, flush: () => client.call('flush') };
   return {
     ...raw,
     fs: Object.fromEntries(Object.entries(fs).map(([name, operation]) => [name, (...args) => enqueue(() => operation(...args))])),
@@ -75,7 +106,7 @@ export async function createNodeRuntime(options = {}) {
       return closePromise ??= (async () => {
         await queue;
         try { if (!client.failed) await client.call('close', [], 30_000); }
-        finally { await client.terminate(); }
+        finally { closeMail(); await client.terminate(); }
       })();
     },
   };

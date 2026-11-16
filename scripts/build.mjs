@@ -17,6 +17,7 @@ import { stagePhpDebugHttp, applyPhpDebugWorkerOverlay } from './phpdbg.mjs';
 import { loadPhpRuntime } from './php-runtime.mjs';
 import { matchesNativeRuntime } from './native-runtime.mjs';
 import { normalizeNetworkConfig } from '../src/network-config.mjs';
+import { build } from 'esbuild';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const versions = await loadPhpRuntime({ root });
@@ -88,6 +89,18 @@ try {
   await cp(path.join(root, 'node_modules/fflate/esm/browser.js'), path.join(assets, 'fflate/browser.js'));
   await cp(path.join(root, 'node_modules/fflate/LICENSE'), path.join(assets, 'fflate/LICENSE'));
   packages.push({ name: 'fflate', version: fflatePin.version, integrity: fflatePin.integrity, url: fflatePin.resolved });
+
+  const mailPin = lock.packages['node_modules/postal-mime'];
+  if (mailPin?.version !== pkg.dependencies['postal-mime'] || mailPin?.version !== '4.2.1') {
+    throw new Error('postal-mime lock mismatch');
+  }
+  await mkdir(path.join(assets, 'mail'));
+  await build({ absWorkingDir: root, entryPoints: ['src/mail/parser.mjs'],
+    outfile: path.join(assets, 'mail/parser.mjs'), bundle: true, format: 'esm',
+    platform: 'browser', target: 'es2022', minify: true, logLevel: 'warning' });
+  await cp(path.join(root, 'node_modules/postal-mime/LICENSE.txt'), path.join(assets, 'mail/LICENSE.txt'));
+  packages.push({ name: 'postal-mime', version: mailPin.version, integrity: mailPin.integrity,
+    url: mailPin.resolved, license: 'mail/LICENSE.txt' });
 
   console.log('Verifying MariaDB release archive and every bundled file…');
   const archive = await downloadVerified(versions.bridge.url, versions.bridge.sha256,

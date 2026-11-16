@@ -9,9 +9,18 @@ try {
   const metadata = {};
   for (const key of ['url', 'baseUrl', 'assetBaseUrl', 'manifest', 'phpVersion', 'phpSettings',
     'documentRoot', 'installMarkerPath', 'runtimeInfo']) metadata[key] = runtime[key];
+  metadata.mailState = runtime.mail.state;
+  runtime.mail.subscribe(state => parentPort.postMessage({ type: 'mail-state', state }));
   parentPort.postMessage({ id: 0, value: metadata });
   let queue = Promise.resolve();
   parentPort.on('message', ({ id, operation, args }) => {
+    if (['mail.list', 'mail.get', 'mail.clear'].includes(operation)) {
+      // This lane cannot wait for the PHP operation which is capturing mail.
+      void Promise.resolve().then(() => runtime.mail[operation.slice(5)](...args))
+        .then(value => parentPort.postMessage({ id, value }),
+          error => parentPort.postMessage({ id, error: serializeError(error) }));
+      return;
+    }
     queue = queue.then(async () => {
       try {
         let value;

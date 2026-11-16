@@ -85,6 +85,62 @@ function childFile(snapshot, name, text) {
   return [...next];
 }
 
+test('nested PHP mail retains capture identity and waits for the parent inbox acknowledgement', async t => {
+  const owner = filesystem(t), workers = callbackWorkers();
+  const accepted = Promise.withResolvers(), captures = [];
+  const request = createPhpRequestWorker({ options: {}, getFilesystem: () => owner,
+    WorkerType: workers.WorkerType, databaseCall: async () => assert.fail('Mail cannot use the database protocol'),
+    onMail: (event, id) => { captures.push({ event, id }); return accepted.promise; } });
+  const pending = request(new Request('https://site.test/mail.php'));
+  const worker = await workers.started;
+  const payload = { version: 1, raw: new Uint8Array([0, 255, 128, 10]) };
+  await worker.emit({ type: 'mail-call', id: 'request-1', captureId: 'original-capture', payload });
+  assert.deepEqual(captures, [{ event: payload, id: 'original-capture' }]);
+  assert.equal(worker.messages.some(message => message.type === 'mail-result'), false);
+  accepted.resolve(true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(worker.messages.find(message => message.type === 'mail-result'),
+    { type: 'mail-result', id: 'request-1', value: true });
+  await worker.complete();
+  await pending;
+  assert.equal(worker.terminated, 1);
+});
+
+test('nested PHP mail rejection and cancellation never acknowledge capture or replay a late packet', async t => {
+  for (const onMail of [undefined, () => false, () => { throw new Error('Inbox unavailable'); }]) {
+    const owner = filesystem(t), workers = callbackWorkers();
+    const request = createPhpRequestWorker({ options: {}, getFilesystem: () => owner,
+      WorkerType: workers.WorkerType, onMail });
+    const pending = request(new Request('https://site.test/mail.php'));
+    const worker = await workers.started;
+    await worker.emit({ type: 'mail-call', id: 'request-1', captureId: 'capture-1', payload: {} });
+    await new Promise(resolve => setImmediate(resolve));
+    const response = worker.messages.find(message => message.type === 'mail-result');
+    assert.equal(typeof response.error, 'string');
+    assert.equal(response.value, undefined);
+    await worker.complete();
+    await pending;
+  }
+  const owner = filesystem(t), controller = new AbortController();
+  const workers = callbackWorkers({ cancelled: worker => worker.emit({ type: 'self-request-cancelled' }) });
+  const accepted = Promise.withResolvers();
+  let calls = 0;
+  const request = createPhpRequestWorker({ options: {}, getFilesystem: () => owner,
+    WorkerType: workers.WorkerType, onMail: () => { calls++; return accepted.promise; } });
+  const pending = request(new Request('https://site.test/mail.php', { signal: controller.signal }));
+  const rejected = assert.rejects(pending, { name: 'AbortError' });
+  const worker = await workers.started;
+  await worker.emit({ type: 'mail-call', id: 'request-1', captureId: 'capture-1', payload: {} });
+  controller.abort();
+  await rejected;
+  accepted.resolve(true);
+  await new Promise(resolve => setImmediate(resolve));
+  await worker.emit({ type: 'mail-call', id: 'request-2', captureId: 'late-capture', payload: {} });
+  assert.equal(calls, 1);
+  assert.equal(worker.messages.some(message => message.type === 'mail-result'), false);
+  assert.equal(worker.terminated, 1);
+});
+
 test('HTTP callback preserves binary CGI input/output and file changes without changing the owner cookie jar', async t => {
   const owner = filesystem(t, { '/config/.cookies': 'owner-cookie', '/persist/www/removed.txt': 'old' });
   const workers = callbackWorkers();

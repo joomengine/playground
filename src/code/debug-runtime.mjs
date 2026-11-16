@@ -1,5 +1,6 @@
 import { createWorkspaceFileService } from './workspace-files.mjs';
 import { capturePhpFilesystem, applyPhpFilesystem } from '../php-filesystem.mjs';
+import { SENDMAIL_INI, requireMailCapture } from '../mail/channel.mjs';
 
 export { capturePhpFilesystem as captureDebugFilesystem, applyPhpFilesystem as applyDebugFilesystem } from '../php-filesystem.mjs';
 
@@ -93,13 +94,16 @@ export class PhpDebugRuntime {
       checkStopped();
       const Runtime = this.options.Runtime || PhpDbgWeb;
       const adapter = this.options.adapter || {};
+      const runtimeOptions = this.options.runtimeOptions || {};
       this.php = new Runtime({ ...adapter, version: this.options.phpVersion, ENV: env,
         sharedLibs: this.options.sharedLibs, files: [...(this.options.files || []), ...(adapter.files || [])],
-        ini: this.options.ini || adapter.ini || '', autoTransaction: false, persist: [],
-        ...this.options.runtimeOptions });
+        autoTransaction: false, persist: [], ...runtimeOptions,
+        ini: `${runtimeOptions.ini ?? this.options.ini ?? adapter.ini ?? ''}\n${SENDMAIL_INI}\n`,
+        onMail: this.options.onMail ?? runtimeOptions.onMail });
       this.php.addEventListener('output', event => this.emit('output', { category: 'console', output: event.detail.join('') }));
       this.php.addEventListener('error', event => this.emit('output', { category: 'stderr', output: event.detail.join('') }));
       this.binary = await this.php.binary;
+      requireMailCapture(this.php);
       checkStopped();
       this.binary.jecDebugError = (message, filename, line) => this.emit('output', {
         category: 'stderr', output: `${message}\n`,
