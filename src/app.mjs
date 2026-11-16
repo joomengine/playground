@@ -36,8 +36,11 @@ import { createSiteBackups } from './site-backups.mjs';
 import { createBackupPanel } from './backup-panel.mjs';
 import { createStorageManagement, createRuntimeStorageAdapter } from './storage-management.mjs';
 import { createRuntimeViewHost, attachRuntimeView, readRuntimeViewURL, readActiveRuntimeView, runtimeViewURL } from './runtime-views.mjs';
+import { createMailController } from './mail/dialog.mjs';
 
 const $ = (id) => document.getElementById(id);
+const mailController = createMailController({ button: $('mail-button'), badge: $('mail-count'), t,
+  onError: error => feedback(error, { error: true, persistent: true }) });
 const deploymentURL = new URL('../', import.meta.url).href;
 const preferenceKey = savedStateKey(deploymentURL);
 const fields = {
@@ -541,6 +544,7 @@ function setBusy(value) {
   }
   $('backup-button').disabled = locked || unavailable;
   $('database-button').disabled = locked || !runtime || filesOnly || Boolean(openingCode || openingDatabase);
+  mailController.bind(runtime?.mail, runtime?.workspace.id);
   $('code-button').disabled = locked || !runtime || Boolean(openingCode || openingDatabase);
   $('download-dialog-button').disabled = locked || !runtime;
   updateCaptureAction();

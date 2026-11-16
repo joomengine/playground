@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { strFromU8, unzipSync } from 'fflate';
 import { createNodeRuntime } from '../scripts/node-runtime.mjs';
 import { normalizeConfiguration, parseCatalog } from '../src/config.mjs';
 import { loadDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
@@ -48,7 +49,7 @@ for (const major of ['5', '6']) {
       const { configuration } = await resolveDeployConfiguration({
         deployId: 'heritage-demo', joomlaVersion: release.version,
         phpVersion: runtime.phpVersion, fresh: true, persistence: false,
-        admin: { name: 'Integration Administrator', username: 'admin', email: 'admin@example.test', password: `Integration-${crypto.randomUUID()}!` },
+        admin: { name: 'Integration Administrator', username: 'admin', email: 'admin@example.invalid', password: `Integration-${crypto.randomUUID()}!` },
       }, { catalog, deployCatalog, baseURL: runtime.assetBaseUrl, fetcher: runtime.fetchAsset });
       const archive = await runtime.fetchAsset(new URL(release.url, manifestURL));
       assert.equal(archive.status, 200);
@@ -192,11 +193,36 @@ for (const major of ['5', '6']) {
         languageConfiguration = next;
       }
 
+      // The marker exists only in the host mailbox and a transient runPhp request,
+      // never in a site fixture file that would legitimately belong in an export.
+      const privateMail = `private-captured-body-${crypto.randomUUID()}`;
+      const mailCount = runtime.mail.state.count;
+      const capturedMail = await runtime.runPhp(`<?php
+        echo mail('export-recipient@example.invalid', 'Private export mail', ${JSON.stringify(privateMail)},
+          'From: export-sender@example.invalid') ? 'accepted' : 'failed';`);
+      assert.equal(capturedMail.status, 200, capturedMail.text);
+      assert.equal(capturedMail.text, 'accepted');
+      assert.equal(runtime.mail.state.count, mailCount + 1);
+      // A site's explicit SMTP configuration must survive export/import. Capture
+      // operates through the runtime and must not silently rewrite site settings.
+      await runStartupCommand(runtime, ['config:set', 'mailer=smtp'], options);
+      await runStartupCommand(runtime, ['config:set', 'smtphost=mail-transport.example.invalid'], options);
+      const configBeforeExport = new TextDecoder().decode(await runtime.fs.readFile('/persist/www/configuration.php'));
       const exported = await runtime.withExclusive((raw) => exportSite(raw, {}, { sourceLoader: exportSource }));
       assert.equal(exported.metadata.joomlaVersion, release.version);
+      assert.equal(new TextDecoder().decode(await runtime.fs.readFile('/persist/www/configuration.php')), configBeforeExport);
+      const members = unzipSync(exported.bytes);
+      const exportedConfig = strFromU8(members['site/configuration.php']);
+      assert.match(exportedConfig, /\$mailer\s*=\s*'smtp'/);
+      assert.match(exportedConfig, /\$smtphost\s*=\s*'mail-transport\.example\.invalid'/);
+      for (const [name, bytes] of Object.entries(members)) {
+        assert.equal(Buffer.from(bytes).includes(Buffer.from(privateMail)), false, `Export leaked captured mail into ${name}.`);
+      }
+      assert.equal(runtime.mail.state.count, mailCount + 1, 'Export must not clear the live session inbox.');
       await runtime.close();
       runtime = undefined;
       restored = await createNodeRuntime({ directory: process.env.PLAYGROUND_DIST, phpVersion: major === '5' ? '8.4' : '8.5' });
+      assert.equal(restored.mail.state.count, 0);
       const restoredConfiguration = {
         ...configuration, language: 'nl-NL', siteName: 'Restored heritage',
         admin: { ...configuration.admin, username: 'restored', password: `Restored-${crypto.randomUUID()}!` },
@@ -214,6 +240,9 @@ for (const major of ['5', '6']) {
       assert.equal(imported.siteName, 'Restored heritage');
       assert.equal(imported.administrator.username, 'restored');
       assert.equal(imported.administrator.password, restoredConfiguration.admin.password);
+      assert.equal(restored.mail.state.count, 0, 'Restoring site files and SQL must not restore captured mail.');
+      const restoredMailSettings = await restored.runPhp("<?php require '/persist/www/configuration.php'; $config = new JConfig(); echo json_encode([$config->mailer, $config->smtphost]);");
+      assert.deepEqual(JSON.parse(restoredMailSettings.text), ['smtp', 'mail-transport.example.invalid']);
       assert.equal((await readJoomlaMetadata(restored, { sourceLoader })).language, 'nl-NL');
       assert.match(await page(restored, 'index.php?lang=nl'), /Verhalen verbinden generaties/);
       assert.doesNotMatch(await page(restored, 'administrator/index.php'), /name="passwd"/);

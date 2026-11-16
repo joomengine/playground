@@ -1,7 +1,8 @@
 import { ACTION_ICONS } from './icon-data.mjs';
 
-// Keep the download tray unchanged and reflect only its arrow for site uploads.
+// Local artwork extends the supplied set; the upload keeps its download tray.
 const derivedIcons = Object.freeze({
+  mail: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm0 2v12h16V6z"/><path d="m4 6 8 6 8-6v2l-8 6-8-6z"/></svg>',
   'upload-site': ACTION_ICONS['download-site'].replace('M13 10h5l-6 6-6-6h5V3h2v7z', 'M13 9h5l-6-6-6 6h5v7h2V9z'),
 });
 export const DERIVED_ICON_IDS = Object.freeze(Object.keys(derivedIcons));
@@ -11,6 +12,7 @@ const iconsURL = new URL('./brand/rocket.svg', import.meta.url).href;
 const idMapping = Object.freeze({
   'deploy-editor-button': 'deployment', 'nav-site': 'site', 'nav-admin': 'admin',
   'save-button': 'save-site', 'share-button': 'share-site', 'code-button': 'code', 'database-button': 'database', 'code-refresh-button': 'refresh-site',
+  'mail-button': 'mail',
   'download-dialog-button': 'download-site', 'upload-site-button': 'upload-site', 'settings-toggle': 'dashboard-toggle',
   'restart-button': 'restart-site', 'close-button': 'close-site',
   'backup-button': 'saved-sites', 'local-images-button': 'saved-sites', 'backup-current-button': 'save-site',

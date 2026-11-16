@@ -1,5 +1,6 @@
 import { createDebugRequestMatcher } from './debug-request.mjs';
 import { capturePhpFilesystem, applyPhpFilesystem } from '../php-filesystem.mjs';
+import { replyToMailCapture } from '../mail/channel.mjs';
 
 /** Resolve the same Joomla front controller and PATH_INFO used by the CGI owner. */
 export function resolveDebugScript(php, fs, request) {
@@ -24,7 +25,7 @@ export function resolveDebugScript(php, fs, request) {
 }
 
 /** A disposable debugger worker owns only the selected request, never storage. */
-export function createPhpDebugOwner({ options, getPhp, getBinary, databaseCall, onState, onEvent, flush }) {
+export function createPhpDebugOwner({ options, getPhp, getBinary, databaseCall, onMail, onState, onEvent, flush }) {
   const breakpoints = new Map();
   const pending = new Map();
   let selection, worker, requestReject, requestDone, sequence = 0, stopping, startupTimer;
@@ -55,6 +56,13 @@ export function createPhpDebugOwner({ options, getPhp, getBinary, databaseCall, 
       worker.onmessage = async event => {
         const message = event.data;
         if (worker !== activeWorker) return;
+        if (replyToMailCapture(message, {
+          capture: (payload, captureId) => {
+            if (worker !== activeWorker) throw new Error('The PHP debug request has ended.');
+            return onMail?.(payload, captureId);
+          },
+          postMessage: value => { if (worker === activeWorker) activeWorker.postMessage(value); },
+        })) return;
         if (message?.type === 'database-call') {
           try {
             const value = await databaseCall(message.payload);

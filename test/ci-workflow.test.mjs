@@ -45,10 +45,25 @@ test('live JCB checks wait for other validation and run browsers sequentially ag
   assert.match(gate, /^          path: dist$/m);
   assert.match(gate, /^          PLAYGROUND_BROWSERS: \$\{\{ matrix\.browser \}\}$/m);
   assert.match(gate, /^        run: node scripts\/test-jcb-network\.mjs$/m);
-  assert.doesNotMatch(gate, /^    if:|continue-on-error|PLAYGROUND_(?:SCENARIOS|PHP_VERSIONS|JOOMLA_VERSIONS)/m,
+  const condition = '${{ !cancelled() && ' + needs.map(id => `needs.${id}.result == 'success'`).join(' && ') + ' }}';
+  assert.equal(/^    if: (.+)$/m.exec(gate)?.[1], condition,
+    'The mandatory JCB gate must run after successful dependencies, including when an optional ancestor was skipped.');
+  assert.doesNotMatch(gate, /continue-on-error|PLAYGROUND_(?:SCENARIOS|PHP_VERSIONS|JOOMLA_VERSIONS)/m,
     'The dedicated gate must not inherit optional scenario or version filters.');
   assert.match(gate, /name: Retain JCB network receipts and diagnostics\n        if: always\(\)/);
   assert.match(gate, /^          if-no-files-found: error$/m);
+});
+
+test('optional candidate skips cannot suppress successful downstream release validation', () => {
+  for (const id of ['browser', 'php-network', 'jcb-network', 'compatibility', 'version-catalog']) {
+    const source = job(validation, id);
+    const needs = /^    needs: \[([^\n]+)\]$/m.exec(source)?.[1].split(',').map(value => value.trim());
+    assert.ok(needs?.length, `${id} must retain its direct prerequisites.`);
+    const requirements = ["!cancelled()", ...needs.map(dependency => `needs.${dependency}.result == 'success'`)];
+    if (['compatibility', 'version-catalog'].includes(id)) requirements.push("needs.checks.outputs.build == 'true'");
+    assert.equal(/^    if: (.+)$/m.exec(source)?.[1], '${{ ' + requirements.join(' && ') + ' }}',
+      `${id} must override the implicit ancestor success check while requiring every direct prerequisite to succeed.`);
+  }
 });
 
 test('the aggregate fails for a failed, skipped, cancelled or absent JCB gate', () => {

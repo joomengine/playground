@@ -55,6 +55,11 @@ export function createNodeWorkerClient(worker) {
       queue = result.catch(() => {});
       return result;
     },
+    callImmediate(operation, args = [], timeoutMs = 180_000) {
+      // Host-owned mailbox reads must remain available while PHP awaits a call.
+      // They retain the same deadline and fatal-worker handling as queued work.
+      return dispatch(++sequence, operation, args, timeoutMs);
+    },
     async terminate() {
       stop(new Error('The Node playground runtime is closed.'));
       await termination;

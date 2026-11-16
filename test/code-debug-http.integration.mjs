@@ -18,13 +18,15 @@ function snapshot(files) {
   ];
 }
 
-for (const version of versions) test(`phpdbg HTTP SAPI preserves POST, cookies, response and one execution on PHP ${version}`, { timeout: 60_000 }, async () => {
+for (const version of versions) test(`phpdbg preserves HTTP state and captures mail once on PHP ${version}`, { timeout: 60_000 }, async () => {
   const { PhpDbgNode } = await builtWrapper(version, 'debugger');
+  const capturedMail = [];
   const runtime = new PhpDebugRuntime({
     Runtime: PhpDbgNode, phpVersion: version, siteURL: 'https://example.test/__site/owner/site/', cookieHeader: 'joomla_session=active',
     sharedLibs: [...await releasedLibraries(version), { name: `php${version}-jec-phpdbg-http.so`, ini: true,
       url: new URL(`../.cache/phpdbg/php${version}-jec-phpdbg-http.so`, import.meta.url) }],
     ini: 'variables_order=EGPCS\nsession.save_path=/persist/sessions\n', prepend: '/internal/prepend.php',
+    onMail: message => { capturedMail.push(message); return true; },
     snapshot: snapshot({
       '/internal/prepend.php': '<?php // No database shim needed in this isolated SAPI check.\n',
       '/persist/www/index.php': `<?php
@@ -34,11 +36,12 @@ setcookie('debug_response', 'accepted', ['path' => '/']);
 $count = (int) @file_get_contents('/persist/www/count.txt') + 1;
 file_put_contents('/persist/www/count.txt', (string) $count);
 $object = (object) ['label' => 'inspected'];
+$mailAccepted = mail('debug-recipient@example.invalid', 'Native phpdbg mail', 'Debugger body: Grüße 日本語', 'From: debug-author@example.invalid');
 function inspect_request($argument) {
     $local = 42;
     echo json_encode(['method' => $_SERVER['REQUEST_METHOD'], 'post' => $_POST,
         'cookie' => $_COOKIE['joomla_session'], 'raw' => file_get_contents('php://input'),
-        'object' => $argument->label, 'local' => $local]);
+        'object' => $argument->label, 'local' => $local, 'mailAccepted' => $GLOBALS['mailAccepted']]);
 }
 inspect_request($object);
 `,
@@ -52,12 +55,20 @@ inspect_request($object);
     if (event.event === 'stopped') stopped(event);
     if (event.event === 'output') logs.push(event.body.output);
   });
-  await runtime.setBreakpoints('/persist/www/index.php', [{ line: 10 }]);
+  await runtime.setBreakpoints('/persist/www/index.php', [{ line: 11 }]);
   const execution = runtime.execute({ url: 'https://example.test/__site/owner/site/index.php?task=save', method: 'POST',
     headers: [['content-type', 'application/x-www-form-urlencoded']], body: text.encode('title=JoomEngine+Code') });
   if (process.env.PHPDBG_TRACE) setTimeout(() => { console.error('debug phase', runtime.phase, Boolean(runtime.binary)); runtime.php?.flush(); }, 3000).unref();
   execution.catch(() => {});
   await Promise.race([stop, execution.then(() => { throw new Error(`PHP completed without hitting the breakpoint.\n${logs.join('')}`); })]);
+  assert.equal(capturedMail.length, 1, 'The real phpdbg request must capture mail before its next breakpoint.');
+  const capturedRaw = capturedMail[0].raw.slice();
+  assert.equal(capturedMail[0].version, 1);
+  assert.equal(capturedMail[0].readRecipientsFromHeaders, true);
+  assert.match(new TextDecoder().decode(capturedRaw), /From: debug-author@example\.invalid/);
+  assert.match(new TextDecoder().decode(capturedRaw), /To: debug-recipient@example\.invalid/);
+  assert.match(new TextDecoder().decode(capturedRaw), /Subject: Native phpdbg mail/);
+  assert.match(new TextDecoder().decode(capturedRaw), /Debugger body: Grüße 日本語/);
   const frames = await runtime.stackTrace();
   assert.ok(frames.length >= 2, JSON.stringify(frames));
   const scopes = await runtime.scopes(frames[0].id);
@@ -77,7 +88,9 @@ inspect_request($object);
   assert.equal(response.status, 201);
   assert.ok(response.headers.some(([name, value]) => name.toLowerCase() === 'set-cookie' && value.includes('debug_response=accepted')));
   const parsed = JSON.parse(new TextDecoder().decode(response.body));
-  assert.deepEqual(parsed, { method: 'POST', post: { title: 'JoomEngine Code' }, cookie: 'active', raw: 'title=JoomEngine+Code', object: 'inspected', local: 42 });
+  assert.deepEqual(parsed, { method: 'POST', post: { title: 'JoomEngine Code' }, cookie: 'active', raw: 'title=JoomEngine+Code', object: 'inspected', local: 42, mailAccepted: true });
+  assert.equal(capturedMail.length, 1, 'Resuming phpdbg must not replay a completed mail capture.');
+  assert.deepEqual(capturedMail[0].raw, capturedRaw, 'Debugger shutdown must leave the captured bytes intact.');
   const result = new Map(runtime.snapshotEntries);
   assert.equal(new TextDecoder().decode(result.get('/persist/www/count.txt').bytes), '1');
 });

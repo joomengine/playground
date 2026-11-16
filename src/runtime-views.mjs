@@ -10,6 +10,7 @@ const CALLS = new Set(['openDatabase', 'clearJoomlaCache', 'flush', 'exportSite'
 const DEBUG = new Set(['start', 'setBreakpoints', 'continue', 'next', 'stepIn', 'stepOut', 'pause',
   'stop', 'stackTrace', 'scopes', 'variables', 'evaluate']);
 const FILES = new Set(['mkdir', 'readFile', 'writeFile', 'readdir', 'stat', 'unlink']);
+const MAIL = new Set(['list', 'get', 'clear']);
 const ACTIONS = new Set(['start', 'stop', 'restart', 'reset', 'backup']);
 const baseURL = () => new URL('../', import.meta.url).href;
 const randomId = () => crypto.randomUUID().replaceAll('-', '');
@@ -30,7 +31,8 @@ function emit(listeners, value) {
   for (const listener of listeners) { try { listener(value); } catch { /* A view cannot interrupt its owner. */ } }
 }
 function runtimeSnapshot(runtime, previous = null) {
-  if (!runtime) return previous ? { ...previous, healthy: false, idle: true, closed: true, changing: false, stopped: true } : null;
+  if (!runtime) return previous ? { ...previous, healthy: false, idle: true, closed: true, changing: false, stopped: true,
+    mail: { ...previous.mail, count: 0, closed: true } } : null;
   return {
     url: runtime.url, baseUrl: runtime.baseUrl, isolation: runtime.isolation,
     documentRoot: runtime.documentRoot, installMarkerPath: runtime.installMarkerPath,
@@ -43,7 +45,12 @@ function runtimeSnapshot(runtime, previous = null) {
     persistenceError: runtime.persistenceError ? errorData(runtime.persistenceError) : null,
     workspace: { id: runtime.workspace.id, storageId: runtime.workspace.storageId, root: runtime.workspace.root },
     debugger: { state: runtime.debugger.state, capabilities: runtime.debugger.capabilities },
+    mail: mailSnapshot(runtime.mail?.state),
   };
+}
+function mailSnapshot(state) {
+  return Object.freeze({ count: state?.count ?? 0, closed: state?.closed ?? true,
+    error: state?.error ?? null, version: state?.version ?? 0 });
 }
 
 /** A companion URL contains only an opaque owner token and the chosen site path. */
@@ -84,19 +91,20 @@ export function createRuntimeViewHost({ getRuntime, onAction, onState = () => {}
   checkedToken(token);
   const channel = createChannel(channelName(base, token));
   const clients = new Set(), batches = new Map(), preparations = new Map();
-  let disposed = false, current, lastSnapshot, unsubscribeWorkspace, unsubscribeDebug, heartbeat;
+  let disposed = false, current, lastSnapshot, unsubscribeWorkspace, unsubscribeDebug, unsubscribeMail, heartbeat;
   const send = message => { if (!disposed) channel.postMessage({ protocol: PROTOCOL, ...message }); };
   const report = error => { try { onError(error); } catch {} };
   const publish = () => {
     if (disposed) return;
     const runtime = getRuntime();
     if (runtime !== current) {
-      unsubscribeWorkspace?.(); unsubscribeDebug?.(); current = runtime;
+      unsubscribeWorkspace?.(); unsubscribeDebug?.(); unsubscribeMail?.(); current = runtime;
       unsubscribeWorkspace = runtime?.workspace.subscribe(event => {
         send({ type: 'workspace', event });
         publish();
       });
       unsubscribeDebug = runtime?.debugger.subscribe(event => send({ type: 'debug', event }));
+      unsubscribeMail = runtime?.mail?.subscribe(() => publish());
     }
     lastSnapshot = runtimeSnapshot(runtime, lastSnapshot);
     try { onState(lastSnapshot); } catch (error) { report(error); }
@@ -160,6 +168,10 @@ export function createRuntimeViewHost({ getRuntime, onAction, onState = () => {}
       return null;
     }
     const runtime = requireRuntime();
+    if (method.startsWith('mail.') && MAIL.has(method.slice(5))) {
+      if (!runtime.mail) throw new Error('Mail capture is unavailable for this runtime.');
+      return runtime.mail[method.slice(5)](...args);
+    }
     if (method === 'workspace.request') return runtime.workspace.request(...args);
     if (method.startsWith('debugger.') && DEBUG.has(method.slice(9))) return runtime.debugger[method.slice(9)](...args);
     if (method.startsWith('fs.') && FILES.has(method.slice(3))) return runtime.fs[method.slice(3)](...args);
@@ -225,7 +237,7 @@ export function createRuntimeViewHost({ getRuntime, onAction, onState = () => {}
     dispose() {
       if (disposed) return;
       send({ type: 'gone' }); disposed = true;
-      clearTimer(heartbeat); unsubscribeWorkspace?.(); unsubscribeDebug?.();
+      clearTimer(heartbeat); unsubscribeWorkspace?.(); unsubscribeDebug?.(); unsubscribeMail?.();
       for (const batch of batches.values()) closeBatch(batch, new Error('The runtime owner was closed.'));
       for (const preparation of preparations.values()) preparation.finish(false);
       try { if (JSON.parse(storage?.getItem(activeKey(base)) || 'null')?.token === token) storage.removeItem(activeKey(base)); } catch {}
@@ -240,18 +252,26 @@ export async function attachRuntimeView({ token, baseURL: base = baseURL(), onSt
   connectTimeoutMs = 5000, requestTimeoutMs = 600_000, ownerTimeoutMs = 90_000 } = {}) {
   checkedToken(token);
   const channel = createChannel(channelName(base, token));
-  const clientId = randomId(), pending = new Map(), workspaceListeners = new Set(), debugListeners = new Set();
+  const clientId = randomId(), pending = new Map(), workspaceListeners = new Set(), debugListeners = new Set(), mailListeners = new Set();
   let snapshot, disposed = false, connected = false, unavailable = false, connectTimer, ownerTimer;
   let connectedResolve, connectedReject;
   const ready = new Promise((resolve, reject) => { connectedResolve = resolve; connectedReject = reject; });
   const send = message => channel.postMessage({ protocol: PROTOCOL, clientId, ...message });
   const notifyState = () => { try { onState(snapshot, { unavailable }); } catch {} };
+  const mailState = () => mailSnapshot(disposed || unavailable ? { count: 0, closed: true,
+    error: 'The runtime owner is no longer available.', version: snapshot?.mail?.version ?? 0 } : snapshot?.mail);
+  function updateSnapshot(next) {
+    const previous = JSON.stringify([snapshot?.workspace?.id, snapshot?.mail]);
+    snapshot = next;
+    if (previous !== JSON.stringify([snapshot?.workspace?.id, snapshot?.mail])) emit(mailListeners, mailState());
+  }
   function markUnavailable() {
     if (disposed || unavailable) return;
     unavailable = true;
     clearTimer(ownerTimer);
     for (const task of pending.values()) { clearTimer(task.timer); task.reject(new Error('The runtime owner is no longer available.')); }
     pending.clear();
+    emit(mailListeners, mailState());
     // Keep editor buffers visible when the owner disappears unexpectedly. A
     // confirmed Stop emits workspace-closed; a lost connection is not consent
     // to discard unsaved text in the companion.
@@ -277,9 +297,9 @@ export async function attachRuntimeView({ token, baseURL: base = baseURL(), onSt
       ownerTimer?.unref?.();
     }
     if (message.type === 'hello-result') {
-      connected = true; snapshot = message.snapshot; clearTimer(connectTimer); connectedResolve(); notifyState();
+      connected = true; updateSnapshot(message.snapshot); clearTimer(connectTimer); connectedResolve(); notifyState();
     } else if (message.type === 'state') {
-      snapshot = message.snapshot; if (connected) notifyState();
+      updateSnapshot(message.snapshot); if (connected) notifyState();
     } else if (message.type === 'prepare') {
       Promise.resolve().then(() => beforeTransition(message.action)).then(ready => {
         if (!disposed) send({ type: 'prepared', id: message.id, ready: Boolean(ready) });
@@ -325,6 +345,10 @@ export async function attachRuntimeView({ token, baseURL: base = baseURL(), onSt
     get changing() { return Boolean(snapshot?.changing); },
     get persistenceError() { return snapshot?.persistenceError ? restoreError(snapshot.persistenceError) : null; },
     get debugger() { return debuggerProxy; },
+    mail: { get state() { return mailState(); },
+      subscribe: listener => subscribe(mailListeners, listener),
+      ...Object.fromEntries([...MAIL].map(method => [method, (...args) => call(`mail.${method}`, args)])),
+    },
     action: (name, args) => call('action', [name, args]),
     close: () => call('action', ['stop']), reset: () => call('action', ['reset']),
     keep: async () => proxy,
@@ -338,8 +362,9 @@ export async function attachRuntimeView({ token, baseURL: base = baseURL(), onSt
       if (disposed) return;
       try { send({ type: 'detach' }); } catch {}
       disposed = true; clearTimer(ownerTimer); channel.close();
+      emit(mailListeners, mailState());
       for (const task of pending.values()) { clearTimer(task.timer); task.reject(new Error('The companion view was closed.')); }
-      pending.clear(); workspaceListeners.clear(); debugListeners.clear();
+      pending.clear(); workspaceListeners.clear(); debugListeners.clear(); mailListeners.clear();
     },
   };
   for (const name of ['url', 'baseUrl', 'isolation', 'documentRoot', 'installMarkerPath', 'configuration', 'installation',

@@ -2,12 +2,15 @@ import { PhpDebugRuntime } from './debug-runtime.mjs';
 import { createNetworkTransport } from '../network-transport.mjs';
 import { runtimeRandomValue } from '../php-settings.mjs';
 import { createPhpSelfRequestFetch, createPhpRequestWorker } from '../php-self-request.mjs';
+import { createMailCaptureClient } from '../mail/channel.mjs';
 
 let runtime;
 let running = false;
 let nextDatabaseId = 0;
 const databaseCalls = new Map();
 const errorMessage = error => error?.message || String(error);
+const mailClient = createMailCaptureClient({ postMessage: message => self.postMessage(message) });
+const onMail = (event, captureId) => mailClient.capture(event, captureId);
 
 function databaseCall(payload) {
   const id = ++nextDatabaseId;
@@ -24,7 +27,7 @@ async function start(message) {
   const transport = createNetworkTransport(globalThis.fetch.bind(globalThis), options.network);
   globalThis.__joomenginePhpFetch = options.cgi ? createPhpSelfRequestFetch({
     siteURL: options.siteURL, transport,
-    request: createPhpRequestWorker({ options: options.cgi, getFilesystem: () => runtime.binary.FS, databaseCall }),
+    request: createPhpRequestWorker({ options: options.cgi, getFilesystem: () => runtime.binary.FS, databaseCall, onMail }),
   }) : transport;
   for (const field of ['moduleUrl', 'adapterUrl']) {
     const url = new URL(options[field], self.location.href);
@@ -32,7 +35,7 @@ async function start(message) {
   }
   const { createPhpWasmAdapter } = await import(options.adapterUrl);
   const adapter = createPhpWasmAdapter({ 'mariadb.v1': databaseCall });
-  runtime = new PhpDebugRuntime({ ...options, adapter, runtimeOptions: { getRandomValue: runtimeRandomValue },
+  runtime = new PhpDebugRuntime({ ...options, adapter, onMail, runtimeOptions: { getRandomValue: runtimeRandomValue },
     onEvent: event => self.postMessage({ type: 'debug-event', ...event }) });
   for (const [path, breakpoints] of message.breakpoints || []) await runtime.setBreakpoints(path, breakpoints);
   try {
@@ -47,11 +50,13 @@ async function start(message) {
   }
   // The owner applies the returned delta before resolving the original request.
   // Closing this disposable Worker releases the finished phpdbg module memory.
+  mailClient.close(new Error('The PHP debug request has ended.'));
   self.close();
 }
 
 self.addEventListener('message', event => {
   const message = event.data;
+  if (mailClient.receive(message)) return;
   if (message?.type === 'database-result') {
     const pending = databaseCalls.get(message.id);
     if (!pending) return;
@@ -60,7 +65,10 @@ self.addEventListener('message', event => {
     return;
   }
   if (message?.type === 'debug-start') {
-    void start(message).catch(error => { self.postMessage({ type: 'debug-result', error: errorMessage(error) }); self.close(); });
+    void start(message).catch(error => {
+      mailClient.close(error);
+      self.postMessage({ type: 'debug-result', error: errorMessage(error) }); self.close();
+    });
     return;
   }
   if (message?.type === 'debug-command') {

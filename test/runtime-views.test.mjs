@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRuntimeViewHost, attachRuntimeView, runtimeViewURL, readRuntimeViewURL, readActiveRuntimeView } from '../src/runtime-views.mjs';
+import { createSessionMailbox } from '../src/mail/mailbox.mjs';
 
 function channelFactory() {
   const channels = new Map();
@@ -25,6 +26,8 @@ function storage() {
   return { values, getItem: key => values.get(key) || null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
 }
 function runtime(id = 'live') {
+  const mailbox = createSessionMailbox({ parseMail: async () => ({ subject: 'Private captured mail', from: null, to: [], cc: [], text: 'Body', attachments: [] }) });
+  const capture = mailbox.activateGeneration(id);
   const workspaceListeners = new Set(), debugListeners = new Set(), files = new Map([['/index.php', 'original']]);
   let queue = Promise.resolve(), count = 0;
   const serialized = callback => { const next = queue.then(callback); queue = next.catch(() => {}); return next; };
@@ -40,6 +43,11 @@ function runtime(id = 'live') {
     configuration: { storageKey: id, persistence: true, phpVersion: '8.4', admin: { password: 'private' } },
     installation: { resumed: true }, runtimeInfo: { phpVersion: '8.4' }, recovery: null,
     healthy: true, closed: false, idle: true, changing: false, lastSavedAt: '2026-11-14T12:00:00Z', savedCurrentState: true,
+    mail: mailbox.mail,
+    captureMail(captureId, raw = new Uint8Array([0, 255, 128, 65])) {
+      return capture({ captureId, version: 1, raw, command: '/usr/sbin/sendmail -t -i', args: ['-t', '-i'],
+        envelopeSender: null, envelopeRecipients: [], readRecipientsFromHeaders: true });
+    },
     workspace: { id, storageId: id, root: '/',
       request: (operation, args) => serialized(() => request(operation, args)),
       withBatch: callback => serialized(() => callback({ request })),
@@ -69,6 +77,7 @@ function setup(t, options = {}) {
     ...options });
   t.after(() => host.dispose());
   return { host, local, actions, runtime: () => current,
+    replace: next => { current = next; host.update(); },
     attach: async extra => {
       const view = await attachRuntimeView({ token, baseURL: base, createChannel, ...extra });
       t.after(() => view.dispose()); return view;
@@ -82,6 +91,50 @@ test('companion URLs identify one owner and a relative view without including co
   assert.equal(readRuntimeViewURL(base), null);
   assert.throws(() => runtimeViewURL({ token, path: '//outside.test/' }), /Invalid site view/);
   assert.throws(() => runtimeViewURL({ token: 'bad', path: '/' }), /Invalid runtime/);
+});
+
+test('companions share mail outside the PHP queue and only explicit reads return raw bytes', async t => {
+  const state = setup(t), first = await state.attach(), second = await state.attach();
+  const events = []; second.mail.subscribe(value => events.push(value));
+  state.runtime().captureMail('first');
+  const messages = await first.mail.list();
+  assert.equal(messages.length, 1);
+  assert.equal(first.mail.state.count, 1);
+  assert.equal(second.mail.state.count, 1);
+  assert.equal(Object.hasOwn(messages[0], 'raw'), false);
+  assert.deepEqual(Object.keys(state.host.getSnapshot().mail).sort(), ['closed', 'count', 'error', 'version']);
+  assert.ok([...state.local.values.values()].every(value => !value.includes('Private captured mail')));
+  const message = await first.mail.get(messages[0].id);
+  assert.deepEqual(message.raw, new Uint8Array([0, 255, 128, 65]));
+  message.raw.fill(0);
+  assert.deepEqual((await second.mail.get(messages[0].id)).raw, new Uint8Array([0, 255, 128, 65]));
+  let release, entered;
+  const gate = new Promise(resolve => { release = resolve; });
+  const ready = new Promise(resolve => { entered = resolve; });
+  const blocked = first.workspace.withBatch(async () => { entered(); await gate; });
+  await ready;
+  assert.equal((await second.mail.list()).length, 1, 'Mail reads do not wait behind paused PHP/editor operations.');
+  release(); await blocked;
+  first.dispose();
+  assert.equal(state.runtime().mail.state.count, 1, 'Detaching a view never clears the owner mailbox.');
+  await second.mail.clear();
+  assert.equal(second.mail.state.count, 0);
+  assert.equal(await second.mail.get(messages[0].id), null);
+  assert.ok(events.some(event => event.count === 1) && events.some(event => event.count === 0));
+});
+
+test('companion mail subscriptions follow a replacement owner even at the same version', async t => {
+  const state = setup(t), view = await state.attach(), previous = state.runtime();
+  const events = []; view.mail.subscribe(value => events.push(value));
+  state.replace(runtime('replacement'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(events.length, 1, 'An empty replacement inbox is still a different owner.');
+  previous.captureMail('retired');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(view.mail.state.count, 0);
+  state.runtime().captureMail('current');
+  assert.equal((await view.mail.list()).length, 1);
+  assert.equal(view.mail.state.count, 1);
 });
 
 test('two companion tools share authoritative files and SQL view without starting another runtime', async t => {

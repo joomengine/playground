@@ -10,6 +10,8 @@ import { createNetworkTransport } from '../src/network-transport.mjs';
 import { createPhpSelfRequestFetch, createPhpRequestWorker, configurePhpCallback } from '../src/php-self-request.mjs';
 import { capturePhpFilesystem, applyPhpFilesystem } from '../src/php-filesystem.mjs';
 import { Worker } from 'node:worker_threads';
+import { createSessionMailbox } from '../src/mail/mailbox.mjs';
+import { SENDMAIL_INI, requireMailCapture } from '../src/mail/channel.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -29,6 +31,17 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
   ]);
   const databaseRuntime = requestContext ? { hostCalls: requestContext.hostCalls, reset: async () => {}, flush: async () => {}, close: async () => {} }
     : await createMariaDB({ database, timeoutMs: 120_000 });
+  const mailbox = requestContext ? null : createSessionMailbox({
+    parseMail: async raw => (await import(pathToFileURL(path.join(distribution, 'assets/mail/parser.mjs')).href)).parseMail(raw),
+  });
+  const capture = mailbox?.activateGeneration(randomUUID());
+  const onMail = (event, captureId = randomUUID()) => {
+    if (requestContext) {
+      if (typeof requestContext.onMail !== 'function') throw new Error('The parent mail inbox is unavailable.');
+      return requestContext.onMail(event, captureId);
+    }
+    return capture({ ...event, captureId });
+  };
   let php;
   let binary;
   let queue = Promise.resolve();
@@ -149,6 +162,7 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
   };
   const raw = {
     url: baseUrl, baseUrl, assetBaseUrl, manifest, phpVersion: entry.version, phpSettings,
+    ...(mailbox ? { mail: mailbox.mail } : {}),
     documentRoot: '/persist/www', installMarkerPath: '/persist/meta/joomla-install.json',
     fs, request, runPhp, fetchAsset, sourceLoader, async flush() { await databaseRuntime.flush(); },
   };
@@ -170,6 +184,7 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
         await queue;
         closed = true;
         try { await databaseRuntime.close(); } finally {
+          mailbox?.close();
           php = null; binary = null;
           if (previousPhpFetch === undefined) delete globalThis.__joomenginePhpFetch;
           else globalThis.__joomenginePhpFetch = previousPhpFetch;
@@ -184,19 +199,20 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
       siteURL: baseUrl, transport: createNetworkTransport(globalThis.fetch.bind(globalThis)),
       request: createPhpRequestWorker({
         options: { directory: distribution, phpVersion: entry.version, phpSettings, siteURL: baseUrl },
-        getFilesystem: () => binary.FS, databaseCall: databaseRuntime.hostCalls['mariadb.v1'],
+        getFilesystem: () => binary.FS, databaseCall: databaseRuntime.hostCalls['mariadb.v1'], onMail,
         WorkerType: Worker, workerURL: new URL('./php-self-request-worker.mjs', import.meta.url),
       }),
     });
     const adapter = createPhpWasmAdapter(databaseRuntime.hostCalls, { shimUrl: new URL('./php-wasm.php', assetURL(manifest.bridge.adapterUrl)) });
     php = new PhpCgiNode({
-      ...adapter, phpArgs: { ...adapter.phpArgs, getRandomValue: runtimeRandomValue }, version: entry.version, prefix, docroot: raw.documentRoot, persist: [], staticFS: true, autoTransaction: false,
+      ...adapter, onMail, phpArgs: { ...adapter.phpArgs, getRandomValue: runtimeRandomValue }, version: entry.version, prefix, docroot: raw.documentRoot, persist: [], staticFS: true, autoTransaction: false,
       sharedLibs: entry.sharedLibs.map((library) => ({ ...library, url: assetURL(library.url).href })),
       files: [...(entry.files || []).map((file) => ({ ...file, url: assetURL(file.url).href })), ...adapter.files,
         { parent: '/internal', name: 'rocket-http.php', url: new URL('../src/php-http-stream.php', import.meta.url).href }],
-      ini: `${adapter.ini}${phpIni(phpSettings)}\nauto_prepend_file=/internal/rocket-http.php\n`,
+      ini: `${adapter.ini}${phpIni(phpSettings)}\n${SENDMAIL_INI}\nauto_prepend_file=/internal/rocket-http.php\n`,
     });
     binary = await php.binary;
+    requireMailCapture(php);
     if (requestContext) configurePhpCallback(php);
     configurePhpRouting(php, binary);
     for (const directory of ['/persist/www', '/persist/sessions', '/persist/meta', '/config', '/internal']) binary.FS.mkdirTree(directory);
@@ -206,12 +222,12 @@ export async function createNodeRuntime({ directory = process.env.PLAYGROUND_DIS
       prepare: next => {
         for (const directory of ['/persist/www', '/persist/sessions', '/persist/meta', '/config', '/internal']) next.FS.mkdirTree(directory);
       },
-      restored: next => { binary = next; configurePhpRouting(php, binary); },
+      restored: next => { requireMailCapture(php); binary = next; configurePhpRouting(php, binary); },
     });
     php.initialized = true;
     php.staticCacheTime = 0;
     php.dynamicCacheTime = 0;
-    handle.runtimeInfo = { phpVersion: entry.patchVersion, phpSettings };
+    handle.runtimeInfo = { phpVersion: entry.patchVersion, phpSettings, mailCaptureVersion: php.mailCaptureVersion };
     return handle;
   } catch (error) {
     await handle.close();

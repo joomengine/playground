@@ -284,12 +284,12 @@ jobs:
         uses: ./.github/actions/install-playwright
         with:
           browser: ${{ matrix.browser }}
-      - name: Validate Code, isolated AI, layout and language interactions
+      - name: Validate Code, Mail, isolated AI, layout and language interactions
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
         run: |
           result=0
-          for suite in test/code-workbench.browser.mjs test/code-ai-browser.mjs test/code-host-lifecycle.browser.mjs test/language-selector.browser.mjs test/extension-inputs.browser.mjs test/dynamic-selection.browser.mjs test/deployment-images.browser.mjs test/deployment-editor.browser.mjs test/backup-panel.browser.mjs test/runtime-views.browser.mjs test/structured-inputs.browser.mjs test/credentials-login.browser.mjs test/network-transport.browser.mjs; do
+          for suite in test/code-workbench.browser.mjs test/code-ai-browser.mjs test/code-host-lifecycle.browser.mjs test/language-selector.browser.mjs test/extension-inputs.browser.mjs test/dynamic-selection.browser.mjs test/deployment-images.browser.mjs test/deployment-editor.browser.mjs test/backup-panel.browser.mjs test/runtime-views.browser.mjs test/structured-inputs.browser.mjs test/credentials-login.browser.mjs test/network-transport.browser.mjs test/mail-ui.browser.mjs; do
             node --test "$suite" || result=1
           done
           exit "$result"
@@ -305,6 +305,7 @@ jobs:
   browser:
     name: Browser validation (${{ matrix.browser }}, ${{ matrix.suite }})
     needs: [checks, build]
+    if: ${{ !cancelled() && needs.checks.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04
     # Independent jobs keep a UI failure from suppressing runtime or visual evidence.
     timeout-minutes: 35
@@ -411,6 +412,7 @@ jobs:
   php-network:
     name: PHP networking (${{ matrix.browser }})
     needs: [checks, build, network-worker]
+    if: ${{ !cancelled() && needs.checks.result == 'success' && needs.build.result == 'success' && needs.network-worker.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -452,6 +454,7 @@ jobs:
     # These checks use live community repositories. Avoid overlapping them with
     # the other compiler/install suites or with the other browser's live check.
     needs: [checks, build, browser, interaction, compatibility, version-catalog, network-worker, php-network]
+    if: ${{ !cancelled() && needs.checks.result == 'success' && needs.build.result == 'success' && needs.browser.result == 'success' && needs.interaction.result == 'success' && needs.compatibility.result == 'success' && needs.version-catalog.result == 'success' && needs.network-worker.result == 'success' && needs.php-network.result == 'success' }}
     runs-on: ubuntu-24.04
     # Each clean attempt keeps the existing 20-minute test deadline.
     timeout-minutes: 45
@@ -493,7 +496,7 @@ jobs:
   compatibility:
     name: Browser isolation and HTTP images (${{ matrix.browser }})
     needs: [checks, build]
-    if: needs.checks.outputs.build == 'true'
+    if: ${{ !cancelled() && needs.checks.result == 'success' && needs.build.result == 'success' && needs.checks.outputs.build == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -528,6 +531,11 @@ jobs:
       - name: Verify Adminer persistence and tool lifecycle
         if: matrix.browser == 'chromium'
         run: node --test test/adminer.browser.mjs
+      - name: Verify Mail preview isolation and downloads in WebKit
+        if: matrix.browser == 'webkit'
+        env:
+          PLAYGROUND_BROWSERS: ${{ matrix.browser }}
+        run: node --test test/mail-ui.browser.mjs
       - name: Retain compatibility diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -540,7 +548,7 @@ jobs:
   version-catalog:
     name: Version catalog installation (${{ matrix.browser }})
     needs: [checks, build]
-    if: needs.checks.outputs.build == 'true'
+    if: ${{ !cancelled() && needs.checks.result == 'success' && needs.build.result == 'success' && needs.checks.outputs.build == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:

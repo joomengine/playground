@@ -30,6 +30,13 @@ left/right/bottom, floating, full-width and detached layouts. Adminer loads on
 demand and adds about 435 KiB of staged PHP/UI assets (about 246 KiB gzipped),
 without another PHP or database engine.
 
+The **Mail** action, immediately after DB, opens the running site's local inbox.
+Its badge shows the total captured message count and hides at zero. Ordinary PHP
+`mail()`, PHPMailer Sendmail and Joomla/JCB's default mail transport are captured
+in session memory, with text, isolated HTML, raw source and original `.eml`
+downloads. See [local mail capture](docs/mail-capture.md) for transport limits,
+inbox lifetime and the API.
+
 [Browser compatibility](docs/browser-compatibility.md) checks isolation before
 starting the runtime and automatically tries a controlled `require-corp` fallback
 when normal isolation is unavailable. PHP requests, package downloads and
@@ -118,13 +125,16 @@ The supported catalog is:
 | 5.4.10 | 8.3, 8.4, 8.5 |
 | 6.2.0 | 8.3, 8.4, 8.5 |
 
-Each build resolves the latest stable JoomEngine int64 release once. Its manifests
-provide the exact PHP patch versions, matching extension headers and source pins.
-The generated catalog records the selected versions; PHP release candidates and
-unpublished builds are not selected.
+Production builds resolve the latest stable JoomEngine int64 release once. Its
+manifests provide the exact PHP patch versions, matching extension headers and source pins.
+The generated catalog records the selected versions. Normal release resolution
+does not select PHP release candidates or unpublished builds. During this mail
+integration, pull-request validation has a separate, explicit exact-commit PHP
+candidate input; it is not a release and cannot be published to Pages. See the
+[temporary validation and release order](docs/mail-capture.md#runtime-validation-and-release-order).
 
 [versions.json](versions.json) defines the supported PHP lines and default
-selection; the generated runtime manifest records their exact released builds.
+selection; the generated runtime manifest records their exact build identities.
 
 ## Current and forward version selection
 
@@ -217,13 +227,20 @@ release, then rebuild its native adapters. All later build steps use that same
 recorded selection. Bridge JavaScript and engine assets come from the verified
 MariaDB bridge release.
 
+`prepare:php` always uses the stable-release policy, even when a temporary
+pull-request candidate pin exists. The mail-enabled PHP runtime must advertise
+mail capture version 1; an older runtime fails validation rather than silently
+disabling capture. Candidate validation is described in the
+[mail capture guide](docs/mail-capture.md#runtime-validation-and-release-order).
+
 ## Build provenance
 
 `package-lock.json` pins the npm packages and their integrity values.
 `versions.json` selects the supported PHP minors and stable int64 release policy,
 and pins the MariaDB release checksum, native and adapter source hashes, Joomla
 distributions and compatible runtime combinations. `.cache/php-int64/resolved.json`
-records the selected int64 release and archive hashes. Its verified manifests
+records the selected int64 runtime and archive hashes, explicitly identifying a
+release or temporary pull-request candidate. Its verified manifests
 provide the exact PHP source commits, compiler image and ABI for the native build.
 
 The build verifies every entry in the MariaDB bridge 0.1.8 release inventory and
@@ -313,8 +330,8 @@ The chevron opens one dashboard containing runtime configuration, site actions
 and appearance. **Site** and **Admin**, beside Deployment, navigate the existing
 preview without reinstalling Joomla or starting another runtime. Ctrl-click,
 Command-click or middle-click either action to open a full Playground view with
-its Code and DB controls, sharing the same runtime, files and database. Keep the
-original owner window open; a raw Joomla link still opens only the site. Admin
+its Code, DB and Mail controls, sharing the same runtime, files, database and
+inbox. Keep the original owner window open; a raw Joomla link still opens only the site. Admin
 uses the normal Joomla authentication flow. The slim header scrolls with the page.
 The supplied pearl rocket identifies the favicon,
 Deployment, Launch and progress views. Activity remains below the site; About in
@@ -789,6 +806,9 @@ provisioning completes:
 | `installation` | Joomla version, site name, and whether saved data was reopened |
 | `request(path, init)` | A standard `Response` for an internal site request |
 | `runPhp(source, { timeoutMs })` | CGI result with `status`, `headers`, binary `body`, and decoded `text` |
+| `mail.state` | Current `{ count, closed, error, version }` inbox metadata |
+| `mail.list()`, `mail.get(id)` | Newest-first summaries, or one message with copied raw bytes and parsed preview |
+| `mail.clear()`, `mail.subscribe(listener)` | Clear the inbox, or observe metadata changes; subscribe returns an unsubscribe function |
 | `fs.mkdir(path)` | Create directories in the virtual filesystem |
 | `fs.writeFile(path, textOrBytes)` | Write a virtual file |
 | `fs.readFile(path)` | Read bytes; pass `{ encoding: 'utf8' }` as the second argument for text |
@@ -819,6 +839,11 @@ Private checkpoints include authentication state: keep them local and do not
 use them as public deployment documents. The filesystem document root is
 `/persist/www`. `runPhp` executes through CGI; it is not a shell or an unrestricted
 host command interface.
+
+Mail reads and notifications remain available while PHP is busy or paused in the
+debugger. Routine companion notifications contain inbox metadata only; message
+bodies are returned by an explicit `mail.get(id)`. The [mail API guide](docs/mail-capture.md#javascript-api)
+defines parsing, failure and lifecycle behavior.
 
 ## Hosting and GitHub Pages
 
@@ -860,6 +885,9 @@ also be started manually on `main`. It validates first, then deploys that exact
 tested artifact through the `github-pages` environment. Scheduled runs use the
 same checks and installation gates as other releases. Upstream download failures
 or failed validation prevent deployment and leave the last published site intact.
+Publication also rejects an artifact marked as a PHP candidate. Publish the
+compatible PHP release first, remove the temporary candidate pin, and rerun
+Playground validation against the stable release before publishing Playground.
 
 Configure Pages with source **GitHub Actions** and custom domain
 **playground.joomengine.org**. The committed `CNAME` is copied into the build.
@@ -906,6 +934,11 @@ The prepared JCB regression creates a Joomla record and changes its configuratio
 file, then checks both and administrator access across whole-page reloads.
 Recovery checks verify that exporting files after a database startup failure
 leaves the saved file and database stores unchanged.
+Mail coverage exercises real PHP/Joomla/JCB sends, nested requests, console and
+debugger paths, inbox lifetime and export exclusion. Focused checks also cover
+capture rejection and missing acknowledgements, byte-preserving MIME downloads,
+parser failure, shared companion state and isolated HTML previews; see the
+[mail validation commands](docs/mail-capture.md#validation).
 `PLAYGROUND_BROWSERS`, `PLAYGROUND_PHP_VERSIONS`, `PLAYGROUND_JOOMLA_VERSIONS` and
 `PLAYGROUND_SCENARIOS` narrow local investigations.
 
@@ -965,7 +998,10 @@ worker timeout, use the recovery controls or restart the instance.
 
 Host processes, system executables, arbitrary socket services, and a production
 mail server are not supplied by this static playground. Extensions that require
-those facilities need a different environment. Installing an extension and passing
+those facilities need a different environment. The runtime's virtual Sendmail
+path captures supported local mail without starting a host process or delivering
+it. Explicit SMTP and HTTP mail providers bypass that capture path; imported
+Joomla mail settings are preserved. Installing an extension and passing
 the integration checks does not prove every workflow of every Joomla extension is
 browser-compatible; exercise the particular component operations you plan to
 demonstrate. Browser storage, WebAssembly memory and CORS still apply.

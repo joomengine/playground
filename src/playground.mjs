@@ -18,6 +18,8 @@ import { closeSiteResources } from './site-close.mjs';
 import { createRuntimeAccess } from './runtime-access.mjs';
 import { createLivePersistence } from './live-persistence.mjs';
 import { rememberRuntimeStorage, forgetRuntimeStorage, createRuntimeStorageAdapter } from './storage-management.mjs';
+import { createSessionMailbox } from './mail/mailbox.mjs';
+import { replyToMailCapture } from './mail/channel.mjs';
 
 const base = new URL('../', import.meta.url);
 const manifestUrl = new URL('assets/manifest.json', base);
@@ -60,10 +62,11 @@ async function clientIdentity() {
 }
 
 export class PhpSession {
-  constructor(database, onFailure, onDiagnostic, isolation) {
+  constructor(database, onFailure, onDiagnostic, isolation, captureMail) {
     this.database = database;
     this.onFailure = onFailure;
     this.onDiagnostic = onDiagnostic;
+    this.captureMail = captureMail;
     this.worker = new Worker(isolation ? ownedClientURL(new URL('./php-worker.mjs', import.meta.url), { baseURL: base.href, ...isolation }) : new URL('./php-worker.mjs', import.meta.url), { type: 'module' });
     this.sequence = 0;
     this.pending = new Map();
@@ -95,6 +98,16 @@ export class PhpSession {
     this.worker.addEventListener('message', event => this.receive(event.data));
   }
   async receive(message) {
+    // Native PHP is suspended while awaiting acceptance. The inbox must answer
+    // independently of the operation queue currently executing that PHP call.
+    if (replyToMailCapture(message, {
+      capture: (payload, captureId) => {
+        if (this.failure) throw this.failure;
+        if (typeof this.captureMail !== 'function') throw new Error('The local mail inbox is unavailable.');
+        return this.captureMail(payload, captureId);
+      },
+      postMessage: result => this.worker.postMessage(result),
+    })) return;
     if (message?.type === 'debug-state' || message?.type === 'debug-event') {
       if (message.type === 'debug-state') {
         this.debugState = message.state;
@@ -522,6 +535,9 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   const release = config.persistence ? await acquireSiteLock(identity) : async () => {};
   if (config.persistence) rememberRuntimeStorage({ baseURL: base.href, storageKey: config.storageKey, identity });
   const instanceId = crypto.randomUUID();
+  // This owner survives PHP settings changes and recovery, but is never part
+  // of a filesystem checkpoint, saved site, or exported production package.
+  const mailbox = createSessionMailbox();
   let database, session, closePromise, changing = false, databaseError = null, adminerOpened = false;
   const workspaceListeners = new Set();
   const debugListeners = new Set();
@@ -550,6 +566,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       if (registered) registerSession();
       throw error;
     }
+    mailbox.close();
     workspaceEvent({ type: 'workspace-closed', erased: Boolean(erase) });
     workspaceListeners.clear();
     debugListeners.clear();
@@ -586,9 +603,11 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
       if (filesOnly) throw new Error('Only file recovery is available. The database could not start; download the recovery files or close and retry.');
     };
     const createSession = () => {
+      const capture = mailbox.activateGeneration(crypto.randomUUID());
       const created = new PhpSession(database,
         error => { workspaceEvent({ type: 'workspace-failed', message: error.message }); progress({ phase: 'failed', message: error.message }); },
-        message => progress({ phase: 'warning', message }), isolation);
+        message => progress({ phase: 'warning', message }), isolation,
+        (payload, captureId) => capture({ ...payload, captureId }));
       created.workspaceListeners.add(workspaceEvent);
       created.persistenceListeners.add(workspaceEvent);
       created.debugListeners.add(message => {
@@ -625,6 +644,7 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     const handle = {
       url: resolveSiteURL(config.initialPath, siteUrl), baseUrl: siteUrl, isolation,
       documentRoot: '/persist/www', installMarkerPath: '/persist/meta/joomla-install.json', runtimeInfo,
+      mail: mailbox.mail,
       get configuration() { return structuredClone(config); },
       get closed() { return Boolean(closePromise); },
       get healthy() { return !closePromise && !session.failure; },
