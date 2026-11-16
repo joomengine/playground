@@ -9,8 +9,8 @@ The inbox lists newest messages first. Select a message to inspect its subject,
 addresses, receive time and available envelope information, then choose **Text**,
 **HTML** or **Raw**. **Download .eml** downloads the original captured bytes,
 including binary MIME parts. The raw text view is a readable decoding of those
-bytes; use the download when exact bytes matter. Attachments are listed by name
-and media type; the API also exposes their size, disposition and content ID.
+bytes; use the download when exact bytes matter. Attachments are listed by name,
+falling back to media type. The API exposes both, plus size, disposition and content ID.
 There is no separate attachment download or CID image reconstruction.
 
 HTML is an isolated preview with a restricted element set, an empty iframe
