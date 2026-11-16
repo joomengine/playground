@@ -444,8 +444,8 @@ async function saveRunningSite(page) {
   await page.locator('#save-state').filter({ hasText: /^Saved locally/i }).waitFor({ timeout: requestTimeout });
 }
 
-async function dismissAutomaticTour(page) {
-  const frame = await renderedSiteFrame(page);
+async function dismissAutomaticTour(page, { frame, username } = {}) {
+  frame ??= await renderedSiteFrame(page);
   // A new administrator's tour fetch can redirect after document load. Use
   // Joomla's actual Hide forever action, then verify TourModel's persisted
   // user profile before navigating or saving this installation.
@@ -453,7 +453,7 @@ async function dismissAutomaticTour(page) {
   await hideTour.waitFor({ timeout: requestTimeout });
   const tourId = await frame.evaluate(() => Number(sessionStorage.getItem('tourId')));
   assert.ok(Number.isSafeInteger(tourId) && tourId > 0, 'The visible tour has a concrete Joomla tour ID.');
-  const username = await page.locator('#admin-username').inputValue();
+  username ??= await page.locator('#admin-username').inputValue();
   assert.ok(username, 'The persistence probe targets the running administrator.');
   const prefix = new URL(frame.url()).pathname.match(/^.*\/__site\/[^/]+\/[^/]+\//)?.[0];
   assert.ok(prefix);
@@ -488,11 +488,20 @@ async function dismissAutomaticTour(page) {
     'Hide forever receives the trusted keyboard activation before its persisted state is checked.');
   await hideTour.waitFor({ state: 'hidden' });
   assert.equal(await frame.evaluate(() => sessionStorage.getItem('tourId')), null);
-  await page.waitForFunction(async url => {
-    const response = await fetch(url, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`Tour-state probe failed: HTTP ${response.status}`);
-    return (await response.json())?.state === 'skipped';
-  }, probeURL.href, { timeout: requestTimeout, polling: 500 });
+  // Playwright's function polling must not treat a Promise as a successful
+  // predicate. Await the real database-backed profile read before proceeding.
+  const persistenceDeadline = Date.now() + requestTimeout;
+  let profile = null;
+  while (Date.now() < persistenceDeadline) {
+    profile = await bounded(page.evaluate(async url => {
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`Tour-state probe failed: HTTP ${response.status}`);
+      return response.json();
+    }, probeURL.href), `Read persisted guided-tour ${tourId} state for ${username}`, Math.max(1, persistenceDeadline - Date.now()));
+    if (profile?.state === 'skipped') return;
+    await new Promise(resolve => setTimeout(resolve, Math.min(500, Math.max(0, persistenceDeadline - Date.now()))));
+  }
+  assert.equal(profile?.state, 'skipped', `Hide forever must persist before the frame closes; last profile: ${JSON.stringify(profile)}`);
 }
 
 async function previewContract(page, action = 'read', frameId = 'site-frame') {
@@ -557,6 +566,12 @@ async function assertSite(page, config) {
     else {
       assert.match(html, /com_cpanel|task=logout|value=["']logout["']/i, 'The administrator iframe must render the authenticated dashboard.');
       assert.doesNotMatch(html, /name=["']username["']/i);
+      // Finish Joomla's native first-use tour before disposing its frame. An
+      // interrupted tour fetch leaves origin-shared session state that the next
+      // administrator document tries to resume with a missing tour ID.
+      if (await frame.evaluate(() => Joomla.getOptions('com_guidedtours.autotour', '') !== '')) {
+        await dismissAutomaticTour(page, { frame, username: config.admin.username });
+      }
     }
     assert.deepEqual(page.failedSiteRequests, [], 'Joomla iframe assets must be served successfully.');
     await page.locator('#site-frame').evaluate((frame) => frame.remove());

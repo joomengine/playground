@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { build } from 'esbuild';
 import { chromium, firefox, webkit } from 'playwright';
 import { createStaticServer } from './server.mjs';
@@ -9,6 +10,19 @@ import { createStaticServer } from './server.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const engines = { chromium, firefox, webkit };
 const browsers = (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox,webkit').split(',');
+
+async function waitForParsedInbox(page, count) {
+  const deadline = Date.now() + 30_000;
+  let messages = [];
+  do {
+    // waitForFunction does not await async predicates in this Playwright build.
+    messages = await page.evaluate(() => window.mailbox.mail.list());
+    for (const message of messages) assert.notEqual(message.parseStatus, 'error', message.parseError);
+    if (messages.length === count && messages.every(message => message.parseStatus === 'ready')) return;
+    await delay(50);
+  } while (Date.now() < deadline);
+  assert.fail(`Mail previews did not finish: expected ${count} ready messages, received ${JSON.stringify(messages)}`);
+}
 
 for (const name of browsers) {
   test(`mail inbox preserves raw bytes, selection and isolated previews (${name})`, { timeout: 90_000 }, async () => {
@@ -65,7 +79,7 @@ for (const name of browsers) {
       const raw = await page.evaluate(html => window.addMessage('one', '<img src=x onerror=alert(1)>', html), malicious);
       await page.waitForFunction(() => window.mailbox.mail.state.count === 1);
       await page.locator('#mail-button').click();
-      await page.waitForFunction(async () => (await window.mailbox.mail.list())[0]?.parseStatus === 'ready');
+      await waitForParsedInbox(page, 1);
       await page.locator('.mail-source').filter({ hasText: 'Plain body one' }).waitFor();
       assert.equal(await page.locator('#mail-count').textContent(), '1');
       assert.equal(await page.locator('.mail-subject').textContent(), '<img src=x onerror=alert(1)>');
@@ -91,7 +105,7 @@ for (const name of browsers) {
       const selected = await page.locator('.mail-row[aria-pressed=true]').getAttribute('data-mail-id');
       await page.evaluate(() => window.addMessage('two', 'Second message'));
       await page.waitForFunction(() => document.querySelector('#mail-count').textContent === '2');
-      await page.waitForFunction(async () => (await window.mailbox.mail.list())[0]?.parseStatus === 'ready');
+      await waitForParsedInbox(page, 2);
       assert.equal(await page.locator('.mail-row[aria-pressed=true]').getAttribute('data-mail-id'), selected);
       assert.equal(await page.evaluate(() => document.activeElement.dataset.mailId), selected, 'New mail preserves the focused message.');
       assert.equal(await page.evaluate(() => document.querySelector('.mail-html') === window.originalMailFrame), true,

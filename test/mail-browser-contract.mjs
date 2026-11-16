@@ -1,17 +1,27 @@
 import assert from 'node:assert/strict';
 import { startRedirectTrace, recordVerifiedRedirectDiagnostic } from './firefox-redirect-probe.mjs';
 
-export async function readCapturedBrowserMail(page, count) {
-  await page.waitForFunction(async count => {
-    const mail = window.playground.mail;
-    return mail.state.count === count && (await mail.list()).every(entry => entry.parseStatus !== 'pending');
-  }, count, { timeout: 30_000 });
+export async function readCapturedBrowserMail(page, count, { timeoutMs = 30_000, pollMs = 25 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    // Playwright waitForFunction treats a Promise as truthy before awaiting its value.
+    const snapshot = await page.evaluate(async () => ({
+      state: window.playground.mail.state, entries: await window.playground.mail.list(),
+    }));
+    for (const entry of snapshot.entries) {
+      assert.notEqual(entry.parseStatus, 'error', `Mail ${entry.id} failed MIME parsing: ${entry.parseError ?? 'No parser diagnostic.'}`);
+    }
+    if (snapshot.state.count === count && snapshot.entries.length === count
+      && snapshot.entries.every(entry => entry.parseStatus === 'ready')) break;
+    assert.ok(Date.now() < deadline, `Timed out waiting for ${count} ready captured messages: ${JSON.stringify(snapshot)}`);
+    await new Promise(resolve => setTimeout(resolve, pollMs));
+  }
   const entries = await page.evaluate(async () => Promise.all((await window.playground.mail.list()).map(async summary => {
     const entry = await window.playground.mail.get(summary.id);
     return { ...entry, raw: Array.from(entry.raw) };
   })));
   assert.equal(entries.length, count);
-  for (const entry of entries) assert.equal(entry.parseStatus, 'ready', entry.parseError);
+  for (const entry of entries) assert.equal(entry.parseStatus, 'ready', `Mail ${entry.id} has parse status ${entry.parseStatus}: ${entry.parseError ?? 'No parser error.'}`);
   return entries;
 }
 
