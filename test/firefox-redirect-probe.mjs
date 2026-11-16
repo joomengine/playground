@@ -23,6 +23,11 @@ self.addEventListener('fetch', event => {
     event.respondWith(Response.redirect(url.href, 303));
     return;
   }
+  if (url.searchParams.has('edit')) {
+    url.search = 'complete=1';
+    event.respondWith(Response.redirect(url.href, 303));
+    return;
+  }
   if (url.searchParams.has('redirect')) {
     const remaining = Number(url.searchParams.get('redirect')) - 1;
     url.search = remaining ? 'redirect=' + remaining : 'complete=1';
@@ -65,6 +70,16 @@ self.addEventListener('fetch', event => {
     assert.ok(diagnostics.length <= 1 && diagnostics.every(record => isSyntheticRedirectDiagnostic(record, sourceURL)),
       `The isolated redirect produced an unrelated browser error: ${JSON.stringify(diagnostics)}`);
     const postDiagnostics = diagnostics.splice(0);
+    const edited = await frame.goto(new URL('form?edit=1', server.url).href);
+    assert.equal(edited.status(), 200);
+    assert.equal(edited.request().method(), 'GET');
+    assert.equal(frame.url(), new URL('form?complete=1', server.url).href);
+    assert.equal(await frame.locator('#result').textContent(), 'GET:1', 'A GET 303 must finish with GET without submitting the form.');
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => resolve())));
+    assert.ok(diagnostics.length <= 1 && diagnostics.every(record => isSyntheticRedirectDiagnostic(record, sourceURL)),
+      `The isolated GET 303 produced an unrelated browser error: ${JSON.stringify(diagnostics)}`);
+    assert.deepEqual(errors, []);
+    const get303Diagnostics = diagnostics.splice(0);
     await frame.goto(new URL('form?redirect=2', server.url).href);
     assert.equal(frame.url(), new URL('form?complete=1', server.url).href);
     assert.equal(await frame.locator('#result').textContent(), 'GET:1', 'GET redirects must not replay the earlier submission.');
@@ -74,6 +89,7 @@ self.addEventListener('fetch', event => {
     assert.deepEqual(errors, []);
     const proof = { browserVersion: browser.version(), methodAfterRedirect: 'GET', submissions: 1,
       cases: { post303: { reproduced: postDiagnostics.length === 1, status: 303, redirects: 1, diagnostics: postDiagnostics },
+        get303: { reproduced: get303Diagnostics.length === 1, status: 303, redirects: 1, diagnostics: get303Diagnostics },
         get301: { reproduced: diagnostics.length === 2, status: 301, redirects: 2, diagnostics } } };
     console.log(JSON.stringify({ syntheticRedirectProbe: proof }));
     return proof;
@@ -103,7 +119,7 @@ export async function startRedirectTrace(page) {
   });
 }
 
-export async function recordVerifiedRedirectDiagnostic(page, { probe, kind, from, traceFrom, sourceURL, step, finalURL, responseStatus, methodAfterRedirect }) {
+export async function recordVerifiedRedirectDiagnostic(page, { probe, kind, from, traceFrom, sourceURL, step, requestURL, finalURL, responseStatus, methodAfterRedirect }) {
   if (!probe?.cases[kind]?.reproduced) return;
   assert.equal(responseStatus, 200);
   assert.equal(methodAfterRedirect, 'GET');
@@ -115,7 +131,10 @@ export async function recordVerifiedRedirectDiagnostic(page, { probe, kind, from
     assert.ok(new URL(redirect.location, redirect.url).pathname.includes('/__site/'));
   }
   assert.ok(known.length <= redirects.length, 'Every known browser diagnostic needs an observed native HTTP redirect.');
-  if (known.length) assert.equal(new URL(redirects.at(-1).location, redirects.at(-1).url).href, finalURL);
+  if (known.length) {
+    if (requestURL) assert.equal(redirects[0].url, requestURL, 'The native redirect must start with the verified navigation request.');
+    assert.equal(new URL(redirects.at(-1).location, redirects.at(-1).url).href, finalURL);
+  }
   for (const record of known) {
     page.knownBrowserDiagnostics.push({ ...record, reason: 'Reproduced by the current Firefox using direct Response.redirect; native redirects and final page verified.', redirects, probe: probe.cases[kind] });
     page.consoleErrors.splice(page.consoleErrors.indexOf(record), 1);

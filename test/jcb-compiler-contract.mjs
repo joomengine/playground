@@ -167,10 +167,19 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
     const compilerURL = frame.url();
     const edit = frame.locator('#component-details a[href*="task=joomla_component.edit"]');
     await assertJcbPageAssets(frame);
-    await Promise.all([
+    const editURL = new URL(await edit.getAttribute('href'), frame.url()).href;
+    const editFrom = page.consoleErrors?.length ?? 0;
+    const editTraceFrom = await startRedirectTrace(page);
+    const [edited] = await Promise.all([
       frame.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs }),
       edit.click(),
     ]);
+    assert.equal(edited.status(), 200);
+    if (page.consoleErrors) await recordVerifiedRedirectDiagnostic(page, {
+      probe, kind: 'get303', from: editFrom, traceFrom: editTraceFrom,
+      sourceURL: new URL('service-worker.mjs', page.url()).href, step: page.testStep,
+      requestURL: editURL, finalURL: frame.url(), responseStatus: edited.status(), methodAfterRedirect: edited.request().method(),
+    });
     await frame.getByRole('tab', { name: 'Libs & Helpers', exact: true }).click();
     const helperOption = frame.locator('input[name="jform[add_email_helper]"][value="1"]');
     const optionId = await helperOption.getAttribute('id');
