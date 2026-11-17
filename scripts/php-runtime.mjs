@@ -1,8 +1,7 @@
-import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { downloadVerified, extractTarGzip, hashFile, inventory, sha256 } from './assets.mjs';
+import { downloadVerified, extractTarGzip, inventory, sha256 } from './assets.mjs';
 
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 const repository = 'joomengine/php-wasm-int64';
@@ -69,19 +68,13 @@ export async function verifyPhpRuntimeArchive(directory, expected) {
   return { manifest, manifestSha256: sha256(bytes) };
 }
 
-async function prepareArchive(root, archive, version, { localOnly = false } = {}) {
+async function prepareArchive(root, archive, version) {
   const directory = phpRuntimeDirectory(root, archive);
   const expected = { ...archive, version };
   try { return { directory, ...await verifyPhpRuntimeArchive(directory, expected) }; }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   const cache = path.join(root, '.cache/php-int64');
-  let filename = path.join(cache, `${archive.sha256}.tar.gz`);
-  if (localOnly) {
-    let digest;
-    try { digest = await hashFile(filename); }
-    catch (error) { throw new Error('The pinned PHP candidate archive is unavailable locally; import it again.', { cause: error }); }
-    if (digest !== archive.sha256) throw new Error('The cached PHP candidate archive checksum differs.');
-  } else filename = await downloadVerified(archive.url, archive.sha256, filename);
+  const filename = await downloadVerified(archive.url, archive.sha256, path.join(cache, `${archive.sha256}.tar.gz`));
   const staging = await mkdtemp(path.join(cache, 'extract-'));
   try {
     await extractTarGzip(filename, staging, { maxOutputLength: 512 * 1024 * 1024 });
@@ -92,14 +85,11 @@ async function prepareArchive(root, archive, version, { localOnly = false } = {}
   } finally { await rm(staging, { recursive: true, force: true }); }
 }
 
-function validateSelection(selection, versions, candidate) {
+function validateSelection(selection, versions) {
   const minors = requireConfiguration(versions);
-  const isCandidate = selection.kind === 'candidate';
   if (selection.schemaVersion !== 1 || selection.repository !== repository || !/^\d+\.\d+\.\d+$/.test(selection.version ?? '')
-    || ![undefined, 'release', 'candidate'].includes(selection.kind) || !commitPattern.test(selection.commit ?? '')
-    || (isCandidate ? !candidate || candidate.commit !== selection.commit || selection.tag !== undefined
-      || selection.url !== `https://github.com/${repository}/commit/${selection.commit}`
-      : selection.tag !== `v${selection.version}` || selection.url !== `https://github.com/${repository}/releases/tag/${selection.tag}`)
+    || selection.kind !== 'release' || !commitPattern.test(selection.commit ?? '')
+    || selection.tag !== `v${selection.version}` || selection.url !== `https://github.com/${repository}/releases/tag/${selection.tag}`
     || !Array.isArray(selection.archives) || selection.archives.length !== minors.length) {
     throw new Error('Invalid resolved PHP release. Run npm run prepare:php before rebuilding native extensions.');
   }
@@ -109,7 +99,7 @@ function validateSelection(selection, versions, candidate) {
     const name = `php-wasm-int64-${selection.version}-php${minor}.tar.gz`;
     if (records.length !== 1 || archive.name !== name || !hashPattern.test(archive.sha256 ?? '')
       || !hashPattern.test(archive.manifestSha256 ?? '') || !hashPattern.test(archive.fingerprint ?? '')
-      || archive.url !== (isCandidate ? selection.url : `https://github.com/${repository}/releases/download/${selection.tag}/${name}`)) {
+      || archive.url !== `https://github.com/${repository}/releases/download/${selection.tag}/${name}`) {
       throw new Error(`Resolved PHP ${minor} archive is missing or inconsistent.`);
     }
   }
@@ -151,81 +141,13 @@ export async function resolvePhpRuntime({ root = projectRoot, versions, fetchImp
   return selection;
 }
 
-/** Explicit, temporary PR input; normal release resolution never consults this file. */
-export async function readPhpRuntimeCandidate(root = projectRoot) {
-  const candidate = JSON.parse(await readFile(path.join(root, '.github/php-runtime-candidate.json'), 'utf8'));
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)
-    || candidate.repository !== repository || !commitPattern.test(candidate.commit ?? '')
-    || Object.keys(candidate).some(key => !['repository', 'commit'].includes(key))) {
-    throw new Error('The PHP candidate must pin the official repository and one exact source commit.');
-  }
-  return candidate;
-}
-
-/** Import locally built CI archives, verifying them against the exact clean source checkout. */
-export async function importCandidatePhpRuntime({ root = projectRoot, versions, sourceRoot, archivesDirectory } = {}) {
-  if (!sourceRoot || !archivesDirectory) throw new Error('Candidate import requires its source checkout and archive directory.');
-  sourceRoot = path.resolve(sourceRoot);
-  archivesDirectory = path.resolve(archivesDirectory);
-  versions ??= JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
-  const minors = requireConfiguration(versions);
-  const candidate = await readPhpRuntimeCandidate(root);
-  const git = (...args) => execFileSync('git', ['-C', sourceRoot, ...args], { encoding: 'utf8' }).trim();
-  if (git('rev-parse', 'HEAD') !== candidate.commit || git('status', '--porcelain') !== '') {
-    throw new Error('Candidate source checkout must be clean and at the exact configured commit.');
-  }
-  const version = (await readFile(path.join(sourceRoot, 'VERSION'), 'utf8')).trim();
-  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Candidate source VERSION is invalid.');
-  const pins = JSON.parse(await readFile(path.join(sourceRoot, 'versions.json'), 'utf8'));
-  const selection = { schemaVersion: 1, kind: 'candidate', repository, version, commit: candidate.commit,
-    url: 'https://github.com/' + repository + '/commit/' + candidate.commit, archives: [] };
-  const cache = path.join(root, '.cache/php-int64');
-  await mkdir(cache, { recursive: true });
-  for (const minor of minors) {
-    const fingerprint = execFileSync('bash', ['-euo', 'pipefail', '-c',
-      'source "$1/scripts/common.sh"; select_php "$2"; printf "%s" "$BUILD_FINGERPRINT"',
-      'php-candidate', sourceRoot, minor], { encoding: 'utf8' }).trim();
-    if (!hashPattern.test(fingerprint)) throw new Error('Candidate build fingerprint is invalid.');
-    const name = 'php-wasm-int64-' + version + '-php' + minor + '.tar.gz';
-    const filename = path.join(archivesDirectory, name);
-    const sidecar = (await readFile(filename + '.sha256', 'utf8')).trim();
-    const match = /^([a-f0-9]{64}) {2}(\S+)$/.exec(sidecar);
-    if (!match || match[2] !== name || await hashFile(filename) !== match[1]) {
-      throw new Error('Candidate archive checksum is missing or inconsistent: ' + name);
-    }
-    const archive = { minor, name, url: selection.url, sha256: match[1] };
-    const cached = path.join(cache, archive.sha256 + '.tar.gz');
-    if (path.resolve(filename) !== path.resolve(cached)) await cp(filename, cached);
-    const { manifest, manifestSha256 } = await prepareArchive(root, archive, version, { localOnly: true });
-    const expectedPhp = pins.php?.find(item => item.minor === minor);
-    if (!expectedPhp || JSON.stringify(manifest.php) !== JSON.stringify(expectedPhp)
-      || manifest.fingerprint !== fingerprint
-      || JSON.stringify(manifest.upstream) !== JSON.stringify(pins.upstream)
-      || JSON.stringify(manifest.emscripten) !== JSON.stringify(pins.emscripten)
-      || JSON.stringify(manifest.vrzno) !== JSON.stringify(pins.vrzno)
-      || JSON.stringify(manifest.abi) !== JSON.stringify(pins.abi)
-      || JSON.stringify(JSON.parse(await readFile(path.join(phpRuntimeDirectory(root, archive), 'build-inputs/versions.json'), 'utf8')))
-        !== JSON.stringify(pins)) {
-      throw new Error('Candidate archive does not match its pinned source inputs: ' + name);
-    }
-    selection.archives.push({ ...archive, manifestSha256, php: manifest.php, fingerprint,
-      upstream: manifest.upstream, emscripten: manifest.emscripten, abi: manifest.abi });
-  }
-  validateSelection(selection, versions, candidate);
-  const filename = phpRuntimeSelectionPath(root);
-  const temporary = filename + '.' + process.pid + '.tmp';
-  await writeFile(temporary, JSON.stringify(selection, null, 2) + '\n');
-  await rename(temporary, filename);
-  return selection;
-}
-
 /** Load the existing build selection; never resolve another release midway through a build. */
 export async function loadPhpRuntime({ root = projectRoot, versions, minor } = {}) {
   versions ??= JSON.parse(await readFile(path.join(root, 'versions.json'), 'utf8'));
   let selection;
   try {
     const value = JSON.parse(await readFile(phpRuntimeSelectionPath(root), 'utf8'));
-    selection = validateSelection(value, versions, value.kind === 'candidate' ? await readPhpRuntimeCandidate(root) : undefined);
+    selection = validateSelection(value, versions);
   }
   catch (error) {
     if (error.code === 'ENOENT') throw new Error('PHP runtime is not prepared. Run npm run prepare:php before compiling native extensions.', { cause: error });
@@ -238,7 +160,7 @@ export async function loadPhpRuntime({ root = projectRoot, versions, minor } = {
     const directory = phpRuntimeDirectory(root, archive);
     let manifest;
     if (!minor || archive.minor === minor) {
-      ({ manifest } = await prepareArchive(root, archive, selection.version, { localOnly: selection.kind === 'candidate' }));
+      ({ manifest } = await prepareArchive(root, archive, selection.version));
       if (JSON.stringify(manifest.php) !== JSON.stringify(archive.php) || manifest.fingerprint !== archive.fingerprint
         || JSON.stringify(manifest.upstream) !== JSON.stringify(archive.upstream)
         || JSON.stringify(manifest.emscripten) !== JSON.stringify(archive.emscripten)) throw new Error('Resolved PHP identity differs from its verified archive.');
@@ -261,10 +183,9 @@ export async function runtimePackage(minor, packageName, { root = projectRoot } 
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const command = process.argv[2];
-  if (!['resolve', 'import-candidate'].includes(command)) {
-    throw new Error('Usage: node scripts/php-runtime.mjs resolve | import-candidate <archive-directory> <source-checkout>');
+  if (command !== 'resolve') {
+    throw new Error('Usage: node scripts/php-runtime.mjs resolve');
   }
-  const selection = command === 'resolve' ? await resolvePhpRuntime()
-    : await importCandidatePhpRuntime({ archivesDirectory: process.argv[3], sourceRoot: process.argv[4] });
+  const selection = await resolvePhpRuntime();
   console.log(`Prepared PHP int64 ${selection.version}: ${selection.archives.map(archive => archive.php.version).join(', ')}`);
 }

@@ -22,7 +22,7 @@ function aggregateScript() {
   return scripts[0][1].split('\n').map(line => line.replace(/^          /, '')).join('\n');
 }
 
-test('live JCB checks wait for other validation and run browsers sequentially against the candidate build', () => {
+test('live JCB checks wait for other validation and run browsers sequentially against the built distribution', () => {
   const gate = job(validation, 'jcb-network');
   assert.match(gate, /^    name: JCB API and repositories \(\$\{\{ matrix\.browser \}\}\)$/m);
   const needs = /^    needs: \[([^\n]+)\]$/m.exec(gate)?.[1].split(',').map(value => value.trim());
@@ -54,7 +54,7 @@ test('live JCB checks wait for other validation and run browsers sequentially ag
   assert.match(gate, /^          if-no-files-found: error$/m);
 });
 
-test('optional candidate skips cannot suppress successful downstream release validation', () => {
+test('downstream release validation requires every direct prerequisite to succeed', () => {
   for (const id of ['browser', 'php-network', 'jcb-network', 'compatibility', 'version-catalog']) {
     const source = job(validation, id);
     const needs = /^    needs: \[([^\n]+)\]$/m.exec(source)?.[1].split(',').map(value => value.trim());
@@ -66,26 +66,26 @@ test('optional candidate skips cannot suppress successful downstream release val
   }
 });
 
-test('the aggregate fails for a failed, skipped, cancelled or absent JCB gate', () => {
+test('the aggregate fails for a failed, skipped, cancelled or absent required validation job', () => {
   const aggregate = job(validation, 'validate');
   assert.match(aggregate, /^    needs: \[[^\n]*\bjcb-network\b[^\n]*\]$/m);
   assert.match(aggregate, /^    if: always\(\)$/m);
   assert.match(aggregate, /^          JCB_NETWORK: \$\{\{ needs\.jcb-network\.result \}\}$/m);
   const script = aggregateScript();
   const baseline = { ...process.env, CHECKS: 'success', BUILD_REQUIRED: 'true', BUILD: 'success',
-    CANDIDATE_REQUIRED: '', CANDIDATE: 'skipped',
     BROWSERS: 'success', INTERACTIONS: 'success', COMPATIBILITY: 'success', VERSION_CATALOG: 'success', JCB_NETWORK: 'success', NETWORK_WORKER: 'success', PHP_NETWORK: 'success' };
   const run = env => spawnSync('bash', ['-e', '-c', script], { env: { ...baseline, ...env }, encoding: 'utf8' });
   assert.equal(run({}).status, 0, 'All successful jobs must permit the aggregate.');
-  assert.equal(run({ CANDIDATE_REQUIRED: 'a'.repeat(40), CANDIDATE: 'success' }).status, 0);
-  for (const result of ['failure', 'skipped', 'cancelled', '']) {
-    assert.notEqual(run({ CANDIDATE_REQUIRED: 'a'.repeat(40), CANDIDATE: result }).status, 0,
-      'A selected PHP candidate cannot be skipped or fail while the aggregate succeeds.');
+  for (const gate of ['BUILD', 'BROWSERS', 'INTERACTIONS', 'COMPATIBILITY', 'VERSION_CATALOG']) {
+    for (const result of ['failure', 'skipped', 'cancelled', '']) {
+      assert.notEqual(run({ [gate]: result }).status, 0,
+        `${gate}=${JSON.stringify(result)} must fail when the build is required.`);
+    }
   }
-  for (const gate of ['JCB_NETWORK', 'NETWORK_WORKER', 'PHP_NETWORK']) for (const result of ['failure', 'skipped', 'cancelled', '']) {
+  for (const gate of ['CHECKS', 'JCB_NETWORK', 'NETWORK_WORKER', 'PHP_NETWORK']) for (const result of ['failure', 'skipped', 'cancelled', '']) {
     for (const buildRequired of ['true', 'false']) {
       assert.notEqual(run({ [gate]: result, BUILD_REQUIRED: buildRequired }).status, 0,
-        `JCB=${JSON.stringify(result)} must fail even when BUILD_REQUIRED=${buildRequired}.`);
+        `${gate}=${JSON.stringify(result)} must fail even when BUILD_REQUIRED=${buildRequired}.`);
     }
   }
 });

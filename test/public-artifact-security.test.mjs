@@ -105,6 +105,6 @@ test('public manifest and network config must retain the normalized production s
 test('the mandatory build injects harmless canaries and verifies final snapshots before publication', async () => {
   const workflow = await readFile(new URL('../.github/workflows/validate.yml', import.meta.url), 'utf8');
   for (const mode of ['build', 'snapshots', 'verify']) assert.match(workflow, new RegExp(`run: node scripts/build-public-artifact\\.mjs ${mode}`));
-  assert.ok(workflow.indexOf('run: node scripts/build-public-artifact.mjs verify') < workflow.indexOf('name: Retain candidate static distribution'));
+  assert.ok(workflow.indexOf('run: node scripts/build-public-artifact.mjs verify') < workflow.indexOf('name: Retain validated static distribution'));
   assert.doesNotMatch(workflow, /secrets\./);
 });
