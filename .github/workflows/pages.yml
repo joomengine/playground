@@ -43,7 +43,7 @@ jobs:
           node --input-type=module <<'JS'
           import { readFileSync } from 'node:fs';
           const manifest = JSON.parse(readFileSync('dist/assets/manifest.json', 'utf8'));
-          if (manifest.runtime?.kind !== 'release') throw new Error('A PHP candidate must not be published to Pages. Build against a verified stable release first.');
+          if (manifest.runtime?.kind !== 'release') throw new Error('Publication requires a verified published PHP runtime release.');
           JS
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:

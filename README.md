@@ -125,13 +125,12 @@ The supported catalog is:
 | 5.4.10 | 8.3, 8.4, 8.5 |
 | 6.2.0 | 8.3, 8.4, 8.5 |
 
-Production builds resolve the latest stable JoomEngine int64 release once. Its
-manifests provide the exact PHP patch versions, matching extension headers and source pins.
-The generated catalog records the selected versions. Normal release resolution
-does not select PHP release candidates or unpublished builds. During this mail
-integration, pull-request validation has a separate, explicit exact-commit PHP
-candidate input; it is not a release and cannot be published to Pages. See the
-[temporary validation and release order](docs/mail-capture.md#runtime-validation-and-release-order).
+Every new build, including pull-request validation, resolves the latest published
+stable JoomEngine int64 release once. New PHP runtime releases therefore flow into
+subsequent builds without updating a committed version or source hash. The selected
+release's manifests provide the exact PHP patch versions, matching extension
+headers and source provenance; all later steps use that same verified selection.
+See the [runtime release policy](docs/mail-capture.md#runtime-release-policy).
 
 [versions.json](versions.json) defines the supported PHP lines and default
 selection; the generated runtime manifest records their exact build identities.
@@ -227,11 +226,10 @@ release, then rebuild its native adapters. All later build steps use that same
 recorded selection. Bridge JavaScript and engine assets come from the verified
 MariaDB bridge release.
 
-`prepare:php` always uses the stable-release policy, even when a temporary
-pull-request candidate pin exists. The mail-enabled PHP runtime must advertise
-mail capture version 1; an older runtime fails validation rather than silently
-disabling capture. Candidate validation is described in the
-[mail capture guide](docs/mail-capture.md#runtime-validation-and-release-order).
+`prepare:php` always resolves the latest published stable release. The runtime
+must advertise mail capture version 1; an incompatible runtime fails validation
+rather than silently disabling capture. Release validation is described in the
+[mail capture guide](docs/mail-capture.md#runtime-release-policy).
 
 ## Build provenance
 
@@ -239,9 +237,10 @@ disabling capture. Candidate validation is described in the
 `versions.json` selects the supported PHP minors and stable int64 release policy,
 and pins the MariaDB release checksum, native and adapter source hashes, Joomla
 distributions and compatible runtime combinations. `.cache/php-int64/resolved.json`
-records the selected int64 runtime and archive hashes, explicitly identifying a
-release or temporary pull-request candidate. Its verified manifests
-provide the exact PHP source commits, compiler image and ABI for the native build.
+records the published int64 release selected for this build and its archive hashes.
+These are build provenance and integrity records, not pins for future builds. Its
+verified manifests provide the exact PHP source commits, compiler image and ABI
+for the native build.
 
 The build verifies every entry in the MariaDB bridge 0.1.8 release inventory and
 stages its runtime, PHP adapter, engine JavaScript and WebAssembly directly from
@@ -885,9 +884,9 @@ also be started manually on `main`. It validates first, then deploys that exact
 tested artifact through the `github-pages` environment. Scheduled runs use the
 same checks and installation gates as other releases. Upstream download failures
 or failed validation prevent deployment and leave the last published site intact.
-Publication also rejects an artifact marked as a PHP candidate. Publish the
-compatible PHP release first, remove the temporary candidate pin, and rerun
-Playground validation against the stable release before publishing Playground.
+Every build resolves the latest published stable PHP runtime and validates the
+resulting distribution. Publication requires a verified release and deploys the
+exact artifact that passed those checks.
 
 Configure Pages with source **GitHub Actions** and custom domain
 **playground.joomengine.org**. The committed `CNAME` is copied into the build.

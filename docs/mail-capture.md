@@ -137,33 +137,25 @@ does not truncate or discard accepted raw mail. The session inbox has no
 automatic eviction policy, so Clear releases retained messages when they are no
 longer needed.
 
-## Runtime validation and release order
+## Runtime release policy
 
-Production builds resolve published stable releases from
-`joomengine/php-wasm-int64`. `npm run prepare:php` follows that policy and never
-implicitly selects an unpublished build. The selected runtime must advertise
-the mail capability in its verified manifest and initialized runtime.
+Every new build, including pull-request validation and production builds, resolves
+`latest` from the published stable releases of `joomengine/php-wasm-int64`.
+`npm run prepare:php` refreshes that selection at the start of the build, so new
+runtime releases propagate without changing a committed version or source hash.
+Prereleases and unpublished source builds are not selected.
 
-While this integration is under review, `.github/php-runtime-candidate.json`
-pins the exact PHP commit `ed6d85e4b0a8c040422d2f2ce2f4e3f41b3debc9`.
-Pull-request CI builds the supported PHP lines from that clean source checkout,
-verifies the source inputs, build fingerprint, archive checksum, inventory, ABI
-and mail capability, and imports the result explicitly. Candidate caches require
-the exact build fingerprint. The generated selection and asset manifest mark it
-as `kind: "candidate"` with its source commit; this is validation evidence, not a
-published PHP release.
+The resolved release, source commit, archive checksums and verified manifest
+identities are recorded for that build. Native compilation, packaging and tests
+all use that same selection; a newer release appearing midway through a build
+does not mix incompatible inputs. The next build resolves `latest` again.
+Checksums and source records provide integrity and provenance without freezing
+future release selection. The selected runtime must advertise mail capture
+version 1 in its verified manifest and initialized runtime.
 
-The explicit import entry point is
-`node scripts/php-runtime.mjs import-candidate <archive-directory> <source-checkout>`.
-It requires complete matching archives and the exact clean pinned checkout;
-ordinary stable-release build instructions remain unchanged. GitHub Pages
-publication rejects candidate artifacts.
-
-The release sequence is: validate and publish the compatible PHP release first,
-remove the temporary Playground candidate pin, then rebuild and run Playground's
-full validation against the published stable release. Only that validated release
-artifact is eligible for Playground publication. A green candidate PR does not
-publish PHP or deploy Playground by itself.
+GitHub Pages publishes the exact verified release artifact that passed the full
+Playground validation. A PHP runtime release becomes available to subsequent
+builds when it is published; publishing PHP does not itself deploy Playground.
 
 ## Validation
 
