@@ -218,7 +218,7 @@ try {
   const deploys = await stageDeployCatalog({ root, staging, assets, cache, canonicalUrl });
   console.log('Staging current and forward Joomla/JCB packages…');
   const versionCatalog = await stageVersionCatalog({ assets, cache, pinnedJoomla: versions.joomla,
-    stagedJoomla: joomla, deployPackages: deploys.packages });
+    stagedJoomla: joomla, deployPackages: deploys.packages, githubToken: process.env.GITHUB_TOKEN });
   for (const name of ['index.html', 'src', 'config', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
     await cp(path.join(root, name), path.join(staging, name), { recursive: true });
   }

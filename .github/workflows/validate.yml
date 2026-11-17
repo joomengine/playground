@@ -121,6 +121,7 @@ jobs:
           key: ${{ steps.native.outputs.cache-primary-key }}
       - name: Build verified static distribution
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           MARIADB_DRIVER_DIR: .cache/native
         run: node scripts/build-public-artifact.mjs build
       - name: Cache verified download archives

@@ -132,7 +132,7 @@ async function download(entry, fetchImpl, limit) {
 /** Publish only verified, automatically downloadable choices; a failed refresh never replaces the catalog. */
 export async function stageVersionCatalog({ assets, cache, pinnedJoomla = [], stagedJoomla = [], deployPackages = [],
   discover = discoverDynamicCatalog, fetchImpl = fetch, now = Date.now,
-  maxPackageBytes = MAX_BYTES }) {
+  maxPackageBytes = MAX_BYTES, githubToken = '' }) {
   if (!Number.isSafeInteger(maxPackageBytes) || maxPackageBytes < 4 || maxPackageBytes > MAX_BYTES) throw new Error('Invalid catalog package limit.');
   const upstreamFetch = (url, init = {}) => {
     const headers = new Headers(init.headers);
@@ -142,6 +142,16 @@ export async function stageVersionCatalog({ assets, cache, pinnedJoomla = [], st
   // A transient gateway failure should not force another full build. Keep each
   // metadata GET within its original deadline and never replay other methods.
   const metadataFetch = async (url, init = {}) => {
+    const target = new URL(url);
+    // Build credentials belong only to this GitHub metadata request, never to
+    // package downloads, other feeds, redirects or the generated browser app.
+    if (githubToken && (init.method || 'GET').toUpperCase() === 'GET'
+      && target.origin === 'https://api.github.com' && !target.username && !target.password
+      && target.pathname === '/repos/joomla/joomla-cms/releases') {
+      const headers = new Headers(init.headers);
+      headers.set('Authorization', `Bearer ${githubToken}`);
+      init = { ...init, headers, redirect: 'error' };
+    }
     const attempts = (init.method || 'GET').toUpperCase() === 'GET' ? 3 : 1;
     for (let attempt = 1; attempt <= attempts; attempt++) {
       init.signal?.throwIfAborted();

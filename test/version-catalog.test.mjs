@@ -115,6 +115,94 @@ const releasesURL = 'https://api.github.com/repos/joomla/joomla-cms/releases?per
 const discoverPinnedCatalog = options => discoverDynamicCatalog({ ...options,
   pinnedJoomla: [stable], pinnedJcb: [jcb], sources: { nightlyURLs: [], jcbURLs: [] } });
 
+test('the build token authenticates release metadata without entering packages or the published catalog', async t => {
+  const token = 'build-only-github-token';
+  const requests = [];
+  const f = await fixture(t, { githubToken: token, discover: discoverPinnedCatalog,
+    fetchImpl: async (url, init) => {
+      requests.push({ url, init });
+      return url === releasesURL ? Response.json([]) : new Response(url === stable.url ? stableBytes : jcbBytes);
+    } });
+  await stageVersionCatalog(f.configuration);
+  const metadata = requests.filter(request => request.url === releasesURL);
+  assert.equal(metadata.length, 1);
+  assert.equal(metadata[0].init.headers.get('Authorization'), `Bearer ${token}`);
+  assert.equal(metadata[0].init.redirect, 'error');
+  assert.equal(metadata[0].init.credentials, 'omit');
+  for (const request of requests.filter(request => request.url !== releasesURL)) {
+    assert.equal(request.init.headers.get('Authorization'), null, 'Archive downloads must not carry the build token.');
+  }
+  const catalog = await f.catalog();
+  assert.equal(JSON.stringify(catalog).includes(token), false);
+  for (const entry of [...catalog.joomla, ...catalog.jcb]) {
+    assert.equal((await readFile(path.join(f.configuration.assets, entry.url))).includes(Buffer.from(token)), false);
+  }
+});
+
+test('build authentication is restricted to the exact HTTPS Joomla release metadata GET', async t => {
+  const probes = [
+    { url: releasesURL, method: 'POST' },
+    { url: releasesURL.replace('https:', 'http:') },
+    { url: releasesURL.replace('api.github.com', 'api.github.com.attacker.test') },
+    { url: releasesURL.replace('api.github.com', 'user:password@api.github.com') },
+    { url: releasesURL.replace('/releases?', '/releases/123?') },
+    { url: 'https://api.github.com/repos/unrelated/repository/releases' },
+    { url: 'https://raw.githubusercontent.com/joomengine/Joomla-Component-Builder/refs/heads/6.x/componentbuilder_update_server.xml' },
+    { url: 'https://github.com/joomla/joomla-cms/releases/download/6.2.0/Joomla_6.2.0-Stable-Full_Package.zip' },
+  ];
+  const seen = [];
+  const f = await fixture(t, { githubToken: 'scoped-build-token',
+    discover: async ({ fetchImpl }) => {
+      for (const { url, method } of probes) await fetchImpl(url, { method, redirect: 'follow' });
+      return { joomla: [stable], jcb: [jcb], errors: [] };
+    },
+    fetchImpl: async (url, init) => {
+      seen.push(url);
+      assert.equal(init.headers.get('Authorization'), null, `Credentials must not be attached to ${url}.`);
+      return new Response(url === stable.url ? stableBytes : jcbBytes);
+    } });
+  await stageVersionCatalog(f.configuration);
+  assert.deepEqual(seen.slice(0, probes.length), probes.map(probe => probe.url));
+});
+
+test('local catalog builds without a token keep the public metadata request unauthenticated', async t => {
+  const f = await fixture(t, { discover: discoverPinnedCatalog, fetchImpl: async (url, init) => {
+    assert.equal(init.headers.get('Authorization'), null);
+    if (url === releasesURL) {
+      assert.equal(init.redirect, 'follow');
+      return Response.json([]);
+    }
+    return new Response(url === stable.url ? stableBytes : jcbBytes);
+  } });
+  await stageVersionCatalog(f.configuration);
+  assert.deepEqual((await f.catalog()).errors, []);
+});
+
+test('rejected or redirected authenticated metadata cannot replace a verified catalog', async t => {
+  const token = 'never-serialize-this-token';
+  for (const result of [401, 403, 302, 'redirect-error']) {
+    const f = await fixture(t);
+    await stageVersionCatalog(f.configuration);
+    const previous = await f.catalog();
+    let attempts = 0;
+    await assert.rejects(stageVersionCatalog({ ...f.configuration, githubToken: token, discover: discoverPinnedCatalog,
+      fetchImpl: async (url, init) => {
+        assert.equal(url, releasesURL, 'Failed metadata must not start a package download.');
+        assert.equal(init.headers.get('Authorization'), `Bearer ${token}`);
+        assert.equal(init.redirect, 'error', 'Authenticated requests must not follow a redirect.');
+        attempts++;
+        if (result === 'redirect-error') throw new TypeError('Unexpected redirect');
+        return new Response(token, { status: result, headers: { Location: 'https://attacker.test/collect' } });
+      } }), error => {
+        assert.match(error.message, /incomplete version catalog/);
+        assert.equal(error.message.includes(token), false);
+        return true;
+      });
+    assert.equal(attempts, 1, 'Permission errors and redirects must not be hidden by retries.');
+    assert.deepEqual(await f.catalog(), previous);
+  }
+});
+
 test('catalog metadata retries transient gateway failures within the same request deadline', async t => {
   for (const status of [502, 503, 504]) {
     const attempts = [];
