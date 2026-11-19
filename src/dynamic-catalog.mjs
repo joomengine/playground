@@ -275,15 +275,33 @@ export async function discoverDynamicCatalog({ fetchImpl = networkFetch, signal,
     try { await task(); }
     catch (error) {
       if (signal?.aborted) throw error;
-      errors.push({ source: name, message: String(error?.message || error) });
+      errors.push({ source: name, message: String(error?.message || error),
+        ...(error?.code === 'NIGHTLY_FEED_UNAVAILABLE' ? { code: error.code } : {}) });
     }
   };
   const read = (name, url, kind) => requestData(fetchImpl, url, signal, { storage, kind, ttl: cacheTtlMs, now, forceRefresh,
     onStale: () => errors.push({ source: name, message: 'Live metadata is unavailable; using a cached copy.' }) });
+  const readNightlyXML = async (name, url) => {
+    try { return await read(name, url, 'xml'); }
+    catch (error) {
+      const target = new URL(url);
+      if (signal?.aborted || !safeURL(url, 'https://update.joomla.org', /^\/core\/nightlies\/[a-z_]+_(?:extension|list)\.xml$/)) throw error;
+      // Joomla deploys its update server from this repository. Only substitute
+      // its matching metadata file; ZIP downloads still use the official feed.
+      const mirror = `https://raw.githubusercontent.com/joomla/update.joomla.org/master/www${target.pathname}`;
+      try { return await read(name, mirror, 'xml'); }
+      catch (mirrorError) {
+        if (signal?.aborted) throw mirrorError;
+        const unavailable = new Error(`Could not read ${target.pathname} from Joomla or its official source repository.`, { cause: mirrorError });
+        unavailable.code = 'NIGHTLY_FEED_UNAVAILABLE';
+        throw unavailable;
+      }
+    }
+  };
   const nightlyReads = new Map();
   const readNightly = (name, url) => {
     if (!nightlyReads.has(url)) nightlyReads.set(url, collect(name, async () => {
-      joomla.push(...parseJoomlaNightlyUpdates(await read(name, url, 'xml')));
+      joomla.push(...parseJoomlaNightlyUpdates(await readNightlyXML(name, url)));
     }));
     return nightlyReads.get(url);
   };
@@ -296,7 +314,7 @@ export async function discoverDynamicCatalog({ fetchImpl = networkFetch, signal,
     }),
     ...[...new Set(sources.nightlyURLs || NIGHTLY_FEEDS)].map((url, index) => collect(`joomla-nightlies-${index + 1}`, async () => {
       const name = `joomla-nightlies-${index + 1}`;
-      const xml = await read(name, url, 'xml');
+      const xml = await readNightlyXML(name, url);
       if (/<extensionset\b/i.test(xml)) {
         const details = parseJoomlaNightlyList(xml);
         if (!details.length) throw new Error('No Joomla nightly update feeds were found.');

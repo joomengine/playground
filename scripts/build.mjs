@@ -1,4 +1,4 @@
-import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile, stat } from 'node:fs/promises';
+import { appendFile, chmod, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -218,7 +218,12 @@ try {
   const deploys = await stageDeployCatalog({ root, staging, assets, cache, canonicalUrl });
   console.log('Staging current and forward Joomla/JCB packages…');
   const versionCatalog = await stageVersionCatalog({ assets, cache, pinnedJoomla: versions.joomla,
-    stagedJoomla: joomla, deployPackages: deploys.packages, githubToken: process.env.GITHUB_TOKEN });
+    stagedJoomla: joomla, deployPackages: deploys.packages, githubToken: process.env.GITHUB_TOKEN,
+    previousCatalogURL: new URL('assets/version-catalog.json', canonicalUrl).href,
+    onNightlyWarning: async message => {
+      console.warn(process.env.GITHUB_ACTIONS ? `::warning::${message}` : message);
+      if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `- ${message}\n`);
+    } });
   for (const name of ['index.html', 'src', 'config', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
     await cp(path.join(root, name), path.join(staging, name), { recursive: true });
   }

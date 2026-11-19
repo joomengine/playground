@@ -61,7 +61,11 @@ function verify(bytes, entry, limit) {
   return sha256;
 }
 
-async function download(entry, fetchImpl, limit) {
+// Only upstream delivery failures may fall back. Verification, archive limits,
+// incompatible packages and filesystem errors still stop publication.
+class PackageUnavailable extends Error {}
+
+export async function downloadCatalogZip(entry, fetchImpl, limit = MAX_BYTES) {
   const url = sourceURL(entry.url);
   const signal = AbortSignal.timeout(180_000);
   const failures = [];
@@ -70,6 +74,7 @@ async function download(entry, fetchImpl, limit) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     let response;
     let retryable = true;
+    let unavailable = true;
     let length = 0;
     let prefix = Buffer.alloc(0);
     try {
@@ -80,10 +85,11 @@ async function download(entry, fetchImpl, limit) {
       });
       if (!response.ok) {
         retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
+        unavailable = retryable || [403, 404, 410].includes(response.status);
         throw new Error(`Package download failed: HTTP ${response.status}.`);
       }
       if (Number(response.headers.get('Content-Length')) > limit) {
-        retryable = false;
+        retryable = unavailable = false;
         throw new Error('The catalog package exceeds 128 MiB.');
       }
       if (!response.body) throw new Error('The catalog package response has no body.');
@@ -96,7 +102,7 @@ async function download(entry, fetchImpl, limit) {
           length += value.byteLength;
           if (prefix.length < 16) prefix = Buffer.concat([prefix, Buffer.from(value).subarray(0, 16 - prefix.length)]);
           if (length > limit) {
-            retryable = false;
+            retryable = unavailable = false;
             throw new Error('The catalog package exceeds 128 MiB.');
           }
           parts.push(Buffer.from(value));
@@ -107,6 +113,7 @@ async function download(entry, fetchImpl, limit) {
       // A gateway can return an HTML error with HTTP 200. Retry that response,
       // but never treat a published checksum mismatch as a temporary success.
       retryable = !isZip(bytes);
+      unavailable = retryable && (length === 0 || /^\s*(?:<!doctype html|<html)/i.test(bytes.toString('ascii', 0, 128)));
       return { bytes, sha256: verify(bytes, entry, limit) };
     } catch (error) {
       await response?.body?.cancel().catch(() => {});
@@ -119,20 +126,66 @@ async function download(entry, fetchImpl, limit) {
         firstBytes: prefix.toString('hex') };
       failures.push(`${error.message} ${JSON.stringify(details)}`);
       if (!retryable || signal.aborted || attempt === 3) {
-        throw new Error(`Package retrieval failed after ${attempt} attempt${attempt === 1 ? '' : 's'}: ${failures.join('; ')}`, { cause: error });
+        const Failure = unavailable ? PackageUnavailable : Error;
+        throw new Failure(`Package retrieval failed after ${attempt} attempt${attempt === 1 ? '' : 's'}: ${failures.join('; ')}`, { cause: error });
       }
       try { await delay(500 * attempt, undefined, { signal }); }
       catch (error) {
-        throw new Error(`Package retrieval deadline expired after ${attempt} attempt${attempt === 1 ? '' : 's'}: ${failures.join('; ')}`, { cause: error });
+        throw new PackageUnavailable(`Package retrieval deadline expired after ${attempt} attempt${attempt === 1 ? '' : 's'}: ${failures.join('; ')}`, { cause: error });
       }
     }
   }
 }
 
+const MAX_RETAINED_NIGHTLY_AGE = 72 * 60 * 60 * 1000;
+
+async function readPublishedCatalog(url, fetchImpl) {
+  const response = await fetchImpl(url, { credentials: 'omit', redirect: 'error', cache: 'no-store',
+    signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(`HTTP ${response.status}`);
+  }
+  let length = 0;
+  const parts = [];
+  for await (const part of response.body) {
+    length += part.byteLength;
+    if (length > 256 * 1024) throw new Error('The previously published catalog exceeds 256 KiB.');
+    parts.push(part);
+  }
+  const catalog = JSON.parse(Buffer.concat(parts, length));
+  if (catalog?.schemaVersion !== 1 || !Array.isArray(catalog.joomla) || catalog.joomla.length > 50) {
+    throw new Error('The previously published catalog is invalid.');
+  }
+  return catalog;
+}
+
+async function retainPublishedNightly({ entry, catalog, catalogURL, fetchImpl, now, limit }) {
+  // A moving version string alone cannot establish freshness. Keep the original
+  // retrieval time through every subsequent outage, including legacy catalogs
+  // which only published generatedAt and always retrieved each nightly live.
+  const previous = catalog?.joomla.find(item => item?.version === entry.version && item.sourceUrl === entry.url
+    && item.source === 'nightly' && item.channel === 'nightly');
+  if (!previous || !/^[a-f0-9]{64}$/.test(previous.sha256) || previous.url !== `packages/${previous.sha256}.zip`) return null;
+  if (entry.sha256 && previous.sha256 !== entry.sha256.toLowerCase()) return null;
+  const verifiedAt = previous.verifiedAt ?? (previous.nightlyStatus ? null : catalog.generatedAt);
+  const age = now - Date.parse(verifiedAt);
+  if (!Number.isFinite(age) || age < 0 || age > MAX_RETAINED_NIGHTLY_AGE) return null;
+  const url = new URL(previous.url, catalogURL).href;
+  let download;
+  try {
+    download = await downloadCatalogZip({ url, sha256: previous.sha256, sha512: entry.sha512 }, fetchImpl, limit);
+  } catch (error) {
+    if (error instanceof PackageUnavailable) return null;
+    throw error;
+  }
+  return { ...download, verifiedAt: new Date(verifiedAt).toISOString() };
+}
+
 /** Publish only verified, automatically downloadable choices; a failed refresh never replaces the catalog. */
 export async function stageVersionCatalog({ assets, cache, pinnedJoomla = [], stagedJoomla = [], deployPackages = [],
   discover = discoverDynamicCatalog, fetchImpl = fetch, now = Date.now,
-  maxPackageBytes = MAX_BYTES, githubToken = '' }) {
+  maxPackageBytes = MAX_BYTES, githubToken = '', previousCatalogURL, onNightlyWarning = console.warn }) {
   if (!Number.isSafeInteger(maxPackageBytes) || maxPackageBytes < 4 || maxPackageBytes > MAX_BYTES) throw new Error('Invalid catalog package limit.');
   const upstreamFetch = (url, init = {}) => {
     const headers = new Headers(init.headers);
@@ -163,12 +216,52 @@ export async function stageVersionCatalog({ assets, cache, pinnedJoomla = [], st
   };
   const discovered = await discover({ fetchImpl: metadataFetch, pinnedJoomla, cacheStorage: null, forceRefresh: true });
   if (!Array.isArray(discovered?.joomla) || !Array.isArray(discovered.jcb) || !Array.isArray(discovered.errors)) throw new Error('Invalid discovered version catalog.');
-  if (discovered.errors.length) throw new Error(`Cannot publish an incomplete version catalog: ${discovered.errors.map(error => `${error.source}: ${error.message}`).join('; ')}`);
+  const nightlyFeedUnavailable = error => previousCatalogURL && error.code === 'NIGHTLY_FEED_UNAVAILABLE'
+    && /^joomla-nightlies-\d+$/.test(error.source) && discovered.joomla.some(entry => entry.channel === 'stable');
+  const fatalErrors = discovered.errors.filter(error => !nightlyFeedUnavailable(error));
+  if (fatalErrors.length) throw new Error(`Cannot publish an incomplete version catalog: ${fatalErrors.map(error => `${error.source}: ${error.message}`).join('; ')}`);
   if (!discovered.joomla.length || !discovered.jcb.length) throw new Error('The version catalog must contain Joomla and JCB packages.');
   await mkdir(path.join(assets, 'packages'), { recursive: true });
   await mkdir(path.join(cache, 'packages'), { recursive: true });
   const catalog = { schemaVersion: 1, generatedAt: new Date(now()).toISOString(), joomla: [], jcb: [], errors: [] };
 
+  const warn = async message => {
+    (catalog.warnings ??= []).push(message);
+    await onNightlyWarning(message);
+  };
+  for (const error of discovered.errors) await warn(`${error.message} Only nightlies confirmed by available feeds will be listed.`);
+
+  // Read the previous deployment only after an actual delivery outage. Multiple
+  // affected channels in this build share the same catalog snapshot.
+  let previousCatalog;
+  const fetchPackage = async (product, entry) => {
+    try {
+      const download = await downloadCatalogZip(entry, upstreamFetch, maxPackageBytes);
+      if (entry.source === 'nightly') entry.verifiedAt = catalog.generatedAt;
+      return download;
+    } catch (error) {
+      if (!(error instanceof PackageUnavailable) || !previousCatalogURL || product !== 'joomla'
+        || entry.source !== 'nightly' || entry.channel !== 'nightly'
+        || !discovered.joomla.some(item => item.channel === 'stable')) throw error;
+      console.warn(error.message);
+    }
+    previousCatalog ??= readPublishedCatalog(previousCatalogURL, upstreamFetch).catch(error => {
+      console.warn(`Previous deployment catalog unavailable: ${error.message}`);
+      return null;
+    });
+    const retained = await retainPublishedNightly({ entry, catalog: await previousCatalog,
+      catalogURL: previousCatalogURL, fetchImpl: upstreamFetch, now: now(), limit: maxPackageBytes });
+    const message = retained
+      ? `Joomla ${entry.version} nightly unavailable upstream. Serving the verified package from ${retained.verifiedAt}.`
+      : `Joomla ${entry.version} nightly unavailable upstream. Omitted because no verified copy from the past 72 hours was available.`;
+    await warn(message);
+    if (retained) {
+      entry.verifiedAt = retained.verifiedAt;
+      entry.nightlyStatus = 'retained';
+      entry.label = `${entry.label} (last verified ${entry.verifiedAt.slice(0, 10)} UTC)`;
+    }
+    return retained;
+  };
   for (const product of ['joomla', 'jcb']) {
     for (const discoveredEntry of discovered[product]) {
       const url = sourceURL(discoveredEntry.url);
@@ -190,7 +283,11 @@ export async function stageVersionCatalog({ assets, cache, pinnedJoomla = [], st
         if (pinnedJoomlaURL) bytes = await readFile(path.join(assets, pinnedJoomlaURL));
         let sha256;
         if (bytes) sha256 = verify(bytes, entry, maxPackageBytes);
-        else ({ bytes, sha256 } = await download(entry, upstreamFetch, maxPackageBytes));
+        else {
+          const download = await fetchPackage(product, entry);
+          if (!download) continue;
+          ({ bytes, sha256 } = download);
+        }
         if (product === 'joomla') entry.phpMinimum = joomlaPackagePhpMinimum(bytes, entry.phpMinimum);
         const packageURL = pinnedJoomlaURL || `packages/${sha256}.zip`;
         if (!pinnedJoomlaURL) await writeFile(path.join(assets, packageURL), bytes);

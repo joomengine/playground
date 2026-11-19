@@ -440,3 +440,124 @@ test('archive inspection keeps stricter feed requirements and rejects incomplete
   contradictory['installation/index.php'] = new Uint8Array(64 * 1024 + 1);
   assert.throws(() => joomlaPackagePhpMinimum(zipSync(contradictory)), /size limit/);
 });
+
+const priorCatalogURL = 'https://playground.example/assets/version-catalog.json';
+const nightly = { version: '7.0.0-alpha1-dev', label: 'Joomla 7.0.0-alpha1-dev', source: 'nightly',
+  channel: 'nightly', url: 'https://developer.joomla.org/nightlies/Joomla_7.0.0-alpha1-dev-Development-Full_Package.zip' };
+const previousNightlyBytes = zip('older nightly');
+const previousHash = sha256(previousNightlyBytes);
+const priorZipURL = new URL(`packages/${previousHash}.zip`, priorCatalogURL).href;
+const lastVerified = '2026-11-17T05:00:00.000Z';
+
+function previousRelease(overrides = {}) {
+  return { schemaVersion: 1, generatedAt: lastVerified, joomla: [{ ...nightly, sourceUrl: nightly.url,
+    sha256: previousHash, url: `packages/${previousHash}.zip`, ...overrides }] };
+}
+
+async function nightlyOutageFixture(t, { upstream = () => new Response('', { status: 404 }),
+  deployed = previousRelease(), deployedBytes = previousNightlyBytes,
+  buildDate = '2026-11-19T04:00:00Z' } = {}) {
+  const warnings = [], requests = [];
+  const freshBytes = zip('another development line');
+  const other = { ...nightly, version: '6.3.0-dev', url: 'https://publisher.test/other-nightly.zip' };
+  const f = await fixture(t, { discover: async () => ({ joomla: [stable, nightly, other], jcb: [jcb], errors: [] }),
+    previousCatalogURL: priorCatalogURL, onNightlyWarning: message => warnings.push(message), now: () => Date.parse(buildDate),
+    fetchImpl: async (url, init) => {
+      requests.push(url);
+      if (url === nightly.url) return upstream();
+      if (url === other.url) return new Response(freshBytes);
+      if (url === stable.url) return new Response(stableBytes);
+      if (url === jcb.url) return new Response(jcbBytes);
+      assert.equal(init.headers.has('Authorization'), false);
+      if (url === priorCatalogURL) return Response.json(deployed);
+      if (url === priorZipURL) return new Response(deployedBytes);
+      throw new Error('Unexpected origin or package');
+    } });
+  return { ...f, warnings, requests, other, freshBytes };
+}
+
+test('upstream HTML retains a recently verified nightly with its original date while other development lines refresh', async t => {
+  let served = null;
+  const f = await nightlyOutageFixture(t, { upstream: () => new Response(served || '<!DOCTYPE html><html>Service unavailable</html>') });
+  await stageVersionCatalog(f.configuration);
+  const catalog = await f.catalog();
+  const retained = catalog.joomla.find(entry => entry.version === nightly.version);
+  assert.equal(retained.sha256, previousHash);
+  assert.equal(retained.verifiedAt, lastVerified);
+  assert.equal(retained.nightlyStatus, 'retained');
+  assert.match(retained.label, /last verified 2026-11-17/);
+  assert.deepEqual(await readFile(path.join(f.configuration.assets, retained.url)), previousNightlyBytes);
+  const fresh = catalog.joomla.find(entry => entry.version === f.other.version);
+  assert.equal(fresh.sha256, sha256(f.freshBytes));
+  assert.equal(fresh.verifiedAt, catalog.generatedAt);
+  assert.deepEqual(catalog.warnings, f.warnings);
+  assert.match(f.warnings[0], /Serving the verified package/);
+
+  served = zip('latest build');
+  await stageVersionCatalog(f.configuration);
+  const recovered = (await f.catalog()).joomla.find(entry => entry.version === nightly.version);
+  assert.equal(recovered.sha256, sha256(served));
+  assert.equal(recovered.verifiedAt, catalog.generatedAt);
+  assert.equal(recovered.nightlyStatus, undefined);
+  assert.equal(recovered.label, nightly.label);
+  assert.equal(f.requests.filter(url => url === priorCatalogURL).length, 1);
+});
+
+test('unavailable nightlies with expired, mismatched or missing previous packages do not block fresh supported choices', async t => {
+  for (const deployed of [
+    { ...previousRelease({ verifiedAt: '2026-11-15T01:00:00Z', nightlyStatus: 'retained' }), generatedAt: '2026-11-18T23:00:00Z' },
+    previousRelease({ sourceUrl: 'https://publisher.test/other.zip' }),
+    previousRelease({ url: 'https://elsewhere.test/file.zip' }),
+    { schemaVersion: 1, joomla: [] },
+  ]) {
+    const f = await nightlyOutageFixture(t, { deployed });
+    await stageVersionCatalog(f.configuration);
+    const catalog = await f.catalog();
+    assert.deepEqual(catalog.joomla.map(entry => entry.version), [stable.version, f.other.version]);
+    assert.equal(f.requests.includes(priorZipURL), false);
+    assert.equal(f.warnings.length, 1);
+    assert.match(f.warnings[0], /Omitted/);
+  }
+});
+
+test('a changed prior package or invalid live ZIP still stops publication', async t => {
+  const corrupted = await nightlyOutageFixture(t, { deployedBytes: zip('substituted') });
+  await assert.rejects(stageVersionCatalog(corrupted.configuration), /published sha256 checksum/);
+  await assert.rejects(corrupted.catalog(), { code: 'ENOENT' });
+  const invalid = await nightlyOutageFixture(t, { upstream: () => new Response(zipSync({ 'wrong.txt': strToU8('hello') })) });
+  await assert.rejects(stageVersionCatalog(invalid.configuration), /missing index.php/);
+  assert.equal(invalid.requests.includes(priorCatalogURL), false);
+});
+
+test('nightly discovery uses the matching official XML mirror and isolates only feeds unavailable in both places', async t => {
+  const base = 'https://update.joomla.org/core/nightlies/';
+  const mirroredBase = 'https://raw.githubusercontent.com/joomla/update.joomla.org/master/www/core/nightlies/';
+  const liveVersion = '6.3.0-alpha1-dev';
+  const update = `https://developer.joomla.org/nightlies/Joomla_${liveVersion}-Development-Update_Package.zip`;
+  const full = update.replace('Update_Package', 'Full_Package');
+  const list = `<extensionset><extension type="file" element="joomla" detailsurl="${base}next_minor_extension.xml"/></extensionset>`;
+  const xml = `<updates><update><version>${liveVersion}</version><php_minimum>8.3.0</php_minimum><downloadurl>${update}</downloadurl></update></updates>`;
+  const requests = [], warnings = [];
+  const f = await fixture(t, { previousCatalogURL: priorCatalogURL, onNightlyWarning: message => warnings.push(message),
+    githubToken: 'metadata-only', discover: options => discoverDynamicCatalog({ ...options, pinnedJoomla: [stable], pinnedJcb: [jcb],
+      sources: { nightlyURLs: [base + 'next_major_list.xml', base + 'next_minor_list.xml'], jcbURLs: [] } }),
+    fetchImpl: async (url, init) => {
+      requests.push(url);
+      if (url === releasesURL) return Response.json([]);
+      assert.equal(init.headers.has('Authorization'), false);
+      if (url === stable.url || url === full) return new Response(stableBytes);
+      if (url === jcb.url) return new Response(jcbBytes);
+      if (url === mirroredBase + 'next_minor_list.xml') return new Response(list);
+      if (url === mirroredBase + 'next_minor_extension.xml') return new Response(xml);
+      if (url.startsWith(base) || url === mirroredBase + 'next_major_list.xml') return new Response('<html>Unavailable</html>');
+      assert.fail(`Unexpected URL: ${url}`);
+    } });
+  await stageVersionCatalog(f.configuration);
+  const catalog = await f.catalog();
+  assert.deepEqual(catalog.joomla.map(entry => entry.version), [stable.version, liveVersion]);
+  assert.equal(catalog.joomla[1].sourceUrl, full);
+  assert.deepEqual(catalog.warnings, warnings);
+  assert.match(warnings[0], /next_major_list\.xml/);
+  assert.equal(warnings.length, 1);
+  assert.ok(requests.includes(mirroredBase + 'next_minor_extension.xml'));
+});
