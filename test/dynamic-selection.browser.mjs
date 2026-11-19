@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { chromium, firefox } from 'playwright';
 import { strToU8, zipSync } from 'fflate';
+import { rememberSite, readSavedState, savedStateKey } from '../src/ui-state.mjs';
 import { readURLConfiguration } from '../src/config.mjs';
 import { createStaticServer } from './server.mjs';
 
@@ -148,10 +149,12 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       await current.close();
 
       const legacy = await context.newPage();
-      await legacy.addInitScript(baseURL => {
-        const site = { storageKey: 'legacy-stable', deployId: 'jcb', joomlaVersion: '6.1.7', jcbVersion: '6.1.3', phpVersion: '8.4', persistence: true };
-        localStorage.setItem(`joomengine:launch:${baseURL}`, JSON.stringify({ schemaVersion: 2, active: site.storageKey, sites: { [site.storageKey]: site } }));
-      }, server.url);
+      const legacySite = { storageKey: 'legacy-stable', siteName: 'Existing JCB site', deployId: 'jcb',
+        joomlaVersion: '6.1.7', jcbVersion: '6.1.3', phpVersion: '8.4', persistence: true };
+      const saved = JSON.stringify(rememberSite({ sites: {} }, legacySite));
+      const key = savedStateKey(server.url);
+      assert.equal(readSavedState({ getItem: () => saved }, key).active, legacySite.storageKey);
+      await legacy.addInitScript(({ key, saved }) => localStorage.setItem(key, saved), { key, saved });
       await legacy.goto(`${server.url}?start=0`);
       await legacy.locator('#embedded-launch:enabled').waitFor();
       assert.equal(await legacy.locator('#joomla-version').inputValue(), '6.1.7', 'Existing version-only site retains its exact retired baseline.');
