@@ -50,7 +50,8 @@ test('live JCB checks wait for other validation and run browsers sequentially ag
     'The mandatory JCB gate must run after successful dependencies, including when an optional ancestor was skipped.');
   assert.doesNotMatch(gate, /continue-on-error|PLAYGROUND_(?:SCENARIOS|PHP_VERSIONS|JOOMLA_VERSIONS)/m,
     'The dedicated gate must not inherit optional scenario or version filters.');
-  assert.match(gate, /name: Retain JCB network receipts and diagnostics\n        if: always\(\)/);
+  assert.match(gate, /name: Verify live JCB discovery, repositories, dependencies and compiled Demo\n        id: verify_network/);
+  assert.ok(gate.includes("name: Retain JCB network receipts and diagnostics\n        if: ${{ !cancelled() && (steps.verify_network.outcome == 'success' || steps.verify_network.outcome == 'failure') }}"));
   assert.match(gate, /^          if-no-files-found: error$/m);
 });
 

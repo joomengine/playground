@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
+      browser_image: ${{ steps.browser_image.outputs.image }}
       build: ${{ steps.plan.outputs.build }}
       full: ${{ steps.plan.outputs.full }}
       scenarios: ${{ steps.plan.outputs.scenarios }}
@@ -33,6 +34,9 @@ jobs:
           node-version-file: '.node-version'
           cache: npm
       - run: npm ci --ignore-scripts
+      - name: Select the image matching the locked browser release
+        id: browser_image
+        run: node scripts/playwright-image.mjs
       - name: Validate source and focused integration helpers
         run: |
           npm run check
@@ -166,6 +170,12 @@ jobs:
     needs: checks
     if: needs.checks.outputs.build == 'true'
     runs-on: ubuntu-24.04
+    container:
+      image: ${{ needs.checks.outputs.browser_image }}
+      options: --user 1001 --init --ipc=host
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -178,10 +188,10 @@ jobs:
           node-version-file: '.node-version'
           cache: npm
       - run: npm ci --ignore-scripts
-      - name: Install selected browser engine
-        uses: ./.github/actions/install-playwright
-        with:
-          browser: ${{ matrix.browser }}
+      - name: Verify the preinstalled browser
+        env:
+          PLAYGROUND_BROWSER: ${{ matrix.browser }}
+        run: node scripts/verify-ci-browser.mjs
       - name: Validate Code, Mail, isolated AI, layout and language interactions
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
@@ -205,6 +215,12 @@ jobs:
     needs: [checks, build]
     if: ${{ !cancelled() && needs.checks.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04
+    container:
+      image: ${{ needs.checks.outputs.browser_image }}
+      options: --user 1001 --init --ipc=host
+    defaults:
+      run:
+        shell: bash
     # Independent jobs keep a UI failure from suppressing runtime or visual evidence.
     timeout-minutes: 35
     strategy:
@@ -223,11 +239,11 @@ jobs:
         with:
           name: playground-static
           path: dist
-      - name: Install selected browser engine
-        id: browser_install
-        uses: ./.github/actions/install-playwright
-        with:
-          browser: ${{ matrix.browser }}
+      - name: Verify the preinstalled browser
+        id: browser_ready
+        env:
+          PLAYGROUND_BROWSER: ${{ matrix.browser }}
+        run: node scripts/verify-ci-browser.mjs
       - name: Validate Code against the running Joomla runtime
         if: matrix.suite == 'code'
         env:
@@ -256,7 +272,7 @@ jobs:
           appendFileSync(process.env.GITHUB_OUTPUT, `scenarios=${scenarios.join(',')}\n`);
           JS
       - name: Validate the exact built distribution
-        if: ${{ !cancelled() && steps.browser_install.outcome == 'success' && steps.scenarios.outputs.scenarios != '' }}
+        if: ${{ !cancelled() && steps.browser_ready.outcome == 'success' && steps.scenarios.outputs.scenarios != '' }}
         env:
           DEBUG: pw:browser
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
@@ -265,16 +281,16 @@ jobs:
           PLAYGROUND_JOOMLA_VERSIONS: ${{ needs.checks.outputs.joomla }}
         run: npm run test:browser
       - name: Validate custom URL installation and reusable images
-        if: ${{ !cancelled() && steps.browser_install.outcome == 'success' && matrix.suite == 'runtime' && matrix.browser == 'chromium' }}
+        if: ${{ !cancelled() && steps.browser_ready.outcome == 'success' && matrix.suite == 'runtime' && matrix.browser == 'chromium' }}
         run: node --test test/custom-extension-url.browser.mjs
       - name: Validate portable site upload and independent copies
-        if: ${{ !cancelled() && steps.browser_install.outcome == 'success' && matrix.suite == 'runtime' && matrix.browser == 'chromium' }}
+        if: ${{ !cancelled() && steps.browser_ready.outcome == 'success' && matrix.suite == 'runtime' && matrix.browser == 'chromium' }}
         env:
           PLAYGROUND_PHP_VERSIONS: ${{ needs.checks.outputs.php }}
           PLAYGROUND_JOOMLA_VERSIONS: ${{ needs.checks.outputs.joomla }}
         run: node --test test/site-import.browser.mjs
       - name: Validate explicit full backups and storage failure recovery
-        if: ${{ !cancelled() && steps.browser_install.outcome == 'success' && matrix.suite == 'runtime' }}
+        if: ${{ !cancelled() && steps.browser_ready.outcome == 'success' && matrix.suite == 'runtime' }}
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
           PLAYGROUND_PHP_VERSIONS: ${{ needs.checks.outputs.php }}
@@ -312,6 +328,12 @@ jobs:
     needs: [checks, build, network-worker]
     if: ${{ !cancelled() && needs.checks.result == 'success' && needs.build.result == 'success' && needs.network-worker.result == 'success' }}
     runs-on: ubuntu-24.04
+    container:
+      image: ${{ needs.checks.outputs.browser_image }}
+      options: --user 1001 --init --ipc=host
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -330,16 +352,17 @@ jobs:
         with:
           name: playground-static
           path: dist
-      - name: Install selected browser engine
-        uses: ./.github/actions/install-playwright
-        with:
-          browser: ${{ matrix.browser }}
+      - name: Verify the preinstalled browser
+        env:
+          PLAYGROUND_BROWSER: ${{ matrix.browser }}
+        run: node scripts/verify-ci-browser.mjs
       - name: Exercise genuine CORS and the actual PHP cURL and stream bridge
+        id: verify_network
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
         run: node --test test/network-runtime.browser.mjs test/self-request.browser.mjs
       - name: Retain PHP networking receipts
-        if: always()
+        if: ${{ !cancelled() && (steps.verify_network.outcome == 'success' || steps.verify_network.outcome == 'failure') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playground-network-results-${{ matrix.browser }}
@@ -354,6 +377,12 @@ jobs:
     needs: [checks, build, browser, interaction, compatibility, version-catalog, network-worker, php-network]
     if: ${{ !cancelled() && needs.checks.result == 'success' && needs.build.result == 'success' && needs.browser.result == 'success' && needs.interaction.result == 'success' && needs.compatibility.result == 'success' && needs.version-catalog.result == 'success' && needs.network-worker.result == 'success' && needs.php-network.result == 'success' }}
     runs-on: ubuntu-24.04
+    container:
+      image: ${{ needs.checks.outputs.browser_image }}
+      options: --user 1001 --init --ipc=host
+    defaults:
+      run:
+        shell: bash
     # Each clean attempt keeps the existing 20-minute test deadline.
     timeout-minutes: 45
     strategy:
@@ -374,16 +403,17 @@ jobs:
         with:
           name: playground-static
           path: dist
-      - name: Install selected browser engine
-        uses: ./.github/actions/install-playwright
-        with:
-          browser: ${{ matrix.browser }}
+      - name: Verify the preinstalled browser
+        env:
+          PLAYGROUND_BROWSER: ${{ matrix.browser }}
+        run: node scripts/verify-ci-browser.mjs
       - name: Verify live JCB discovery, repositories, dependencies and compiled Demo
+        id: verify_network
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
         run: node scripts/test-jcb-network.mjs
       - name: Retain JCB network receipts and diagnostics
-        if: always()
+        if: ${{ !cancelled() && (steps.verify_network.outcome == 'success' || steps.verify_network.outcome == 'failure') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playground-jcb-network-results-${{ matrix.browser }}
@@ -396,6 +426,12 @@ jobs:
     needs: [checks, build]
     if: ${{ !cancelled() && needs.checks.result == 'success' && needs.build.result == 'success' && needs.checks.outputs.build == 'true' }}
     runs-on: ubuntu-24.04
+    container:
+      image: ${{ needs.checks.outputs.browser_image }}
+      options: --user 1001 --init --ipc=host
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -412,10 +448,10 @@ jobs:
         with:
           name: playground-static
           path: dist
-      - name: Install selected browser engine
-        uses: ./.github/actions/install-playwright
-        with:
-          browser: ${{ matrix.browser }}
+      - name: Verify the preinstalled browser
+        env:
+          PLAYGROUND_BROWSER: ${{ matrix.browser }}
+        run: node scripts/verify-ci-browser.mjs
       - name: Verify browser isolation and HTTP images
         env:
           PLAYGROUND_ISOLATION_BROWSER: ${{ matrix.browser }}
@@ -448,6 +484,12 @@ jobs:
     needs: [checks, build]
     if: ${{ !cancelled() && needs.checks.result == 'success' && needs.build.result == 'success' && needs.checks.outputs.build == 'true' }}
     runs-on: ubuntu-24.04
+    container:
+      image: ${{ needs.checks.outputs.browser_image }}
+      options: --user 1001 --init --ipc=host
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -464,10 +506,10 @@ jobs:
         with:
           name: playground-static
           path: dist
-      - name: Install selected browser engine
-        uses: ./.github/actions/install-playwright
-        with:
-          browser: ${{ matrix.browser }}
+      - name: Verify the preinstalled browser
+        env:
+          PLAYGROUND_BROWSER: ${{ matrix.browser }}
+        run: node scripts/verify-ci-browser.mjs
       - name: Install the published version choices from the built distribution
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}

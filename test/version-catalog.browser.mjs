@@ -40,6 +40,13 @@ for (const entry of catalog.jcb) {
   assert.ok(release, `JCB ${entry.version} must have a selectable Joomla release.`);
   cases.push({ joomlaVersion: release.version, jcbVersion: entry.version, jcbSha256: entry.sha256 });
 }
+if (!cases.length && catalog.warnings?.length) {
+  // An outage may leave only the pinned stable catalog. Exercise a real install
+  // from its published ZIP through the same browser path used for candidates.
+  const stable = catalog.joomla.find(item => item.channel === 'stable' && item.version === manifest.defaults.joomlaVersion);
+  assert.ok(stable, 'A degraded catalog must still offer the supported default.');
+  cases.push({ joomlaVersion: stable.version, joomlaSha256: stable.sha256, exerciseCatalog: true });
+}
 assert.ok(cases.length, 'The production version catalog must exercise an additional Joomla or JCB package.');
 
 async function bounded(promise, label, timeoutMs = requestTimeout) {
@@ -72,7 +79,7 @@ async function install(page, scenario) {
       autoLogin: true, fresh: true,
       admin: { name: 'Version catalog test', username: 'catalogtest', email: 'catalog@example.test', password: `Catalog!${crypto.randomUUID()}` },
     };
-    if (!pinned.joomla.some(item => item.version === scenario.joomlaVersion)) {
+    if (scenario.exerciseCatalog || !pinned.joomla.some(item => item.version === scenario.joomlaVersion)) {
       input.joomlaPackage = selectCatalogPackage(staged.joomla.find(item => item.version === scenario.joomlaVersion), { php: release.php });
     }
     if (!scenario.defaultJcb) {

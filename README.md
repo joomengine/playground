@@ -158,6 +158,9 @@ At build time, discovery follows Joomla's official
 [next minor](https://update.joomla.org/core/nightlies/next_minor_list.xml) and
 [next major](https://update.joomla.org/core/nightlies/next_major_list.xml) XML lists
 to their details feeds and selects **Full Package** ZIPs for fresh installations.
+If a nightly feed is unavailable, discovery tries the corresponding XML from
+Joomla's official update-server repository. A failure at both sources is recorded
+in the build summary, and the remaining feeds continue independently.
 JCB discovery reads only its
 [5.x](https://raw.githubusercontent.com/joomengine/Joomla-Component-Builder/refs/heads/5.x/componentbuilder_update_server.xml)
 and
@@ -172,8 +175,14 @@ without a published checksum, and writes immutable package paths alongside
 catalog was built. The selectors refresh that published local catalog; they do not
 query upstream servers or fetch a newer nightly on their own. Pages rebuilds daily
 at 03:15 UTC and on changes to `main`, then publishes only after validation of that
-same artifact. A failed upstream refresh or validation leaves the previous deployed
-catalog and packages available. Use a new site to try a newly published nightly;
+same artifact. Every build requests each moving nightly again. If Joomla's
+download server cannot deliver one, the build can recover the same version from
+the previous deployment. It verifies the archive's SHA-256 and shows its original
+verification date in the selector. After 72 hours, or when a matching archive is
+unavailable, that nightly is omitted until Joomla serves it again. The workflow
+summary records each affected nightly while healthy packages continue to update.
+Checksum, installer and validation failures still preserve the previous deployment.
+Use a new site to try a newly published nightly;
 retain a complete site export when the exact old build must remain portable.
 
 Playground checks for a new published build on startup, when returning to the tab,
