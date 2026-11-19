@@ -20,6 +20,8 @@ export function updatePackagePins(manifest, lock, releases) {
     assert.ok(pins && Object.hasOwn(pins, name), `Missing direct dependency ${name}`);
     const installed = lock.packages[`node_modules/${name}`];
     assert.equal(installed?.version, pins[name], `Inconsistent ${name} lock`);
+    // Chromium 159 in Playwright 1.65.1 crashed the hosted UI and PHP runtime jobs on PR #29.
+    if (name === 'playwright' && release.version === '1.65.1') continue;
     const version = forwardVersion(name, pins[name], release.version);
     if (version !== pins[name]) {
       assert.equal(release.license, installed.license, `Review licence change for ${name}`);
@@ -58,7 +60,7 @@ async function updatePackages() {
     }
   }
   for (const [file, bytes] of changes) await writeFile(file, bytes);
-  console.log(changes.size ? 'Updated Playground npm manifests and lockfiles.' : 'Playground npm dependencies are current.');
+  console.log(changes.size ? 'Updated Playground npm manifests and lockfiles.' : 'No eligible Playground npm package updates.');
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) await updatePackages();

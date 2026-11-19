@@ -18,3 +18,14 @@ test('updates the direct package in place and preserves its licence for distribu
   assert.deepEqual(updatePackagePins(manifest, lock, { tool: { version: '1.99.9' } }), manifest);
   assert.throws(() => updatePackagePins(manifest, lock, { tool: { version: '2.1.0', license: 'other' } }), /licence change/);
 });
+
+test('skips only the Playwright Chromium regression and admits its next stable release', () => {
+  const manifest = { devDependencies: { playwright: '1.65.0', other: '1.65.0' } };
+  const pin = { version: '1.65.0', license: 'Apache-2.0' };
+  const lock = { packages: { 'node_modules/playwright': pin, 'node_modules/other': pin } };
+  const blocked = { version: '1.65.1', license: pin.license };
+  assert.deepEqual(updatePackagePins(manifest, lock, { playwright: blocked }), manifest);
+  assert.deepEqual(updatePackagePins(manifest, lock, { playwright: blocked, other: blocked }).devDependencies,
+    { playwright: '1.65.0', other: '1.65.1' });
+  assert.equal(updatePackagePins(manifest, lock, { playwright: { ...blocked, version: '1.65.2' } }).devDependencies.playwright, '1.65.2');
+});
