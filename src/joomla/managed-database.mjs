@@ -72,7 +72,9 @@ export async function managedDatabaseSource(source, version, kind = 'model') {
   // source file is byte-for-byte identical to a reviewed reference. This lets
   // unchanged development snapshots use the guard without weakening it to a
   // best-effort text match. For a pinned release, keep its exact reference.
-  const candidates = exact.length ? exact : reviewed;
+  const stable = /^(\d+)\.\d+\.\d+$/.exec(version);
+  const sameMajor = stable ? reviewed.filter(item => item.version.split('.')[0] === stable[1]) : [];
+  const candidates = exact.length ? exact : sameMajor.length ? sameMajor : reviewed;
   const hasMarker = source.includes(marker);
   const sourceDigest = hasMarker ? null : await digest(source);
   for (const reference of candidates) {

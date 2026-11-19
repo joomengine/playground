@@ -10,6 +10,10 @@ export const digest = value => createHash('sha256').update(value).digest('hex');
 export async function prepareAdminer() {
   const provenance = JSON.parse(await readFile(path.join(root, 'dependencies/adminer/provenance.json'), 'utf8'));
   const original = await readFile(path.join(root, 'dependencies/adminer', provenance.asset));
+  return { source: await adaptAdminer(original, provenance), provenance };
+}
+
+export async function adaptAdminer(original, provenance) {
   if (original.length !== provenance.bytes || digest(original) !== provenance.sha256) throw new Error('The pinned Adminer release failed integrity verification.');
   const source = original.toString('utf8');
   const start = '}elseif(extension_loaded("pdo_mysql")){class\nDb\nextends\nPdoDb{';
@@ -21,17 +25,17 @@ export async function prepareAdminer() {
   // Embedded MariaDB has no password/grant subsystem and reports an empty
   // COLUMNS.PRIVILEGES even for its sole root connection. Adminer's fields UI
   // must reflect that connection's existing access; no database grant changes.
-  const privileges = '"privileges"=>array_flip(explode(",","$K[PRIVILEGES],where,order"))';
-  if (patched.split(privileges).length !== 2) throw new Error('The pinned Adminer field privileges boundary changed.');
-  patched = patched.replace(privileges, '"privileges"=>array_flip(explode(",",($K["PRIVILEGES"]!==""?$K["PRIVILEGES"]:"select,insert,update,references").",where,order"))');
-  const resultClass = "array('Adminer\\PdoResult')";
-  if (patched.split(resultClass).length !== 2) throw new Error('The pinned Adminer PDO result boundary changed.');
-  patched = patched.replace(resultClass, "array('Adminer\\JoomEnginePdoResult')");
-  const support = 'function\nsupport($zd){return\npreg_match';
-  if (patched.split(support).length !== 2) throw new Error('The pinned Adminer capabilities boundary changed.');
-  patched = patched.replace(support, 'function\nsupport($zd){if(in_array($zd,array("routine","procedure","event","privileges"),true))return false;return\npreg_match');
+  const privileges = /"privileges"=>array_flip\(explode\(",","(\$\w+)\[PRIVILEGES\],where,order"\)\)/g;
+  if ([...patched.matchAll(privileges)].length !== 1) throw new Error('The pinned Adminer field privileges boundary changed.');
+  patched = patched.replace(privileges, (_, row) => `"privileges"=>array_flip(explode(",",(${row}["PRIVILEGES"]!==""?${row}["PRIVILEGES"]:"select,insert,update,references").",where,order"))`);
+  const resultClass = /\[\\PDO::ATTR_STATEMENT_CLASS\]=(?:array\('Adminer\\PdoResult'\)|\['Adminer\\PdoResult'\])/g;
+  if ([...patched.matchAll(resultClass)].length !== 1) throw new Error('The pinned Adminer PDO result boundary changed.');
+  patched = patched.replace(resultClass, assignment => assignment.replace('PdoResult', 'JoomEnginePdoResult'));
+  const support = /function\nsupport\((\$\w+)\)\{return\npreg_match/g;
+  if ([...patched.matchAll(support)].length !== 1) throw new Error('The pinned Adminer capabilities boundary changed.');
+  patched = patched.replace(support, (_, name) => `function\nsupport(${name}){if(in_array(${name},array("routine","procedure","event","privileges"),true))return false;return\npreg_match`);
   if (patched.includes('\\PDO::MYSQL_ATTR_')) throw new Error('Native PDO mysql attributes remain in the Adminer adapter.');
-  return { source: Buffer.from(patched), provenance };
+  return Buffer.from(patched);
 }
 
 /** Stage only public executable sources; no site credentials or DB data. */

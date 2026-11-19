@@ -122,8 +122,14 @@ The supported catalog is:
 
 | Joomla distribution | Available PHP builds |
 | --- | --- |
-| 5.4.10 | 8.3, 8.4, 8.5 |
-| 6.2.0 | 8.3, 8.4, 8.5 |
+| Current stable Joomla 5 | Compatible lines in `versions.json` |
+| Current stable Joomla 6 | Compatible lines in `versions.json` |
+
+The daily package refresh advances each stable baseline from the official Joomla
+full installer and release SHA-256. The default follows its existing major.
+Saved sites retain exact earlier versions through their recorded compatibility
+and archive digests. Each new baseline must pass the same native, browser and
+prepared snapshot checks before publication.
 
 Every new build, including pull-request validation, resolves the latest published
 stable JoomEngine int64 release once. New PHP runtime releases therefore flow into
@@ -184,6 +190,16 @@ summary records each affected nightly while healthy packages continue to update.
 Checksum, installer and validation failures still preserve the previous deployment.
 Use a new site to try a newly published nightly;
 retain a complete site export when the exact old build must remain portable.
+
+A separate daily package refresh runs at 00:23 UTC. It resolves released inputs
+for the extension recipes, MariaDB bridge and native driver, Adminer, editor
+packages and npm tooling. When their recorded versions and checksums are current,
+the job succeeds without starting another build. Changes go to a temporary
+branch and through the same native, browser and live JCB checks used for Pages.
+A successful candidate fast-forwards `main` and starts publication. If another
+commit reaches `main` during testing, the next refresh resolves the new base.
+A failed candidate remains available for investigation and the scheduled Pages
+build continues using the previously accepted pins.
 
 Playground checks for a new published build on startup, when returning to the tab,
 and before launching. When a build changes, it refreshes this deployment’s cached
@@ -251,7 +267,7 @@ These are build provenance and integrity records, not pins for future builds. It
 verified manifests provide the exact PHP source commits, compiler image and ABI
 for the native build.
 
-The build verifies every entry in the MariaDB bridge 0.1.8 release inventory and
+The build verifies every entry in the selected MariaDB bridge release inventory and
 stages its runtime, PHP adapter, engine JavaScript and WebAssembly directly from
 that release. Native driver source hashes must match the same release. The
 PDO extension’s compiler, PHP version, source hashes, upstream revision, and
@@ -664,15 +680,15 @@ and database instead of repeating its installer. New sites created from prepared
 images receive their own configured administrator; PHP settings and explicit extension, language, menu
 and template choices still apply. `fresh=1` builds the original recipe instead.
 
-Prepared JCB copies use the stable package releases pinned in
-[deploys/jcb.json](deploys/jcb.json): currently JCB 5.2.0 and 6.2.0. To adopt a new
-stable release, update its versioned URL and SHA-256 in that recipe and the
-optional MCP recipe, update any applicable compatibility inputs, and rebuild.
-CI installs and independently restores the new copies before publishing them.
+The scheduled update checks the official extension feeds for the latest stable
+JCB package on each supported major, Service Directory and JoomEngine MCP. It
+also checks the official Patch Tester and Weblinks GitHub release assets. The
+update records the exact package URL and digest in the affected recipes. JCB
+and JCB + MCP use the same verified archive on their shared Joomla major.
+CI installs and independently restores prepared JCB copies before publication.
 Existing saved sites are preserved. A new deployment uses a prepared copy only
 when its exact Joomla/JCB selection matches that copy; other listed versions
-install automatically from their verified staged packages. Updating the prepared
-recipe and rebuilding remains necessary to publish a new prepared snapshot.
+install automatically from their verified staged packages.
 
 The interface recognizes these query parameters:
 
@@ -951,8 +967,8 @@ parser failure, shared companion state and isolated HTML previews; see the
 `PLAYGROUND_SCENARIOS` narrow local investigations.
 
 CI runs source checks and unit tests first. Documentation-only pull requests skip
-native/browser jobs. Presentation-only changes run the default Joomla 6.2.0 / PHP
-8.4 combination with deployment, lifecycle and Rocket checks. Runtime, deployment,
+native/browser jobs. Presentation-only changes run the default Joomla / PHP
+combination recorded in the runtime manifest with deployment, lifecycle and Rocket checks. Runtime, deployment,
 configuration and unclassified changes run the full supported matrix, as do
 `main` and manual builds. Chromium and Firefox validate in parallel jobs against
 the same built artifact. Native/compiler caches require exact source and toolchain

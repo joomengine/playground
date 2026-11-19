@@ -91,7 +91,7 @@ try {
   packages.push({ name: 'fflate', version: fflatePin.version, integrity: fflatePin.integrity, url: fflatePin.resolved });
 
   const mailPin = lock.packages['node_modules/postal-mime'];
-  if (mailPin?.version !== pkg.dependencies['postal-mime'] || mailPin?.version !== '4.2.1') {
+  if (!mailPin?.integrity || mailPin.version !== pkg.dependencies['postal-mime']) {
     throw new Error('postal-mime lock mismatch');
   }
   await mkdir(path.join(assets, 'mail'));
@@ -237,6 +237,8 @@ try {
   catch { throw new Error('Build requires a Git checkout to record source provenance'); }
   const manifest = {
     schemaVersion: 1, projectVersion: pkg.version, sourceCommit, code,
+    ...(versions.retiredJcb?.length ? { retiredJcb: versions.retiredJcb } : {}),
+    ...(versions.retiredJoomla?.length ? { retiredJoomla: versions.retiredJoomla } : {}),
     deployment: { canonicalUrl, domain, environment: deploymentEnvironment },
     browserCompatibility, network,
     runtime: versions.runtime, upstream: versions.upstream, nativeDriver: versions.nativeDriver, packages, php, joomla, deploys, versionCatalog,

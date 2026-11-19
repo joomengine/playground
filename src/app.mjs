@@ -817,7 +817,7 @@ function formInput(overrides = {}, { draft = false } = {}) {
   }))
     && fields.jcbVersion.value === (editorConfiguration.jcbVersion ?? 'none');
   const jcbInput = unchangedRestoredJcb ? { jcbVersion: fields.jcbVersion.value } : jcbSelectionInput({ selection: { ...jcbSelection, version: fields.jcbVersion.value },
-    major: joomlaVersion.split('.')[0], deploy: currentDeployRecipe, pinned: pinnedJcb });
+    major: joomlaVersion.split('.')[0], deploy: currentDeployRecipe, pinned: pinnedJcb, retired: catalog.retiredJcb });
   const candidate = {
     ...(editorConfiguration || {}),
     ...extraDeploymentFields,
@@ -894,7 +894,8 @@ async function resolve(input) {
   await prepareDynamicInput(input);
   // Exact older pinned versions may still belong to an existing saved site or
   // shared configuration, even after a newer stable replaced them in the menu.
-  const previousPinned = pinnedCatalog.joomla.find(entry => entry.version === input.joomlaVersion);
+  const previousPinned = pinnedCatalog.joomla.find(entry => entry.version === input.joomlaVersion)
+    ?? pinnedCatalog.retiredJoomla?.find(entry => entry.version === input.joomlaVersion);
   if (previousPinned && !catalog.joomla.some(entry => entry.version === input.joomlaVersion)) {
     selectedJoomlaPackages.set(previousPinned.version, { ...previousPinned });
     catalog = { ...catalog, joomla: dynamicJoomlaChoices(pinnedCatalog, dynamicMetadata.joomla, selectedJoomlaPackages) };
@@ -1002,7 +1003,7 @@ async function refreshDynamicCatalog({ required = false } = {}) {
 }
 function pinnedJoomlaVersion(version) {
   try { return resolveJoomlaVersion(version, pinnedCatalog); }
-  catch { return undefined; }
+  catch { return pinnedCatalog?.retiredJoomla?.find(entry => entry.version === version)?.version; }
 }
 async function prepareDynamicInput(input) {
   if (input.joomlaVersion && !input.joomlaPackage) {
@@ -1038,7 +1039,8 @@ function renderJcbOptions(major, selection = jcbSelection) {
   const choices = matchingJcbChoices(major, dynamicMetadata.jcb, pinnedJcb);
   if (selection.version !== 'none' && !choices.some(entry => entry.version === selection.version)) {
     const pinned = [...pinnedJcb.values()].find(entry => entry.version === selection.version);
-    if (selection.package || pinned || editorConfiguration?.restoredSite || runtime?.configuration?.jcbVersion === selection.version) choices.push({ version: selection.version, label: `JCB ${selection.version}`, channel: 'saved' });
+    const retired = catalog.retiredJcb?.some(entry => entry.version === selection.version);
+    if (selection.package || pinned || retired || editorConfiguration?.restoredSite || runtime?.configuration?.jcbVersion === selection.version) choices.push({ version: selection.version, label: `JCB ${selection.version}`, channel: 'saved' });
   }
   fillOptions(fields.jcbVersion, [{ version: 'none', label: t('label.jcbNone'), disabled: deploymentRequiresJcb(currentDeployRecipe) }, ...choices]);
   if (![...fields.jcbVersion.options].some(option => option.value === selection.version)) {
@@ -1058,7 +1060,7 @@ async function changeJcbSelection() {
     await prepareDynamicInput(input);
     const next = { version, omit: false, ...(input.jcbPackage ? { package: input.jcbPackage } : {}) };
     // Validate before changing either the configured value or the visible selection.
-    jcbSelectionInput({ selection: next, major: fields.joomlaVersion.value.split('.')[0], deploy: currentDeployRecipe, pinned: pinnedJcb });
+    jcbSelectionInput({ selection: next, major: fields.joomlaVersion.value.split('.')[0], deploy: currentDeployRecipe, pinned: pinnedJcb, retired: catalog.retiredJcb });
     jcbSelection = next;
     clearFeedback();
   } catch (error) {

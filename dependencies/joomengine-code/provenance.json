@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "integrationVersion": "38.1.3",
+  "integrationVersion": "39.0.5",
   "upstream": [
     {
       "name": "CodinGame Monaco VS Code integration",
-      "version": "38.1.3",
+      "version": "39.0.5",
       "repository": "https://github.com/CodinGame/monaco-vscode-api",
-      "revision": "010c84da9caff452b81db844b647b6ab749af012",
+      "revision": "fed4e8b0c383bdba212f9bf7c49abf1f0bc46c84",
       "licence": "MIT",
       "noticeFiles": [
         "LICENSE.codingame.txt"
@@ -15,9 +15,9 @@
     },
     {
       "name": "Microsoft Visual Studio Code",
-      "version": "1.142.0",
+      "version": "1.145.2",
       "repository": "https://github.com/microsoft/vscode",
-      "revision": "d956e8a6ac5d904486557eea07e1d6bd62a4d36f",
+      "revision": "c4453f8ea430795f941c1b2ff6c9321135a74a02",
       "licence": "MIT with preserved third-party component notices",
       "noticeFiles": [
         "LICENSE.vscode.txt",
@@ -64,9 +64,9 @@
     },
     {
       "name": "@vscode/codicons",
-      "version": "0.0.46-48",
-      "resolved": "https://registry.npmjs.org/@vscode/codicons/-/codicons-0.0.46-48.tgz",
-      "integrity": "sha512-HhX6VUa84nR9C9ceyiZvR1lRCOc4dZC1vSwnyPWiqIpN+06x+KDaGGn0WFmFLG0APariLhFPlBUljep1cIWk/Q==",
+      "version": "0.0.46-50",
+      "resolved": "https://registry.npmjs.org/@vscode/codicons/-/codicons-0.0.46-50.tgz",
+      "integrity": "sha512-Mj2SOGlmbkI8RGycEMH4JZfGb/TepYOPrSeZ9OFazjJ4cJh2IKFYEUYpvnl4hJ5VE/XW4GyNDj3huDlnqhSSCA==",
       "licence": "CC-BY-4.0",
       "noticeFiles": [
         "LICENSE.codicons.txt",
@@ -94,19 +94,19 @@
   "noticeDigests": {
     "LICENSE-CODE.codicons.txt": "9906940f61b1f0b533fa7d99baf55178b2808fbe113ea51dfbfad8572ccd5f2b",
     "LICENSE.codicons.txt": "af5e030844efddbc7ab00dcfea8b019703753d4d9f5172d727c533a492aec665",
-    "LICENSE.codingame.txt": "cfc1e8f5d4ff0aba05f0e8d6d781b68088ab7f2fc054dcee6a85aaa3753b653e",
-    "LICENSE.monaco.txt": "5378c3bba06d4996015eeb26a54e76811e2842c876d1b455c3ac7bcd75429f9c",
+    "LICENSE.codingame.txt": "72a310787f7d3351c6ad1357569c94f995e50b56e4297e9b1d2536d8fa5a6687",
+    "LICENSE.monaco.txt": "33e4ff1a06ef62ba21788ea162564ee8165269a24a9ce6ef301837447eab0ac6",
     "LICENSE.vscode-oniguruma.txt": "ddde8aba8fe72b4830e27901fc78733eb6db7b6c653161075de213a6adeda3fd",
     "LICENSE.vscode-textmate.txt": "b5cb7ff7859e7d282d98fc43ab081b0dda5dc659dc3385cf65740c759a7e6a6c",
-    "LICENSE.vscode.txt": "6b4861ff7dc16820de113b2356eaa9953a5b7a023ce91bd0d0edb109f2a0c0e2",
+    "LICENSE.vscode.txt": "9480271317925265e806a9a196aaa33410a962fa9d4d1e248a4a5187bc8c9df9",
     "NOTICES.vscode-oniguruma.txt": "615d94d89eacc046241518c247f6650a5df80d1adf4b284a756f500867620b35",
-    "ThirdPartyNotices.monaco.txt": "81e99a0923eaf68a3b7e8f5ab5422cde54b6035a0a07c52203ebb2acffa118b0",
-    "ThirdPartyNotices.vscode.txt": "111354f31f180212e7fda9bf4e6c811fcbc610d60f1e98b94ec92d1a0744925d"
+    "ThirdPartyNotices.monaco.txt": "5b40eb9e046e24e28148b7cebf91ce346bf839eb4cfdcd3bd21140af2b3512bb",
+    "ThirdPartyNotices.vscode.txt": "4cb210d0c8f8fa304b37a31d44436ebf86dff59466a4033fbcd0c401d63c6568"
   },
   "localAdaptations": [
     {
       "component": "@codingame/monaco-vscode-api",
-      "version": "38.1.3",
+      "version": "39.0.5",
       "sourceFile": "@codingame/monaco-vscode-api/vscode/src/vs/workbench/services/textfile/common/encoding.js",
       "sourceSha256": "70f5165292a49dfb89323b40d22c3c6cce9dec3ebf4b649ea1e167abf4ac46e0",
       "buildScript": "scripts/code-assets.mjs",

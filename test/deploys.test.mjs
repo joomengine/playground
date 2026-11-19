@@ -33,14 +33,15 @@ test('repository catalog and every manifest validate with required integrity pin
 });
 
 test('defaults select prepared JCB on PHP 8.4 for Joomla 5 and 6', async () => {
-  for (const [requested, expected, packageVersion] of [['5.4', '5.4.10', '5.2.0'], ['6.2', '6.2.0', '6.2.0']]) {
+  for (const [requested, expected] of [['5.4', '5.4.10'], ['6.2', '6.2.0']]) {
     const { configuration, deploy } = await resolveDeployConfiguration({ admin, joomlaVersion: requested }, options);
     assert.equal(configuration.deployId, 'jcb');
     assert.equal(configuration.phpVersion, '8.4');
     assert.equal(deploy.prebuild, true);
     assert.equal(configuration.joomlaVersion, expected);
     assert.equal(configuration.extensions.length, 1);
-    assert.ok(configuration.extensions[0].url.endsWith(`/v${packageVersion}.zip`));
+    assert.match(configuration.extensions[0].url, /\/pkg-component-builder\/archive\/refs\/tags\/v\d+\.\d+\.\d+\.zip$/);
+    assert.ok(configuration.extensions[0].url.includes(`/v${expected.split('.')[0]}.`));
     assert.match(configuration.extensions[0].sha256, /^[a-f0-9]{64}$/);
     assert.equal(configuration.initialPath, '/administrator/index.php?option=com_componentbuilder');
     assert.deepEqual(configuration.addonExtensions, []);
@@ -64,7 +65,7 @@ test('extension and CLI overrides append after a selected recipe', async () => {
   assert.equal(configuration.phpVersion, '8.5');
   assert.equal(configuration.initialPath, '/');
   assert.equal(configuration.extensions.length, 2);
-  assert.ok(configuration.extensions[0].url.includes('pkg-weblinks-5.2.0.zip'));
+  assert.match(configuration.extensions[0].url, /\/joomla-extensions\/weblinks\/releases\/download\/v?(\d+\.\d+\.\d+)\/pkg-weblinks-\1\.zip$/);
   assert.deepEqual(configuration.addonExtensions, [{ url: 'https://example.test/extra.zip' }]);
 });
 

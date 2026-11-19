@@ -1,0 +1,157 @@
+name: Refresh Playground packages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/refresh-packages.yml
+      - scripts/update-*.mjs
+      - scripts/release-metadata.mjs
+      - scripts/npm-releases.mjs
+  schedule:
+    - cron: '23 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: playground-package-refresh
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    outputs:
+      changed: ${{ steps.patch.outputs.changed }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: '.node-version'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Resolve released packages and verify their provenance
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          for package in mariadb adminer joomla extensions editor npm; do
+            node "scripts/update-${package}.mjs"
+          done
+      - name: Collect the proposed changes
+        id: patch
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo 'All supported package pins are current.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+            git diff --cached --stat >> "$GITHUB_STEP_SUMMARY"
+            git diff --cached --binary --full-index > "$RUNNER_TEMP/updates.patch"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.patch.outputs.changed == 'true'
+        with:
+          name: package-updates
+          path: ${{ runner.temp }}/updates.patch
+          if-no-files-found: error
+          retention-days: 14
+
+  candidate:
+    needs: resolve
+    if: needs.resolve.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+      branch: ${{ steps.candidate.outputs.branch }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: package-updates
+          path: ${{ runner.temp }}
+      - name: Store the candidate for read-only validation
+        id: candidate
+        run: |
+          git apply --index --binary --whitespace=nowarn "$RUNNER_TEMP/updates.patch"
+          while IFS= read -r -d '' file; do
+            case "$file" in
+              versions.json|package.json|package-lock.json|services/network-worker/package.json|services/network-worker/package-lock.json|NOTICE|index.html|src/locales/*.mjs|src/database/runtime.mjs|dependencies/adminer/*|dependencies/joomengine-code/*|deploys/*.json) ;;
+              *) echo "Unexpected package update path: $file" >&2; exit 1 ;;
+            esac
+          done < <(git diff --cached --no-renames --name-only -z)
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Refresh verified Playground packages'
+          branch="automation/package-updates-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git push origin "HEAD:refs/heads/$branch"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  validate:
+    needs: candidate
+    uses: ./.github/workflows/validate.yml
+    with:
+      candidate_sha: ${{ needs.candidate.outputs.sha }}
+
+  promote:
+    needs: [candidate, validate]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.candidate.outputs.sha }}
+          fetch-depth: 2
+      - name: Fast-forward main to the tested candidate and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(git rev-parse HEAD^)" = "$GITHUB_SHA"
+          current=$(git ls-remote --exit-code origin refs/heads/main | cut -f1)
+          if [[ "$current" = "$(git rev-parse HEAD)" ]]; then
+            echo 'Candidate already promoted. Requesting publication.'
+          elif [[ "$current" = "$GITHUB_SHA" ]]; then
+            if ! git push origin HEAD:refs/heads/main; then
+              observed=$(git ls-remote --exit-code origin refs/heads/main | cut -f1)
+              if [[ "$observed" = "$current" ]]; then exit 1; fi
+              if [[ "$observed" != "$(git rev-parse HEAD)" ]]; then
+                echo 'Main advanced during promotion. The next refresh will test its new base.' >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+            fi
+          else
+            echo 'Main advanced during validation. The next refresh will test its new base.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh workflow run pages.yml --ref main
+
+  cleanup:
+    needs: [candidate, validate, promote]
+    if: needs.promote.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Remove this run's temporary branch
+        env:
+          CANDIDATE: ${{ needs.candidate.outputs.sha }}
+          BRANCH: ${{ needs.candidate.outputs.branch }}
+        run: |
+          ref="refs/heads/$BRANCH"
+          remote=$(git ls-remote origin "$ref" | cut -f1)
+          if [[ "$remote" = "$CANDIDATE" ]]; then
+            git push --force-with-lease="$ref:$CANDIDATE" origin ":$ref"
+          fi

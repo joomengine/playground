@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { chromium, firefox } from 'playwright';
 import { strToU8, zipSync } from 'fflate';
+import { rememberSite, readSavedState, savedStateKey } from '../src/ui-state.mjs';
 import { readURLConfiguration } from '../src/config.mjs';
 import { createStaticServer } from './server.mjs';
 
@@ -15,6 +17,9 @@ const runtimeManifest = {
   php: [{ version: '8.3', patchVersion: '8.3.29' }, { version: '8.4', patchVersion: '8.4.1' }, { version: '8.5', patchVersion: '8.5.0' }],
   joomla: [{ version: '5.4.10', php: ['8.3', '8.4'] }, { version: '6.2.0', php: ['8.3', '8.4', '8.5'] }],
   defaults: { phpVersion: '8.4', joomlaVersion: '6.2.0' },
+  retiredJcb: [{ version: '6.1.3', package: { sha256, url: 'https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v6.1.3.zip' } }],
+  retiredJoomla: [{ version: '6.1.7', php: ['8.4'], sha256,
+    url: 'https://github.com/joomla/joomla-cms/releases/download/6.1.7/Joomla_6.1.7-Stable-Full_Package.zip' }],
 };
 
 async function selectedConfiguration(page) {
@@ -40,7 +45,13 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
         ...entry, source: 'jcb-update', url: `packages/${sha256}.zip`, sha256, sha512,
       })),
     });
+    // Keep the baseline recipe paired with this test's historical catalog.
+    const fixtureRecipe = JSON.parse(await readFile(new URL('../deploys/jcb.json', import.meta.url), 'utf8'));
+    fixtureRecipe.variants['6'].extensions = [{
+      url: 'https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v6.2.0.zip', sha256,
+    }];
     const server = await createStaticServer({ directory, fixtures: {
+      'deploys/jcb.json': JSON.stringify(fixtureRecipe),
       'assets/manifest.json': JSON.stringify(runtimeManifest),
       'assets/version-catalog.json': () => catalogUnavailable ? '{}' : JSON.stringify(catalog()),
       [`assets/packages/${sha256}.zip`]: archive,
@@ -136,6 +147,19 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       assert.equal(await current.locator('#jcb-version').inputValue(), '6.2.1');
       assert.equal(await current.locator('#jcb-version option[value="6.2.0"]').count(), 0);
       await current.close();
+
+      const legacy = await context.newPage();
+      const legacySite = { storageKey: 'legacy-stable', siteName: 'Existing JCB site', deployId: 'jcb',
+        joomlaVersion: '6.1.7', jcbVersion: '6.1.3', phpVersion: '8.4', persistence: true };
+      const saved = JSON.stringify(rememberSite({ sites: {} }, legacySite));
+      const key = savedStateKey(server.url);
+      assert.equal(readSavedState({ getItem: () => saved }, key).active, legacySite.storageKey);
+      await legacy.addInitScript(({ key, saved }) => localStorage.setItem(key, saved), { key, saved });
+      await legacy.goto(`${server.url}?start=0`);
+      await legacy.locator('#embedded-launch:enabled').waitFor();
+      assert.equal(await legacy.locator('#joomla-version').inputValue(), '6.1.7', 'Existing version-only site retains its exact retired baseline.');
+      assert.equal(await legacy.locator('#jcb-version').inputValue(), '6.1.3');
+      await legacy.close();
 
       // An uploaded site's installed versions do not require its old packages.
       const restored = await context.newPage();

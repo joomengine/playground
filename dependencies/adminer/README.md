@@ -1,4 +1,4 @@
-# Adminer 6.2.0
+# Adminer
 
 The unmodified multilingual MySQL/MariaDB release is retained here with its
 published SHA-256 digest and exact size in `provenance.json`. JoomEngine distributes
@@ -24,6 +24,9 @@ All tool files are installed lazily under `/internal/adminer`, outside the Jooml
 workspace and portable exports. A reserved virtual `__adminer/` route temporarily
 changes only the CGI prefix/document root for that serialized request. The same
 PHP request queue and MariaDB worker serve Joomla and Adminer.
+
+Run `node scripts/update-adminer.mjs` to check the latest stable release and
+refresh the source, digest and runtime version after checking the PDO adapter.
 
 Run `node scripts/prepare-adminer.mjs dist/assets/adminer` to stage the verified
 assets. The normal build calls the same function and retains the resulting hashes.

@@ -162,7 +162,19 @@ export function parseCatalog(manifest, { baseURL } = {}) {
   if (!joomla.some((item) => item.version === defaults.joomlaVersion && item.php.includes(defaults.phpVersion))) {
     throw new TypeError('The runtime manifest default versions are incompatible.');
   }
-  return { php, joomla, defaults };
+  const retiredJoomla = (manifest.retiredJoomla || []).map(entry => {
+    const { version, url, sha256 } = entry;
+    const expected = 'https://github.com/joomla/joomla-cms/releases/download/';
+    if (!/^\d+\.\d+\.\d+$/.test(version) || ![version, 'v' + version].some(tag => url === `${expected}${tag}/Joomla_${version}-Stable-Full_Package.zip`)
+        || !SHA256.test(sha256) || !Array.isArray(entry.php)) throw new TypeError('Invalid historical Joomla release pin.');
+    return { ...entry, php: entry.php.filter(line => php.some(item => item.version === line)), retired: true };
+  }).filter(entry => entry.php.length);
+  const retiredJcb = (manifest.retiredJcb || []).map(({ version, package: pin }) => {
+    if (!/^\d+\.\d+\.\d+$/.test(version) || pin?.url !== `https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v${version}.zip`
+        || !SHA256.test(pin.sha256) || (pin.sha512 !== undefined && !SHA512.test(pin.sha512))) throw new TypeError('Invalid historical JCB release pin.');
+    return { version, package: { url: pin.url, sha256: pin.sha256, ...(pin.sha512 ? { sha512: pin.sha512 } : {}) } };
+  });
+  return { php, joomla, defaults, ...(retiredJoomla.length ? { retiredJoomla } : {}), ...(retiredJcb.length ? { retiredJcb } : {}) };
 }
 
 export function normalizeLanguage(value = 'en-GB') {
@@ -190,6 +202,7 @@ export function resolveJoomlaVersion(value, catalog) {
 }
 
 export function normalizeConfiguration(input = {}, { catalog, baseURL = 'https://playground.invalid/' } = {}) {
+  if (catalog) catalog = catalogForExactJoomlaVersion(catalog, input.joomlaVersion);
   const config = { ...DEFAULTS, ...catalog?.defaults, ...input, admin: { ...DEFAULTS.admin, ...input.admin } };
   config.joomlaVersion = resolveJoomlaVersion(config.joomlaVersion, catalog);
   if (typeof config.phpVersion !== 'string' || !VERSION.test(config.phpVersion) || typeof config.joomlaVersion !== 'string' || !VERSION.test(config.joomlaVersion)) {
@@ -209,7 +222,7 @@ export function normalizeConfiguration(input = {}, { catalog, baseURL = 'https:/
       throw new TypeError('A Joomla package requires an exact Joomla version.');
     }
     config.joomlaPackage = normalizeJoomlaPackage(config.joomlaPackage, baseURL,
-      catalog?.joomla.find(entry => entry.version === config.joomlaVersion));
+      catalog?.retiredJoomla?.find(entry => entry.version === config.joomlaVersion) ?? catalog?.joomla.find(entry => entry.version === config.joomlaVersion));
     if (!config.joomlaPackage.php.includes(config.phpVersion)) throw new TypeError('The Joomla package does not support the selected PHP runtime.');
   }
   if (config.jcbVersion !== undefined) config.jcbVersion = normalizeJcbVersion(config.jcbVersion);
@@ -275,6 +288,10 @@ export function normalizeJoomlaPackage(value, baseURL = 'https://playground.inva
   // dropping its assets/ prefix. Repair only that exact URL for the same bytes.
   if (published?.url && published.sha256?.toLowerCase() === result.sha256) {
     const assets = new URL('assets/', baseURL);
+    if (published.retired) {
+      const name = `joomla/Joomla_${published.version}.zip`;
+      if ([assets, baseURL].some(base => result.url === new URL(name, base).href)) result.url = published.url;
+    }
     const canonical = new URL(published.url, assets);
     if (canonical.origin === assets.origin && canonical.pathname.startsWith(assets.pathname)) {
       const misplaced = new URL(canonical.pathname.slice(assets.pathname.length) + canonical.search, baseURL);
@@ -284,10 +301,19 @@ export function normalizeJoomlaPackage(value, baseURL = 'https://playground.inva
   return { url: result.url, sha256: result.sha256, php: [...new Set(value.php)] };
 }
 
+// Retired baselines are available only when a saved site or an explicit request
+// names its exact version. They never grow the current install or snapshot matrix.
+export function catalogForExactJoomlaVersion(catalog, version) {
+  if (!version || !catalog.retiredJoomla?.length || catalog.joomla.some(entry => entry.version === version)) return catalog;
+  const retired = catalog.retiredJoomla.find(entry => entry.version === version);
+  return retired ? { ...catalog, joomla: [...catalog.joomla, retired] } : catalog;
+}
+
 /** Reconstruct an explicitly selected, integrity-pinned release when a shared
  * configuration or saved site is opened without the online discovery catalog.
  * Runtime binaries still come exclusively from the local catalog. */
 export function catalogWithSelectedJoomlaPackage(catalog, input, baseURL = 'https://playground.invalid/') {
+  catalog = catalogForExactJoomlaVersion(catalog, input.joomlaVersion);
   if (input.joomlaPackage === undefined) return catalog;
   if (typeof input.joomlaVersion !== 'string' || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(input.joomlaVersion)) {
     throw new TypeError('A Joomla package requires an exact Joomla version.');

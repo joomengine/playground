@@ -157,7 +157,10 @@ for (const [deployId, major] of pairs) {
         assert.deepEqual(JSON.parse(health.text), { sodium: true, sodiumRoundTrip: '00ff80' });
         const mcp = await checkMcpRuntime(runtime, { sourceLoader, admin: configuration.admin });
         assert.equal(mcp.installed, true);
-        assert.equal(mcp.version, '1.0.10');
+        const source = recipe.variants[major].extensions.find(item => new URL(item.url).pathname.includes('/mcp_package/'));
+        const expected = source.url.match(/\/v(\d+\.\d+\.\d+)(?:\.zip)?$/);
+        assert.ok(expected, 'The MCP recipe must identify a stable package tag.');
+        assert.equal(mcp.version, expected[1]);
         assert.equal(mcp.protocolVersion, '2025-11-25');
         assert.ok(mcp.toolCount > 0);
         assert.equal(mcp.describedAction, 'content.categories.list');

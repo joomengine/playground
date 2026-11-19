@@ -13,8 +13,8 @@
     "initialPath": "/administrator/index.php?option=com_weblinks",
     "extensions": [
       {
-        "url": "https://github.com/joomla-extensions/weblinks/releases/download/5.2.0/pkg-weblinks-5.2.0.zip",
-        "sha256": "3f5a0081d64b857729711107d54fab6613f0b1e8c5c211a301972c29e42639ad"
+        "url": "https://github.com/joomla-extensions/weblinks/releases/download/5.2.1/pkg-weblinks-5.2.1.zip",
+        "sha256": "2b35473c53058b147d62ee197d775fdebd848149ae36ea0e798839dfed4e8824"
       }
     ]
   },

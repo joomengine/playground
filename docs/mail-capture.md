@@ -131,8 +131,8 @@ packets from adding the same message twice, including after Clear; a deliberate
 new application send is a new message. Retired worker packets cannot append mail
 to a replacement worker's session.
 
-The parser is PostalMime **4.2.1**, bundled as a browser ESM module with its
-MIT-0 license. Its parsing limits protect preview processing; parser rejection
+The browser ESM bundle uses PostalMime under its MIT-0 license. The asset
+manifest records the exact package version and integrity. Its parsing limits protect preview processing; parser rejection
 does not truncate or discard accepted raw mail. The session inbox has no
 automatic eviction policy, so Clear releases retained messages when they are no
 longer needed.

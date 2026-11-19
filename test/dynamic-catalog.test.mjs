@@ -52,6 +52,7 @@ test('an update ZIP checksum is never reused for the full nightly installer', ()
 
 test('JCB discovery requires a matching version, official package URL and published SHA-512', () => {
   assert.equal(parseJcbUpdates(jcbXML('6.2.1-alpha1'))[0].sha512, sha512);
+  assert.equal(parseJcbUpdates(jcbXML('6.1.2').replace('https://github.com', ''))[0].sha512, sha512);
   assert.deepEqual(parseJcbUpdates(jcbXML('6.1.2', sha512, '6.1.3')), []);
   assert.deepEqual(parseJcbUpdates(jcbXML('6.1.2', 'bad')), []);
   assert.deepEqual(parseJcbUpdates(jcbXML('6.1.2').replace('github.com', 'attacker.invalid')), []);
