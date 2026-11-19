@@ -238,7 +238,11 @@ async function sharedJcbPackages(registry, fetcher) {
 }
 
 function samePackage(left, right) {
-  return ['url', 'sha256', 'sha512', 'provider', 'apiBase', 'authentication', 'headers']
+  // Older saved presets have the same SHA-256 without the later publisher
+  // SHA-512. When both records do name a SHA-512 they must agree.
+  const sha512Matches = left?.sha512 === right?.sha512 || (PACKAGE_DIGEST.test(left?.sha256)
+    && left.sha256 === right?.sha256 && (left.sha512 === undefined || right.sha512 === undefined));
+  return sha512Matches && ['url', 'sha256', 'provider', 'apiBase', 'authentication', 'headers']
     .every(key => sameDeploymentValue(left?.[key], right?.[key]));
 }
 

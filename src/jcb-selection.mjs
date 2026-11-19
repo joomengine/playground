@@ -15,7 +15,7 @@ export function pinnedJcbPackages(deploy) {
     const entry = (variant.extensions || []).find(item => jcbVersion(item));
     const version = jcbVersion(entry);
     if (!version || version.split('.')[0] !== major || !entry.sha256) continue;
-    result.set(major, { version, package: { url: entry.url, sha256: entry.sha256 } });
+    result.set(major, { version, package: { url: entry.url, sha256: entry.sha256, ...(entry.sha512 ? { sha512: entry.sha512 } : {}) } });
   }
   return result;
 }

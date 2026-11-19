@@ -80,3 +80,31 @@ test('unavailable metadata and restored sites stay neutral; invalid settings nev
   await assert.rejects(deploymentLaunchReadiness(input, { ...options,
     fetcher: async () => new Response('', { status: 503 }) }));
 });
+
+test('editing a staged JCB preset keeps both published checksums on its one managed extension', async () => {
+  const pkg = { url: '../assets/packages/' + 'c'.repeat(64) + '.zip', sha256: 'c'.repeat(64), sha512: 'd'.repeat(128),
+    sourceUrl: 'https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v6.2.0.zip' };
+  const preset = { schemaVersion: 1, id: 'jcb', title: 'JCB', joomla: ['6'], requirements: { jcb: 'required' },
+    configuration: { siteName: 'JCB', initialPath: '/administrator/index.php?option=com_componentbuilder' },
+    variants: { 6: { extensions: [pkg], snapshot } } };
+  const options = { baseURL, catalog, manifest: { prebuiltDeploys: [{ ...manifest.prebuiltDeploys[0], id: 'jcb' }] },
+    deployCatalog: normalizeDeployCatalog({ schemaVersion: 1, default: 'jcb',
+      deploys: [{ id: 'jcb', title: 'JCB', file: './jcb.json' }] }, { baseURL: baseURL + 'deploys/catalog.json' }),
+    fetcher: async () => Response.json(preset) };
+  const input = { admin, deployId: 'jcb', joomlaVersion: release, jcbVersion: '6.2.0' };
+  assert.equal(await deploymentLaunchReadiness(input, options), 'fast');
+  const { configuration } = await resolveDeployConfiguration(input, options);
+  const edited = { ...configuration, siteName: 'Changed site name' };
+  edited.deploymentRecipe = createFullDeploymentDocument(edited, { baseURL });
+  assert.equal(await deploymentLaunchReadiness(edited, options), 'fresh');
+  const { configuration: result } = await resolveDeployConfiguration(edited, options);
+  assert.deepEqual(result.extensions, [{ url: new URL(pkg.url, baseURL + 'deploys/jcb.json').href,
+    sha256: pkg.sha256, sha512: pkg.sha512 }]);
+  const saved = structuredClone(edited);
+  delete saved.extensions[0].sha512;
+  delete saved.deploymentRecipe.configuration.extensions[0].sha512;
+  assert.deepEqual((await resolveDeployConfiguration(saved, options)).configuration.extensions, result.extensions);
+  saved.extensions[0].sha512 = 'e'.repeat(128);
+  saved.deploymentRecipe.configuration.extensions[0].sha512 = saved.extensions[0].sha512;
+  await assert.rejects(resolveDeployConfiguration(saved, options), /conflicting package checksums/);
+});
