@@ -33,7 +33,7 @@ export function initialJcbSelection({ input, deploy, major, pinned, isSaved }) {
   return { version: fallback && (deploymentRequiresJcb(deploy) || recipeIncludesJcb(deploy, major, fallback)) ? fallback : 'none', omit: false };
 }
 
-export function jcbSelectionInput({ selection, major, deploy, pinned }) {
+export function jcbSelectionInput({ selection, major, deploy, pinned, retired = [] }) {
   if (selection.omit) return {};
   const version = selection.version;
   if (version === 'none') {
@@ -45,7 +45,9 @@ export function jcbSelectionInput({ selection, major, deploy, pinned }) {
   if (selectedMajor !== major && !(major === '7' && selectedMajor === '6')) throw new TypeError(`JCB ${version} is not a selectable package for Joomla ${major}.`);
   const explicit = selection.package;
   const pinnedEntry = pinned.get(recipeMajor(major, pinned));
-  if (!explicit && recipeIncludesJcb(deploy, major, version)) return { jcbVersion: version };
+  // Preserve version-only saved configurations. The resolver selects the
+  // archived pin without adding a package override that would fork the saved site.
+  if (!explicit && (recipeIncludesJcb(deploy, major, version) || retired.some(entry => entry.version === version))) return { jcbVersion: version };
   const packageEntry = explicit || (pinnedEntry?.version === version ? pinnedEntry.package : null);
   if (!packageEntry) throw new TypeError(`The selected JCB ${version} package is unavailable.`);
   return { jcbVersion: version, jcbPackage: structuredClone(packageEntry) };

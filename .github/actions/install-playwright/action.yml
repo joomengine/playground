@@ -8,6 +8,7 @@ runs:
   using: composite
   steps:
     - name: Install and launch selected browser
+      id: browser
       shell: bash
       env:
         PLAYGROUND_BROWSER: ${{ inputs.browser }}
@@ -17,22 +18,30 @@ runs:
           *) echo '::error::browser must be chromium, firefox, or webkit.' >&2; exit 1 ;;
         esac
         ./node_modules/.bin/playwright install "$PLAYGROUND_BROWSER"
-        render_page() {
-          node --input-type=module <<'JS'
-        import * as playwright from 'playwright';
-        const browser = await playwright[process.env.PLAYGROUND_BROWSER].launch({ timeout: 15000 });
-        try {
-          const page = await browser.newPage();
-          await page.setContent('<p>Playground</p>');
-          await page.screenshot({ timeout: 10000 });
-        } finally {
-          await browser.close();
-        }
-        JS
-        }
-        # Hosted runners often already have the libraries needed by our headless tests.
-        if render_page; then exit 0; fi
-        echo '::warning::Browser render failed. Installing system dependencies and trying again.'
-        # Preserve the Ubuntu runner's configured, signed package sources and mirror failover.
-        ./node_modules/.bin/playwright install-deps "$PLAYGROUND_BROWSER"
-        render_page
+        if node "$GITHUB_ACTION_PATH/verify.mjs"; then exit 0; fi
+        echo '::warning::Browser capability probe failed. Installing system dependencies and trying again.'
+        echo 'repair=true' >> "$GITHUB_OUTPUT"
+        echo "image=${ImageVersion:-ubuntu-24.04}" >> "$GITHUB_OUTPUT"
+    - name: Restore Ubuntu browser packages
+      if: steps.browser.outputs.repair == 'true'
+      id: archives
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.cache/playground-apt/*.deb
+        key: playwright-apt-v1-ubuntu24-${{ runner.arch }}-${{ inputs.browser }}-${{ steps.browser.outputs.image }}-${{ hashFiles('package-lock.json') }}
+        restore-keys: playwright-apt-v1-ubuntu24-${{ runner.arch }}-${{ inputs.browser }}-
+    - name: Repair browser dependencies and verify playback
+      if: steps.browser.outputs.repair == 'true'
+      id: repair
+      shell: bash
+      env:
+        PLAYGROUND_BROWSER: ${{ inputs.browser }}
+      run: |
+        bash "$GITHUB_ACTION_PATH/repair-deps.sh"
+        node "$GITHUB_ACTION_PATH/verify.mjs"
+    - name: Save Ubuntu browser packages
+      if: steps.repair.outputs.archives == 'true' && steps.archives.outputs.cache-hit != 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.cache/playground-apt/*.deb
+        key: ${{ steps.archives.outputs.cache-primary-key }}

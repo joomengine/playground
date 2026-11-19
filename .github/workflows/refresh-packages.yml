@@ -36,7 +36,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          for package in mariadb adminer extensions editor npm; do
+          for package in mariadb adminer joomla extensions editor npm; do
             node "scripts/update-${package}.mjs"
           done
       - name: Collect the proposed changes

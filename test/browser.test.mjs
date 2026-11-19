@@ -1012,11 +1012,12 @@ for (const name of browserNames) {
         proof.push({ id: 'manual-servicedirectory', ...serviceData, administrator: true });
         await close(page);
         page.testStep = 'Dutch URL recipe with explicit logged-out session and extension command';
+        const joomlaFive = manifest.joomla.find(entry => entry.version.startsWith('5.'));
         const dutch = await startDeploy(page, new URLSearchParams({
-          deploy: 'blank', joomla: '5.4', php: defaultPair.phpVersion, language: 'nl-NL', login: 'no',
+          deploy: 'blank', joomla: joomlaFive.version.split('.').slice(0, 2).join('.'), php: defaultPair.phpVersion, language: 'nl-NL', login: 'no',
           extension: new URL('__test_extension.zip', server.url).href, commands: JSON.stringify([['list']]),
         }).toString(), setup());
-        assert.equal(dutch.configuration.joomlaVersion, manifest.joomla.find((entry) => entry.version.startsWith('5.4.')).version);
+        assert.equal(dutch.configuration.joomlaVersion, joomlaFive.version);
         const frontend = await request(page, '/');
         assert.equal(frontend.status, 200, frontend.text.slice(0, 1000));
         assert.match(frontend.text, /<html[^>]+lang=["']nl-NL["']/i);

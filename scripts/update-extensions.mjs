@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { setTimeout as delay } from 'node:timers/promises';
+import { readReleaseMetadata } from './release-metadata.mjs';
 import { parsePackageUpdates } from '../src/dynamic-catalog.mjs';
 import { downloadCatalogZip } from './version-catalog.mjs';
 
@@ -14,23 +14,6 @@ const releasePackages = {
   weblinks: version => `pkg-weblinks-${version}.zip`,
 };
 
-async function metadata(url, fetchImpl, token) {
-  const headers = { 'User-Agent': 'JoomEngine-Playground' };
-  if (token && new URL(url).origin === 'https://api.github.com') headers.Authorization = `Bearer ${token}`;
-  for (let attempt = 1; ; attempt++) {
-    try {
-      const response = await fetchImpl(url, { headers, redirect: 'error', signal: AbortSignal.timeout(30_000) });
-      if (response.ok) return await response.text();
-      await response.body?.cancel();
-      if (![408, 429, 500, 502, 503, 504].includes(response.status)) throw new Error(`HTTP ${response.status} for ${url}`);
-      if (attempt === 3) throw new Error(`HTTP ${response.status} for ${url} after three attempts`);
-    } catch (error) {
-      if (attempt === 3 || !(error instanceof TypeError || ['AbortError', 'TimeoutError'].includes(error.name))) throw error;
-    }
-    await delay(500 * attempt);
-  }
-}
-
 export function githubExtensionRelease(id, release) {
   const version = release.tag_name?.replace(/^v/, '');
   if (release.draft !== false || release.prerelease !== false || !stable.test(version)) throw new Error(`Invalid stable ${id} release`);
@@ -42,12 +25,13 @@ export function githubExtensionRelease(id, release) {
 }
 
 export async function updateExtensions({ root = project, fetchImpl = fetch, token = process.env.GITHUB_TOKEN } = {}) {
-  const read = url => metadata(url, fetchImpl, token);
+  const read = url => readReleaseMetadata(url, fetchImpl, token);
   const directory = path.join(root, 'deploys');
   const ids = ['jcb', 'jcb-mcp', 'servicedirectory', 'patchtester', 'weblinks'];
   const recipes = new Map(await Promise.all(ids.map(async id => [id, JSON.parse(await readFile(path.join(directory, `${id}.json`), 'utf8'))])));
   const cache = path.join(root, '.cache/packages');
   const changed = new Set();
+  const retiredJcb = [];
 
   function slot(id, major, repository) {
     const recipe = recipes.get(id);
@@ -105,6 +89,9 @@ export async function updateExtensions({ root = project, fetchImpl = fetch, toke
       if (current === entry.version) return;
     }
     if (!current || compare(entry.version, current) < 0) throw new Error(`Cannot advance ${pin.url} to ${entry.version}`);
+    if (repository === 'joomengine/pkg-component-builder' && current !== entry.version) {
+      retiredJcb.push({ version: current, package: { ...pin } });
+    }
     await apply(entry, slots);
   }
 
@@ -133,6 +120,21 @@ export async function updateExtensions({ root = project, fetchImpl = fetch, toke
     })());
   }
   await Promise.all(updates);
+  if (retiredJcb.length) {
+    const filename = path.join(root, 'versions.json');
+    const versions = JSON.parse(await readFile(filename, 'utf8'));
+    versions.retiredJcb ??= [];
+    for (const entry of retiredJcb.sort((a, b) => compare(a.version, b.version))) {
+      const existing = versions.retiredJcb.find(item => item.version === entry.version);
+      if (existing && (existing.package.url !== entry.package.url || existing.package.sha256 !== entry.package.sha256)) {
+        throw new Error(`Conflicting historical JCB package for ${entry.version}`);
+      }
+      if (!existing) versions.retiredJcb.push(entry);
+    }
+    const temporary = `${filename}.${process.pid}.tmp`;
+    await writeFile(temporary, JSON.stringify(versions, null, 2) + '\n');
+    await rename(temporary, filename);
+  }
   for (const id of changed) {
     const filename = path.join(directory, `${id}.json`);
     const temporary = `${filename}.${process.pid}.tmp`;

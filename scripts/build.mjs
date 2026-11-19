@@ -237,6 +237,8 @@ try {
   catch { throw new Error('Build requires a Git checkout to record source provenance'); }
   const manifest = {
     schemaVersion: 1, projectVersion: pkg.version, sourceCommit, code,
+    ...(versions.retiredJcb?.length ? { retiredJcb: versions.retiredJcb } : {}),
+    ...(versions.retiredJoomla?.length ? { retiredJoomla: versions.retiredJoomla } : {}),
     deployment: { canonicalUrl, domain, environment: deploymentEnvironment },
     browserCompatibility, network,
     runtime: versions.runtime, upstream: versions.upstream, nativeDriver: versions.nativeDriver, packages, php, joomla, deploys, versionCatalog,

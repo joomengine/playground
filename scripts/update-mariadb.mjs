@@ -1,6 +1,7 @@
 import { readFile, writeFile, rename } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { sha256 } from './assets.mjs';
+import { readReleaseMetadata } from './release-metadata.mjs';
 
 const repository = 'joomengine/mariadb-wasm-bridge';
 const digest = /^[0-9a-f]{64}$/;
@@ -43,18 +44,17 @@ export function selectBridge(pins, release, manifestBytes) {
   return { ...pins, bridge, nativeDriver };
 }
 
-async function checkedFetch(url, headers = {}) {
-  const response = await fetch(url, { headers, signal: AbortSignal.timeout(60_000) });
+async function manifestBytes(url) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(60_000) });
   if (!response.ok) throw new Error(`Bridge download returned HTTP ${response.status} for ${url}`);
-  return response;
+  return Buffer.from(await response.arrayBuffer());
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const file = fileURLToPath(new URL('../versions.json', import.meta.url));
   const before = await readFile(file, 'utf8');
-  const headers = process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {};
-  const release = await (await checkedFetch(`https://api.github.com/repos/${repository}/releases/latest`, headers)).json();
-  const bytes = Buffer.from(await (await checkedFetch(asset(release, 'bridge-manifest.json').url)).arrayBuffer());
+  const release = JSON.parse(await readReleaseMetadata(`https://api.github.com/repos/${repository}/releases/latest`, fetch, process.env.GITHUB_TOKEN));
+  const bytes = await manifestBytes(asset(release, 'bridge-manifest.json').url);
   const pins = selectBridge(JSON.parse(before), release, bytes);
   const after = JSON.stringify(pins, null, 2) + '\n';
   if (before !== after) {

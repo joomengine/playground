@@ -49,6 +49,10 @@ test(`Configure a deployment supports stable editing and saved copies for ${pres
     const executablePath = process.env[`PLAYGROUND_${browserName.toUpperCase()}_EXECUTABLE`];
     browser = await { chromium, firefox }[browserName].launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const failedRequests = [];
+    page.on('requestfailed', request => failedRequests.push({
+      url: request.url(), resourceType: request.resourceType(), reason: request.failure()?.errorText,
+    }));
     page.on('pageerror', error => diagnostics.pageErrors.push(error.message));
     page.on('console', message => { if (message.type() === 'error' || /Unable to check|invalid.*(?:regexp|regular expression)/i.test(message.text())) diagnostics.consoleErrors.push(message.text()); });
     await page.goto(`${server.url}?deploy=${preset}&start=0`);
@@ -235,7 +239,8 @@ test(`Configure a deployment supports stable editing and saved copies for ${pres
     assert.equal(await jsonValue(page, 'deploy-content'), null);
     assert.deepEqual(await jsonValue(page, 'deploy-menus'), []);
     assert.equal(await page.locator('#multilingual').isChecked(), false);
-    assert.deepEqual(diagnostics, { pageErrors: [], consoleErrors: [] }, 'Ordinary configuration emits no script or validation-pattern errors.');
+    assert.deepEqual(diagnostics, { pageErrors: [], consoleErrors: [] },
+      `Ordinary configuration emitted a browser error. Failed requests: ${JSON.stringify(failedRequests)}`);
     await mkdir('test-results', { recursive: true });
     await writeFile(`test-results/configure-deployment-${preset}-${browserName}.json`, JSON.stringify({ preset, browser: browserName,
       sections: ['packages', 'commands', 'template', 'languages', 'menus', 'content', 'configuration'],

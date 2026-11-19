@@ -6,57 +6,55 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 const action = readFileSync(new URL('../.github/actions/install-playwright/action.yml', import.meta.url), 'utf8');
-const script = action.split('      run: |\n')[1].replace(/^        /gm, '');
+const scripts = [...action.matchAll(/^      run: \|\n((?:        [^\n]*\n)+)/gm)]
+  .map(match => match[1].replace(/^        /gm, ''));
 
-test('browser setup renders before consulting apt and verifies any dependency repair', () => {
+test('browser setup verifies readiness before repairing and rechecks after repair', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'playwright-install-'));
   const log = path.join(directory, 'calls');
+  const output = path.join(directory, 'outputs');
   try {
     const bin = path.join(directory, 'node_modules/.bin');
     mkdirSync(bin, { recursive: true });
     writeFileSync(path.join(bin, 'playwright'), `#!/bin/bash
 echo "$*" >> "$CALL_LOG"
-case "$1" in
-  install) exit "$INSTALL_EXIT" ;;
-  install-deps) exit "$DEPS_EXIT" ;;
-  *) exit 99 ;;
-esac
+exit "$INSTALL_EXIT"
 `, { mode: 0o755 });
-    // A render can fail on the first launch, or on both sides of the repair.
     writeFileSync(path.join(bin, 'node'), `#!/bin/bash
-cat >/dev/null
 echo "render $PLAYGROUND_BROWSER" >> "$CALL_LOG"
-if [[ "$RENDER" == fail || ( "$RENDER" == repair && ! -f repaired ) ]]; then
-  touch repaired
-  exit 23
-fi
+exit "$RENDER_EXIT"
 `, { mode: 0o755 });
-    const run = (browser, overrides = {}) => {
+    writeFileSync(path.join(directory, 'repair-deps.sh'), `echo "repair $PLAYGROUND_BROWSER" >> "$CALL_LOG"
+exit "$DEPS_EXIT"
+`);
+    const run = (browser, step = 0, overrides = {}) => {
       writeFileSync(log, '');
-      rmSync(path.join(directory, 'repaired'), { force: true });
-      const { status, stderr } = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script], {
+      writeFileSync(output, '');
+      const { status, stderr } = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', scripts[step]], {
         cwd: directory, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, PLAYGROUND_BROWSER: browser,
-          CALL_LOG: log, INSTALL_EXIT: '0', DEPS_EXIT: '0', RENDER: 'ok', ...overrides },
+          GITHUB_OUTPUT: output, GITHUB_ACTION_PATH: directory, CALL_LOG: log, INSTALL_EXIT: '0', DEPS_EXIT: '0', RENDER_EXIT: '0', ...overrides },
       });
-      return { status, stderr, calls: readFileSync(log, 'utf8').trimEnd() };
+      return { status, stderr, calls: readFileSync(log, 'utf8').trimEnd(), outputs: readFileSync(output, 'utf8') };
     };
     for (const browser of ['chromium', 'firefox', 'webkit']) {
       const ready = run(browser);
       assert.equal(ready.status, 0, ready.stderr);
       assert.equal(ready.calls, `install ${browser}\nrender ${browser}`);
-      const repaired = run(browser, { RENDER: 'repair' });
+      assert.equal(ready.outputs, '');
+      assert.match(run(browser, 0, { RENDER_EXIT: '23' }).outputs, /^repair=true$/m);
+      const repaired = run(browser, 1);
       assert.equal(repaired.status, 0, repaired.stderr);
-      assert.equal(repaired.calls, `install ${browser}\nrender ${browser}\ninstall-deps ${browser}\nrender ${browser}`);
+      assert.equal(repaired.calls, `repair ${browser}\nrender ${browser}`);
     }
     for (const browser of ['', 'chrome', 'chromium firefox', 'chromium; exit 0', '$(exit 0)']) {
       assert.notEqual(run(browser).status, 0);
       assert.equal(readFileSync(log, 'utf8'), '');
     }
-    assert.equal(run('chromium', { INSTALL_EXIT: '7' }).status, 7);
+    assert.equal(run('chromium', 0, { INSTALL_EXIT: '7' }).status, 7);
     assert.equal(readFileSync(log, 'utf8'), 'install chromium\n');
-    assert.equal(run('firefox', { RENDER: 'repair', DEPS_EXIT: '100' }).status, 100);
-    assert.equal(readFileSync(log, 'utf8'), 'install firefox\nrender firefox\ninstall-deps firefox\n');
-    assert.equal(run('webkit', { RENDER: 'fail' }).status, 23);
+    assert.equal(run('firefox', 1, { DEPS_EXIT: '100' }).status, 100);
+    assert.equal(readFileSync(log, 'utf8'), 'repair firefox\n');
+    assert.equal(run('webkit', 1, { RENDER_EXIT: '23' }).status, 23);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

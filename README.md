@@ -122,8 +122,14 @@ The supported catalog is:
 
 | Joomla distribution | Available PHP builds |
 | --- | --- |
-| 5.4.10 | 8.3, 8.4, 8.5 |
-| 6.2.0 | 8.3, 8.4, 8.5 |
+| Current stable Joomla 5 | Compatible lines in `versions.json` |
+| Current stable Joomla 6 | Compatible lines in `versions.json` |
+
+The daily package refresh advances each stable baseline from the official Joomla
+full installer and release SHA-256. The default follows its existing major.
+Saved sites retain exact earlier versions through their recorded compatibility
+and archive digests. Each new baseline must pass the same native, browser and
+prepared snapshot checks before publication.
 
 Every new build, including pull-request validation, resolves the latest published
 stable JoomEngine int64 release once. New PHP runtime releases therefore flow into
@@ -961,8 +967,8 @@ parser failure, shared companion state and isolated HTML previews; see the
 `PLAYGROUND_SCENARIOS` narrow local investigations.
 
 CI runs source checks and unit tests first. Documentation-only pull requests skip
-native/browser jobs. Presentation-only changes run the default Joomla 6.2.0 / PHP
-8.4 combination with deployment, lifecycle and Rocket checks. Runtime, deployment,
+native/browser jobs. Presentation-only changes run the default Joomla / PHP
+combination recorded in the runtime manifest with deployment, lifecycle and Rocket checks. Runtime, deployment,
 configuration and unclassified changes run the full supported matrix, as do
 `main` and manual builds. Chromium and Firefox validate in parallel jobs against
 the same built artifact. Native/compiler caches require exact source and toolchain

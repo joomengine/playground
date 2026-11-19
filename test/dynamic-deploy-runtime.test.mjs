@@ -5,6 +5,7 @@ import { createShareURL, createFullDeploymentDocument, normalizeConfiguration, p
 import { normalizeDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
 import { validateInstallOptions } from '../src/joomla/index.mjs';
 import { customSetupDetails, isolateSetup, publicConfiguration } from '../src/ui-state.mjs';
+import { jcbSelectionInput } from '../src/jcb-selection.mjs';
 import { deploymentNeedsReview } from '../src/launch-countdown.mjs';
 
 const baseURL = 'https://playground.joomengine.org/';
@@ -159,4 +160,19 @@ test('first-time shared launches and saved resumes resolve pinned dynamic Joomla
   await assert.rejects(resolveDeployConfiguration({ ...requested, phpVersion: '8.5' }, { ...options, catalog: pinnedOnly }), /PHP and Joomla combination|does not support/);
   await assert.rejects(resolveDeployConfiguration({ ...requested, joomlaPackage: { ...joomlaPackage, php: ['8.4', '7.4'] } }, { ...options, catalog: pinnedOnly }), /PHP 7\.4 is not available/);
   await assert.rejects(resolveDeployConfiguration({ ...requested, joomlaVersion: '6.2.0', joomlaPackage: { ...joomlaPackage, php: ['8.4', '9.9'] } }, { ...options, catalog: pinnedOnly }), /PHP 9\.9 is not available/);
+});
+
+test('an existing version-only JCB site resolves its historical bytes and keeps its own storage key', async () => {
+  const version = '6.1.7';
+  const retired = { version, package: { url: `https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v${version}.zip`, sha256: '9'.repeat(64) } };
+  const historical = parseCatalog({ ...catalog, retiredJcb: [retired] });
+  const saved = { admin, deployId: 'jcb', joomlaVersion: '6.2.0', jcbVersion: version, storageKey: 'my-installed-jcb', persistence: true };
+  const { configuration, deploy } = await resolveDeployConfiguration(saved, { ...options, catalog: historical });
+  assert.deepEqual(configuration.extensions, [retired.package]);
+  assert.equal(configuration.snapshot, undefined);
+  assert.equal(configuration.jcbPackage, undefined);
+  const selected = jcbSelectionInput({ selection: { version }, major: '6', deploy, pinned: new Map(), retired: historical.retiredJcb });
+  const reopened = await isolateSetup({ sites: { [saved.storageKey]: saved } }, { ...saved, ...selected });
+  assert.equal(reopened.changed, false);
+  assert.equal(reopened.configuration.storageKey, saved.storageKey);
 });

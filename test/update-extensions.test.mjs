@@ -28,6 +28,7 @@ test('refresh updates both JCB recipes together, skips previews and keeps post-t
   t.after(() => rm(root, { recursive: true, force: true }));
   const directory = path.join(root, 'deploys');
   await mkdir(directory);
+  await writeFile(path.join(root, 'versions.json'), '{}');
   const pin = url => ({ url, sha256: '1'.repeat(64) });
   const jcbPin = major => pin(`https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v${major}.1.0.zip`);
   const directoryPin = major => pin(`https://codeload.github.com/joomengine/pkg-servicedirectory/zip/${major.repeat(40)}`);
@@ -81,6 +82,8 @@ test('refresh updates both JCB recipes together, skips previews and keeps post-t
   assert.equal(jcb.sha256, digest('sha256'));
   assert.equal(jcb.sha512, digest('sha512'));
   assert.deepEqual((await recipe('servicedirectory')).variants['5'], originalService.variants['5']);
+  const retired = JSON.parse(await readFile(path.join(root, 'versions.json'))).retiredJcb;
+  assert.deepEqual(retired, ['5','6'].map(major => ({ version: `${major}.1.0`, package: jcbPin(major) })));
   const count = downloads;
   assert.deepEqual(await updateExtensions(options), []);
   assert.equal(downloads, count, 'Unchanged package checksums require no new ZIP transfers.');

@@ -16,6 +16,9 @@ const runtimeManifest = {
   php: [{ version: '8.3', patchVersion: '8.3.29' }, { version: '8.4', patchVersion: '8.4.1' }, { version: '8.5', patchVersion: '8.5.0' }],
   joomla: [{ version: '5.4.10', php: ['8.3', '8.4'] }, { version: '6.2.0', php: ['8.3', '8.4', '8.5'] }],
   defaults: { phpVersion: '8.4', joomlaVersion: '6.2.0' },
+  retiredJcb: [{ version: '6.1.3', package: { sha256, url: 'https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v6.1.3.zip' } }],
+  retiredJoomla: [{ version: '6.1.7', php: ['8.4'], sha256,
+    url: 'https://github.com/joomla/joomla-cms/releases/download/6.1.7/Joomla_6.1.7-Stable-Full_Package.zip' }],
 };
 
 async function selectedConfiguration(page) {
@@ -143,6 +146,17 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
       assert.equal(await current.locator('#jcb-version').inputValue(), '6.2.1');
       assert.equal(await current.locator('#jcb-version option[value="6.2.0"]').count(), 0);
       await current.close();
+
+      const legacy = await context.newPage();
+      await legacy.addInitScript(baseURL => {
+        const site = { storageKey: 'legacy-stable', deployId: 'jcb', joomlaVersion: '6.1.7', jcbVersion: '6.1.3', phpVersion: '8.4', persistence: true };
+        localStorage.setItem(`joomengine:launch:${baseURL}`, JSON.stringify({ schemaVersion: 2, active: site.storageKey, sites: { [site.storageKey]: site } }));
+      }, server.url);
+      await legacy.goto(`${server.url}?start=0`);
+      await legacy.locator('#embedded-launch:enabled').waitFor();
+      assert.equal(await legacy.locator('#joomla-version').inputValue(), '6.1.7', 'Existing version-only site retains its exact retired baseline.');
+      assert.equal(await legacy.locator('#jcb-version').inputValue(), '6.1.3');
+      await legacy.close();
 
       // An uploaded site's installed versions do not require its old packages.
       const restored = await context.newPage();

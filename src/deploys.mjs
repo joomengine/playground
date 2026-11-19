@@ -314,7 +314,7 @@ async function resolveMaterializedDeployment(input, { catalog, deployCatalog, ba
     if (version !== 'none') {
       const explicit = input.jcbPackage ?? (version === source.jcbVersion ? source.jcbPackage : undefined);
       selected = explicit ? normalizeJcbPackage(explicit, baseURL)
-        : [...pinned.values()].find(entry => entry.version === version)?.package;
+        : [...pinned.values()].find(entry => entry.version === version)?.package ?? catalog.retiredJcb?.find(entry => entry.version === version)?.package;
       if (!selected) throw new TypeError(`The selected JCB ${version} package is unavailable.`);
     }
     setup.extensions = setup.extensions.filter(entry => !existingJcb.some(item => samePackage(item, entry)));
@@ -418,6 +418,7 @@ export async function resolveDeployConfiguration(input = {}, {
             const jcbDeploy = id === 'jcb' ? deploy : normalizeDeploy(await fetchJSON(url, fetcher), { baseURL: url });
             selectedPackage = [...pinnedJcbPackages(jcbDeploy).values()].find(entry => entry.version === selectedVersion)?.package;
           }
+          selectedPackage ??= catalog.retiredJcb?.find(entry => entry.version === selectedVersion)?.package;
           if (!selectedPackage) throw new TypeError(`The selected JCB ${selectedVersion} package is unavailable.`);
         }
       }
