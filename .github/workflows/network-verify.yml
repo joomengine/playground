@@ -34,9 +34,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  browser-image:
+    name: Select the locked browser image
+    runs-on: ubuntu-24.04
+    outputs:
+      image: ${{ steps.browser_image.outputs.image }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - id: browser_image
+        run: node scripts/playwright-image.mjs
+
   verify:
     name: Verify the deployed website and Worker together
     runs-on: ubuntu-24.04
+    needs: browser-image
+    container:
+      image: ${{ needs.browser-image.outputs.image }}
+      options: --user 1001 --init --ipc=host
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -47,10 +66,10 @@ jobs:
           node-version-file: '.node-version'
           cache: npm
       - run: npm ci --ignore-scripts
-      - name: Install Chromium
-        uses: ./.github/actions/install-playwright
-        with:
-          browser: chromium
+      - name: Verify the preinstalled Chromium browser
+        env:
+          PLAYGROUND_BROWSER: chromium
+        run: node scripts/verify-ci-browser.mjs
       - name: Exercise actual PHP and Joomla over HTTPS
         id: verify_network
         env:
