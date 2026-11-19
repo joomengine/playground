@@ -52,6 +52,7 @@ jobs:
         with:
           browser: chromium
       - name: Exercise actual PHP and Joomla over HTTPS
+        id: verify_network
         env:
           NETWORK_DEPLOYMENT_ENV: ${{ inputs.deployment_environment }}
           NETWORK_PLAYGROUND_URL: ${{ inputs.playground_url }}
@@ -60,7 +61,7 @@ jobs:
           NETWORK_EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
         run: node --test test/network-hosted.browser.mjs
       - name: Retain hosted networking evidence
-        if: always()
+        if: ${{ !cancelled() && (steps.verify_network.outcome == 'success' || steps.verify_network.outcome == 'failure') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playground-network-hosted-${{ inputs.deployment_environment }}

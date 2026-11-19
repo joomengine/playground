@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -8,42 +8,55 @@ import test from 'node:test';
 const action = readFileSync(new URL('../.github/actions/install-playwright/action.yml', import.meta.url), 'utf8');
 const script = action.split('      run: |\n')[1].replace(/^        /gm, '');
 
-test('browser installation validates input and fails closed at each setup boundary', () => {
+test('browser setup renders before consulting apt and verifies any dependency repair', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'playwright-install-'));
-  const log = path.join(directory, 'calls'), mirrors = path.join(directory, 'mirrors');
+  const log = path.join(directory, 'calls');
   try {
-    // Exercise the action's real Bash script without touching host apt settings
-    // or downloading browsers. Only its three external setup commands are fake.
-    for (const command of ['grep', 'sudo', 'npx']) {
-      writeFileSync(path.join(directory, command), `#!/bin/bash\nprintf '%s\\n' '${command}' "$@" >> "$CALL_LOG"\n${command === 'sudo' ? 'cat > "$MIRROR_RESULT"\n' : ''}exit "\${${command.toUpperCase()}_EXIT:-0}"\n`, { mode: 0o755 });
-    }
+    const bin = path.join(directory, 'node_modules/.bin');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(path.join(bin, 'playwright'), `#!/bin/bash
+echo "$*" >> "$CALL_LOG"
+case "$1" in
+  install) exit "$INSTALL_EXIT" ;;
+  install-deps) exit "$DEPS_EXIT" ;;
+  *) exit 99 ;;
+esac
+`, { mode: 0o755 });
+    // A render can fail on the first launch, or on both sides of the repair.
+    writeFileSync(path.join(bin, 'node'), `#!/bin/bash
+cat >/dev/null
+echo "render $PLAYGROUND_BROWSER" >> "$CALL_LOG"
+if [[ "$RENDER" == fail || ( "$RENDER" == repair && ! -f repaired ) ]]; then
+  touch repaired
+  exit 23
+fi
+`, { mode: 0o755 });
     const run = (browser, overrides = {}) => {
-      writeFileSync(log, ''); writeFileSync(mirrors, '');
-      const result = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script], {
-        encoding: 'utf8', env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, PLAYGROUND_BROWSER: browser,
-          CALL_LOG: log, MIRROR_RESULT: mirrors, GREP_EXIT: '0', SUDO_EXIT: '0', NPX_EXIT: '0', ...overrides },
+      writeFileSync(log, '');
+      rmSync(path.join(directory, 'repaired'), { force: true });
+      const { status, stderr } = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script], {
+        cwd: directory, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, PLAYGROUND_BROWSER: browser,
+          CALL_LOG: log, INSTALL_EXIT: '0', DEPS_EXIT: '0', RENDER: 'ok', ...overrides },
       });
-      return { ...result, calls: readFileSync(log, 'utf8'), mirrors: readFileSync(mirrors, 'utf8') };
+      return { status, stderr, calls: readFileSync(log, 'utf8').trimEnd() };
     };
-    const expectedMirrors = 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n';
     for (const browser of ['chromium', 'firefox', 'webkit']) {
-      const result = run(browser);
-      assert.equal(result.status, 0, result.stderr);
-      assert.equal(result.mirrors, expectedMirrors);
-      assert.equal(result.calls, `grep\n-Fq\nmirror+file:/etc/apt/apt-mirrors.txt\n/etc/apt/sources.list.d/ubuntu.sources\nsudo\ntee\n/etc/apt/apt-mirrors.txt\nnpx\nplaywright\ninstall\n--with-deps\n${browser}\n`);
+      const ready = run(browser);
+      assert.equal(ready.status, 0, ready.stderr);
+      assert.equal(ready.calls, `install ${browser}\nrender ${browser}`);
+      const repaired = run(browser, { RENDER: 'repair' });
+      assert.equal(repaired.status, 0, repaired.stderr);
+      assert.equal(repaired.calls, `install ${browser}\nrender ${browser}\ninstall-deps ${browser}\nrender ${browser}`);
     }
     for (const browser of ['', 'chrome', 'chromium firefox', 'chromium; exit 0', '$(exit 0)']) {
-      const result = run(browser);
-      assert.notEqual(result.status, 0);
-      assert.equal(result.calls, '', 'Invalid input must fail before any host change or install.');
-      assert.equal(result.mirrors, '');
+      assert.notEqual(run(browser).status, 0);
+      assert.equal(readFileSync(log, 'utf8'), '');
     }
-    for (const overrides of [{ GREP_EXIT: '1' }, { SUDO_EXIT: '2' }]) {
-      const result = run('webkit', overrides);
-      assert.notEqual(result.status, 0);
-      assert.doesNotMatch(result.calls, /^npx$/m, 'A failed source guard or mirror write must prevent installation.');
-    }
-    assert.equal(run('chromium', { NPX_EXIT: '7' }).status, 7, 'Installer failure must fail the action.');
+    assert.equal(run('chromium', { INSTALL_EXIT: '7' }).status, 7);
+    assert.equal(readFileSync(log, 'utf8'), 'install chromium\n');
+    assert.equal(run('firefox', { RENDER: 'repair', DEPS_EXIT: '100' }).status, 100);
+    assert.equal(readFileSync(log, 'utf8'), 'install firefox\nrender firefox\ninstall-deps firefox\n');
+    assert.equal(run('webkit', { RENDER: 'fail' }).status, 23);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

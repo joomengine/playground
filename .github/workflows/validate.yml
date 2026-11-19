@@ -335,11 +335,12 @@ jobs:
         with:
           browser: ${{ matrix.browser }}
       - name: Exercise genuine CORS and the actual PHP cURL and stream bridge
+        id: verify_network
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
         run: node --test test/network-runtime.browser.mjs test/self-request.browser.mjs
       - name: Retain PHP networking receipts
-        if: always()
+        if: ${{ !cancelled() && (steps.verify_network.outcome == 'success' || steps.verify_network.outcome == 'failure') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playground-network-results-${{ matrix.browser }}
@@ -379,11 +380,12 @@ jobs:
         with:
           browser: ${{ matrix.browser }}
       - name: Verify live JCB discovery, repositories, dependencies and compiled Demo
+        id: verify_network
         env:
           PLAYGROUND_BROWSERS: ${{ matrix.browser }}
         run: node scripts/test-jcb-network.mjs
       - name: Retain JCB network receipts and diagnostics
-        if: always()
+        if: ${{ !cancelled() && (steps.verify_network.outcome == 'success' || steps.verify_network.outcome == 'failure') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playground-jcb-network-results-${{ matrix.browser }}
