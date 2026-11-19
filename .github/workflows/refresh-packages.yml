@@ -1,6 +1,13 @@
 name: Refresh Playground packages
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/refresh-packages.yml
+      - scripts/update-*.mjs
+      - scripts/release-metadata.mjs
+      - scripts/npm-releases.mjs
   schedule:
     - cron: '23 0 * * *'
   workflow_dispatch:
