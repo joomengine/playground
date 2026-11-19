@@ -17,11 +17,13 @@
       "extensions": [
         {
           "url": "https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v6.2.0.zip",
-          "sha256": "17a2b4c7b352d0ead2592e7e5838ace8255bbcbdc71566d883e8e82ca3dacd8e"
+          "sha256": "17a2b4c7b352d0ead2592e7e5838ace8255bbcbdc71566d883e8e82ca3dacd8e",
+          "sha512": "51dcfa77063f03b96bafc64d55e7a7f05ec2984e82a88045604e07d8ce0f8d085c40924736325c72e5306b88f05d172ce657a7e1c8d15ed285cecb8530e74917"
         },
         {
-          "url": "https://codeload.github.com/joomengine/mcp_package/zip/refs/tags/v1.0.10",
-          "sha256": "4a05bcc33a99b6f38d63ccc6d2bf6708658221546d9f7e7af2fc714dadf0b865"
+          "url": "https://github.com/joomengine/mcp_package/archive/refs/tags/v1.0.12.zip",
+          "sha256": "e69b205c843f540a4cae16186d42fe5cf033dcce318e87f3b352860016d5fca2",
+          "sha512": "70af19e9a9e24404ff29a23fb1e8d97e0f5244a92c8f653a75a8205d3f84105e5cd8a3d632954e5a314def9df1d36a46eed084688519af07f7d29e1f2d9e0c0d"
         }
       ]
     }

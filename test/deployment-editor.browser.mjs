@@ -397,9 +397,11 @@ test(`deployment editor clones core recipes, saves reloadable customs and import
     await page.locator('#deploy').selectOption('servicedirectory');
     await page.locator('#launch-button:enabled').waitFor();
     assert.equal(await page.locator('#jcb-version').inputValue(), 'none');
-    await page.locator('#jcb-version').selectOption('6.2.0');
+    const stable = await page.locator('#jcb-version option').evaluateAll(options => options.find(option => /^6\.\d+\.\d+$/.test(option.value))?.value);
+    assert.ok(stable, 'The reviewed stable JCB 6 package must be selectable.');
+    await page.locator('#jcb-version').selectOption(stable);
     await page.locator('#launch-button:enabled').waitFor();
-    assert.equal(await page.locator('#jcb-version').inputValue(), '6.2.0');
+    assert.equal(await page.locator('#jcb-version').inputValue(), stable);
     await page.locator('#deploy').selectOption('heritage-demo');
     await page.locator('#launch-button:enabled').waitFor();
     assert.equal(await page.locator('#jcb-version').inputValue(), 'none');

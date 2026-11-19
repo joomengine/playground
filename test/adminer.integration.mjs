@@ -62,7 +62,9 @@ test('Adminer browses and modifies the active MariaDB with CSRF protection and e
     method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ token, save: 'Save', 'fields[id]': '1', 'fields[value]': 'row-edited café 🦁', 'function[id]': '', 'function[value]': '' }).toString(),
   });
-  assert.equal(edited.status, 302, await edited.text());
+  // Adminer completes a successful row edit with a Post/Redirect/Get.
+  assert.ok([302, 303].includes(edited.status), await edited.text());
+  assert.ok(edited.headers.get('location'));
   const form = new FormData();
   form.append('token', token);
   form.append('sql_file[]', new File(["INSERT INTO adminer_contract VALUES (3, 'imported');"], 'proof.sql', { type: 'application/sql' }));

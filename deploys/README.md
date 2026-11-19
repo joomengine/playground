@@ -100,7 +100,7 @@ Share links include the selected deployment, site name, runtime/PHP settings, me
 
 A snapshot contains `site/`, `database.sql` and `export.json`, and declares `format: "joomengine-playground-export"`, `schemaVersion: 1`, an exact `joomlaVersion`, `url` and `sha256`. Snapshot contents are PHP-runtime independent. A snapshot is selected only for its exact Joomla release and when `fresh` is false. Each new site created from it receives its own configured administrator. Selected PHP settings, language, menus and template still apply. Explicit user extension and CLI additions run after import; the prepared recipe's installation steps are not repeated.
 
-To update prepared JCB installations, select a stable release, update its versioned package URL and SHA-256 in `jcb.json` and (for Joomla 6) `jcb-mcp.json`, then rebuild. Package compatibility inputs must also match the selected release. The build installs the pinned package and independently restores the exported site before it publishes the copy. Existing saved sites are not replaced. This deliberately trades a build on stable-release updates for a faster, repeatable visitor launch.
+The scheduled refresh runs `node scripts/update-extensions.mjs` to update the JCB, JCB + MCP, Patch Tester, Weblinks and Service Directory recipe pins. It verifies the publisher’s SHA-512 for package-tag archives and uses GitHub’s release-asset SHA-256 for Patch Tester and Weblinks. Both JCB recipes use the same stable package for a given Joomla major. The build installs the pinned JCB package and independently restores the exported site before publishing the copy.
 
 ## Resolver API
 

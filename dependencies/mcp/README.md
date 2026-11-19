@@ -1,6 +1,6 @@
 # JoomEngine MCP in a browser deployment
 
-The `jcb-mcp` deploy installs the pinned [JoomEngine MCP package](https://github.com/joomengine/mcp_package/tree/v1.0.10) alongside JCB on Joomla 6. Joomla 5 selects the JCB-only deploy. The source archive and SHA-256 are recorded in `deploys/jcb-mcp.json`; the package supplies its component, console plugin and webservices plugin unchanged.
+The `jcb-mcp` deploy installs the pinned [JoomEngine MCP package](https://github.com/joomengine/mcp_package) alongside JCB on Joomla 6. Joomla 5 selects the JCB-only deploy. The source archive and SHA-256 are recorded in `deploys/jcb-mcp.json`; the package supplies its component, console plugin and webservices plugin unchanged.
 
 PHP loads the real Sodium extension required by the package. A fresh deployment configures the component's canonical API URL and generates a native Joomla API token through Joomla's user-token plugin. The token is private to the site, persists with Joomla's user profile, and is omitted from shared URLs, activity logs and installation diagnostics.
 

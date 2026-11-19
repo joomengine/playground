@@ -6,12 +6,12 @@ These files restore upstream notices missing from the published CodinGame npm pa
 
 | Component | Exact version or source | Licence / recognition |
 | --- | --- | --- |
-| CodinGame Monaco VS Code integration, services and default extensions | 38.1.3; source `010c84da9caff452b81db844b647b6ab749af012` | MIT; copyright CodinGame |
-| Microsoft Visual Studio Code | 1.142.0; source `d956e8a6ac5d904486557eea07e1d6bd62a4d36f` | MIT plus the preserved complete third-party notices |
+| CodinGame Monaco VS Code integration, services and default extensions | 39.0.5; source `fed4e8b0c383bdba212f9bf7c49abf1f0bc46c84` | MIT; copyright CodinGame |
+| Microsoft Visual Studio Code | 1.145.2; source `c4453f8ea430795f941c1b2ff6c9321135a74a02` | MIT plus the preserved complete third-party notices |
 | Microsoft Monaco Editor | 0.57.0; source `d61824269f1377111d34306e4a47172327777083` | MIT plus the preserved complete third-party notices |
 | vscode-textmate | 9.3.2, embedded by CodinGame | MIT; Microsoft and contributors |
 | vscode-oniguruma | 1.7.0, embedded by CodinGame | MIT; Microsoft; its `NOTICES` also preserves Oniguruma's BSD terms and copyright |
-| Codicons | 0.0.46-48, embedded by CodinGame | CC-BY-4.0 artwork and MIT code; Microsoft and contributors |
+| Codicons | 0.0.46-50, embedded by CodinGame | CC-BY-4.0 artwork and MIT code; Microsoft and contributors |
 | jschardet | 3.1.4 | LGPL-2.1-or-later; António Afonso and contributors; Mozilla/Netscape detector origins |
 
 The upstream CodinGame `package.json` identifies VS Code and Monaco; its `package-lock.json` identifies the embedded npm packages. The copied Oniguruma WebAssembly module and Codicons font were compared byte-for-byte with the integrity-verified npm archives. The original font and engine are unmodified. TextMate code is transformed by CodinGame's build; its version follows that same pinned upstream lockfile.

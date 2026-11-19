@@ -17,7 +17,8 @@
       "extensions": [
         {
           "url": "https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v5.2.0.zip",
-          "sha256": "261e11de61a31ce6183fdcdf35fd3fdc7d0ff93b347bfb4cdaf7d4c66f93385b"
+          "sha256": "261e11de61a31ce6183fdcdf35fd3fdc7d0ff93b347bfb4cdaf7d4c66f93385b",
+          "sha512": "ec5b3e85b67441b7be46a623a17e2c6c160a8cc568528b6c692590b792200d9ee501e1e0e256694a8bcf80d5221aef7ec4addf5fe4e3342a9803a7ac99460212"
         }
       ]
     },
@@ -25,7 +26,8 @@
       "extensions": [
         {
           "url": "https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v6.2.0.zip",
-          "sha256": "17a2b4c7b352d0ead2592e7e5838ace8255bbcbdc71566d883e8e82ca3dacd8e"
+          "sha256": "17a2b4c7b352d0ead2592e7e5838ace8255bbcbdc71566d883e8e82ca3dacd8e",
+          "sha512": "51dcfa77063f03b96bafc64d55e7a7f05ec2984e82a88045604e07d8ce0f8d085c40924736325c72e5306b88f05d172ce657a7e1c8d15ed285cecb8530e74917"
         }
       ]
     }

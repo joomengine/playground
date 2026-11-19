@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { installAdminer, withAdminerRequest } from '../src/database/runtime.mjs';
+import { ADMINER_VERSION, installAdminer, withAdminerRequest } from '../src/database/runtime.mjs';
 
 function memoryFS() {
   const files = new Map();
@@ -12,12 +12,12 @@ test('Adminer mounts all downloaded assets and leaves no partial tool after an H
   const entries = ['adminer.php', 'index.php', 'bridge.js', 'adminer.css'].map(name => ({
     name,
   }));
-  const fetcher = async url => url.pathname.endsWith('manifest.json') ? Response.json({ version: '6.2.0', files: entries })
+  const fetcher = async url => url.pathname.endsWith('manifest.json') ? Response.json({ version: ADMINER_VERSION, files: entries })
     : new Response('Unavailable', { status: 503 });
   await assert.rejects(installAdminer({ fs, baseURL: 'https://playground.example/sub/', fetcher }), /503/);
   assert.equal(fs.files.size, 0);
   const result = await installAdminer({ fs, baseURL: 'https://playground.example/sub/', fetcher: async url =>
-    url.pathname.endsWith('manifest.json') ? Response.json({ version: '6.2.0', files: entries }) : new Response('ok') });
+    url.pathname.endsWith('manifest.json') ? Response.json({ version: ADMINER_VERSION, files: entries }) : new Response('ok') });
   assert.equal(result.bytes, 8);
   assert.equal(fs.files.size, 4);
 });

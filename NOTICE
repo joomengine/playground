@@ -42,9 +42,9 @@ lite4mariadb is provided by the contributors to https://github.com/shyim/lite4ma
 under GNU GPL version 2. The embedded MariaDB engine and its source provenance
 retain their upstream licenses and notices.
 
-JoomEngine Code uses Microsoft's Visual Studio Code 1.142.0 and Monaco Editor
+JoomEngine Code uses Microsoft's Visual Studio Code 1.145.2 and Monaco Editor
 0.57.0 through CodinGame's Monaco VS Code API, services and default extensions
-38.1.3. Their MIT licences and the matching Microsoft third-party notices are
+39.0.5. Their MIT licences and the matching Microsoft third-party notices are
 preserved in dependencies/joomengine-code and distributed with the editor.
 The upstream revisions, source locations and notice digests are recorded there
 in provenance.json. The project is independent of Microsoft and CodinGame.
@@ -83,10 +83,9 @@ the remaining deadline and relay response metadata. Its digest and changed sourc
 inventory are recorded with each rebuilt cURL extension.
 
 The separately deployed services/network-worker code is original Apache-2.0
-code. Its development tooling pins Cloudflare Wrangler 4.158.0 (MIT OR Apache-2.0)
-and Miniflare 4.20260730.0 (MIT);
-the service package-lock.json records transitive dependencies, which retain their
-own licenses. No WordPress or Joomla reference proxy source is incorporated into
+code. Its development tooling uses Cloudflare Wrangler (MIT OR Apache-2.0)
+and Miniflare (MIT). The service package-lock.json records their exact versions
+and transitive dependencies, which retain their own licenses. No WordPress or Joomla reference proxy source is incorporated into
 the shared networking service.
 
 The Sodium modules compile PHP's ext/sodium against the official libsodium
@@ -104,7 +103,7 @@ modified. scripts/cgi-request-overlay.mjs verifies each original source digest;
 the generated manifest records both original and adjusted source digests.
 
 The JoomEngine MCP package is provided by Llewellyn van der Merwe and Vast
-Development Method through https://github.com/joomengine/mcp_package . Version 1.0.10 and its bundled
+Development Method through https://github.com/joomengine/mcp_package . The bundled
 component and plugins retain their GNU GPL version 3 or later notices. Its pinned
 package URL and digest are recorded in deploys/jcb-mcp.json. The playground's
 private native read diagnostic does not modify the installed package's license,

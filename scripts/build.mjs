@@ -91,7 +91,7 @@ try {
   packages.push({ name: 'fflate', version: fflatePin.version, integrity: fflatePin.integrity, url: fflatePin.resolved });
 
   const mailPin = lock.packages['node_modules/postal-mime'];
-  if (mailPin?.version !== pkg.dependencies['postal-mime'] || mailPin?.version !== '4.2.1') {
+  if (!mailPin?.integrity || mailPin.version !== pkg.dependencies['postal-mime']) {
     throw new Error('postal-mime lock mismatch');
   }
   await mkdir(path.join(assets, 'mail'));

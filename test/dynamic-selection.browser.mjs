@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { chromium, firefox } from 'playwright';
@@ -40,7 +41,13 @@ for (const name of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split
         ...entry, source: 'jcb-update', url: `packages/${sha256}.zip`, sha256, sha512,
       })),
     });
+    // Keep the baseline recipe paired with this test's historical catalog.
+    const fixtureRecipe = JSON.parse(await readFile(new URL('../deploys/jcb.json', import.meta.url), 'utf8'));
+    fixtureRecipe.variants['6'].extensions = [{
+      url: 'https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v6.2.0.zip', sha256,
+    }];
     const server = await createStaticServer({ directory, fixtures: {
+      'deploys/jcb.json': JSON.stringify(fixtureRecipe),
       'assets/manifest.json': JSON.stringify(runtimeManifest),
       'assets/version-catalog.json': () => catalogUnavailable ? '{}' : JSON.stringify(catalog()),
       [`assets/packages/${sha256}.zip`]: archive,

@@ -16,6 +16,8 @@ const fetcher = async (url) => new Response(files.get(String(url)) ?? '', { stat
 const catalog = parseCatalog({ php: [{ version: '8.3' }, { version: '8.4' }, { version: '8.5' }],
   joomla: [{ version: '5.4.10', php: ['8.3', '8.4'] }, { version: '6.2.0', php: ['8.3', '8.4', '8.5'] },
     { version: '7.0.0-alpha1-dev', php: ['8.3', '8.4'] }], defaults: { phpVersion: '8.4', joomlaVersion: '6.2.0' } });
+const jcbPackage = JSON.parse(files.get(`${baseURL}deploys/jcb.json`)).variants['6'].extensions[0];
+const jcbVersion = new URL(jcbPackage.url).pathname.match(/\/v(6\.\d+\.\d+)\.zip$/)[1];
 const options = { catalog, deployCatalog, fetcher, baseURL };
 const admin = { password: 'Deploy-contract-password-123!' };
 const dynamicJcb = { url: 'https://example.org/pkg-component-builder-v6.2.1-alpha1.zip', sha512: 'a'.repeat(128) };
@@ -24,10 +26,10 @@ test('explicit JCB version changes replace only JCB and do not reuse the preset 
   const preset = JSON.parse(files.get(`${baseURL}deploys/jcb.json`));
   preset.snapshot = { format: 'joomengine-playground-export', schemaVersion: 1, joomlaVersion: '6.2.0', url: './prepared.zip', sha256: 'c'.repeat(64) };
   const withSnapshot = { ...options, fetcher: async (url) => String(url).endsWith('/jcb.json') ? new Response(JSON.stringify(preset)) : fetcher(url) };
-  const pinned = (await resolveDeployConfiguration({ admin, deployId: 'jcb', jcbVersion: '6.2.0' }, withSnapshot)).configuration;
+  const pinned = (await resolveDeployConfiguration({ admin, deployId: 'jcb', jcbVersion }, withSnapshot)).configuration;
   assert.equal(pinned.snapshot.sha256, 'c'.repeat(64));
-  assert.match(pinned.extensions[0].url, /v6\.2\.0\.zip$/);
-  const replacedPinned = (await resolveDeployConfiguration({ admin, deployId: 'jcb', jcbVersion: '6.2.0', jcbPackage: dynamicJcb }, withSnapshot)).configuration;
+  assert.equal(pinned.extensions[0].url, jcbPackage.url);
+  const replacedPinned = (await resolveDeployConfiguration({ admin, deployId: 'jcb', jcbVersion, jcbPackage: dynamicJcb }, withSnapshot)).configuration;
   assert.deepEqual(replacedPinned.extensions, [dynamicJcb]);
   assert.equal(replacedPinned.snapshot, undefined);
   const alternate = (await resolveDeployConfiguration({ admin, deployId: 'jcb', jcbVersion: '6.2.1-alpha1', jcbPackage: dynamicJcb }, withSnapshot)).configuration;
@@ -57,8 +59,8 @@ test('Service Directory and heritage accept None or the shared pinned JCB withou
   for (const deployId of ['servicedirectory', 'heritage-demo']) {
     const plain = (await resolveDeployConfiguration({ admin, deployId, jcbVersion: 'none' }, options)).configuration;
     assert.equal(plain.extensions.some(entry => entry.url.includes('component-builder')), false);
-    const added = (await resolveDeployConfiguration({ admin, deployId, jcbVersion: '6.2.0' }, options)).configuration;
-    assert.match(added.extensions[0].url, /v6\.2\.0\.zip$/);
+    const added = (await resolveDeployConfiguration({ admin, deployId, jcbVersion }, options)).configuration;
+    assert.equal(added.extensions[0].url, jcbPackage.url);
     assert.equal(added.extensions.length, plain.extensions.length + 1);
   }
 });
@@ -81,7 +83,7 @@ test('a complete custom recipe replaces removed core packages and commands witho
 });
 
 test('a custom JCB opening page still requires JCB and can select another compatible package', async () => {
-  const original = (await resolveDeployConfiguration({ admin, deployId: 'jcb', jcbVersion: '6.2.0' }, options)).configuration;
+  const original = (await resolveDeployConfiguration({ admin, deployId: 'jcb', jcbVersion }, options)).configuration;
   const recipe = createFullDeploymentDocument(original, { name: 'JCB Custom', requirements: { joomla: ['6'], jcb: 'optional' }, baseURL });
   await assert.rejects(resolveDeployConfiguration({ admin, deployId: 'custom-jcb', deploymentRecipe: recipe, jcbVersion: 'none' }, options), /requires Joomla Component Builder/);
   const selected = (await resolveDeployConfiguration({ admin, deployId: 'custom-jcb', deploymentRecipe: recipe, jcbVersion: '6.2.1-alpha1', jcbPackage: dynamicJcb }, options)).configuration;

@@ -154,23 +154,28 @@ export function parseJoomlaNightlyUpdates(xml) {
   return unique(result);
 }
 
-/** Parse JCB's update manifest; discard version/URL inconsistencies and unsigned entries. */
-export function parseJcbUpdates(xml) {
-  if (typeof xml !== 'string') throw new TypeError('JCB update metadata must be text.');
+/** Read checksummed package tags from an official Joomla extension update feed. */
+export function parsePackageUpdates(xml, repository, element) {
+  if (typeof xml !== 'string') throw new TypeError('Package update metadata must be text.');
   const result = [];
   for (const match of xml.matchAll(/<update(?:\s[^>]*)?>([\s\S]*?)<\/update\s*>/gi)) {
     const item = match[1];
     const version = firstTag(item, 'version');
     const checksum = firstTag(item, 'sha512');
     const rawURL = firstTag(item, 'downloadurl');
-    if (!VERSION.test(version) || !SHA512.test(checksum) || firstTag(item, 'element') !== 'pkg_component_builder') continue;
-    const url = safeURL(rawURL, 'https://github.com', /^\/joomengine\/pkg-component-builder\/archive\/refs\/tags\/v[\w.-]+\.zip$/);
-    if (!url || new URL(url).pathname !== `/joomengine/pkg-component-builder/archive/refs/tags/v${version}.zip`) continue;
+    if (!VERSION.test(version) || !SHA512.test(checksum) || firstTag(item, 'element') !== element) continue;
+    const url = safeURL(rawURL, 'https://github.com', /\/archive\/refs\/tags\/v[\w.-]+\.zip$/);
+    if (url !== `https://github.com/${repository}/archive/refs/tags/v${version}.zip`) continue;
     const platform = item.match(/<targetplatform\b[^>]*\bversion\s*=\s*(["'])(.*?)\1/i)?.[2];
-    result.push({ version, label: label(version, 'JCB'), url, sha512: checksum.toLowerCase(), source: 'jcb-update', prerelease: prerelease(version),
+    result.push({ version, url, sha512: checksum.toLowerCase(), prerelease: prerelease(version),
       ...(platform ? { targetPlatform: xmlText(platform) } : {}) });
   }
   return result;
+}
+
+export function parseJcbUpdates(xml) {
+  return parsePackageUpdates(xml, 'joomengine/pkg-component-builder', 'pkg_component_builder')
+    .map(entry => ({ ...entry, label: label(entry.version, 'JCB'), source: 'jcb-update' }));
 }
 
 /** Tag metadata identifies source commits, but is not an archive checksum. */
