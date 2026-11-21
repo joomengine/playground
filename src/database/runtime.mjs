@@ -1,7 +1,7 @@
 import { networkFetch } from '../network-transport.mjs';
 
 /** Private runtime mounting for Adminer; never writes into the exported site. */
-export const ADMINER_VERSION = '6.3.0';
+export const ADMINER_VERSION = '6.3.1';
 export const ADMINER_DIRECTORY = '/internal/adminer';
 export const ADMINER_ROUTE = '__adminer/';
 const NAMES = ['adminer.php', 'index.php', 'adminer.css', 'bridge.js'];

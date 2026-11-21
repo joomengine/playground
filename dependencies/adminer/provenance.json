@@ -1,12 +1,12 @@
 {
   "name": "Adminer",
-  "version": "6.3.0",
+  "version": "6.3.1",
   "source": "https://github.com/vrana/adminer",
-  "release": "https://github.com/vrana/adminer/releases/tag/v6.3.0",
+  "release": "https://github.com/vrana/adminer/releases/tag/v6.3.1",
   "license": "Apache-2.0",
   "upstreamLicenseChoice": "Apache-2.0 OR GPL-2.0-only",
-  "asset": "adminer-6.3.0-mysql.php",
-  "url": "https://github.com/vrana/adminer/releases/download/v6.3.0/adminer-6.3.0-mysql.php",
-  "bytes": 441747,
-  "sha256": "33af3816a08213ae7579f8416e66d7d70054d6bcd70516d4ad3124f4b8b5c1e0"
+  "asset": "adminer-6.3.1-mysql.php",
+  "url": "https://github.com/vrana/adminer/releases/download/v6.3.1/adminer-6.3.1-mysql.php",
+  "bytes": 443560,
+  "sha256": "97fdb49c3e941636fe4b0559b2b042de3ac105dff0daafec3c255cd6bd81d4b6"
 }
