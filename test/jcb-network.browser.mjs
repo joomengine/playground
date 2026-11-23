@@ -10,6 +10,7 @@ import { createNetworkFixture } from './network-fixture.mjs';
 import { assertJcbCompiler } from './jcb-compiler-contract.mjs';
 import { assertJcbDocumentAssets } from './jcb-document-contract.mjs';
 import { jcbDiagnosticText } from './jcb-network-diagnostics.mjs';
+import { repositoryHostsFromDiscovery, publicNetworkURL, successfulRead } from './jcb-network-receipts.mjs';
 import { probeSyntheticRedirect } from './firefox-redirect-probe.mjs';
 import { assertLiveNetworkApi, assertLivePowerClient, assertLiveFieldImport,
   powerGuid, fieldGuid } from './jcb-network-contract.mjs';
@@ -21,8 +22,6 @@ const browserNames = (process.env.PLAYGROUND_BROWSERS ?? 'chromium,firefox').spl
 const engines = { chromium, firefox };
 const phpVersion = '8.4';
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
-const repositoryHosts = new Set(['codeberg.org', 'git.envs.net', 'tildegit.org', 'git.disroot.org', 'git.vdm.dev',
-  'api.github.com', 'raw.githubusercontent.com']);
 
 async function bounded(operation, label, timeoutMs = 240_000) {
   let timer;
@@ -33,26 +32,11 @@ async function bounded(operation, label, timeoutMs = 240_000) {
   } finally { clearTimeout(timer); }
 }
 
-// Receipts intentionally contain no request headers, cookies, credentials or
-// arbitrary user URLs. These are the public endpoints exercised by this gate.
-function publicNetworkURL(value) {
-  const url = new URL(value);
-  if (url.protocol !== 'https:' || url.username || url.password || url.hash
-    || [...url.searchParams.keys()].some(key => key !== 'ref')) return null;
-  if (url.hostname === 'api.joomlacomponentbuilder.com'
-    && url.pathname.startsWith('/v1/network/')) return url.href;
-  if (!repositoryHosts.has(url.hostname)) return null;
-  if (/\/api\/v1\/repos\/joomla\//.test(url.pathname)
-    || /\/repos\/joomengine\/packages\//.test(url.pathname)
-    || /\/joomengine\/packages\//.test(url.pathname)) return url.href;
-  return null;
-}
-
-function observeNetwork(page, record) {
+function observeNetwork(page, record, repositoryHosts) {
   const consoleMessages = [];
   for (const event of ['request', 'response', 'requestfailed']) {
     page.on(event, item => {
-      const url = publicNetworkURL(item.url());
+      const url = publicNetworkURL(item.url(), repositoryHosts);
       if (!url) return;
       record.network.push({ event, url, phase: record.phase, at: new Date().toISOString(),
         ...(event === 'request' ? { method: item.method() } : {}),
@@ -111,18 +95,6 @@ async function failureDiagnostics(page, consoleMessages) {
     .then(logs => logs.map(log => ({ ...log, ...(log.tail === undefined ? {} : { tail: text(log.tail, 16384) }) })))
     .catch(error => [{ error: text(error.message) }]);
   return result;
-}
-
-function successfulRead(events, suffix, label) {
-  // A rejected HTTP-200 challenge can precede the valid fallback response.
-  // The PHP/client proof is already validated; report its final response.
-  const read = events.findLast(event => event.event === 'response' && event.status === 200
-    && !/text\/html/i.test(event.contentType)
-    && decodeURIComponent(new URL(event.url).pathname).endsWith(suffix));
-  assert.ok(read, `${label} must have an observed successful real repository response (${suffix}).`);
-  const url = new URL(read.url);
-  return { url: read.url, status: read.status, resolvedOrigin: url.origin,
-    requestedRef: url.searchParams.get('ref') ?? null };
 }
 
 async function launchJcb(page, joomlaVersion) {
@@ -186,7 +158,7 @@ test('required JCB discovery, repositories, entity import and complete Demo work
       await save(setupFile, setup);
       // Static Pages hosting supplies no isolation headers. Exercise the real
       // service-worker bootstrap before any PHP/network assertion.
-      server = await createNetworkFixture({ directory, liveOrigins: [...repositoryHosts].map(host => `https://${host}`).concat('https://api.joomlacomponentbuilder.com') });
+      server = await createNetworkFixture({ directory });
       for (const name of browserNames) {
         receiptFile = path.join(receipts, `jcb-network-${name}.json`);
         receipt = { browser: name, status: 'running', build, requiredPairs: pairs,
@@ -202,6 +174,7 @@ test('required JCB discovery, repositories, entity import and complete Demo work
         for (const pair of pairs) {
           // PHP/MariaDB WebAssembly contexts are deliberately sequential to
           // avoid RAM contention and to prove each target starts without data.
+          const repositoryHosts = new Set();
           activeCase = { ...pair, phase: 'bootstrap', status: 'running', network: [], pageErrors: [],
             phases: [{ name: 'bootstrap', startedAt: new Date().toISOString() }] };
           receipt.cases.push(activeCase);
@@ -210,7 +183,7 @@ test('required JCB discovery, repositories, entity import and complete Demo work
           const finishPhase = () => {
             const current = activeCase.phases.at(-1);
             current.finishedAt = new Date().toISOString();
-            current.relayReads = server.liveReads.slice(phaseRelayStart).filter(event => publicNetworkURL(event.url));
+            current.relayReads = server.liveReads.slice(phaseRelayStart).filter(event => publicNetworkURL(event.url, repositoryHosts));
             current.relayOperations = server.relayOperations.slice(phaseOperationStart);
             phaseRelayStart = server.liveReads.length;
             phaseOperationStart = server.relayOperations.length;
@@ -227,7 +200,7 @@ test('required JCB discovery, repositories, entity import and complete Demo work
           page = await context.newPage();
           page.setDefaultTimeout(30_000);
           page.setDefaultNavigationTimeout(120_000);
-          const consoleMessages = observeNetwork(page, activeCase);
+          const consoleMessages = observeNetwork(page, activeCase, repositoryHosts);
           try {
             await page.goto(new URL('__test__.html', server.url).href);
             await prepareBrowserEnvironment(page);
@@ -235,6 +208,9 @@ test('required JCB discovery, repositories, entity import and complete Demo work
             activeCase.installation = await launchJcb(page, pair.joomlaVersion);
             await phase('live API through native PHP cURL and HTTP streams');
             activeCase.discovery = await bounded(assertLiveNetworkApi(page), 'Live network discovery');
+            // Observe the mirrors advertised by this installation's verified discovery JSON.
+            for (const host of repositoryHostsFromDiscovery(activeCase.discovery)) repositoryHosts.add(host);
+            activeCase.repositoryHosts = [...repositoryHosts].sort();
             await phase('live read-only JCB Power client');
             let from = activeCase.network.length;
             let relayFrom = server.liveReads.length;
