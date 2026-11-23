@@ -16,9 +16,9 @@
     "6": {
       "extensions": [
         {
-          "url": "https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v6.2.0.zip",
-          "sha256": "17a2b4c7b352d0ead2592e7e5838ace8255bbcbdc71566d883e8e82ca3dacd8e",
-          "sha512": "51dcfa77063f03b96bafc64d55e7a7f05ec2984e82a88045604e07d8ce0f8d085c40924736325c72e5306b88f05d172ce657a7e1c8d15ed285cecb8530e74917"
+          "url": "https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v6.2.1.zip",
+          "sha256": "775c7ef189e8ba382e9c6a53b906cf11b4b7303905f4bb05328fe2cf0a144f8e",
+          "sha512": "192b5ecbca19655d4d969d9b9a88be9adbb831b956683e3d7d083c55294f983704b1cee46bdbd277115c72405eccc90eaced828b4e5b39f325b58e7ab3d41cd3"
         },
         {
           "url": "https://github.com/joomengine/mcp_package/archive/refs/tags/v1.0.12.zip",

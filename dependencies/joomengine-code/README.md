@@ -6,7 +6,7 @@ These files restore upstream notices missing from the published CodinGame npm pa
 
 | Component | Exact version or source | Licence / recognition |
 | --- | --- | --- |
-| CodinGame Monaco VS Code integration, services and default extensions | 40.0.0; source `604d4891c981cfa3dbb416dee3bdde67a73f51bf` | MIT; copyright CodinGame |
+| CodinGame Monaco VS Code integration, services and default extensions | 40.1.0; source `c3b1b0f129047a3639fb129e08a2578a3a1cc8af` | MIT; copyright CodinGame |
 | Microsoft Visual Studio Code | 1.145.2; source `c4453f8ea430795f941c1b2ff6c9321135a74a02` | MIT plus the preserved complete third-party notices |
 | Microsoft Monaco Editor | 0.57.0; source `d61824269f1377111d34306e4a47172327777083` | MIT plus the preserved complete third-party notices |
 | vscode-textmate | 9.3.2, embedded by CodinGame | MIT; Microsoft and contributors |
