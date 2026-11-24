@@ -19,7 +19,7 @@ export async function assertImmediateShareOption(page) {
 }
 
 /** Observe the real launch path without relying on machine-dependent timing. */
-export async function assertImmediateLaunch(page, baseURL, waitUntilRunning) {
+export async function assertImmediateLaunch(page, baseURL, manifest, waitUntilRunning) {
   await page.addInitScript(() => {
     window.immediateCountdownObserved = false;
     new MutationObserver(() => {
@@ -32,7 +32,12 @@ export async function assertImmediateLaunch(page, baseURL, waitUntilRunning) {
   const url = new URL(baseURL);
   // Test a new shared deployment, independently of the deliberately stopped
   // live site used earlier in this context. Stop must continue to win for it.
-  url.searchParams.set('deploy', 'jcb');
+  // Readiness exercises the maintained image, even when today's stable release
+  // has advanced beyond the version used to build the image in this run.
+  const prepared = manifest.prebuiltDeploys.find(image => image.id === 'jcb' && image.joomlaVersion === manifest.defaults.joomlaVersion);
+  assert.ok(prepared, 'The readiness scenario requires the built JCB deployment image.');
+  url.searchParams.set('deploy', prepared.id);
+  url.searchParams.set('joomla', prepared.joomlaVersion);
   url.searchParams.set('key', `immediate-${randomUUID()}`);
   url.searchParams.set('immediate', '1');
   url.searchParams.set('start', '0');

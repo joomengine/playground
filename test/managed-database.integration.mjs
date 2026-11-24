@@ -34,7 +34,13 @@ test('new Joomla versions reuse only byte-identical reviewed database guards', a
         const earlierNightly = await managedDatabaseSource(source, '6.2.1-dev', kind);
         assert.equal(earlierNightly.source, stable.source, 'reviewing a newer nightly must not reject an earlier reviewed snapshot with the same label');
       }
-      await assert.rejects(managedDatabaseSource(`${source}\n`, alias, kind), /reviewed source checksum/);
+      const modified = `${source}\n`;
+      const modifiedDigest = createHash('sha256').update(modified).digest('hex');
+      await assert.rejects(managedDatabaseSource(modified, alias, kind), error => {
+        assert.match(error.message, /reviewed source checksum/);
+        assert.ok([alias, name, modifiedDigest].every(detail => error.message.includes(detail)));
+        return true;
+      });
       await assert.rejects(managedDatabaseSource(`${nightly.source}\n`, alias, kind), /reviewed source checksum/);
     }
     sources.set(release.version, pair);

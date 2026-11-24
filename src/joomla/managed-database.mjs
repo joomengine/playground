@@ -2,11 +2,17 @@ const PATHS = { model: '/administrator/components/com_config/src/Model/Applicati
 const REFERENCES = [
   { kind: 'model', version: '5.4.10', sha256: 'f53ce977b42d0c373660fe4c4cb22313b8ad972809c76afdda266cad01336cee',
     connection: '$revisedDbo = DatabaseDriver::getInstance($options);' },
+  // Reviewed 2026-11-24: protected configuration fields changed; database validation is identical.
+  { kind: 'model', version: '5.4.11', sha256: 'dc05b2ac5cc820237ad74b1608e833b2bd582e26370eb980c6bc96afc52456b2',
+    connection: '$revisedDbo = DatabaseDriver::getInstance($options);' },
   { kind: 'console', version: '5.4.10', sha256: '7de63a108161b5d57414c1f93a49a8889b7aaa8c9dc6c6f886d4aa4da9ff5e95',
     connection: '$db = DatabaseDriver::getInstance($settings);' },
   { kind: 'console', version: '6.2.0', sha256: '7b57dab5a8c1a3215c4febaa8b91a763e67f0fe3a52970da15f0b160759d17cd',
     connection: "$db = (new DatabaseFactory())->getDriver($settings['driver'], $settings);" },
   { kind: 'model', version: '6.2.0', sha256: '4c818d664dccb05f12a19930275cd7b3cc64ad54c7b1a98bfd1e7b6d9314abf3',
+    connection: "$revisedDbo = (new DatabaseFactory())->getDriver($options['driver'], $options);" },
+  // Reviewed 2026-11-24: form/secret handling and the CLI SSL check changed; database validation is identical.
+  { kind: 'model', version: '6.2.1', sha256: 'd60d0b52074a442308cdc52a3ea97f8b378630a8286dcc68c46dc19fde03dfc3',
     connection: "$revisedDbo = (new DatabaseFactory())->getDriver($options['driver'], $options);" },
   // Reviewed 2026-11-05: the Force SSL check skips CLI; database validation is unchanged.
   { kind: 'model', version: '6.2.1-dev', sha256: '3158d8aed9c849f08a6affb8e9f7e3c698c6c0df18cd95764c3e5814c93e4fc9',
@@ -92,7 +98,8 @@ export async function managedDatabaseSource(source, version, kind = 'model') {
       return { source: source.replace(before, after), changed: true, sourceSha256: reference.sha256 };
     }
   }
-  throw new Error('The Joomla configuration model does not match a reviewed source checksum; its source must be reviewed before adapting it.');
+  const sha256 = sourceDigest ?? await digest(source);
+  throw new Error(`Joomla ${version} ${PATHS[kind] ?? kind} does not match a reviewed source checksum (SHA-256 ${sha256}). Review the source before adapting it.`);
 }
 
 export async function ensureManagedDatabaseConfiguration(runtime, version) {

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
-import { readURLConfiguration } from '../src/config.mjs';
+import { catalogWithSelectedJoomlaPackage, normalizeConfiguration, readURLConfiguration } from '../src/config.mjs';
+import { catalogForRestoredSite } from '../src/site-import.mjs';
 import { readRuntimeViewURL } from '../src/runtime-views.mjs';
 
 const source = await readFile(new URL('../src/app.mjs', import.meta.url), 'utf8');
@@ -182,4 +183,38 @@ test('opening an independent named site refuses persisted, running, stopped and 
   assert.equal(launched, 0);
   assert.equal((await owner.perform('open', {configuration: {storageKey: 'unused'}})).workspaceId, 'fresh');
   assert.equal(launched, 1);
+});
+
+
+test('a stopped materialized site reopens at its exact version after a new stable release', async () => {
+  const resolver = source.slice(source.indexOf('function catalogForDeploymentInput('), source.indexOf('function fillOptions('));
+  const matching = source.slice(source.indexOf('function matchesInstalledSelection('), source.indexOf('function sameEditorSetup('));
+  const packageFor = version => ({ version, url: `https://example.org/Joomla_${version}.zip`, sha256: '1'.repeat(64), php: ['8.4'] });
+  const bundled = packageFor('6.2.0'), newest = packageFor('6.2.1');
+  const catalog = { php: [{version: '8.4'}], joomla: [newest], defaults: {joomlaVersion: newest.version, phpVersion: '8.4'} };
+  const context = { catalog, pinnedCatalog: {...catalog, joomla: [bundled]}, deploymentURL: base, selectedJoomlaPackages: new Map(),
+    runtime: null, savedState: {sites: {}}, fields: {joomlaVersion: {value: ''}}, fillJoomlaOptions() {},
+    normalizeConfiguration, catalogWithSelectedJoomlaPackage, catalogForRestoredSite, deploymentDescriptor: () => ({id: 'blank'}),
+  };
+  const {resolve, existingSiteConfiguration} = runInNewContext(matching + resolver + '\n({resolve, existingSiteConfiguration})', context);
+  for (const [version, selected] of [['6.2.0', undefined], ['6.1.9', packageFor('6.1.9')]]) {
+    const input = { deployId: 'blank', storageKey: 'saved-site', persistence: true, joomlaVersion: version,
+      phpVersion: '8.4', admin: { password: 'local-test-password' }, deploymentRecipe: {name: 'Saved'},
+      ...(selected ? {joomlaPackage: selected} : {}) };
+    context.savedState.sites[input.storageKey] = input;
+    const {configuration} = await resolve(input);
+    assert.equal(configuration.joomlaVersion, version);
+    assert.equal(context.selectedJoomlaPackages.get(version).version, version);
+    assert.equal(context.catalog.defaults.joomlaVersion, '6.2.1');
+    // A resume, recovery or checkpoint can enter directly with no prior editor selection.
+    context.catalog = catalog;
+    context.selectedJoomlaPackages.clear();
+    assert.equal(existingSiteConfiguration({...input, deploymentRecipe: undefined}).joomlaVersion, version);
+    assert.equal(context.selectedJoomlaPackages.get(version).version, version);
+  }
+  const uploaded = {joomlaVersion: '5.4.9', phpVersion: '8.4', restoredSite: {joomlaVersion: '5.4.9', php: ['8.4']},
+    admin: {password: 'local-test-password'}};
+  assert.equal(existingSiteConfiguration(uploaded).joomlaVersion, uploaded.joomlaVersion);
+  assert.equal(context.selectedJoomlaPackages.get(uploaded.joomlaVersion).url, undefined);
+  assert.throws(() => existingSiteConfiguration({...uploaded, phpVersion: '8.6'}), /not available/);
 });

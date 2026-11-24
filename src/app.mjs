@@ -786,7 +786,7 @@ async function recoverSite(savedConfiguration) {
     const input = savedConfiguration ?? formInput();
     // Recovery opens the existing storage identity without downloading its deployment recipe.
     const resolved = savedConfiguration
-      ? { configuration: normalizeConfiguration(input, { catalog: catalogForRestoredSite(catalog, input), baseURL: deploymentURL }), deploy: deploymentDescriptor(input.deployId) }
+      ? { configuration: existingSiteConfiguration(input), deploy: deploymentDescriptor(input.deployId) }
       : await resolve(input);
     const recovered = await createPlayground(resolved.configuration, { recovery: true, onProgress: progress });
     runtime = recovered; stoppedSite = undefined;
@@ -890,13 +890,34 @@ function materializeEditedConfiguration(full, previous, name, requirements) {
   const document = createFullDeploymentDocument(full, { name, requirements, baseURL: deploymentURL });
   return { ...full, deploymentRecipe: document };
 }
+function catalogForDeploymentInput(input) {
+  if (input.restoredSite) return catalogForRestoredSite(catalog, input);
+  // The current selector omits earlier stable releases. A saved site can still
+  // be backed by a host-pinned archive or its own exact package descriptor.
+  const pinned = pinnedCatalog.joomla.find(entry => entry.version === input.joomlaVersion);
+  const available = pinned && !catalog.joomla.some(entry => entry.version === pinned.version)
+    ? { ...catalog, joomla: [...catalog.joomla, pinned] } : catalog;
+  return catalogWithSelectedJoomlaPackage(available, input, deploymentURL);
+}
+function useDeploymentCatalog(available, version) {
+  if (available === catalog) return;
+  const entry = available.joomla.find(item => item.version === version);
+  if (entry) selectedJoomlaPackages.set(version, { ...entry });
+  const previous = fields.joomlaVersion.value;
+  catalog = available;
+  fillJoomlaOptions();
+  fields.joomlaVersion.value = previous;
+}
+function existingSiteConfiguration(input) {
+  const available = catalogForDeploymentInput(input);
+  const configuration = normalizeConfiguration(input, { catalog: available, baseURL: deploymentURL });
+  useDeploymentCatalog(available, configuration.joomlaVersion);
+  return configuration;
+}
 async function resolve(input) {
   if (input.restoredSite) {
     if (input.jcbVersion !== editorConfiguration?.jcbVersion) await prepareDynamicInput(input);
-    catalog = catalogForRestoredSite(catalog, input);
-    selectedJoomlaPackages.set(input.joomlaVersion, { ...catalog.joomla.find(entry => entry.version === input.joomlaVersion) });
-    fillJoomlaOptions();
-    return { configuration: normalizeConfiguration(input, { catalog, baseURL: deploymentURL }), deploy: deploymentDescriptor('blank') };
+    return { configuration: existingSiteConfiguration(input), deploy: deploymentDescriptor('blank') };
   }
   // An unchanged core recipe keeps additive setup identity in saved preferences,
   // while the editor retains its complete configuration for package-free resume.
@@ -911,8 +932,7 @@ async function resolve(input) {
   // This also lets owners configure a JCB version no longer present in the catalog.
   if (installedInput && matchesInstalledSelection(input)) {
     const document = input.deploymentRecipe;
-    return { configuration: normalizeConfiguration(installedInput, { catalog: catalogForRestoredSite(catalog, installedInput), baseURL: deploymentURL }),
-      deploy: deploymentDescriptor(input.deployId) || (document ? { id: input.deployId, title: document.name,
+    return { configuration: existingSiteConfiguration(installedInput), deploy: deploymentDescriptor(input.deployId) || (document ? { id: input.deployId, title: document.name,
         joomla: document.requirements.joomla, requirements: document.requirements, configuration: document.configuration } : undefined) };
   }
   input = customDeploymentInput(input);
@@ -924,24 +944,9 @@ async function resolve(input) {
     if (current) input.jcbVersion = current.version;
   }
   await prepareDynamicInput(input);
-  // Exact older pinned versions may still belong to an existing saved site or
-  // shared configuration, even after a newer stable replaced them in the menu.
-  const previousPinned = pinnedCatalog.joomla.find(entry => entry.version === input.joomlaVersion)
-    ?? pinnedCatalog.retiredJoomla?.find(entry => entry.version === input.joomlaVersion);
-  if (previousPinned && !catalog.joomla.some(entry => entry.version === input.joomlaVersion)) {
-    selectedJoomlaPackages.set(previousPinned.version, { ...previousPinned });
-    catalog = { ...catalog, joomla: dynamicJoomlaChoices(pinnedCatalog, dynamicMetadata.joomla, selectedJoomlaPackages) };
-    fillJoomlaOptions();
-  }
-  const selectedCatalog = catalogWithSelectedJoomlaPackage(catalog, input, deploymentURL);
-  const resolved = await resolveDeployConfiguration(input, { catalog: selectedCatalog, deployCatalog, baseURL: deploymentURL });
-  if (selectedCatalog !== catalog) {
-    selectedJoomlaPackages.set(resolved.configuration.joomlaVersion, structuredClone(resolved.configuration.joomlaPackage));
-    const previous = fields.joomlaVersion.value;
-    catalog = selectedCatalog;
-    fillJoomlaOptions();
-    fields.joomlaVersion.value = previous;
-  }
+  const available = catalogForDeploymentInput(input);
+  const resolved = await resolveDeployConfiguration(input, { catalog: available, deployCatalog, baseURL: deploymentURL });
+  useDeploymentCatalog(available, resolved.configuration.joomlaVersion);
   return resolved;
 }
 function fillOptions(select, items) {
@@ -1249,7 +1254,7 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
       activity('Changed deployment configuration will start a new live site.');
     }
     const resolved = checkpoint || resumeOnly
-      ? { configuration: normalizeConfiguration(input, { catalog: catalogForRestoredSite(catalog, input), baseURL: deploymentURL }), deploy: deploymentDescriptor(input.deployId) }
+      ? { configuration: existingSiteConfiguration(input), deploy: deploymentDescriptor(input.deployId) }
       : await resolve(input);
     if (runtime && currentConfig.storageKey === resolved.configuration.storageKey && currentConfig.persistence === resolved.configuration.persistence && JSON.stringify(publicConfiguration(currentInput)) === JSON.stringify(publicConfiguration(input))) {
       setDrawer(false); $('site-frame')?.focus(); feedback(t('status.alreadyRunning')); return;
@@ -2143,7 +2148,7 @@ export async function ownerDeployment(workspaceId, operation, options = {}) {
   if (operation === 'apply') {
     const editable = ['siteName', 'initialPath', 'autoLogin', 'hideToolbar', 'language', 'multilingual', 'languageTags', 'extensions', 'languages', 'startupCommands', 'menus', 'template', 'content', 'overlays'];
     for (const key of Object.keys(options)) if (!editable.includes(key)) throw new TypeError(`Use a new deployment to change ${key}.`);
-    const full = normalizeConfiguration({ ...currentConfig, ...options, fresh: false }, { catalog: catalogForRestoredSite(catalog, currentConfig), baseURL: deploymentURL });
+    const full = existingSiteConfiguration({ ...currentConfig, ...options, fresh: false });
     const descriptor = deploymentDescriptor(currentConfig.deployId);
     const input = materializeEditedConfiguration(full, currentConfig, currentConfig.deploymentRecipe?.name || full.siteName, editorRequirements(full, descriptor));
     if (!await applyDeployment(input)) throw new Error('The deployment change was cancelled in the owner.');
@@ -2266,8 +2271,7 @@ function applyCompanionSnapshot(snapshot, { unavailable = false } = {}) {
   if (changed) {
     // Attaching an existing runtime must not resolve or deploy its recipe again.
     // Retain its exact package and recipe solely to populate the configuration UI.
-    catalog = currentConfig.restoredSite ? catalogForRestoredSite(catalog, currentConfig)
-      : catalogWithSelectedJoomlaPackage(catalog, currentConfig, deploymentURL);
+    catalog = catalogForDeploymentInput(currentConfig);
     const release = catalog.joomla.find(entry => entry.version === currentConfig.joomlaVersion);
     if (release) selectedJoomlaPackages.set(release.version, { ...release });
     fillJoomlaOptions();

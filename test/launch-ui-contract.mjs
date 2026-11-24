@@ -1,8 +1,9 @@
 import { continueLiveReplacement } from './live-replacement-contract.mjs';
 import assert from 'node:assert/strict';
+import { dynamicJoomlaChoices } from '../src/dynamic-selection.mjs';
 
 /** Pause the visible launch before any runtime download, then start explicitly. */
-export async function assertLaunchCountdown(page, url) {
+export async function assertLaunchCountdown(page, url, manifest, stagedCatalog) {
   const requests = [];
   const observe = request => requests.push(request.url());
   page.on('request', observe);
@@ -35,6 +36,13 @@ export async function assertLaunchCountdown(page, url) {
     assert.equal(requests.some(request => /\.(?:wasm|so)(?:\?|$)/.test(request)), false,
       'Pausing launch must prevent PHP and MariaDB startup, not merely hide its progress.');
     await page.locator('#deploy-dialog [data-close-dialog]').click();
+    const joomlaVersion = await page.locator('#joomla-version').inputValue();
+    const defaultMajor = manifest.defaults.joomlaVersion.split('.')[0];
+    const stable = dynamicJoomlaChoices(manifest, stagedCatalog.joomla).find(entry =>
+      entry.channel === 'stable' && entry.php.length && entry.version.split('.')[0] === defaultMajor);
+    assert.equal(joomlaVersion, stable?.version ?? manifest.defaults.joomlaVersion, 'The bare domain selects the published current stable Joomla release.');
+    const hasPreparedBase = manifest.prebuiltDeploys.some(image => image.joomlaVersion === joomlaVersion);
+    if (!hasPreparedBase) await page.locator('#launch-readiness[data-readiness="fresh"]').waitFor({ state: 'attached' });
     const startedAt = Date.now();
     await page.locator('#embedded-launch').click();
     return startedAt;
