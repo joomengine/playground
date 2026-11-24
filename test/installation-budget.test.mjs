@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { installationBudget, DEFAULT_PHP_SETTINGS } from '../src/php-settings.mjs';
+import { installationBudget } from '../src/php-settings.mjs';
 import { PhpSession } from '../src/playground.mjs';
 
 test('installation allowance is independent of ordinary request defaults and reserves shutdown time', () => {
-  assert.equal(DEFAULT_PHP_SETTINGS.max_execution_time, 60);
-  assert.deepEqual(installationBudget(), { executionTimeSeconds: 180, timeoutMs: 210_000 });
-  assert.deepEqual(installationBudget({ executionTimeSeconds: 300 }), { executionTimeSeconds: 300, timeoutMs: 330_000 });
+  assert.deepEqual(installationBudget(), { executionTimeSeconds: 300, timeoutMs: 330_000 });
+  assert.deepEqual(installationBudget({ executionTimeSeconds: 180 }), { executionTimeSeconds: 180, timeoutMs: 210_000 });
   assert.deepEqual(installationBudget({ executionTimeSeconds: 10, timeoutMs: 600_000 }), { executionTimeSeconds: 10, timeoutMs: 600_000 });
   for (const executionTimeSeconds of [0, 4, 301, 60.1, '180', NaN, null]) {
     assert.throws(() => installationBudget({ executionTimeSeconds }), /between 5 and 300/);
   }
-  for (const timeoutMs of [0, 180_000, 209_999, 600_001, '210000', 210_000.5]) {
+  for (const timeoutMs of [0, 300_000, 329_999, 600_001, '330000', 330_000.5]) {
     assert.throws(() => installationBudget({ timeoutMs }), /including 30 seconds/);
   }
 });

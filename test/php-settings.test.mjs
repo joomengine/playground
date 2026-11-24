@@ -10,7 +10,10 @@ test('PHP settings preserve JCB headroom and validate correlated limits', () => 
   assert.equal(value.memory_limit, '256M');
   assert.equal(value.max_input_vars, 7000);
   assert.equal(phpRequestBodyLimit(value), 160 * 1024 * 1024);
-  assert.equal(phpRequestTimeoutMs(value), 180_000);
+  assert.equal(value.max_execution_time, 300);
+  assert.equal(value.max_input_time, 300);
+  assert.equal(phpRequestTimeoutMs(value), 600_000);
+  assert.equal(phpRequestTimeoutMs({ max_execution_time: 60, max_input_time: 60 }), 180_000);
   assert.match(phpIni(value), /memory_limit=256M\n/);
   for (const settings of [{ post_max_size: '128M' }, { memory_limit: '128M' }, { upload_max_filesize: '2G' }, { memory_limit: -1 },
     { max_execution_time: 0 }, { max_input_time: '60\nfoo=1' }, { max_input_vars: 7000.5 }, { auto_prepend_file: '/evil.php' }]) {

@@ -211,8 +211,7 @@ test('large custom Service Directory launches without export and still reads a c
   const config = configuration(new URL('manual-servicedirectory.zip', server.url).href, {
     phpVersion: '8.4', joomlaVersion: manifest.joomla.find(entry => entry.version.startsWith('6.')).version,
   });
-  // Exercise the public configuration boundary: URL-only addons do not inherit
-  // the maintained Service Directory preset's longer normal request timeout.
+  // Exercise the public configuration boundary with only the package URL.
   delete config.addonExtensions;
   const launch = configuration => page.evaluate(async configuration => {
     const { createPlayground, PhpSession } = await import('./src/playground.mjs');
@@ -260,7 +259,7 @@ test('large custom Service Directory launches without export and still reads a c
       $db = new PDO('mysql:dbname=joomla;charset=utf8mb4', 'root', '', [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
       echo json_encode(['cities'=>(int)$db->query('SELECT COUNT(*) FROM jml_servicedirectory_city')->fetchColumn(),
         'states'=>(int)$db->query('SELECT COUNT(*) FROM jml_servicedirectory_state')->fetchColumn(),
-        'executionTime'=>(int)ini_get('max_execution_time'), 'siteName'=>$config->sitename]);
+        'executionTime'=>(int)ini_get('max_execution_time'), 'inputTime'=>(int)ini_get('max_input_time'), 'siteName'=>$config->sitename]);
     `);
     const data = JSON.parse(result.text ?? new TextDecoder().decode(result.body));
     const administrator = await window.playground.request('/administrator/index.php?option=com_servicedirectory&view=cities');
@@ -288,8 +287,8 @@ test('large custom Service Directory launches without export and still reads a c
     })) }));
     throw error;
   }
-  assert.deepEqual(first.data, { cities: 151233, states: 5073, executionTime: 60, siteName: config.siteName });
-  assert.equal(first.configuredExecutionTime, 60);
+  assert.deepEqual(first.data, { cities: 151233, states: 5073, executionTime: 300, inputTime: 300, siteName: config.siteName });
+  assert.equal(first.configuredExecutionTime, 300);
   assert.equal(first.administratorStatus, 200);
   assert.deepEqual(first.warnings, []);
   assert.deepEqual(first.calls.exports, [], 'Launching must not dump and compress all 151233 cities into an optional image.');
@@ -325,11 +324,11 @@ test('large custom Service Directory launches without export and still reads a c
     throw error;
   }
   assert.equal(second.fromSnapshot, true);
-  assert.deepEqual(second.data, { cities: 151233, states: 5073, executionTime: 60, siteName: 'Separate cached directory' });
+  assert.deepEqual(second.data, { cities: 151233, states: 5073, executionTime: 300, inputTime: 300, siteName: 'Separate cached directory' });
   assert.equal(second.administratorStatus, 200);
   assert.equal(second.plan.find(row => row.table === 'g').key, 'idx_guid', 'The restored state lookup must use its index rather than scan thousands of states for every city.');
   assert.deepEqual(second.warnings, []);
-  assert.equal(second.configuredExecutionTime, 60);
+  assert.equal(second.configuredExecutionTime, 300);
   assert.equal(downloads, 1, 'The complete large image must not download the extension again.');
   assert.deepEqual(second.calls, callsAfterExport, 'Reuse must not reinstall the extension or rebuild/export the image.');
   assert.ok(!second.progress.some(event => event.phase === 'build-image'));

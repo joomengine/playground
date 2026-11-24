@@ -211,13 +211,14 @@ test('extension installer applies matching PHP and host budgets before any work'
   assert.equal(writes.length, 0);
   assert.equal(calls.length, 0);
   await installExtension(runtime, bytes, { sourceLoader });
-  assert.equal(calls[0].payload.installationExecutionTimeSeconds, 180);
-  assert.equal(calls[0].options.timeoutMs, 210000);
-  await installExtension(runtime, bytes, { sourceLoader, executionTimeSeconds: 300, timeoutMs: 400000 });
-  assert.equal(calls[1].payload.installationExecutionTimeSeconds, 300);
+  assert.equal(calls[0].payload.installationExecutionTimeSeconds, 300);
+  assert.equal(calls[0].options.timeoutMs, 330000);
+  await installExtension(runtime, bytes, { sourceLoader, executionTimeSeconds: 120, timeoutMs: 400000 });
+  assert.equal(calls[1].payload.installationExecutionTimeSeconds, 120);
   assert.equal(calls[1].options.timeoutMs, 400000);
   await runStartupCommand(runtime, ['extension:install', '--path=/tmp/package.zip'], { sourceLoader });
-  assert.equal(calls[2].payload.installationExecutionTimeSeconds, 180);
+  assert.equal(calls[2].payload.installationExecutionTimeSeconds, 300);
+  assert.equal(calls[2].options.timeoutMs, 330000);
   await runStartupCommand(runtime, ['cache:clean'], { sourceLoader });
   assert.equal(calls[3].payload.installationExecutionTimeSeconds, undefined);
   assert.equal(calls[3].options, undefined);
@@ -229,15 +230,15 @@ test('installer errors identify package, phase and deadline without exposing HTM
   let calls = 0;
   const runtime = { fs: { writeFile: async () => {} }, runPhp: async () => {
     calls++;
-    return { status: 500, text: '\n__JOOMENGINE_RESULT__{"ok":false,"error":"Maximum execution time of 180 seconds exceeded"}<!DOCTYPE html>' };
+    return { status: 500, text: '\n__JOOMENGINE_RESULT__{"ok":false,"error":"Maximum execution time of 300 seconds exceeded"}<!DOCTYPE html>' };
   } };
   await assert.rejects(installExtension(runtime, bytes, { sourceLoader: async () => '<?php', packageUrl: 'https://example.test/package.zip?token=secret' }), error => {
-    assert.match(error.message, /Extension package installation exceeded PHP's 180-second limit/);
+    assert.match(error.message, /Extension package installation exceeded PHP's 300-second limit/);
     assert.doesNotMatch(error.message, /DOCTYPE|secret|example\.test|package\.zip/);
     assert.equal(error.packageUrl, 'Extension package');
     assert.equal(error.phase, 'installation');
     assert.equal(error.incomplete, true);
-    assert.equal(error.executionTimeSeconds, 180);
+    assert.equal(error.executionTimeSeconds, 300);
     return true;
   });
   assert.equal(calls, 1, 'A partially completed install must never be replayed.');
@@ -269,8 +270,8 @@ test('applying packages distinguishes unreadable downloads and installer work', 
   await assert.rejects(applyJoomlaConfiguration(runtime, config, { sourceLoader, progress: event => progress.push(event),
     fetchPackage: async () => new Response(new Uint8Array([0x50, 0x4b, 3, 4])) }), /Installer failed/);
   assert.deepEqual(progress.filter(event => event.phase).map(event => event.phase), ['download', 'installation']);
-  assert.equal(calls.at(-1).payload.installationExecutionTimeSeconds, 180);
-  assert.equal(calls.at(-1).options.timeoutMs, 210000);
+  assert.equal(calls.at(-1).payload.installationExecutionTimeSeconds, 300);
+  assert.equal(calls.at(-1).options.timeoutMs, 330000);
   assert.equal(writes.length, 1, 'Failure must not rewrite the complete marker or replay installation.');
 });
 
@@ -290,8 +291,8 @@ test('custom extension URLs go directly to Joomla CLI without a staged archive',
   assert.equal(result.exitCode, 0);
   assert.deepEqual(calls[0].payload.argv, ['extension:install', `--url=${url}`]);
   assert.equal(calls[0].payload.archive, undefined);
-  assert.equal(calls[0].payload.installationExecutionTimeSeconds, 180);
-  assert.equal(calls[0].options.timeoutMs, 210000);
+  assert.equal(calls[0].payload.installationExecutionTimeSeconds, 300);
+  assert.equal(calls[0].options.timeoutMs, 330000);
 });
 
 test('custom extension and template checksum metadata is ignored', () => {

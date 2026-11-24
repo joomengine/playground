@@ -161,7 +161,7 @@ export async function assertJcbCompiler(page, { navigationTimeoutMs = 90_000, co
     return { site: window.playground.baseUrl, joomlaVersion: window.playground.configuration.joomlaVersion,
       phpVersion: window.playground.configuration.phpVersion, maxExecutionTime: Number(result.text) };
   });
-  assert.equal(maxExecutionTime, 60, 'The compiler must work with the shipping JCB execution limit.');
+  assert.equal(maxExecutionTime, 300, 'The compiler must work with the shipping JCB execution limit.');
   const major = joomlaVersion.split('.')[0];
   const demo = `Demo J${major}`;
   let element = await page.locator('#site-frame').count() ? await page.locator('#site-frame').elementHandle() : null;

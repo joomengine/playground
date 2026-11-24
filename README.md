@@ -505,10 +505,10 @@ The Playground does not add a runtime package checksum or download-size gate.
 Maintained build recipes keep pinned digests for reproducible static builds.
 
 Each extension, template or language ZIP installed by the deployment helper gets
-180 seconds of PHP execution time and a 210-second host deadline. The allowance
-is applied only to that installer request: ordinary page requests and Joomla's
-administrator upload interface retain the selected PHP settings (60 seconds by
-default). Preset and manually supplied packages use the same installation policy.
+300 seconds of PHP execution time and a 330-second host deadline. The allowance
+applies to that installer request. Ordinary page requests and Joomla administrator
+uploads use the selected PHP settings (300 seconds each for input and execution
+by default). Preset and manually supplied packages use the same installation policy.
 A timeout stops setup without replaying the installer or marking the site ready;
 the partially installed site requires recovery or a fresh deployment.
 
@@ -606,8 +606,8 @@ deploys:
 {
   "upload_max_filesize": "128M",
   "post_max_size": "160M",
-  "max_execution_time": 60,
-  "max_input_time": 60,
+  "max_execution_time": 300,
+  "max_input_time": 300,
   "max_input_vars": 10000,
   "memory_limit": "512M"
 }
@@ -616,8 +616,11 @@ deploys:
 These defaults cover JCB's published guidelines with extra POST, form-variable
 and memory headroom. POST size must exceed the upload limit, and PHP memory must
 leave at least 64 MiB above POST size. The editor validates bounded values rather
-than accepting arbitrary ini directives. Deploys can request different values;
-Service Directory allows 180 seconds for its large initial geographic-data import.
+than accepting arbitrary ini directives. Service Directory inherits these defaults.
+Deployments and saved sites can specify their own PHP settings. For ordinary HTTP
+requests, the host allows input time plus execution time plus 30 seconds for cleanup,
+with a minimum of 180 seconds and a maximum of 600 seconds. Browser and Node
+SDK calls to `runPhp()` use the same deadline unless the caller sets `timeoutMs`.
 A PHP memory limit is not a guarantee that a particular browser or device can
 allocate that much memory.
 
