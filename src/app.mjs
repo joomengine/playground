@@ -636,10 +636,13 @@ function setupBackups() {
     onDownload: downloadArchive, onBusy: value => setBusy(value),
     onError: error => activity(error), t,
   });
+  window.addEventListener('joomengine-backups-changed', () => {
+    if (backupPanel?.isOpen) void backupPanel.refresh().catch(error => activity(error));
+  });
   for (const id of ['backup-button', 'local-images-button']) $(id).addEventListener('click', () => void openImages());
 }
 
-async function listManagedStorage() {
+export async function listManagedStorage() {
   const liveKeys = protectedLiveKeys();
   const native = await managedStorage.list();
   const entries = native.map(entry => ({ ...entry, id: `native:${entry.id}`, nativeId: entry.id,
@@ -663,6 +666,17 @@ async function listManagedStorage() {
     }
   }
   return entries;
+}
+
+/** Use the same ownership checks and UI updates as the Backups panel for external clients. */
+export async function removeManagedStorageById(id, { allowUnassigned = false } = {}) {
+  if (busy || launching || closing) throw new Error('Wait for the current Playground operation to finish.');
+  const entry = (await listManagedStorage()).find(entry => entry.id === id);
+  if (!entry || !entry.removable || entry.active) throw new Error('This storage entry is unavailable or belongs to the active site.');
+  if (entry.manualOnly && !allowUnassigned) throw new Error('Review this unassigned storage entry individually before removing it.');
+  await removeManagedEntry(entry);
+  if (backupPanel?.isOpen) await backupPanel.refresh();
+  return { removed: true, id };
 }
 
 async function removeManagedEntry(entry) {
@@ -845,17 +859,21 @@ function formInput(overrides = {}, { draft = false } = {}) {
     // shows full lists while the core resolver receives only genuine additions.
     return coreRecipeAdditions(full);
   }
-  const previousAddons = new Set((editorConfiguration?.addonExtensions || []).map(item => item.url));
-  const managed = new Map((editorConfiguration?.extensions || []).filter(item => !previousAddons.has(item.url)).map(item => [item.url, item]));
+  const name = $('deployment-name').value.trim() || deploymentDescriptor(fields.deployId.value)?.title || full.siteName;
+  return materializeEditedConfiguration(full, editorConfiguration, name, editorRequirements(full));
+}
+
+function materializeEditedConfiguration(full, previous, name, requirements) {
+  const previousAddons = new Set((previous?.addonExtensions || []).map(item => item.url));
+  const managed = new Map((previous?.extensions || []).filter(item => !previousAddons.has(item.url)).map(item => [item.url, item]));
   full.extensions = full.extensions.map(item => managed.has(item.url) && !item.authentication && !item.headers && !item.provider
     ? structuredClone(managed.get(item.url)) : structuredClone(item));
   full.addonExtensions = full.extensions.filter(item => !managed.has(item.url) || item.authentication || item.headers || item.provider).map(item => structuredClone(item));
   full.addonStartupCommands = full.startupCommands;
   full.addonLanguages = full.languages || [];
-  full.addonTemplate = full.template?.url && full.template.url !== editorConfiguration?.template?.url
-    ? full.template : editorConfiguration?.addonTemplate || null;
-  const name = $('deployment-name').value.trim() || deploymentDescriptor(fields.deployId.value)?.title || full.siteName;
-  const document = createFullDeploymentDocument(full, { name, requirements: editorRequirements(full), baseURL: deploymentURL });
+  full.addonTemplate = full.template?.url && full.template.url !== previous?.template?.url
+    ? full.template : previous?.addonTemplate || null;
+  const document = createFullDeploymentDocument(full, { name, requirements, baseURL: deploymentURL });
   return { ...full, deploymentRecipe: document };
 }
 async function resolve(input) {
@@ -1165,7 +1183,7 @@ function findProfile(deployId, joomlaVersion) {
   return drafts.get(`${deployId}:${joomlaVersion}`)
     || Object.values(savedState.sites).reverse().find((item) => item.deployId === deployId && item.joomlaVersion === joomlaVersion);
 }
-async function launch({ siteExport, checkpoint, importedConfiguration, deploymentChanges, jcbUpgrade, rotateAdministrator = false, resumeOnly = false, backupId } = {}) {
+async function launch({ siteExport, checkpoint, importedConfiguration, deploymentChanges, jcbUpgrade, rotateAdministrator = false, resumeOnly = false, backupId, replaceWorkspaceId } = {}) {
   if (!requireOwnerForReplacement()) return;
   if (busy || launching || !initialized || !catalog || !deployCatalog) return;
   launching = true;
@@ -1223,7 +1241,9 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
       setDrawer(false); $('site-frame')?.focus(); feedback(t('status.alreadyRunning')); return;
     }
     if (runtime || (stoppedSite && stoppedSite.configuration.storageKey !== resolved.configuration.storageKey)) {
-      if (!resumeOnly && !await confirmLiveReplacement()) return;
+      if (replaceWorkspaceId !== undefined) {
+        if (replaceWorkspaceId !== (runtime?.workspace.id || stoppedSite?.workspaceId)) throw new Error('The selected workspace changed before replacement.');
+      } else if (!resumeOnly && !await confirmLiveReplacement()) return;
     }
     // Validate a complete upload/backup in its own new live store before the
     // existing site is stopped. A failed restore never destroys the source.
@@ -1384,7 +1404,7 @@ async function closeSite({ reset = false, save = false } = {}) {
     if (reset) await handle.reset();
     else await handle.close();
     if (!reset) {
-      stoppedSite = { configuration: { ...currentConfig, fresh: false, admin: runningAdministrator || currentInput.admin }, input: { ...currentInput, fresh: false }, path: currentSitePath };
+      stoppedSite = { workspaceId: handle.workspace.id, configuration: { ...currentConfig, fresh: false, admin: runningAdministrator || currentInput.admin }, input: { ...currentInput, fresh: false }, path: currentSitePath };
       rememberLiveMetadata(true);
     } else { stoppedSite = undefined; sourceBackupId = undefined; }
     await databaseHost?.dispose(); databaseHost = undefined;
@@ -1415,7 +1435,7 @@ async function closeSite({ reset = false, save = false } = {}) {
       try { await codeHost?.dispose(); } catch (cleanupError) { activity(cleanupError); }
       codeHost = undefined; runningSiteId = null; runningAdministrator = null;
       if (!reset && currentConfig.persistence) {
-        stoppedSite = { configuration: { ...currentConfig, fresh: false }, input: { ...currentInput, fresh: false }, path: currentSitePath };
+        stoppedSite = { workspaceId: handle.workspace.id, configuration: { ...currentConfig, fresh: false }, input: { ...currentInput, fresh: false }, path: currentSitePath };
         rememberLiveMetadata(true);
       }
       persistenceSubscription?.(); persistenceSubscription = undefined;
@@ -1444,13 +1464,13 @@ async function openSavedSite(key) {
   } catch (error) { feedback(error, { error: true, persistent: true }); }
   finally { setBusy(false); }
 }
-async function deleteSelectedSite() {
+async function deleteSelectedSite({ confirmedKey } = {}) {
   if (busy || launching || !selectedSiteId || !Object.hasOwn(savedState.sites, selectedSiteId)) return;
   pauseAutomaticLaunch();
   const key = selectedSiteId;
   if (protectedLiveKeys().has(key)) return;
   const name = savedState.sites[key].displayName || savedState.sites[key].siteName;
-  if (!confirm(t('confirm.deleteSavedSite', { name }))) return;
+  if (confirmedKey !== key && !confirm(t('confirm.deleteSavedSite', { name }))) return;
   if (runtime && runningSiteId === key && !await closeSite()) return;
   setBusy(true);
   try {
@@ -1963,12 +1983,12 @@ async function useDeployment() {
     await launch();
   } catch (error) { editorError(error); }
 }
-async function applyDeployment() {
+async function applyDeployment(supplied) {
   if (!requireOwnerForReplacement()) return;
   if (busy || launching || closing || !runtime) return;
   $('deploy-error').hidden = true;
   let input;
-  try { input = formInput({ storageKey: currentConfig.storageKey, persistence: currentConfig.persistence, fresh: false }); }
+  try { input = supplied || formInput({ storageKey: currentConfig.storageKey, persistence: currentConfig.persistence, fresh: false }); }
   catch (error) { editorError(error); return; }
   setBusy(true);
   try {
@@ -1990,6 +2010,7 @@ async function applyDeployment() {
     mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
     $('deploy-dialog').close(); feedback(t('status.ready'));
     updateRuntimeLocation();
+    return true;
   } catch (error) {
     if (typeof error.recover === 'function') {
       try {
@@ -2009,9 +2030,88 @@ async function applyDeployment() {
       catch (recoveryError) { feedback(recoveryError, { error: true, persistent: true }); }
     }
     editorError(error); if (runtime?.healthy) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl)); else displayError(error);
+    if (supplied) throw error;
   }
   finally { setBusy(false); }
 }
+/** Resolve portable recipe documents and dashboard selections through the native deployment catalog. */
+export async function resolveOwnerDeployment({ deployId, configuration = {}, document: recipe, sourceURL, shareURL } = {}) {
+  if ([recipe, sourceURL, shareURL].filter(value => value !== undefined).length > 1) {
+    throw new TypeError('Choose one deployment document, hosted configuration URL or Playground share URL.');
+  }
+  let input = {};
+  if (recipe !== undefined) input = parseDeploymentDocument(recipe, { baseURL: deploymentURL });
+  if (sourceURL !== undefined) input = await loadDeploymentDocument(sourceURL, { baseURL: deploymentURL });
+  if (shareURL !== undefined) {
+    const url = new URL(shareURL);
+    const base = new URL(deploymentURL);
+    if (url.origin !== base.origin || ![base.pathname, base.pathname + 'index.html'].includes(url.pathname)) {
+      throw new TypeError('Use a share link from this Playground.');
+    }
+    const parsed = readURLConfiguration(url);
+    input = parsed.document ? { ...await loadDeploymentDocument(parsed.document.url, { baseURL: deploymentURL }), ...parsed.config } : parsed.config;
+    // Sharing opens a different installation even when presented with a hand-edited local site key.
+    delete input.storageKey;
+  }
+  const sourceJoomla = input.joomlaVersion, sourceJcb = input.jcbVersion;
+  input = { ...input, ...configuration, deployId: deployId ?? configuration.deployId ?? input.deployId ?? deployCatalog.default };
+  customDeploymentInput(input);
+  // A new deployment gets its own password unless its private recipe specifies one.
+  input.admin = { ...administrator(), password: password(), ...input.admin };
+  if (sourceJoomla && configuration.joomlaVersion && configuration.joomlaVersion !== sourceJoomla && !configuration.joomlaPackage) delete input.joomlaPackage;
+  if (sourceJcb && configuration.jcbVersion && !configuration.jcbPackage && sourceJcb !== configuration.jcbVersion) delete input.jcbPackage;
+  return input;
+}
+
+async function updateRunningPhp(settings, minor = currentConfig.phpVersion) {
+  setBusy(true); destroyPreview(); show('loading-view');
+  await runtime.updatePhpSettings(settings, minor);
+  currentConfig = runtime.configuration;
+  currentInput = { ...currentInput, phpVersion: currentConfig.phpVersion, phpSettings: settings };
+  phpSettings = settings;
+  fields.phpVersion.value = currentConfig.phpVersion;
+  rememberCurrentSite(); mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
+  updateRuntimeLocation();
+}
+
+/** Keep an attached agent's deployment changes in step with this owner's forms, saved state and preview. */
+export async function ownerDeployment(workspaceId, operation, options = {}) {
+  if (!runtime?.healthy || runtime.workspace.id !== workspaceId || companionView) throw new Error('The selected Playground site changed.');
+  if (busy || launching || closing) throw new Error('Wait for the active Playground operation to finish.');
+  if (operation === 'resolve') {
+    const selected = await resolveOwnerDeployment(options);
+    const resolved = await resolve(selected);
+    return { configuration: resolved.configuration, requirements: { ...resolved.deploy.requirements, joomla: resolved.deploy.joomla } };
+  }
+  if (operation === 'refreshRecipes') {
+    customRegistry = readDeploymentRegistry(preferences, customRegistryKey);
+    const selected = fields.deployId.value;
+    renderDeploymentChoices(deploymentDescriptor(selected) ? selected : currentConfig.deployId);
+    return;
+  }
+  if (document.querySelector('dialog[open]')) throw new Error('Finish the open Playground dialog before changing this site.');
+  if (operation === 'php') {
+    const settings = normalizePhpSettings({ ...currentConfig.phpSettings, ...options.phpSettings });
+    try { await updateRunningPhp(settings, options.phpVersion ?? currentConfig.phpVersion); }
+    catch (error) {
+      if (runtime?.healthy) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
+      else displayError(error);
+      throw error;
+    } finally { setBusy(false); }
+    return { phpVersion: currentConfig.phpVersion, phpSettings: { ...currentConfig.phpSettings } };
+  }
+  if (operation === 'apply') {
+    const editable = ['siteName', 'initialPath', 'autoLogin', 'language', 'multilingual', 'languageTags', 'extensions', 'languages', 'startupCommands', 'menus', 'template', 'content', 'overlays'];
+    for (const key of Object.keys(options)) if (!editable.includes(key)) throw new TypeError(`Use a new deployment to change ${key}.`);
+    const full = normalizeConfiguration({ ...currentConfig, ...options, fresh: false }, { catalog: catalogForRestoredSite(catalog, currentConfig), baseURL: deploymentURL });
+    const descriptor = deploymentDescriptor(currentConfig.deployId);
+    const input = materializeEditedConfiguration(full, currentConfig, currentConfig.deploymentRecipe?.name || full.siteName, editorRequirements(full, descriptor));
+    if (!await applyDeployment(input)) throw new Error('The deployment change was cancelled in the owner.');
+    return { applied: true, siteName: currentConfig.siteName, language: currentConfig.language };
+  }
+  throw new TypeError('Unknown deployment operation.');
+}
+
 function populatePhpSettings(settings = phpSettings) {
   const form = $('php-settings-form');
   for (const [name, value] of Object.entries(settings)) if (form.elements.namedItem(name)) form.elements.namedItem(name).value = value;
@@ -2338,13 +2438,7 @@ function setupInterface() {
     $('php-error').hidden = true;
     try {
       const settings = normalizePhpSettings(Object.fromEntries(new FormData(event.target)));
-      if (runtime) {
-        setBusy(true); destroyPreview(); show('loading-view');
-        await runtime.updatePhpSettings(settings);
-        currentConfig = runtime.configuration; currentInput = { ...currentInput, phpSettings: settings };
-        rememberCurrentSite(); mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
-        updateRuntimeLocation();
-      }
+      if (runtime) await updateRunningPhp(settings);
       phpSettings = settings; $('php-dialog').close(); feedback(t('status.ready'));
     } catch (error) { $('php-error').textContent = messageOf(error); $('php-error').hidden = false; if (runtime?.healthy) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl)); else if (runtime) displayError(error); }
     finally { setBusy(false); }
@@ -2489,4 +2583,95 @@ async function startInterface() {
   setBusy(false);
   await initialize();
 }
+// The owner remains available while PHP workers stop, restart, or switch sites.
+// Direct calls and toolbar buttons share the same durability and editor checks.
+export function getOwnerWorkspace() {
+  if (companionView) throw new Error('Select the original Playground owner window.');
+  const identity = () => runtime?.workspace?.id || stoppedSite?.workspaceId || null;
+  const state = () => ({
+    phase: !initialized ? 'initializing' : busy || launching || closing ? 'busy'
+      : runtime?.healthy ? 'running' : runtime?.recovery ? 'recovery' : stoppedSite ? 'stopped' : 'idle',
+    workspaceId: identity(), storageKey: runtime?.configuration?.storageKey || stoppedSite?.configuration?.storageKey || null,
+    selectedStorageKey: selectedSiteId, healthy: Boolean(runtime?.healthy),
+  });
+  async function perform(action, input = {}) {
+    if (!initialized || busy || launching || closing) throw new Error('The Playground owner is busy or initializing.');
+    if (companionView) throw new Error('Select the original Playground owner window.');
+    const previous = identity();
+    const expected = input.workspaceId ?? input.replaceWorkspaceId;
+    if (expected !== undefined && previous !== expected) throw new Error('The selected workspace has changed.');
+    if (action === 'list') {
+      return { ...state(), sites: Object.values(savedState.sites).map(({storageKey, displayName, siteName, deployId, joomlaVersion, phpVersion}) =>
+        ({storageKey, displayName, siteName, deployId, joomlaVersion, phpVersion, protected: protectedLiveKeys().has(storageKey)})) };
+    }
+    pauseAutomaticLaunch();
+    switch (action) {
+      case 'open': {
+        const options = await resolveOwnerDeployment(input);
+        // Each independent deployment gets its own durable store within this profile.
+        options.storageKey ||= 'agent-' + crypto.randomUUID();
+        freshKeyPending = false; resumeLastRoute = false;
+        const opened = await launch({ importedConfiguration: options, replaceWorkspaceId: input.replaceWorkspaceId });
+        if (!opened) throw new Error($('header-feedback').textContent || $('error-message').textContent || 'The deployment did not open.');
+        break;
+      }
+      case 'restore': {
+        const siteExport = await readSiteExport(input.archive);
+        const importedConfiguration = configurationForSiteExport(siteExport, catalog, { baseURL: deploymentURL, admin: administrator() });
+        await launch({ siteExport, importedConfiguration, replaceWorkspaceId: input.replaceWorkspaceId });
+        if (!runtime?.healthy || identity() === previous) throw new Error('The site restore did not complete.');
+        return { ...state(), restored: true, sha256: siteExport.sha256 };
+      }
+      case 'start':
+        if (runtime?.healthy) return state();
+        if (stoppedSite) await restartOrStart({ confirmed: true });
+        else await launch();
+        break;
+      case 'stop':
+        if (!await stopSite({ confirmed: true })) throw new Error('The owner could not stop the site.');
+        return state();
+      case 'restart':
+        if (!runtime || !await restartOrStart({ confirmed: true })) throw new Error('The owner could not restart the site.');
+        break;
+      case 'reset':
+        if (!previous || previous !== input.workspaceId) throw new Error('Reset requires the exact running or stopped workspace ID.');
+        await resetSite({ confirmed: true });
+        if (identity() === previous) throw new Error('The site was not reset.');
+        break;
+      case 'resume': {
+        if (!Object.hasOwn(savedState.sites, input.storageKey)) throw new Error('Unknown saved site.');
+        if (runningSiteId === input.storageKey && runtime?.healthy) return state();
+        await openSavedSite(input.storageKey);
+        if (selectedSiteId !== input.storageKey) throw new Error('The saved site could not be selected.');
+        const options = { ...savedState.sites[input.storageKey], admin: administrator(), fresh: false };
+        // Opening a different saved site is a replacement, including when PHP is stopped.
+        if (previous && input.replaceWorkspaceId === undefined && !await confirmLiveReplacement()) throw new Error('Cancelled the saved site switch.');
+        await launch({ importedConfiguration: options, resumeOnly: true, replaceWorkspaceId: input.replaceWorkspaceId });
+        if (runningSiteId !== input.storageKey) throw new Error('The saved site could not be resumed.');
+        break;
+      }
+      case 'rename':
+      case 'delete': {
+        if (!Object.hasOwn(savedState.sites, input.storageKey)) throw new Error('Unknown saved site.');
+        if (action === 'delete' && protectedLiveKeys().has(input.storageKey)) throw new Error('The active or stopped site is protected. Select another workspace first.');
+        if (action === 'rename') {
+          const before = savedState;
+          savedState = renameSavedSite(savedState, input.storageKey, input.name);
+          if (!writePreferences()) { savedState = before; renderSavedSites(); throw new Error('Could not persist the saved site name.'); }
+          renderSavedSites();
+        } else {
+          selectedSiteId = input.storageKey;
+          await deleteSelectedSite({ confirmedKey: input.storageKey });
+          if (Object.hasOwn(savedState.sites, input.storageKey)) throw new Error('Could not remove the saved site.');
+        }
+        return { ...state(), storageKey: input.storageKey, [action === 'rename' ? 'renamed' : 'deleted']: true };
+      }
+      default: throw new Error('Unknown owner workspace operation.');
+    }
+    if (!runtime?.healthy) throw new Error($('error-message').textContent || 'The requested site did not start.');
+    return state();
+  }
+  return { getRuntime: () => runtime, state, perform };
+}
+
 void startInterface();
