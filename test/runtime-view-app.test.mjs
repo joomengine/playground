@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { catalogWithSelectedJoomlaPackage, normalizeConfiguration, readURLConfiguration } from '../src/config.mjs';
+import { catalogForRestoredSite } from '../src/site-import.mjs';
 import { readRuntimeViewURL } from '../src/runtime-views.mjs';
 
 const source = await readFile(new URL('../src/app.mjs', import.meta.url), 'utf8');
@@ -193,9 +194,9 @@ test('a stopped materialized site reopens at its exact version after a new stabl
   const catalog = { php: [{version: '8.4'}], joomla: [newest], defaults: {joomlaVersion: newest.version, phpVersion: '8.4'} };
   const context = { catalog, pinnedCatalog: {...catalog, joomla: [bundled]}, deploymentURL: base, selectedJoomlaPackages: new Map(),
     runtime: null, savedState: {sites: {}}, fields: {joomlaVersion: {value: ''}}, fillJoomlaOptions() {},
-    normalizeConfiguration, catalogWithSelectedJoomlaPackage, deploymentDescriptor: () => ({id: 'blank'}),
+    normalizeConfiguration, catalogWithSelectedJoomlaPackage, catalogForRestoredSite, deploymentDescriptor: () => ({id: 'blank'}),
   };
-  const resolve = runInNewContext(matching + resolver + '\nresolve', context);
+  const {resolve, existingSiteConfiguration} = runInNewContext(matching + resolver + '\n({resolve, existingSiteConfiguration})', context);
   for (const [version, selected] of [['6.2.0', undefined], ['6.1.9', packageFor('6.1.9')]]) {
     const input = { deployId: 'blank', storageKey: 'saved-site', persistence: true, joomlaVersion: version,
       phpVersion: '8.4', admin: { password: 'local-test-password' }, deploymentRecipe: {name: 'Saved'},
@@ -205,5 +206,15 @@ test('a stopped materialized site reopens at its exact version after a new stabl
     assert.equal(configuration.joomlaVersion, version);
     assert.equal(context.selectedJoomlaPackages.get(version).version, version);
     assert.equal(context.catalog.defaults.joomlaVersion, '6.2.1');
+    // A resume, recovery or checkpoint can enter directly with no prior editor selection.
+    context.catalog = catalog;
+    context.selectedJoomlaPackages.clear();
+    assert.equal(existingSiteConfiguration({...input, deploymentRecipe: undefined}).joomlaVersion, version);
+    assert.equal(context.selectedJoomlaPackages.get(version).version, version);
   }
+  const uploaded = {joomlaVersion: '5.4.9', phpVersion: '8.4', restoredSite: {joomlaVersion: '5.4.9', php: ['8.4']},
+    admin: {password: 'local-test-password'}};
+  assert.equal(existingSiteConfiguration(uploaded).joomlaVersion, uploaded.joomlaVersion);
+  assert.equal(context.selectedJoomlaPackages.get(uploaded.joomlaVersion).url, undefined);
+  assert.throws(() => existingSiteConfiguration({...uploaded, phpVersion: '8.6'}), /not available/);
 });
