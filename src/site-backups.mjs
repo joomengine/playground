@@ -88,7 +88,19 @@ export function createIndexedDBBackupStorage({ indexedDB = globalThis.indexedDB,
         };
       });
     },
-    remove: id => transaction('readwrite', tx => { tx.objectStore('backups').delete(id); tx.objectStore('archives').delete(id); }),
+    remove: (id, expectedRevision) => transaction('readwrite', (tx, done, abort) => {
+      const metadata = tx.objectStore('backups');
+      const erase = () => { metadata.delete(id); tx.objectStore('archives').delete(id); };
+      if (expectedRevision === undefined) { erase(); return; }
+      const read = metadata.get(id);
+      read.onsuccess = () => {
+        if (!read.result || read.result.revision !== expectedRevision) {
+          const error = new Error('The backup changed or was removed in another window.');
+          error.name = 'BackupConflictError'; abort(error); return;
+        }
+        erase();
+      };
+    }),
     clear: () => transaction('readwrite', tx => { tx.objectStore('backups').clear(); tx.objectStore('archives').clear(); }),
   };
 }
@@ -111,6 +123,10 @@ export function createSiteBackups({ baseURL = DEFAULT_BASE, storage = createInde
       return record;
     },
     remove: id => serial(() => storage.remove(id)),
+    removeRevision(id, expectedRevision) {
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) throw new TypeError('A positive backup revision is required.');
+      return serial(() => storage.remove(id, expectedRevision));
+    },
     clear: () => serial(() => storage.clear()),
     saveArchive(archive, { id, name, configuration, sourceSiteKey, expectedRevision } = {}) {
       // Capture the bytes before a worker can transfer or reuse the source buffer.

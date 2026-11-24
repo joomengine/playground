@@ -498,7 +498,7 @@ export async function resetPlayground({ storageKey = 'default', onBlocked = () =
 }
 
 /** Create a real Joomla installation backed by upstream PHP and MariaDB WASM. */
-export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, siteExport = null, recovery = false, rotateAdministrator = false, deferInitialSave = false, jcbUpgrade = null, resumeOnly = false } = {}) {
+export async function createPlayground(input, { onProgress = () => {}, checkpoint = null, siteExport = null, recovery = false, rotateAdministrator = false, deferInitialSave = false, jcbUpgrade = null, resumeOnly = false, verifyUnusedStorage } = {}) {
   const environment = await prepareEnvironment();
   if (environment.reloadRequired) throw new Error(environment.reason + ' Complete the controlled page navigation before starting the playground.');
   let imagePhase;
@@ -533,6 +533,12 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   const identity = await storageIdentity(config.storageKey);
   const clientId = await clientIdentity();
   const release = config.persistence ? await acquireSiteLock(identity) : async () => {};
+  if (config.persistence && verifyUnusedStorage) {
+    // The owner already checked before switching away from its source site.
+    // Repeat under the actual runtime lock, before opening or marking either database.
+    try { await verifyUnusedStorage(config.storageKey); }
+    catch (error) { await release(); throw error; }
+  }
   if (config.persistence) rememberRuntimeStorage({ baseURL: base.href, storageKey: config.storageKey, identity });
   const instanceId = crypto.randomUUID();
   // This owner survives PHP settings changes and recovery, but is never part
@@ -1016,6 +1022,8 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
     }
     const actual = await readJoomlaMetadata(handle);
     installed = { ...installed, ...actual };
+    // A resume authenticates with the site's saved account, independent of the draft on the dashboard.
+    if (installed.administrator) config.admin = structuredClone(installed.administrator);
     if (actual.jcbVersion) {
       if (actual.jcbVersion !== config.jcbVersion || actual.jcbVersion === 'none') delete config.jcbPackage;
       config.jcbVersion = actual.jcbVersion;

@@ -130,6 +130,12 @@ for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox'
     assert.equal(failedReplacement.count, 1);
     assert.deepEqual(failedReplacement.retained, failedReplacement.original);
 
+    // A second client may have confirmed deletion before this revision was replaced.
+    await assert.rejects(page.evaluate(async () => {
+      await window.backups.removeRevision(window.backupId, 1);
+    }), /changed or was removed/);
+    assert.equal(await page.evaluate(async () => (await window.backups.get(window.backupId)).revision), 2);
+
     const recovery = await page.evaluate(async () => {
       const original = Worker.prototype.postMessage;
       window.restoreFlush = () => { Worker.prototype.postMessage = original; };
