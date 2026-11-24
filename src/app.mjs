@@ -890,6 +890,23 @@ function materializeEditedConfiguration(full, previous, name, requirements) {
   const document = createFullDeploymentDocument(full, { name, requirements, baseURL: deploymentURL });
   return { ...full, deploymentRecipe: document };
 }
+function catalogForDeploymentInput(input) {
+  // The current selector omits earlier stable releases. A saved site can still
+  // be backed by a host-pinned archive or its own exact package descriptor.
+  const pinned = pinnedCatalog.joomla.find(entry => entry.version === input.joomlaVersion);
+  const available = pinned && !catalog.joomla.some(entry => entry.version === pinned.version)
+    ? { ...catalog, joomla: [...catalog.joomla, pinned] } : catalog;
+  return catalogWithSelectedJoomlaPackage(available, input, deploymentURL);
+}
+function useDeploymentCatalog(available, version) {
+  if (available === catalog) return;
+  const entry = available.joomla.find(item => item.version === version);
+  if (entry) selectedJoomlaPackages.set(version, { ...entry });
+  const previous = fields.joomlaVersion.value;
+  catalog = available;
+  fillJoomlaOptions();
+  fields.joomlaVersion.value = previous;
+}
 async function resolve(input) {
   if (input.restoredSite) {
     if (input.jcbVersion !== editorConfiguration?.jcbVersion) await prepareDynamicInput(input);
@@ -911,8 +928,10 @@ async function resolve(input) {
   // This also lets owners configure a JCB version no longer present in the catalog.
   if (installedInput && matchesInstalledSelection(input)) {
     const document = input.deploymentRecipe;
-    return { configuration: normalizeConfiguration(installedInput, { catalog: catalogForRestoredSite(catalog, installedInput), baseURL: deploymentURL }),
-      deploy: deploymentDescriptor(input.deployId) || (document ? { id: input.deployId, title: document.name,
+    const available = catalogForDeploymentInput(installedInput);
+    const configuration = normalizeConfiguration(installedInput, { catalog: available, baseURL: deploymentURL });
+    useDeploymentCatalog(available, configuration.joomlaVersion);
+    return { configuration, deploy: deploymentDescriptor(input.deployId) || (document ? { id: input.deployId, title: document.name,
         joomla: document.requirements.joomla, requirements: document.requirements, configuration: document.configuration } : undefined) };
   }
   input = customDeploymentInput(input);
@@ -924,24 +943,9 @@ async function resolve(input) {
     if (current) input.jcbVersion = current.version;
   }
   await prepareDynamicInput(input);
-  // Exact older pinned versions may still belong to an existing saved site or
-  // shared configuration, even after a newer stable replaced them in the menu.
-  const previousPinned = pinnedCatalog.joomla.find(entry => entry.version === input.joomlaVersion)
-    ?? pinnedCatalog.retiredJoomla?.find(entry => entry.version === input.joomlaVersion);
-  if (previousPinned && !catalog.joomla.some(entry => entry.version === input.joomlaVersion)) {
-    selectedJoomlaPackages.set(previousPinned.version, { ...previousPinned });
-    catalog = { ...catalog, joomla: dynamicJoomlaChoices(pinnedCatalog, dynamicMetadata.joomla, selectedJoomlaPackages) };
-    fillJoomlaOptions();
-  }
-  const selectedCatalog = catalogWithSelectedJoomlaPackage(catalog, input, deploymentURL);
-  const resolved = await resolveDeployConfiguration(input, { catalog: selectedCatalog, deployCatalog, baseURL: deploymentURL });
-  if (selectedCatalog !== catalog) {
-    selectedJoomlaPackages.set(resolved.configuration.joomlaVersion, structuredClone(resolved.configuration.joomlaPackage));
-    const previous = fields.joomlaVersion.value;
-    catalog = selectedCatalog;
-    fillJoomlaOptions();
-    fields.joomlaVersion.value = previous;
-  }
+  const available = catalogForDeploymentInput(input);
+  const resolved = await resolveDeployConfiguration(input, { catalog: available, deployCatalog, baseURL: deploymentURL });
+  useDeploymentCatalog(available, resolved.configuration.joomlaVersion);
   return resolved;
 }
 function fillOptions(select, items) {
