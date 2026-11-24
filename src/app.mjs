@@ -185,6 +185,14 @@ function renderDeploymentChoices(selected = fields.deployId.value) {
   $('editor-deployment').value = selected;
   $('delete-deployment').disabled = !customRegistry.deployments.some(entry => entry.id === selected);
 }
+function refreshCustomRecipes() {
+  customRegistry = readDeploymentRegistry(preferences, customRegistryKey);
+  const selected = fields.deployId.value;
+  renderDeploymentChoices(deploymentDescriptor(selected) ? selected : currentConfig?.deployId || deployCatalog?.default);
+}
+window.addEventListener('storage', event => {
+  if (event.storageArea === preferences && (event.key === customRegistryKey || event.key === null)) refreshCustomRecipes();
+});
 let administratorEdited = false;
 function markDeploymentEdited(event) {
   if (['admin-name', 'admin-username', 'admin-email', 'admin-password'].includes(event?.target?.id)) administratorEdited = true;
@@ -1183,7 +1191,7 @@ function findProfile(deployId, joomlaVersion) {
   return drafts.get(`${deployId}:${joomlaVersion}`)
     || Object.values(savedState.sites).reverse().find((item) => item.deployId === deployId && item.joomlaVersion === joomlaVersion);
 }
-async function launch({ siteExport, checkpoint, importedConfiguration, deploymentChanges, jcbUpgrade, rotateAdministrator = false, resumeOnly = false, backupId, replaceWorkspaceId } = {}) {
+async function launch({ siteExport, checkpoint, importedConfiguration, deploymentChanges, jcbUpgrade, rotateAdministrator = false, resumeOnly = false, backupId, replaceWorkspaceId, retainPrevious = false } = {}) {
   if (!requireOwnerForReplacement()) return;
   if (busy || launching || !initialized || !catalog || !deployCatalog) return;
   launching = true;
@@ -1334,7 +1342,7 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     if (siteExport) feedback(runtime.installation.contentHashValidated ? 'Package validated.' : 'Package validation is unavailable for this older export.');
     // Only newly managed replacement slots are discarded. Legacy saved sites
     // and PR24's deliberate source copies remain visible in storage management.
-    if (previousManaged?.managed && previousLiveKey && previousLiveKey !== currentConfig.storageKey && !checkpoint) {
+    if (!retainPrevious && previousManaged?.managed && previousLiveKey && previousLiveKey !== currentConfig.storageKey && !checkpoint) {
       try {
         await runtime.flush();
         await resetPlayground({ storageKey: previousLiveKey, onBlocked: storageRemovalBlocked });
@@ -1938,6 +1946,29 @@ async function downloadConfiguration(input) {
   const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'joomengine-deploy.json';
   document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
+async function copyDeployment(input, sourceSite, storageKey, rotateAdministrator, replaceWorkspaceId) {
+  setBusy(true);
+  let copy;
+  try {
+    if (input.jcbVersion && input.jcbVersion !== 'none' && !input.jcbPackage) {
+      await prepareDynamicInput(input);
+      const pin = [...pinnedJcb.values()].find(item => item.version === input.jcbVersion);
+      if (!input.jcbPackage && pin) input.jcbPackage = structuredClone(pin.package);
+    }
+    input = (await resolve(input)).configuration;
+    if (codeHost && !codeHost.closed && !await codeHost.beforeClose()) return false;
+    if (databaseHost && !databaseHost.closed && !await databaseHost.beforeClose()) return false;
+    if (replaceWorkspaceId !== undefined && runtime?.workspace.id !== replaceWorkspaceId) throw new Error('The source workspace changed.');
+    const sourceConfiguration = { ...sourceSite, storageKey: input.storageKey, admin: input.admin };
+    copy = await prepareUploadedSiteCopy({ input, sourceConfiguration, runtime, storageKey, administratorEdited: rotateAdministrator,
+      open: async source => createPlayground((await resolve(source)).configuration, { onProgress: progress }) });
+  } finally { setBusy(false); }
+  freshKeyPending = false; selectedSiteId = null; resumeLastRoute = false;
+  $('deploy-dialog').close();
+  await launch({ checkpoint: copy.checkpoint, importedConfiguration: copy.configuration, deploymentChanges: copy.changes,
+    rotateAdministrator: copy.rotateAdministrator, jcbUpgrade: copy.jcbUpgrade, replaceWorkspaceId, retainPrevious: replaceWorkspaceId !== undefined });
+  return runtime?.healthy && currentConfig?.storageKey === storageKey;
+}
 async function useDeployment() {
   if (!requireOwnerForReplacement()) return;
   if (busy || launching || !catalog) return;
@@ -1949,26 +1980,7 @@ async function useDeployment() {
     const changesInstalledJcb = sourceSite && input.joomlaVersion === sourceSite.joomlaVersion
       && input.jcbVersion && input.jcbVersion !== 'none' && input.jcbVersion !== (sourceSite.jcbVersion || 'none');
     if (input.restoredSite || changesInstalledJcb) {
-      if (input.jcbVersion && input.jcbVersion !== 'none' && !input.jcbPackage) {
-        await prepareDynamicInput(input);
-        const pin = [...pinnedJcb.values()].find(item => item.version === input.jcbVersion);
-        if (!input.jcbPackage && pin) input.jcbPackage = structuredClone(pin.package);
-      }
-      input = (await resolve(input)).configuration;
-      setBusy(true);
-      let copy;
-      try {
-        if (codeHost && !codeHost.closed && !await codeHost.beforeClose()) return;
-        if (databaseHost && !databaseHost.closed && !await databaseHost.beforeClose()) return;
-        const sourceConfiguration = { ...(sourceSite || editorConfiguration),
-          storageKey: input.storageKey, admin: input.admin };
-        copy = await prepareUploadedSiteCopy({ input, sourceConfiguration, runtime, storageKey, administratorEdited,
-          open: async source => createPlayground((await resolve(source)).configuration, { onProgress: progress }) });
-      } finally { setBusy(false); }
-      freshKeyPending = false; selectedSiteId = null; resumeLastRoute = false;
-      $('deploy-dialog').close();
-      await launch({ checkpoint: copy.checkpoint, importedConfiguration: copy.configuration, deploymentChanges: copy.changes,
-        rotateAdministrator: copy.rotateAdministrator, jcbUpgrade: copy.jcbUpgrade });
+      await copyDeployment(input, sourceSite || editorConfiguration, storageKey, administratorEdited);
       return;
     }
     // Using a recipe creates an independent installation, including when a
@@ -2077,17 +2089,12 @@ async function updateRunningPhp(settings, minor = currentConfig.phpVersion) {
 /** Keep an attached agent's deployment changes in step with this owner's forms, saved state and preview. */
 export async function ownerDeployment(workspaceId, operation, options = {}) {
   if (!runtime?.healthy || runtime.workspace.id !== workspaceId || companionView) throw new Error('The selected Playground site changed.');
+  if (operation === 'refreshRecipes') { refreshCustomRecipes(); return; }
   if (busy || launching || closing) throw new Error('Wait for the active Playground operation to finish.');
   if (operation === 'resolve') {
     const selected = await resolveOwnerDeployment(options);
     const resolved = await resolve(selected);
-    return { configuration: resolved.configuration, requirements: { ...resolved.deploy.requirements, joomla: resolved.deploy.joomla } };
-  }
-  if (operation === 'refreshRecipes') {
-    customRegistry = readDeploymentRegistry(preferences, customRegistryKey);
-    const selected = fields.deployId.value;
-    renderDeploymentChoices(deploymentDescriptor(selected) ? selected : currentConfig.deployId);
-    return;
+    return { configuration: resolved.configuration, requirements: selected.deploymentRecipe?.requirements ?? (resolved.deploy && { ...resolved.deploy.requirements, joomla: resolved.deploy.joomla }) };
   }
   if (document.querySelector('dialog[open]')) throw new Error('Finish the open Playground dialog before changing this site.');
   if (operation === 'php') {
@@ -2099,6 +2106,17 @@ export async function ownerDeployment(workspaceId, operation, options = {}) {
       throw error;
     } finally { setBusy(false); }
     return { phpVersion: currentConfig.phpVersion, phpSettings: { ...currentConfig.phpSettings } };
+  }
+  if (operation === 'clone') {
+    const allowed = ['siteName', 'initialPath', 'autoLogin', 'hideToolbar', 'language', 'multilingual', 'languageTags', 'extensions', 'languages', 'startupCommands', 'menus', 'template', 'content', 'overlays', 'phpVersion', 'phpSettings', 'jcbVersion', 'jcbPackage', 'admin'];
+    for (const key of Object.keys(options)) if (!allowed.includes(key)) throw new TypeError(`Use a new deployment to change ${key}.`);
+    if (options.jcbVersion === 'none' && currentConfig.jcbVersion !== 'none') throw new Error('Choose a new deployment to remove installed JCB.');
+    const input = { ...currentConfig, ...options, phpSettings: { ...currentConfig.phpSettings, ...options.phpSettings },
+      admin: { ...currentConfig.admin, ...options.admin } };
+    if (options.jcbVersion && options.jcbVersion !== currentConfig.jcbVersion && !options.jcbPackage) delete input.jcbPackage;
+    const storageKey = `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`;
+    if (!await copyDeployment(input, currentConfig, storageKey, options.admin !== undefined, workspaceId)) throw new Error('The owner did not open the new site copy.');
+    return { workspaceId: runtime.workspace.id, siteName: currentConfig.siteName, deployId: currentConfig.deployId };
   }
   if (operation === 'apply') {
     const editable = ['siteName', 'initialPath', 'autoLogin', 'language', 'multilingual', 'languageTags', 'extensions', 'languages', 'startupCommands', 'menus', 'template', 'content', 'overlays'];
@@ -2611,7 +2629,7 @@ export function getOwnerWorkspace() {
         // Each independent deployment gets its own durable store within this profile.
         options.storageKey ||= 'agent-' + crypto.randomUUID();
         freshKeyPending = false; resumeLastRoute = false;
-        const opened = await launch({ importedConfiguration: options, replaceWorkspaceId: input.replaceWorkspaceId });
+        const opened = await launch({ importedConfiguration: options, replaceWorkspaceId: input.replaceWorkspaceId, retainPrevious: true });
         if (!opened) throw new Error($('header-feedback').textContent || $('error-message').textContent || 'The deployment did not open.');
         break;
       }
@@ -2646,7 +2664,7 @@ export function getOwnerWorkspace() {
         const options = { ...savedState.sites[input.storageKey], admin: administrator(), fresh: false };
         // Opening a different saved site is a replacement, including when PHP is stopped.
         if (previous && input.replaceWorkspaceId === undefined && !await confirmLiveReplacement()) throw new Error('Cancelled the saved site switch.');
-        await launch({ importedConfiguration: options, resumeOnly: true, replaceWorkspaceId: input.replaceWorkspaceId });
+        await launch({ importedConfiguration: options, resumeOnly: true, replaceWorkspaceId: input.replaceWorkspaceId, retainPrevious: true });
         if (runningSiteId !== input.storageKey) throw new Error('The saved site could not be resumed.');
         break;
       }
