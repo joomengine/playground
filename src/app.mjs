@@ -774,22 +774,28 @@ function displayError(error, title = t('title.error')) {
   activity(presentation.summary);
   $('error-view').focus();
 }
-async function recoverSite() {
+async function recoverSite(savedConfiguration) {
   if (!requireOwnerForReplacement()) return;
-  if (busy || !catalog || !deployCatalog || !fields.persistence.checked) return;
+  if (busy || !catalog || !deployCatalog || !(savedConfiguration?.persistence ?? fields.persistence.checked)) return;
   pauseAutomaticLaunch();
   if (runtime && !await closeSite({ save: runtime.healthy && currentConfig.persistence && !runtime.recovery })) return;
   setBusy(true);
   destroyPreview();
   show('loading-view');
   try {
-    const input = formInput();
-    const resolved = await resolve(input);
-    currentInput = input;
-    currentConfig = resolved.configuration;
-    runtime = await createPlayground(currentConfig, { recovery: true, onProgress: progress });
+    const input = savedConfiguration ?? formInput();
+    // Recovery opens the existing storage identity without downloading its deployment recipe.
+    const resolved = savedConfiguration
+      ? { configuration: normalizeConfiguration(input, { catalog: catalogForRestoredSite(catalog, input), baseURL: deploymentURL }), deploy: deploymentDescriptor(input.deployId) }
+      : await resolve(input);
+    const recovered = await createPlayground(resolved.configuration, { recovery: true, onProgress: progress });
+    runtime = recovered; stoppedSite = undefined;
+    currentInput = input; currentConfig = recovered.configuration;
+    if (savedConfiguration) applyConfiguration(currentConfig, input, resolved.deploy);
+    selectedSiteId = currentConfig.storageKey;
     lastSavedAt = undefined; saveFailed = false;
     runningSiteId = currentConfig.storageKey;
+    runtimeViewHost?.update();
     runningAdministrator = runtime.installation?.administrator || currentInput.admin;
     clearFeedback();
     $('error-title').textContent = t('title.recovery');
@@ -1626,6 +1632,12 @@ async function restartOrStart({ confirmed = false } = {}) {
     return launch({ importedConfiguration: input, resumeOnly: true, backupId: sourceBackupId });
   }
   if (runtime.recovery?.filesOnly || (!confirmed && !confirm(t('lifecycle.restartConfirm')))) return false;
+  if (runtime.recovery) {
+    // A recovery handle never booted Joomla. Close it and prove a normal resume can load the repaired site.
+    const input = { ...currentInput, ...runtime.configuration, admin: runningAdministrator || currentInput.admin, persistence: true, fresh: false };
+    if (!await closeSite()) return false;
+    return launch({ importedConfiguration: input, resumeOnly: true, backupId: sourceBackupId });
+  }
   if (previewDirty && !confirm(t('confirm.unsavedSiteForm'))) return false;
   if (runtimeViewHost && !await runtimeViewHost.prepareTransition('restart')) {
     feedback(t('lifecycle.transitionBlocked'), { error: true, persistent: true }); return false;
@@ -2088,14 +2100,18 @@ async function updateRunningPhp(settings, minor = currentConfig.phpVersion) {
 
 /** Keep an attached agent's deployment changes in step with this owner's forms, saved state and preview. */
 export async function ownerDeployment(workspaceId, operation, options = {}) {
-  if (!runtime?.healthy || runtime.workspace.id !== workspaceId || companionView) throw new Error('The selected Playground site changed.');
+  if (!initialized || companionView || (runtime?.workspace.id ?? stoppedSite?.workspaceId ?? null) !== (workspaceId ?? null)) {
+    throw new Error('The selected Playground owner or site changed.');
+  }
   if (operation === 'refreshRecipes') { refreshCustomRecipes(); return; }
   if (busy || launching || closing) throw new Error('Wait for the active Playground operation to finish.');
-  if (operation === 'resolve') {
-    const selected = await resolveOwnerDeployment(options);
+  if (operation === 'resolve' || operation === 'selectedRecipe') {
+    const selected = operation === 'resolve' ? await resolveOwnerDeployment(options)
+      : stoppedSite?.configuration ?? formInput({}, { draft: true });
     const resolved = await resolve(selected);
     return { configuration: resolved.configuration, requirements: selected.deploymentRecipe?.requirements ?? (resolved.deploy && { ...resolved.deploy.requirements, joomla: resolved.deploy.joomla }) };
   }
+  if (!runtime?.healthy) throw new Error('Start the selected site before applying changes or making a live copy.');
   if (document.querySelector('dialog[open]')) throw new Error('Finish the open Playground dialog before changing this site.');
   if (operation === 'php') {
     const settings = normalizePhpSettings({ ...currentConfig.phpSettings, ...options.phpSettings });
@@ -2111,7 +2127,13 @@ export async function ownerDeployment(workspaceId, operation, options = {}) {
     const allowed = ['siteName', 'initialPath', 'autoLogin', 'hideToolbar', 'language', 'multilingual', 'languageTags', 'extensions', 'languages', 'startupCommands', 'menus', 'template', 'content', 'overlays', 'phpVersion', 'phpSettings', 'jcbVersion', 'jcbPackage', 'admin'];
     for (const key of Object.keys(options)) if (!allowed.includes(key)) throw new TypeError(`Use a new deployment to change ${key}.`);
     if (options.jcbVersion === 'none' && currentConfig.jcbVersion !== 'none') throw new Error('Choose a new deployment to remove installed JCB.');
-    const input = { ...currentConfig, ...options, phpSettings: { ...currentConfig.phpSettings, ...options.phpSettings },
+    // A running configuration already contains its preset packages and startup commands.
+    // Preserve their provenance when copying a built-in recipe with edited settings.
+    const preset = deploymentDescriptor(currentConfig.sourceDeployId || currentConfig.deployId);
+    const deploymentRecipe = currentConfig.deploymentRecipe || createFullDeploymentDocument(currentConfig, {
+      baseURL: deploymentURL, requirements: preset && { ...preset.requirements, joomla: preset.joomla },
+    });
+    const input = { ...currentConfig, deploymentRecipe, ...options, phpSettings: { ...currentConfig.phpSettings, ...options.phpSettings },
       admin: { ...currentConfig.admin, ...options.admin } };
     if (options.jcbVersion && options.jcbVersion !== currentConfig.jcbVersion && !options.jcbPackage) delete input.jcbPackage;
     const storageKey = `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`;
@@ -2119,7 +2141,7 @@ export async function ownerDeployment(workspaceId, operation, options = {}) {
     return { workspaceId: runtime.workspace.id, siteName: currentConfig.siteName, deployId: currentConfig.deployId };
   }
   if (operation === 'apply') {
-    const editable = ['siteName', 'initialPath', 'autoLogin', 'language', 'multilingual', 'languageTags', 'extensions', 'languages', 'startupCommands', 'menus', 'template', 'content', 'overlays'];
+    const editable = ['siteName', 'initialPath', 'autoLogin', 'hideToolbar', 'language', 'multilingual', 'languageTags', 'extensions', 'languages', 'startupCommands', 'menus', 'template', 'content', 'overlays'];
     for (const key of Object.keys(options)) if (!editable.includes(key)) throw new TypeError(`Use a new deployment to change ${key}.`);
     const full = normalizeConfiguration({ ...currentConfig, ...options, fresh: false }, { catalog: catalogForRestoredSite(catalog, currentConfig), baseURL: deploymentURL });
     const descriptor = deploymentDescriptor(currentConfig.deployId);
@@ -2608,9 +2630,9 @@ export function getOwnerWorkspace() {
   const identity = () => runtime?.workspace?.id || stoppedSite?.workspaceId || null;
   const state = () => ({
     phase: !initialized ? 'initializing' : busy || launching || closing ? 'busy'
-      : runtime?.healthy ? 'running' : runtime?.recovery ? 'recovery' : stoppedSite ? 'stopped' : 'idle',
+      : runtime?.recovery ? 'recovery' : runtime?.healthy ? 'running' : stoppedSite ? 'stopped' : 'idle',
     workspaceId: identity(), storageKey: runtime?.configuration?.storageKey || stoppedSite?.configuration?.storageKey || null,
-    selectedStorageKey: selectedSiteId, healthy: Boolean(runtime?.healthy),
+    selectedStorageKey: selectedSiteId, healthy: Boolean(runtime?.healthy), countdownActive: launchCountdown.active,
   });
   async function perform(action, input = {}) {
     if (!initialized || busy || launching || closing) throw new Error('The Playground owner is busy or initializing.');
@@ -2624,6 +2646,7 @@ export function getOwnerWorkspace() {
     }
     pauseAutomaticLaunch();
     switch (action) {
+      case 'pause': return state();
       case 'open': {
         const options = await resolveOwnerDeployment(input);
         // Each independent deployment gets its own durable store within this profile.
@@ -2656,6 +2679,22 @@ export function getOwnerWorkspace() {
         await resetSite({ confirmed: true });
         if (identity() === previous) throw new Error('The site was not reset.');
         break;
+      case 'recover': {
+        const key = input.storageKey;
+        const active = runtime?.configuration;
+        const stopped = stoppedSite?.configuration;
+        const saved = active?.storageKey === key ? active : stopped?.storageKey === key ? stopped
+          : Object.hasOwn(savedState.sites, key) ? savedState.sites[key] : currentConfig?.storageKey === key && currentConfig.persistence ? currentConfig : null;
+        if (!saved) throw new Error('Unknown saved site.');
+        if (active?.storageKey === key && runtime.recovery) return { ...state(), recovery: runtime.recovery };
+        if (previous && (active?.storageKey ?? stopped?.storageKey) !== key && input.replaceWorkspaceId === undefined && !await confirmLiveReplacement()) {
+          throw new Error('Cancelled the switch to the recovery site.');
+        }
+        if (identity() !== previous) throw new Error('The selected workspace changed before recovery.');
+        await recoverSite({ ...saved, admin: saved.admin || administrator(), persistence: true, fresh: false });
+        if (!runtime?.recovery || runtime.configuration.storageKey !== key) throw new Error($('error-message').textContent || 'The saved site could not be opened for recovery.');
+        return { ...state(), recovery: runtime.recovery };
+      }
       case 'resume': {
         if (!Object.hasOwn(savedState.sites, input.storageKey)) throw new Error('Unknown saved site.');
         if (runningSiteId === input.storageKey && runtime?.healthy) return state();

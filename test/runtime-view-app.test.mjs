@@ -120,3 +120,36 @@ test('owner metadata follows completed companion PHP changes without overwriting
   assert.equal(context.currentConfig.initialPath, '/administrator/');
   assert.equal(saves, 1);
 });
+
+test('owner recovery selects the exact stopped or failed saved site and checks replacements', async () => {
+  const ownerSource = source.slice(source.indexOf('export function getOwnerWorkspace()'), source.indexOf('\nvoid startInterface();')).replace('export function', 'function');
+  const storageKey = 'saved-recovery';
+  const configuration = { storageKey, persistence: true, siteName: 'Existing' };
+  let restored;
+  const context = {
+    initialized: true, busy: false, launching: false, closing: false, companionView: false, runtime: null,
+    stoppedSite: { workspaceId: 'stopped-id', configuration }, selectedSiteId: storageKey, currentConfig: null,
+    savedState: { sites: {} }, administrator: () => ({ username: 'admin' }), pauseAutomaticLaunch() {},
+    $: () => ({ textContent: '' }), confirmLiveReplacement: async () => false,
+    async recoverSite(input) {
+      restored = input;
+      context.runtime = { workspace: { id: 'recovery-id' }, configuration: input, healthy: true, recovery: { configured: true, databaseAvailable: true } };
+      context.stoppedSite = null;
+    },
+  };
+  const owner = runInNewContext(ownerSource + '\ngetOwnerWorkspace()', context);
+  await assert.rejects(owner.perform('recover', { storageKey, replaceWorkspaceId: 'stale-id' }), /changed/);
+  await assert.rejects(owner.perform('recover', { storageKey: 'missing' }), /Unknown saved site/);
+  const recovered = await owner.perform('recover', { storageKey });
+  assert.equal(recovered.phase, 'recovery');
+  assert.equal(recovered.workspaceId, 'recovery-id');
+  assert.equal(restored.fresh, false);
+  assert.equal(restored.storageKey, storageKey);
+  context.savedState.sites.other = { storageKey: 'other', persistence: true };
+  await assert.rejects(owner.perform('recover', { storageKey: 'other' }), /Cancelled/);
+  assert.equal(owner.state().storageKey, storageKey);
+  // A failed launch can have a durable saved configuration before it appears in the catalog.
+  context.runtime = null;
+  context.currentConfig = { storageKey: 'failed-site', persistence: true };
+  assert.equal((await owner.perform('recover', { storageKey: 'failed-site' })).storageKey, 'failed-site');
+});
