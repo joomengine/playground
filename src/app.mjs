@@ -34,7 +34,7 @@ import { readSiteExport, configurationForSiteExport, catalogForRestoredSite } fr
 import { networkFetch } from './network-transport.mjs';
 import { createSiteBackups } from './site-backups.mjs';
 import { createBackupPanel } from './backup-panel.mjs';
-import { createStorageManagement, createRuntimeStorageAdapter } from './storage-management.mjs';
+import { createStorageManagement, createRuntimeStorageAdapter, runtimeStorageIdentity } from './storage-management.mjs';
 import { createRuntimeViewHost, attachRuntimeView, readRuntimeViewURL, readActiveRuntimeView, runtimeViewURL } from './runtime-views.mjs';
 import { createMailController } from './mail/dialog.mjs';
 
@@ -1197,7 +1197,7 @@ function findProfile(deployId, joomlaVersion) {
   return drafts.get(`${deployId}:${joomlaVersion}`)
     || Object.values(savedState.sites).reverse().find((item) => item.deployId === deployId && item.joomlaVersion === joomlaVersion);
 }
-async function launch({ siteExport, checkpoint, importedConfiguration, deploymentChanges, jcbUpgrade, rotateAdministrator = false, resumeOnly = false, backupId, replaceWorkspaceId, retainPrevious = false } = {}) {
+async function launch({ siteExport, checkpoint, importedConfiguration, deploymentChanges, jcbUpgrade, rotateAdministrator = false, resumeOnly = false, backupId, replaceWorkspaceId, retainPrevious = false, verifyUnusedStorage } = {}) {
   if (!requireOwnerForReplacement()) return;
   if (busy || launching || !initialized || !catalog || !deployCatalog) return;
   launching = true;
@@ -1278,7 +1278,7 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     $('preview-label').textContent = currentConfig.siteName;
     activity(`Starting ${resolved.deploy?.title || currentConfig.deployId} with Joomla ${currentConfig.joomlaVersion} and PHP ${currentConfig.phpVersion}.`);
     const resumePath = resumeLastRoute && !input.fresh && currentConfig.persistence && savedState.sites[currentConfig.storageKey]?.lastPath;
-    runtime = preparedRuntime || await createPlayground({ ...currentConfig, ...(resumePath ? { initialPath: safeSavedRoute(resumePath, currentConfig.initialPath) } : {}) }, { onProgress: progress, siteExport, checkpoint, jcbUpgrade, rotateAdministrator, deferInitialSave: true, resumeOnly });
+    runtime = preparedRuntime || await createPlayground({ ...currentConfig, ...(resumePath ? { initialPath: safeSavedRoute(resumePath, currentConfig.initialPath) } : {}) }, { onProgress: progress, siteExport, checkpoint, jcbUpgrade, rotateAdministrator, deferInitialSave: true, resumeOnly, verifyUnusedStorage });
     preparedRuntime = undefined;
     stoppedSite = undefined;
     currentLiveManaged = previousManaged?.storageKey === currentConfig.storageKey
@@ -2634,6 +2634,14 @@ export function getOwnerWorkspace() {
     workspaceId: identity(), storageKey: runtime?.configuration?.storageKey || stoppedSite?.configuration?.storageKey || null,
     selectedStorageKey: selectedSiteId, healthy: Boolean(runtime?.healthy), countdownActive: launchCountdown.active,
   });
+  async function assertUnusedStorage(key) {
+    const exists = () => Object.hasOwn(savedState.sites, key)
+      || Object.hasOwn(readSavedState(preferences, preferenceKey).sites, key) || protectedLiveKeys().has(key);
+    const id = await runtimeStorageIdentity(deploymentURL, key);
+    if (exists() || (await managedStorage.list()).some(entry => entry.id === id || entry.storageKey === key) || exists()) {
+      throw new Error('This storage key already belongs to a site. Use workspace_resume or choose an unused storageKey.');
+    }
+  }
   async function perform(action, input = {}) {
     if (!initialized || busy || launching || closing) throw new Error('The Playground owner is busy or initializing.');
     if (companionView) throw new Error('Select the original Playground owner window.');
@@ -2650,9 +2658,11 @@ export function getOwnerWorkspace() {
       case 'open': {
         const options = await resolveOwnerDeployment(input);
         // Each independent deployment gets its own durable store within this profile.
+        const verifyUnusedStorage = options.storageKey ? assertUnusedStorage : undefined;
         options.storageKey ||= 'agent-' + crypto.randomUUID();
+        if (verifyUnusedStorage) await verifyUnusedStorage(options.storageKey);
         freshKeyPending = false; resumeLastRoute = false;
-        const opened = await launch({ importedConfiguration: options, replaceWorkspaceId: input.replaceWorkspaceId, retainPrevious: true });
+        const opened = await launch({ importedConfiguration: options, replaceWorkspaceId: input.replaceWorkspaceId, retainPrevious: true, verifyUnusedStorage });
         if (!opened) throw new Error($('header-feedback').textContent || $('error-message').textContent || 'The deployment did not open.');
         break;
       }

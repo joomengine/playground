@@ -129,7 +129,8 @@ test('owner recovery selects the exact stopped or failed saved site and checks r
   const context = {
     initialized: true, busy: false, launching: false, closing: false, companionView: false, runtime: null,
     stoppedSite: { workspaceId: 'stopped-id', configuration }, selectedSiteId: storageKey, currentConfig: null,
-    savedState: { sites: {} }, administrator: () => ({ username: 'admin' }), pauseAutomaticLaunch() {},
+    savedState: { sites: {} }, administrator: () => ({ username: 'admin' }),
+    launchCountdown: { active: false }, pauseAutomaticLaunch() {},
     $: () => ({ textContent: '' }), confirmLiveReplacement: async () => false,
     async recoverSite(input) {
       restored = input;
@@ -152,4 +153,33 @@ test('owner recovery selects the exact stopped or failed saved site and checks r
   context.runtime = null;
   context.currentConfig = { storageKey: 'failed-site', persistence: true };
   assert.equal((await owner.perform('recover', { storageKey: 'failed-site' })).storageKey, 'failed-site');
+});
+
+test('opening an independent named site refuses persisted, running, stopped and orphaned stores', async () => {
+  const ownerSource = source.slice(source.indexOf('export function getOwnerWorkspace()'), source.indexOf('\nvoid startInterface();')).replace('export function', 'function');
+  let launched = 0;
+  let inventory = [{ id: 'native-id' }];
+  const context = {
+    initialized: true, busy: false, launching: false, closing: false, companionView: false, runtime: null, stoppedSite: null,
+    launchCountdown: {active: false}, pauseAutomaticLaunch() {}, savedState: {sites: {saved: {}}}, selectedSiteId: null,
+    protectedLiveKeys: () => new Set(['running', 'stopped']), runtimeStorageIdentity: async (_base, key) => key === 'orphan' ? 'native-id' : key,
+    readSavedState: () => ({sites: {otherTab: {}}}), managedStorage: {list: async () => inventory}, preferences: {}, preferenceKey: 'key', deploymentURL: base,
+    resolveOwnerDeployment: async input => ({storageKey: input.configuration.storageKey}),
+    freshKeyPending: false, resumeLastRoute: false,
+    async launch({ importedConfiguration, verifyUnusedStorage }) {
+      if (importedConfiguration.storageKey === 'race') inventory = [{storageKey: 'race'}];
+      await verifyUnusedStorage(importedConfiguration.storageKey);
+      assert.equal(importedConfiguration.storageKey, 'unused');
+      launched++;
+      context.runtime = {healthy: true, configuration: importedConfiguration, workspace: {id: 'fresh'}};
+      return true;
+    },
+  };
+  const owner = runInNewContext(ownerSource + '\ngetOwnerWorkspace()', context);
+  for (const storageKey of ['saved', 'otherTab', 'running', 'stopped', 'orphan', 'race']) {
+    await assert.rejects(owner.perform('open', {configuration: {storageKey}}), /workspace_resume/);
+  }
+  assert.equal(launched, 0);
+  assert.equal((await owner.perform('open', {configuration: {storageKey: 'unused'}})).workspaceId, 'fresh');
+  assert.equal(launched, 1);
 });

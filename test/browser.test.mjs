@@ -768,7 +768,10 @@ for (const name of browserNames) {
           await bounded(page.evaluate(() => window.playground.flush()), 'Durable filesystem and database flush');
           await close(page);
           await page.reload();
-          const resumed = await start(page, config);
+          const resumed = await start(page, { ...config, admin: { ...config.admin, password: 'Draft-' + randomUUID() } });
+          assert.equal(await page.evaluate(password => window.playground.installation.administrator.password === password
+            && window.playground.configuration.admin.password === password, config.admin.password), true,
+            'Resumed login and private deployment configuration must use the installed account.');
           assert.equal(await page.evaluate(() => window.playground.mail.state.count), 0,
             'A new owner must not restore mail from persisted site files.');
           await assertSite(page, config);
