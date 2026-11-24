@@ -2,7 +2,7 @@ import { catalogWithSelectedJoomlaPackage, normalizeConfiguration, parseCatalog,
 import { installJoomla, inspectJoomla, sha256, importJoomlaSnapshot, importJoomlaCheckpoint, readJoomlaMetadata, restoreJoomlaSession, applyJoomlaConfiguration, discoverJoomlaConfiguration, getMcpConnection, readJoomlaAdministrator, repairJoomlaConfiguration, runStartupCommand, reconcileJcbVersion, captureJoomlaData } from './joomla/index.mjs';
 import { exportSite } from './export.mjs';
 import { normalizePhpSettings, phpRequestTimeoutMs } from './php-settings.mjs';
-import { openSiteDatabase } from './saved-site-recovery.mjs';
+import { initializeSiteDatabase, openSiteDatabase } from './saved-site-recovery.mjs';
 import { createPackageFetcher } from './dynamic-packages.mjs';
 import { prepareBrowserIsolation } from './isolation-bootstrap.mjs';
 import { ownedClientURL } from './isolation.mjs';
@@ -600,8 +600,11 @@ export async function createPlayground(input, { onProgress = () => {}, checkpoin
   try {
     progress({ phase: 'database', message: 'Starting MariaDB…' });
     ({ database, error: databaseError } = await openSiteDatabase(async () => {
-      const { createMariaDB } = await import(resolveAsset(manifest.bridge.moduleUrl));
-      return createMariaDB({ database: 'joomla', timeoutMs: 120_000, ...(config.persistence ? { persistence: { key: `joomengine-${identity}` } } : {}) });
+      const bridge = await import(resolveAsset(manifest.bridge.moduleUrl));
+      return initializeSiteDatabase(bridge, {
+        database: 'joomla', timeoutMs: 120_000,
+        ...(config.persistence ? { persistence: { key: `joomengine-${identity}` } } : {}),
+      }, () => progress({ phase: 'database', message: 'MariaDB startup timed out. Starting a new worker for the same database…' }));
     }, { recovery, persistent: config.persistence }));
     const filesOnly = databaseError !== null;
     if (filesOnly) progress({ phase: 'warning', message: `${databaseError.message} Opening saved files without changing browser storage.` });
