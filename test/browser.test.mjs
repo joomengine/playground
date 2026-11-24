@@ -870,7 +870,8 @@ for (const name of browserNames) {
       } finally { if (page) await close(page).catch(() => {}); await context.close(); await plainServer.close(); }
     });
     if (scenarios.includes('deploys')) await runScenario('repository and URL recipes install actual components, languages and prepared content', { timeout: 1_200_000 }, async () => {
-      const context = await withPinnedCatalog(browser);
+      // The bare-domain launch must see the same staged catalog as a visitor, including through the service worker.
+      const context = await browser.newContext();
       const server = await createNetworkFixture({ directory, prefix: '/nested/playground/', fixtures, isolation: true,
         liveOrigins: ['api.joomlacomponentbuilder.com', 'codeberg.org', 'git.envs.net', 'tildegit.org', 'git.disroot.org', 'git.vdm.dev',
           'api.github.com', 'raw.githubusercontent.com'].map(host => `https://${host}`) });
@@ -1080,11 +1081,12 @@ for (const name of browserNames) {
           proof.push({ id: 'heritage-demo', fresh, fromSnapshot: Boolean(result.installation.fromSnapshot), content });
           await close(page);
         }
-        page.testStep = 'default domain counts down and opens prepared JCB on PHP 8.4 in English';
+        page.testStep = 'default domain counts down and opens JCB on PHP 8.4 in English';
         await page.setViewportSize({ width: 1440, height: 1000 });
-        const defaultLaunchStarted = await assertLaunchCountdown(page, server.url);
+        const stagedCatalog = JSON.parse(await readFile(path.join(directory, 'assets/version-catalog.json'), 'utf8'));
+        const defaultLaunchStarted = await assertLaunchCountdown(page, server.url, manifest, stagedCatalog);
         await renderedSiteFrame(page);
-        const preparedLaunchMs = Date.now() - defaultLaunchStarted;
+        const defaultLaunchMs = Date.now() - defaultLaunchStarted;
         assert.equal(await page.locator('#deploy').inputValue(), 'jcb');
         assert.equal(await page.locator('#php-version').inputValue(), '8.4');
         assert.match(await page.frameLocator('#site-frame').locator('html').innerHTML(), /com_componentbuilder/);
@@ -1102,9 +1104,9 @@ for (const name of browserNames) {
         await page.locator('#close-button').click();
         await showQuickSettings(page);
         await page.locator('#launch-button:enabled').waitFor();
-        proof.push({ id: 'jcb', defaultDomainCountdown: true, preparedLaunchMs });
+        proof.push({ id: 'jcb', defaultDomainCountdown: true, defaultLaunchMs });
         page.testStep = 'immediate shared deployment skips countdown while start=0 still waits';
-        proof.push({ id: 'immediate-shared-launch', ...(await assertImmediateLaunch(page, server.url, () => renderedSiteFrame(page))) });
+        proof.push({ id: 'immediate-shared-launch', ...(await assertImmediateLaunch(page, server.url, manifest, () => renderedSiteFrame(page))) });
         await showSiteActions(page);
         page.once('dialog', dialog => dialog.accept());
         await page.locator('#close-button').click();
