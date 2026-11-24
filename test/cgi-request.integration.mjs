@@ -31,7 +31,8 @@ test('staged int64 CGI carries binary API bodies and multipart uploads', { timeo
         echo json_encode(['method' => $_SERVER['REQUEST_METHOD'], 'length' => strlen($body), 'hash' => hash('sha256', $body),
           'type' => $_SERVER['CONTENT_TYPE'] ?? '', 'post' => $_POST,
           'file' => isset($_FILES['package']) ? ['size' => $_FILES['package']['size'], 'error' => $_FILES['package']['error'], 'hash' => hash_file('sha256', $_FILES['package']['tmp_name'])] : null,
-          'ini' => ['upload' => ini_get('upload_max_filesize'), 'post' => ini_get('post_max_size'), 'memory' => ini_get('memory_limit'), 'time' => ini_get('max_execution_time')]], JSON_THROW_ON_ERROR);
+          'ini' => ['upload' => ini_get('upload_max_filesize'), 'post' => ini_get('post_max_size'), 'memory' => ini_get('memory_limit'),
+            'executionTime' => ini_get('max_execution_time'), 'inputTime' => ini_get('max_input_time')]], JSON_THROW_ON_ERROR);
       `);
       const request = async (method, body, type = 'application/octet-stream') => {
         const response = await php.request({ url: '/index.php', method,
@@ -44,7 +45,7 @@ test('staged int64 CGI carries binary API bodies and multipart uploads', { timeo
         assert.equal(result.method, method); assert.equal(result.length, binary.length);
         assert.equal(result.hash, createHash('sha256').update(binary).digest('hex'));
         assert.equal(result.type, 'application/octet-stream');
-        assert.deepEqual(result.ini, { upload: '128M', post: '160M', memory: '512M', time: '60' });
+        assert.deepEqual(result.ini, { upload: '128M', post: '160M', memory: '512M', executionTime: '300', inputTime: '300' });
       }
       const form = await request('POST', 'name=Afrikaans&value=%E4%B8%AD%E6%96%87', 'application/x-www-form-urlencoded');
       assert.deepEqual(form.post, { name: 'Afrikaans', value: '中文' });

@@ -989,22 +989,24 @@ for (const name of browserNames) {
             joomlaVersion: release.version, phpVersion: '8.4',
             admin: { password: `Manual-${crypto.randomUUID()}!` },
           }, { catalog, deployCatalog, baseURL: location.href });
-          return { extensions: configuration.extensions, joomlaVersion: release.version };
+          return { extensions: configuration.extensions, joomlaVersion: release.version, phpSettings: configuration.phpSettings };
         });
+        assert.equal(servicePackage.phpSettings.max_execution_time, 300);
+        assert.equal(servicePackage.phpSettings.max_input_time, 300);
         const manualService = await startDeploy(page, new URLSearchParams({ deploy: 'blank',
           joomla: servicePackage.joomlaVersion, php: '8.4', fresh: '1',
         }).toString(), { ...setup(), extensions: servicePackage.extensions });
         assert.ok(!manualService.progress.some(event => /Preparing the image for reuse|Saving the prepared image/.test(event.message)),
           'Custom installations must launch without waiting for an optional full-site export.');
-        assert.equal(manualService.configuration.phpSettings.max_execution_time, 60,
-          'A manually supplied package must install without inheriting preset PHP settings.');
+        assert.equal(manualService.configuration.phpSettings.max_execution_time, 300);
+        assert.equal(manualService.configuration.phpSettings.max_input_time, 300);
         assert.equal(manualService.configuration.menus.length, 0);
         const serviceData = await phpJSON(page, `${PDO}
           echo json_encode(['cities' => (int) $db->query('SELECT COUNT(*) FROM jml_servicedirectory_city')->fetchColumn(),
             'states' => (int) $db->query('SELECT COUNT(*) FROM jml_servicedirectory_state')->fetchColumn(),
-            'executionTime' => (int) ini_get('max_execution_time'),
+            'executionTime' => (int) ini_get('max_execution_time'), 'inputTime' => (int) ini_get('max_input_time'),
             'state' => json_decode(file_get_contents('/persist/meta/joomla-install.json'), true)['state']], JSON_THROW_ON_ERROR);`);
-        assert.deepEqual(serviceData, { cities: 151233, states: 5073, executionTime: 60, state: 'complete' });
+        assert.deepEqual(serviceData, { cities: 151233, states: 5073, executionTime: 300, inputTime: 300, state: 'complete' });
         const servicePage = await request(page, '/administrator/index.php?option=com_servicedirectory&view=cities');
         assert.equal(servicePage.status, 200, servicePage.text.slice(0, 1000));
         assert.match(servicePage.text, /com_servicedirectory/);
@@ -1611,15 +1613,10 @@ for (const name of browserNames) {
         page.testStep = 'apply and verify PHP settings without losing data';
         await showSiteActions(page);
         await page.locator('#php-settings-button').click();
-        const serviceDirectoryProfile = await page.evaluate(async () => {
-          const { parseCatalog } = await import('./src/config.mjs');
-          const { loadDeployCatalog, resolveDeployConfiguration } = await import('./src/deploys.mjs');
-          const catalog = parseCatalog(await (await fetch('./assets/manifest.json')).json());
-          const deployCatalog = await loadDeployCatalog();
-          return (await resolveDeployConfiguration({ deployId: 'servicedirectory', admin: { name: 'Runtime settings test', username: 'runtimetest', email: 'runtime@example.test', password: `Rocket!${crypto.randomUUID()}` } }, { catalog, deployCatalog, baseURL: location.href })).configuration.phpSettings;
-        });
-        assert.equal(serviceDirectoryProfile.max_execution_time, 180);
-        await page.locator('#ini-execution').fill(String(serviceDirectoryProfile.max_execution_time));
+        assert.equal(await page.locator('#ini-execution').inputValue(), '300');
+        assert.equal(await page.locator('#ini-input').inputValue(), '300');
+        await page.locator('#ini-execution').fill('60');
+        await page.locator('#ini-input').fill('60');
         await page.locator('#ini-vars').fill('12000');
         await page.locator('#ini-memory').fill('640M');
         await page.locator('#php-apply-button').click();
@@ -1631,7 +1628,8 @@ for (const name of browserNames) {
         assert.deepEqual(await previewContract(page, 'mail'), { accepted: true });
         await page.waitForFunction(count => document.getElementById('mail-count').textContent === String(count), retainedMailCount + 1);
         const settings = await previewContract(page, 'settings');
-        assert.equal(settings.max_execution_time, '180');
+        assert.equal(settings.max_execution_time, '60');
+        assert.equal(settings.max_input_time, '60');
         assert.equal(settings.max_input_vars, '12000');
         assert.equal(settings.memory_limit, '640M');
         assert.equal(settings.upload_max_filesize, '128M');
@@ -1725,6 +1723,7 @@ for (const name of browserNames) {
         page.testStep = 'build updates preserve the running site and saved files/database';
         const buildUpdate = await assertBuildUpdate(page, { fixtures, indexHTML: await readFile(path.join(directory, 'index.html'), 'utf8'),
           readSite: async () => { await renderedSiteFrame(page); return previewContract(page); } });
+        assert.deepEqual(await previewContract(page, 'settings'), settings, 'Reopening a saved site must retain its explicit PHP settings.');
         await bounded(Promise.allSettled([...page.responseChecks]), 'Read embedded site responses', 10_000);
         await assertCleanConsole(page);
         records.push({ ...defaultPair, rocket: true, shareLink: true, independentInterfaceLanguage: true, rtl: true,

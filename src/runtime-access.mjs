@@ -13,7 +13,7 @@ export function createRuntimeAccess({ send, siteUrl, requestTimeout, isChanging,
         async (path, data) => { check(); return send(`fs.${method}`, { path, data }); }])),
       async runPhp(source, options = {}) {
         check();
-        return send('runPhp', { source }, options.timeoutMs ?? 180_000);
+        return send('runPhp', { source }, options.timeoutMs ?? requestTimeout());
       },
       async request(path = '/', init = {}) {
         check(); requireDatabase();

@@ -60,7 +60,7 @@ export async function createNodeRuntime(options = {}) {
   };
   const fs = Object.fromEntries(['mkdir', 'writeFile', 'readFile', 'readdir', 'stat', 'unlink']
     .map(name => [name, (...args) => client.call(`fs.${name}`, args)]));
-  const runPhp = (source, { timeoutMs = 180_000 } = {}) => client.call('runPhp', [source], timeoutMs);
+  const runPhp = (source, { timeoutMs = phpRequestTimeoutMs(metadata.phpSettings) } = {}) => client.call('runPhp', [source], timeoutMs);
   const request = async (pathname = '/', init = {}) => {
     // Request/Headers are not structured-cloneable. Normalize bodies in the host.
     const url = new URL(String(pathname).replace(/^\/+/, ''), metadata.baseUrl);

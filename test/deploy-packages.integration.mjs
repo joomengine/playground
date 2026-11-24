@@ -135,6 +135,8 @@ for (const [deployId, major] of pairs) {
       }, { catalog, deployCatalog, baseURL: runtime.assetBaseUrl, fetcher: runtime.fetchAsset });
       assert.equal(configuration.language, 'en-GB');
       assert.deepEqual(configuration.phpSettings, runtime.phpSettings);
+      assert.equal(configuration.phpSettings.max_execution_time, 300);
+      assert.equal(configuration.phpSettings.max_input_time, 300);
       assert.deepEqual(configuration.languages, [], 'Ordinary deployments must not fetch Joomla language packs.');
       const archive = await runtime.fetchAsset(new URL(release.url, manifestURL));
       const installed = await installJoomla(runtime, configuration, { archiveBytes: await archive.arrayBuffer(), sha256: release.sha256,
@@ -189,10 +191,11 @@ for (const [deployId, major] of pairs) {
   });
 }
 
-test('manual Service Directory package keeps normal PHP settings and installs every seeded city', { timeout: 360_000 }, async t => {
-  const runtime = await createNodeRuntime({ directory: process.env.PLAYGROUND_DIST, phpVersion: '8.4' });
+test('manual Service Directory package preserves custom PHP limits and installs every seeded city', { timeout: 360_000 }, async t => {
+  const phpSettings = { max_execution_time: 60, max_input_time: 60 };
+  const runtimeOptions = { directory: process.env.PLAYGROUND_DIST, phpVersion: '8.4', phpSettings };
+  const runtime = await createNodeRuntime(runtimeOptions);
   try {
-    assert.equal(runtime.phpSettings.max_execution_time, 60);
     const catalog = parseCatalog(runtime.manifest);
     const release = catalog.joomla.find(item => item.version.startsWith('6.'));
     assert.ok(release, 'The candidate must stage Joomla 6.');
@@ -215,10 +218,10 @@ test('manual Service Directory package keeps normal PHP settings and installs ev
     t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
     const packageURL = `http://127.0.0.1:${server.address().port}/servicedirectory.zip`;
     const { configuration } = await resolveDeployConfiguration({ deployId: 'blank', joomlaVersion: release.version,
-      phpVersion: '8.4', persistence: false, fresh: true, extensions: [{ url: packageURL }],
+      phpVersion: '8.4', phpSettings, persistence: false, fresh: true, extensions: [{ url: packageURL }],
       admin: administrator,
     }, shared);
-    assert.equal(configuration.phpSettings.max_execution_time, 60, 'Entering a package URL must not import the preset PHP settings.');
+    assert.deepEqual(configuration.phpSettings, runtime.phpSettings);
     assert.equal(configuration.menus.length, 0, 'This exercises manual package entry, not the Service Directory preset.');
     assert.deepEqual(configuration.extensions, [{ url: packageURL }], 'Manual package URLs belong to Joomla, without wrapper checksums.');
     assert.deepEqual(configuration.addonExtensions, configuration.extensions);
@@ -239,7 +242,7 @@ test('manual Service Directory package keeps normal PHP settings and installs ev
       // Observe the real PHP setting immediately after the production helper applies it.
       const setup = 'playgroundInstallationAllowance($playground);';
       assert.ok(source.includes(setup));
-      return source.replace(setup, `${setup}\n    if ((int) ini_get('max_execution_time') !== 180) throw new RuntimeException('manual-package-execution-budget');`);
+      return source.replace(setup, `${setup}\n    if ((int) ini_get('max_execution_time') !== 300) throw new RuntimeException('manual-package-execution-budget');`);
     };
     const archive = await runtime.fetchAsset(new URL(release.url, manifestURL));
     assert.equal(archive.status, 200);
@@ -250,7 +253,7 @@ test('manual Service Directory package keeps normal PHP settings and installs ev
     assert.deepEqual(commands, [['extension:install', `--url=${packageURL}`]]);
     assert.deepEqual(requests, [{ method: 'GET', url: '/servicedirectory.zip' }]);
     assert.equal(packageChecks.length, 1, 'The package installer runs once without automatic replay.');
-    assert.ok(packageChecks[0] >= 210_000, 'The host deadline must allow PHP its full 180 seconds and cleanup grace.');
+    assert.equal(packageChecks[0], 330_000, 'The installer gets 300 seconds plus 30 seconds for cleanup.');
     const result = await runtime.runPhp(`<?php
       $db = new PDO('mysql:dbname=joomla;charset=utf8mb4', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
       $tables = $db->query("SHOW TABLES LIKE 'jml\\_servicedirectory\\_%'")->fetchAll(PDO::FETCH_COLUMN);
@@ -276,7 +279,7 @@ test('manual Service Directory package keeps normal PHP settings and installs ev
     await runtime.close();
 
     // A fatal exit after writes must remain incomplete and must not replay the installer.
-    const failedRuntime = await createNodeRuntime({ directory: process.env.PLAYGROUND_DIST, phpVersion: '8.4' });
+    const failedRuntime = await createNodeRuntime(runtimeOptions);
     try {
       let attempts = 0;
       const fatalSourceLoader = async name => {

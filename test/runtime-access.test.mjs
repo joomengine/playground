@@ -5,12 +5,20 @@ import { createRuntimeAccess } from '../src/runtime-access.mjs';
 function fixture() {
   const state = { changing: false, closing: false }, calls = [];
   const access = createRuntimeAccess({
-    send: async (operation, args) => { calls.push({ operation, args }); return { status: 200, headers: [], body: new Uint8Array() }; },
+    send: async (operation, args, timeoutMs) => { calls.push({ operation, args, timeoutMs }); return { status: 200, headers: [], body: new Uint8Array() }; },
     siteUrl: 'https://playground.example/__site/test/', requestTimeout: () => 120_000,
     isChanging: () => state.changing, isClosing: () => state.closing, requireDatabase: () => {},
   });
   return { state, calls, ...access };
 }
+
+test('SDK PHP calls use the site request deadline and honor explicit operation deadlines', async () => {
+  const access = fixture();
+  await access.public.runPhp('<?php echo 1;');
+  await access.public.request('/');
+  await access.internal.runPhp('<?php echo 2;', { timeoutMs: 330_000 });
+  assert.deepEqual(access.calls.map(call => call.timeoutMs), [120_000, 120_000, 330_000]);
+});
 
 test('SDK writes cannot enter the old site after a transition checkpoint while internal restore proceeds', async () => {
   const access = fixture();

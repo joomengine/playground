@@ -13,8 +13,8 @@ export const PHP_SETTING_FIELDS = Object.freeze([
 export const DEFAULT_PHP_SETTINGS = Object.freeze({
   upload_max_filesize: '128M',
   post_max_size: '160M',
-  max_execution_time: 60,
-  max_input_time: 60,
+  max_execution_time: 300,
+  max_input_time: 300,
   max_input_vars: 10000,
   memory_limit: '512M',
 });
@@ -22,11 +22,11 @@ export const DEFAULT_PHP_SETTINGS = Object.freeze({
 export const MAX_HTTP_BODY_BYTES = 320 * 1024 * 1024;
 
 /** Package installation has its own allowance; ordinary page requests keep theirs.
- * An explicit operation allowance wins over the default, including values below
- * 180 seconds. Queue waiting is excluded from the host deadline. The extra 30
- * seconds lets PHP finish shutdown/error reporting before the host stops it.
+ * An explicit operation allowance wins over the default. Queue waiting is excluded
+ * from the host deadline. The extra 30 seconds allow PHP to finish shutdown and
+ * error reporting before the host stops it.
  */
-export function installationBudget({ executionTimeSeconds = 180, timeoutMs } = {}) {
+export function installationBudget({ executionTimeSeconds = DEFAULT_PHP_SETTINGS.max_execution_time, timeoutMs } = {}) {
   if (!Number.isInteger(executionTimeSeconds) || executionTimeSeconds < 5 || executionTimeSeconds > 300) {
     throw new RangeError('Installation execution time must be between 5 and 300 seconds.');
   }
