@@ -44,7 +44,7 @@ retain their upstream licenses and notices.
 
 JoomEngine Code uses Microsoft's Visual Studio Code 1.145.2 and Monaco Editor
 0.57.0 through CodinGame's Monaco VS Code API, services and default extensions
-40.1.0. Their MIT licences and the matching Microsoft third-party notices are
+40.1.1. Their MIT licences and the matching Microsoft third-party notices are
 preserved in dependencies/joomengine-code and distributed with the editor.
 The upstream revisions, source locations and notice digests are recorded there
 in provenance.json. The project is independent of Microsoft and CodinGame.
