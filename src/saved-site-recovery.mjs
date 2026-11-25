@@ -4,7 +4,8 @@
 export async function initializeSiteDatabase(bridge, options, onRetry) {
   try { return await bridge.createMariaDB(options); }
   catch (cause) {
-    if (!(cause instanceof bridge.MariaDBBridgeError) || cause.code !== 'TIMEOUT') throw cause;
+    if (typeof bridge.MariaDBBridgeError !== 'function' ||
+        !(cause instanceof bridge.MariaDBBridgeError) || cause.code !== 'TIMEOUT') throw cause;
     onRetry?.();
     return bridge.createMariaDB(options);
   }
