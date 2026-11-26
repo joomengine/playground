@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "default": "field-notes",
+  "deploys": [
+    {
+      "id": "field-notes",
+      "file": "./field-notes.json",
+      "title": "Field Notes editorial desk",
+      "description": "Open Joomla's article manager with a field report ready to edit.",
+      "joomla": ["5", "6"]
+    }
+  ]
+}

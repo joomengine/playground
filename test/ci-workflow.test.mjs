@@ -70,7 +70,7 @@ test('downstream release validation requires every direct prerequisite to succee
 test('the aggregate fails for a failed, skipped, cancelled or absent required validation job', () => {
   const aggregate = job(validation, 'validate');
   assert.match(aggregate, /^    needs: \[[^\n]*\bjcb-network\b[^\n]*\]$/m);
-  assert.match(aggregate, /^    if: always\(\)$/m);
+  assert.match(aggregate, /^    if: always\(\) && github\.repository == 'joomengine\/playground'$/m);
   assert.match(aggregate, /^          JCB_NETWORK: \$\{\{ needs\.jcb-network\.result \}\}$/m);
   const script = aggregateScript();
   const baseline = { ...process.env, CHECKS: 'success', BUILD_REQUIRED: 'true', BUILD: 'success',
@@ -103,7 +103,7 @@ test('every pull-request update and main publication invokes the mandatory valid
   assert.doesNotMatch(publications, /^\s+(?:paths|paths-ignore):/m);
   const publicationValidation = job(publishing, 'validate');
   assert.match(publicationValidation, /^    uses: \.\/\.github\/workflows\/validate\.yml$/m);
-  assert.match(publicationValidation, /^    if: github\.ref == 'refs\/heads\/main'$/m);
+  assert.match(publicationValidation, /^    if: github\.repository == 'joomengine\/playground' && github\.ref == 'refs\/heads\/main'$/m);
   assert.doesNotMatch(publicationValidation, /needs:|configuration|continue-on-error/,
     'Configuration publication must still run the complete validation chain independently.');
   const deploy = job(publishing, 'deploy');

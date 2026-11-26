@@ -398,6 +398,11 @@ test(`deployment editor clones core recipes, saves reloadable customs and import
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`${server.url}?start=0`);
     await page.locator('#embedded-launch:enabled').waitFor();
+    const localPackage = await page.evaluate(async () => {
+      const { parseDeploymentDocument } = await import('./src/config.mjs');
+      return parseDeploymentDocument({ schemaVersion: 1, configuration: { extensions: [{ url: './demo.zip' }] } }).extensions[0].url;
+    });
+    assert.equal(localPackage, new URL('demo.zip', server.url).href);
     await page.locator('#settings-toggle').click();
     await page.locator('#deploy').selectOption('servicedirectory');
     await page.locator('#launch-button:enabled').waitFor();

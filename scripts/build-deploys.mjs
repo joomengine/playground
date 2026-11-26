@@ -15,8 +15,15 @@ function administrator(prefix) {
   return { name: `${prefix} administrator`, username: identity, email: `${identity}@example.test`, password: `Pg!${randomBytes(24).toString('hex')}` };
 }
 
+function attachSnapshot(recipe, item) {
+  const major = item.joomlaVersion.split('.')[0];
+  recipe.variants ??= {};
+  recipe.variants[major] = { ...recipe.variants[major], snapshot: { url: `../assets/${item.url}`,
+    sha256: item.sha256, format: 'joomengine-playground-export', schemaVersion: 1, joomlaVersion: item.joomlaVersion } };
+}
+
 /** Publish a prepared recipe only after a separate runtime restores its export. */
-export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || path.join(root, 'dist') } = {}) {
+export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || path.join(root, 'dist'), reusePrepared = false } = {}) {
   const distribution = path.resolve(directory);
   const inventoryPath = path.join(distribution, 'asset-inventory.json');
   const inventoryBytes = await readFile(inventoryPath);
@@ -54,17 +61,22 @@ export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || 
     const normalized = normalizeDeploy(recipe, { baseURL: descriptor.url });
     if (normalized.prebuild) recipes.push({ descriptor, recipe, normalized, sourceSha256: digest(new Uint8Array(bytes)) });
   }
-  if (!recipes.length) {
+  if (!recipes.length && !reusePrepared) {
     console.log('No repository deploys request a prepared copy.');
     return [];
   }
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const staging = await mkdtemp(path.join(root, '.cache', 'deploy-snapshots-'));
   const prepared = [];
+  const seed = reusePrepared ? manifest.prebuiltDeploys ?? [] : [];
   try {
     for (const { descriptor, recipe, normalized, sourceSha256 } of recipes) {
       for (const release of catalog.joomla.filter((entry) => normalized.joomla.includes(entry.version.split('.')[0]))) {
-        const phpVersion = release.php.includes(catalog.defaults.phpVersion) ? catalog.defaults.phpVersion : release.php[0];
+        const variant = normalized.variants[release.version.split('.')[0]];
+        const supported = release.php.filter(line => !normalized.requirements.php || normalized.requirements.php.includes(line));
+        const phpVersion = variant?.phpVersion ?? normalized.configuration.phpVersion ??
+          (supported.includes(catalog.defaults.phpVersion) ? catalog.defaults.phpVersion : supported[0]);
+        if (!phpVersion) throw new Error(`${descriptor.title} has no compatible PHP runtime for Joomla ${release.version}.`);
         const label = `${descriptor.id} / Joomla ${release.version} / PHP ${phpVersion}`;
         console.log(`Preparing ${label}…`);
         const buildStarted = performance.now();
@@ -72,6 +84,23 @@ export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || 
           deployId: descriptor.id, joomlaVersion: release.version, phpVersion,
           fresh: true, persistence: false, autoLogin: false, admin: administrator('build'),
         }, { catalog, deployCatalog, baseURL: canonicalURL.href, fetcher: fetchAsset });
+        // Compare the resolved language packages too: a site can replace those independently of a recipe.
+        const inputsSha256 = digest(JSON.stringify({ sourceSha256, languages: configuration.languages.map(pack => [pack.tag, pack.sha256]),
+          joomlaSha256: release.sha256, php: manifest.php.find(entry => entry.version === phpVersion),
+          bridge: manifest.bridge, engineCommit: manifest.upstreamEngine?.sourceCommit ?? manifest.sourceCommit }));
+        const existing = seed.find(entry => entry.id === descriptor.id && entry.joomlaVersion === release.version
+          && entry.phpVersion === phpVersion && entry.inputsSha256 === inputsSha256 && entry.verifiedImport === true);
+        if (existing) {
+          const asset = declared.find(entry => entry.path === `assets/${existing.url}`);
+          if (!asset || existing.url !== `snapshots/${descriptor.id}-${release.version}-${asset.sha256}.zip`
+            || existing.sha256 !== asset.sha256 || existing.size !== asset.size) {
+            throw new Error(`Upstream prepared deployment failed verification: ${label}.`);
+          }
+          attachSnapshot(recipe, existing);
+          prepared.push(existing);
+          console.log(`Reused verified ${label}.`);
+          continue;
+        }
         let runtime;
         let exported;
         try {
@@ -123,17 +152,12 @@ export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || 
         const verificationMs = Math.round(performance.now() - restoreStarted);
         const filename = `${descriptor.id}-${release.version}-${sha256}.zip`;
         await writeFile(path.join(staging, filename), exported.bytes);
-        const snapshot = {
-          url: `../assets/snapshots/${filename}`, sha256, format: 'joomengine-playground-export',
-          schemaVersion: 1, joomlaVersion: release.version,
-        };
-        const major = release.version.split('.')[0];
-        recipe.variants ??= {};
-        recipe.variants[major] = { ...recipe.variants[major], snapshot };
-        prepared.push({ id: descriptor.id, joomlaVersion: release.version, phpVersion,
+        const built = { id: descriptor.id, joomlaVersion: release.version, phpVersion,
           url: `snapshots/${filename}`, sha256, size: exported.bytes.byteLength,
-          sourceSha256, sourceInventorySha256: digest(inventoryBytes), verifiedImport: true,
-          initialPath: restoredConfig.initialPath, preparationMs, verificationMs });
+          sourceSha256, inputsSha256, sourceInventorySha256: digest(inventoryBytes), verifiedImport: true,
+          initialPath: restoredConfig.initialPath, preparationMs, verificationMs };
+        attachSnapshot(recipe, built);
+        prepared.push(built);
         console.log(`Verified independent import of ${label} (${exported.bytes.byteLength} bytes; preparation ${preparationMs} ms, restore verification ${verificationMs} ms).`);
       }
       normalizeDeploy(recipe, { baseURL: descriptor.url });
@@ -141,7 +165,13 @@ export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || 
     assert.deepEqual((await inventory(distribution)).filter((entry) => entry.path !== 'asset-inventory.json'), declared,
       'The input artifact changed while prepared deploys were being generated.');
     await mkdir(path.join(distribution, 'assets/snapshots'), { recursive: true });
-    for (const item of prepared) await cp(path.join(staging, path.basename(item.url)), path.join(distribution, 'assets', item.url));
+    for (const item of prepared.filter(entry => !seed.includes(entry))) {
+      await cp(path.join(staging, path.basename(item.url)), path.join(distribution, 'assets', item.url));
+    }
+    const kept = new Set(prepared.map(entry => `assets/${entry.url}`));
+    for (const { path: file } of declared) {
+      if (reusePrepared && file.startsWith('assets/snapshots/') && !kept.has(file)) await rm(path.join(distribution, file));
+    }
     for (const { descriptor, recipe } of recipes) {
       await writeFile(path.join(distribution, 'deploys', `${descriptor.id}.json`), `${JSON.stringify(recipe, null, 2)}\n`);
     }
@@ -154,4 +184,4 @@ export async function buildDeploys({ directory = process.env.PLAYGROUND_DIST || 
   } finally { await rm(staging, { recursive: true, force: true }); }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await buildDeploys();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await buildDeploys({ reusePrepared: process.argv.includes('--reuse-prepared') });

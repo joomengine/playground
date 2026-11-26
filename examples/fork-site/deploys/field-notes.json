@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "field-notes",
+  "title": "Field Notes editorial desk",
+  "joomla": ["5", "6"],
+  "configuration": {
+    "siteName": "Field Notes",
+    "initialPath": "/administrator/index.php?option=com_content",
+    "content": {
+      "categories": [
+        {
+          "key": "reports",
+          "title": "Field reports",
+          "alias": "field-reports",
+          "language": "en-GB"
+        }
+      ],
+      "articles": [
+        {
+          "key": "first-report",
+          "title": "The first field report",
+          "alias": "first-field-report",
+          "language": "en-GB",
+          "category": "reports",
+          "introtext": "<p>We counted twelve swifts on the morning walk. Open this article in Joomla to add your own observation.</p>",
+          "featured": true
+        }
+      ]
+    }
+  }
+}

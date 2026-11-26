@@ -58,11 +58,22 @@
               ]
             }
           },
+          "jcbVersions": {
+            "description": "JCB versions pinned by a site-owned recipe, emitted by the build.",
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
           "requirements": {
             "$ref": "./schema.json#/$defs/requirements"
           }
         }
       }
+    },
+    "jcbPackages": {
+      "description": "Shared JCB package pins emitted by the build.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[1-9][0-9]*$" },
+      "additionalProperties": { "$ref": "./schema.json#/$defs/package" }
     },
     "languages": {
       "type": "object",

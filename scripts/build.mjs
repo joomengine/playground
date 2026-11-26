@@ -2,10 +2,10 @@ import { appendFile, chmod, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, w
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { downloadVerified, extractTarGzip, hashFile, inventory, verifyBridgeBundle } from './assets.mjs';
+import { downloadVerified, extractTarGzip, hashFile, verifyBridgeBundle } from './assets.mjs';
 import { stageDeployCatalog } from './deploys.mjs';
 import { stageVersionCatalog } from './version-catalog.mjs';
-import { phpRuntimeAssetPath, writeBuildIdentity } from './build-identity.mjs';
+import { phpRuntimeAssetPath } from './build-identity.mjs';
 import { stageCurl } from './curl.mjs';
 import { stageSodium } from './sodium.mjs';
 import { applyCgiRequestOverlay } from './cgi-request-overlay.mjs';
@@ -18,6 +18,7 @@ import { loadPhpRuntime } from './php-runtime.mjs';
 import { matchesNativeRuntime } from './native-runtime.mjs';
 import { normalizeNetworkConfig } from '../src/network-config.mjs';
 import { build } from 'esbuild';
+import { readSiteProfile, sourceBuildUrl, stageSiteShell, writeSiteManifest } from './site-build.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const versions = await loadPhpRuntime({ root });
@@ -28,11 +29,10 @@ const deploymentEnvironment = process.env.PLAYGROUND_DEPLOYMENT_ENV || 'producti
 if (!['production', 'staging'].includes(deploymentEnvironment)) throw new Error('Invalid Playground deployment environment.');
 const networkConfigurationPath = deploymentEnvironment === 'staging' ? 'config/network.staging.json' : 'config/network.json';
 const network = normalizeNetworkConfig(JSON.parse(await readFile(path.join(root, networkConfigurationPath), 'utf8')));
-const domain = (await readFile(path.join(root, 'CNAME'), 'utf8')).trim();
-if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
-  throw new Error('CNAME must contain one valid deployment hostname.');
-}
-const canonicalUrl = `https://${domain}/`;
+const siteDirectory = path.join(root, 'site');
+const profile = await readSiteProfile(siteDirectory);
+const canonicalUrl = await sourceBuildUrl({ root, profile });
+const domain = new URL(canonicalUrl).hostname;
 const cache = path.join(root, '.cache');
 const destination = path.join(root, 'dist');
 const driverDirectory = path.resolve(root, process.env.MARIADB_DRIVER_DIR || '.cache/native');
@@ -215,7 +215,7 @@ try {
     await cp(archive, path.join(assets, 'joomla', filename));
     joomla.push({ ...release, sourceUrl: release.url, url: `joomla/${filename}` });
   }
-  const deploys = await stageDeployCatalog({ root, staging, assets, cache, canonicalUrl });
+  const deploys = await stageDeployCatalog({ root, staging, assets, cache, canonicalUrl, siteDirectory });
   console.log('Staging current and forward Joomla/JCB packages…');
   const versionCatalog = await stageVersionCatalog({ assets, cache, pinnedJoomla: versions.joomla,
     stagedJoomla: joomla, deployPackages: deploys.packages, githubToken: process.env.GITHUB_TOKEN,
@@ -224,7 +224,7 @@ try {
       console.warn(process.env.GITHUB_ACTIONS ? `::warning::${message}` : message);
       if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `- ${message}\n`);
     } });
-  for (const name of ['index.html', 'src', 'config', 'service-worker.mjs', 'LICENSE', 'NOTICE', 'CNAME']) {
+  for (const name of ['index.html', 'src', 'config', 'service-worker.mjs', 'LICENSE', 'NOTICE']) {
     await cp(path.join(root, name), path.join(staging, name), { recursive: true });
   }
   // Each artifact includes only its chosen public environment configuration.
@@ -237,6 +237,7 @@ try {
   catch { throw new Error('Build requires a Git checkout to record source provenance'); }
   const manifest = {
     schemaVersion: 1, projectVersion: pkg.version, sourceCommit, code,
+    ...(process.env.GITHUB_RUN_ID ? { engineBuild: { runId: process.env.GITHUB_RUN_ID } } : {}),
     ...(versions.retiredJcb?.length ? { retiredJcb: versions.retiredJcb } : {}),
     ...(versions.retiredJoomla?.length ? { retiredJoomla: versions.retiredJoomla } : {}),
     deployment: { canonicalUrl, domain, environment: deploymentEnvironment },
@@ -253,9 +254,8 @@ try {
     },
     defaults: versions.defaults,
   };
-  await writeFile(path.join(assets, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  await writeBuildIdentity(staging, manifest);
-  await writeFile(path.join(staging, 'asset-inventory.json'), `${JSON.stringify(await inventory(staging), null, 2)}\n`);
+  await stageSiteShell({ directory: staging, siteDirectory, profile, manifest });
+  await writeSiteManifest(staging, manifest);
   await chmod(staging, 0o755);
   await rm(destination, { recursive: true, force: true });
   await rename(staging, destination);
