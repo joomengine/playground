@@ -6,7 +6,7 @@ import {
 } from './config.mjs';
 import { validateContent } from './joomla/index.mjs';
 import { deploymentRecipeMajor, deploymentRequiresJcb, deploymentPhpVersions, selectDeploymentRuntime } from './deployment-compatibility.mjs';
-import { pinnedJcbPackages } from './jcb-selection.mjs';
+import { jcbRecipeVersion, pinnedJcbPackages, recipeJcbEntry } from './jcb-selection.mjs';
 import { normalizeDeploymentOverlays, sameDeploymentValue } from './deployment-overlays.mjs';
 
 const VERSION = /^\d+\.\d+\.\d+$/;
@@ -236,14 +236,6 @@ function uniquePackages(entries) {
   return [...result.values()];
 }
 
-// Prepared recipes may reference a same-origin staged package. sourceUrl retains
-// its upstream identity even when the staged archive has a different checksum.
-function jcbRecipeVersion(entry) {
-  const source = entry.sourceUrl || entry.url;
-  const match = /\/(?:joomengine\/)?pkg-component-builder\/(?:archive\/refs\/tags\/|zip\/refs\/tags\/)?v?(\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?)(?:\.zip)?(?:$|[?#])/i.exec(source);
-  return match?.[1]?.replace(/\.zip$/i, '') ?? null;
-}
-
 export async function sharedJcbPackages(registry, fetcher = networkFetch) {
   if (registry.jcbPackages) {
     const variants = Object.fromEntries(Object.entries(registry.jcbPackages).map(([major, pin]) => [major, { extensions: [pin] }]));
@@ -325,12 +317,16 @@ async function resolveMaterializedDeployment(input, { catalog, deployCatalog, ba
     || variantReplacements.some(item => samePackage(item.to, entry)));
   const major = setup.joomlaVersion.split('.')[0];
   const requestedJcb = setup.jcbVersion ?? source.jcbVersion;
-  if (requestedJcb !== undefined || deploymentRequiresJcb(deploy)) {
+  // Saved documents keep staged URLs. Recover their publisher identity only
+  // from a currently reviewed package with the exact same URL and digest.
+  const recipePins = reviewedTarget.extensions.filter(entry => jcbRecipeVersion(entry) && unchangedManaged.some(item => samePackage(item, entry)));
+  const localPin = recipeJcbEntry({ configuration: { extensions: recipePins } }, major);
+  if (requestedJcb !== undefined || localPin || deploymentRequiresJcb(deploy)) {
     const pinned = await sharedJcbPackages(registry, fetcher);
-    const existingJcb = unchangedManaged.filter(entry => jcbRecipeVersion(entry)
+    const existingJcb = unchangedManaged.filter(entry => recipePins.some(item => samePackage(item, entry)) || jcbRecipeVersion(entry)
       || samePackage(entry, source.jcbPackage) || [...pinned.values()].some(item => samePackage(item.package, entry)));
     const fallback = pinned.get(major) ?? (major === '7' ? pinned.get('6') : undefined);
-    const version = normalizeJcbVersion(requestedJcb ?? fallback?.version ?? 'none');
+    const version = normalizeJcbVersion(requestedJcb ?? jcbRecipeVersion(localPin) ?? fallback?.version ?? 'none');
     if (version === 'none' && deploymentRequiresJcb(deploy)) throw new TypeError(`${deploy.title} requires Joomla Component Builder. Choose a compatible JCB version.`);
     const jcbMajor = version.split('.')[0];
     if (version !== 'none' && jcbMajor !== major && !(major === '7' && jcbMajor === '6')) throw new TypeError(`JCB ${version} is not a selectable package for Joomla ${major}.`);
@@ -338,7 +334,7 @@ async function resolveMaterializedDeployment(input, { catalog, deployCatalog, ba
     if (version !== 'none') {
       const explicit = input.jcbPackage ?? (version === source.jcbVersion ? source.jcbPackage : undefined);
       selected = explicit ? normalizeJcbPackage(explicit, baseURL)
-        : [...pinned.values()].find(entry => entry.version === version)?.package ?? catalog.retiredJcb?.find(entry => entry.version === version)?.package;
+        : recipePins.findLast(entry => jcbRecipeVersion(entry) === version) ?? [...pinned.values()].find(entry => entry.version === version)?.package ?? catalog.retiredJcb?.find(entry => entry.version === version)?.package;
       if (!selected) throw new TypeError(`The selected JCB ${version} package is unavailable.`);
     }
     setup.extensions = setup.extensions.filter(entry => !existingJcb.some(item => samePackage(item, entry)));
@@ -417,12 +413,13 @@ export async function resolveDeployConfiguration(input = {}, {
   const presetExtensions = [...common.extensions, ...(variant.extensions ?? [])];
   let selectedPresetExtensions = presetExtensions;
   let snapshotCompatible = true;
-  if (input.jcbVersion !== undefined) {
-    const selectedVersion = normalizeJcbVersion(input.jcbVersion);
+  const requestedJcb = input.jcbVersion ?? descriptor.jcbVersions?.[recipeMajor];
+  if (requestedJcb !== undefined) {
+    const selectedVersion = normalizeJcbVersion(requestedJcb);
     // Only inherit the reviewed preset when no explicit package was supplied.
     // A caller who supplies a package selected those exact bytes, even if it
     // happens to use the same version string as the pinned default.
-    const matching = input.jcbPackage === undefined && presetExtensions.find((entry) => jcbRecipeVersion(entry) === selectedVersion);
+    const matching = input.jcbPackage === undefined && recipeJcbEntry(deploy, recipeMajor, selectedVersion);
     let selectedPackage;
     if (selectedVersion === 'none') {
       if (deploymentRequiresJcb(deploy)) throw new TypeError(`${deploy.title} requires Joomla Component Builder. Choose a compatible JCB version.`);
@@ -442,9 +439,10 @@ export async function resolveDeployConfiguration(input = {}, {
         }
       }
     }
-    selectedPresetExtensions = presetExtensions.filter((entry) => !jcbRecipeVersion(entry));
-    if (selectedPackage) selectedPresetExtensions.unshift(selectedPackage);
-    snapshotCompatible = JSON.stringify(selectedPresetExtensions) === JSON.stringify(presetExtensions);
+    selectedPresetExtensions = presetExtensions.filter(entry => !jcbRecipeVersion(entry) || entry === matching);
+    if (selectedPackage && !matching) selectedPresetExtensions.unshift(selectedPackage);
+    const defaultPin = recipeJcbEntry(deploy, recipeMajor);
+    snapshotCompatible = selectedPackage ? selectedPackage === matching && matching === defaultPin : !defaultPin;
     setup.jcbVersion = selectedVersion;
     if (input.jcbPackage !== undefined) setup.jcbPackage = normalizeJcbPackage(input.jcbPackage, baseURL);
   }

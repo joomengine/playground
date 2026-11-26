@@ -5,7 +5,7 @@ import { createShareURL, createFullDeploymentDocument, normalizeConfiguration, p
 import { normalizeDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
 import { validateInstallOptions } from '../src/joomla/index.mjs';
 import { customSetupDetails, isolateSetup, publicConfiguration } from '../src/ui-state.mjs';
-import { jcbSelectionInput } from '../src/jcb-selection.mjs';
+import { initialJcbSelection, jcbSelectionInput, pinnedJcbPackages } from '../src/jcb-selection.mjs';
 import { deploymentNeedsReview } from '../src/launch-countdown.mjs';
 
 const baseURL = 'https://playground.joomengine.org/';
@@ -38,6 +38,44 @@ test('explicit JCB version changes replace only JCB and do not reuse the preset 
   assert.equal(alternate.snapshot, undefined);
   await assert.rejects(resolveDeployConfiguration({ admin, deployId: 'jcb', jcbVersion: 'none' }, withSnapshot), /requires Joomla Component Builder/);
   await assert.rejects(resolveDeployConfiguration({ admin, deployId: 'jcb', jcbVersion: '6.2.1-alpha1' }, options), /package is unavailable/);
+});
+
+test('fork recipes keep their own JCB version and bytes in the editor, launch, snapshot and saved copy', async () => {
+  const managed = (version, hash) => ({ url: `${baseURL}assets/packages/${hash.repeat(64)}.zip`,
+    sha256: hash.repeat(64), sourceUrl: `https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v${version}.zip` });
+  const shared = managed('6.8.0', 'e');
+  const base = managed('6.4.0', 'b');
+  const variant = managed('6.5.0', 'c');
+  const extra = { url: `${baseURL}assets/packages/other.zip`, sha256: 'f'.repeat(64) };
+  const snapshot = { format: 'joomengine-playground-export', schemaVersion: 1, joomlaVersion: '6.2.0', url: './prepared.zip', sha256: 'a'.repeat(64) };
+  for (const requirement of ['optional', 'required']) {
+    const useVariant = requirement === 'required';
+    const recipe = { schemaVersion: 1, id: 'training', title: 'Training', joomla: ['6'], requirements: { jcb: requirement },
+      configuration: { extensions: [extra, base] }, variants: useVariant ? { 6: { extensions: [variant] } } : {}, snapshot };
+    const pin = useVariant ? variant : base;
+    const version = useVariant ? '6.5.0' : '6.4.0';
+    const registry = normalizeDeployCatalog({ schemaVersion: 1, default: recipe.id, jcbPackages: { 6: shared },
+      deploys: [{ id: recipe.id, title: recipe.title, file: './training.json', jcbVersions: { 6: version } }] }, { baseURL });
+    const settings = { ...options, deployCatalog: registry, fetcher: async () => Response.json(recipe) };
+    const pinned = pinnedJcbPackages({ variants: { 6: { extensions: [shared] } } });
+    const selection = initialJcbSelection({ input: {}, deploy: recipe, major: '6', pinned, isSaved: false });
+    assert.equal(selection.version, version);
+    const fromEditor = jcbSelectionInput({ selection, major: '6', deploy: recipe, pinned });
+    for (const input of [{}, fromEditor]) {
+      const { configuration } = await resolveDeployConfiguration({ admin, ...input }, settings);
+      assert.deepEqual(configuration.extensions.map(entry => entry.sha256), [extra.sha256, pin.sha256]);
+      assert.equal(configuration.snapshot.sha256, snapshot.sha256);
+      const copy = createFullDeploymentDocument(configuration, { name: 'Saved training', requirements: { joomla: ['6'], jcb: requirement } });
+      delete copy.configuration.jcbVersion;
+      const reopened = await resolveDeployConfiguration({ admin, deploymentRecipe: copy }, settings);
+      assert.equal(reopened.configuration.jcbVersion, version);
+      assert.equal(reopened.configuration.jcbPackage.sha256, pin.sha256);
+      assert.equal(reopened.configuration.extensions.filter(entry => entry.sha256 === pin.sha256).length, 1);
+    }
+    const changed = await resolveDeployConfiguration({ admin, jcbVersion: '6.8.0' }, settings);
+    assert.deepEqual(changed.configuration.extensions.map(entry => entry.sha256), [shared.sha256, extra.sha256]);
+    assert.equal(changed.configuration.snapshot, undefined);
+  }
 });
 
 test('other presets retain their package when adding JCB, including Joomla-only by explicit choice', async () => {

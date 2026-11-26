@@ -138,11 +138,7 @@ export async function stageDeployCatalog({ root, staging, assets, cache, canonic
         descriptor.description = normalized.description;
       }
       descriptor.jcbVersions = {};
-      for (const major of normalized.joomla) {
-        const extensions = [...normalized.configuration.extensions, ...(normalized.variants[major]?.extensions ?? [])];
-        const pin = pinnedJcbPackages({ variants: { [major]: { extensions } } }).get(major);
-        if (pin) descriptor.jcbVersions[major] = pin.version;
-      }
+      for (const [major, pin] of pinnedJcbPackages(normalized)) descriptor.jcbVersions[major] = pin.version;
     }
     await writeFile(path.join(target, `${descriptor.id}.json`), `${JSON.stringify(deploy, null, 2)}\n`);
   }
