@@ -23,7 +23,7 @@ import { loadDeploymentFormSchemas } from './deployment-form-schema.mjs';
 import { administratorCaptureTargets } from './deployment-capture.mjs';
 import { normalizeDeploymentOverlays } from './deployment-overlays.mjs';
 import { deploymentRegistryKey, readDeploymentRegistry, saveCustomDeployment, deleteCustomDeployment, customDeploymentName } from './deployment-registry.mjs';
-import { initialJcbSelection, jcbSelectionInput, recipeIncludesJcb } from './jcb-selection.mjs';
+import { initialJcbSelection, jcbRecipeVersion, jcbSelectionInput, recipeIncludesJcb, recipeJcbEntry } from './jcb-selection.mjs';
 import { deploymentRequiresJcb, deploymentPhpVersions } from './deployment-compatibility.mjs';
 import { loadVersionCatalog } from './version-catalog.mjs';
 import { createBuildUpdateMonitor } from './build-updates.mjs';
@@ -963,7 +963,7 @@ async function resolve(input) {
   const major = input.joomlaVersion.split('.')[0];
   const pinnedVersion = descriptor?.jcbVersions?.[major] ?? descriptor?.jcbVersions?.[descriptor.requirements?.joomlaFallbacks?.[major]];
   if (input.jcbVersion === undefined && pinnedVersion && !savedState.sites[input.storageKey]) input.jcbVersion = pinnedVersion;
-  if (input.jcbVersion === undefined && deploymentRequiresJcb(descriptor) && !savedState.sites[input.storageKey]) {
+  if (input.jcbVersion === undefined && !input.deploymentRecipe && deploymentRequiresJcb(descriptor) && !savedState.sites[input.storageKey]) {
     const current = matchingJcbChoices(input.joomlaVersion.split('.')[0], dynamicMetadata.jcb, pinnedJcb)
       .find(entry => entry.channel === 'stable');
     if (current) input.jcbVersion = current.version;
@@ -1104,6 +1104,10 @@ async function prepareDynamicInput(input) {
 }
 function renderJcbOptions(major, selection = jcbSelection) {
   const choices = matchingJcbChoices(major, dynamicMetadata.jcb, pinnedJcb);
+  const recipeVersion = jcbRecipeVersion(recipeJcbEntry(currentDeployRecipe, major));
+  if (recipeVersion && !choices.some(entry => entry.version === recipeVersion)) {
+    choices.push({ version: recipeVersion, label: `JCB ${recipeVersion}`, channel: 'saved' });
+  }
   if (selection.version !== 'none' && !choices.some(entry => entry.version === selection.version)) {
     const pinned = [...pinnedJcb.values()].find(entry => entry.version === selection.version);
     const retired = catalog.retiredJcb?.some(entry => entry.version === selection.version);
@@ -1122,7 +1126,7 @@ async function changeJcbSelection() {
   pauseAutomaticLaunch();
   setBusy(true);
   try {
-    const input = { jcbVersion: version };
+    const input = { deployId: fields.deployId.value, joomlaVersion: fields.joomlaVersion.value, jcbVersion: version };
     if (previous.version === version && previous.package) input.jcbPackage = previous.package;
     await prepareDynamicInput(input);
     const next = { version, omit: false, ...(input.jcbPackage ? { package: input.jcbPackage } : {}) };
@@ -1180,8 +1184,8 @@ function applyConfiguration(config, input = config, deploy) {
   updateCompatibility({ preserve: true });
   const major = config.joomlaVersion.split('.')[0];
   const isSaved = config.persistence && Object.hasOwn(savedState.sites, config.storageKey);
-  jcbSelection = initialJcbSelection({ input: { ...input, deployId: input.deployId ?? config.deployId },
-    deploy: currentDeployRecipe, major, pinned: pinnedJcb, isSaved });
+  const selectionInput = isSaved ? input : { ...input, jcbVersion: config.jcbVersion, jcbPackage: config.jcbPackage };
+  jcbSelection = initialJcbSelection({ input: selectionInput, deploy: currentDeployRecipe, major, pinned: pinnedJcb, isSaved });
   renderJcbOptions(major);
   languageSelector?.refresh(); deploymentLanguageSelector?.refresh();
 }
