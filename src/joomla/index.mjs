@@ -104,6 +104,7 @@ export function validateInstallOptions(config) {
     autoLogin: config.autoLogin !== false,
     deployId: config.deployId,
     sourceDeployId: config.sourceDeployId,
+    initializeMcp: config.initializeMcp === true,
   };
   if (typeof result.multilingual !== 'boolean') throw new TypeError('multilingual must be true or false.');
   if (!/^[a-zA-Z0-9_]+$/.test(result.database)) throw new TypeError('Database names may contain letters, numbers and underscores.');
@@ -655,7 +656,7 @@ export async function installJoomla(runtime, config, {
   await runDeploymentCommands(runtime, options.startupCommands, config, extensionWarnings, sourceLoader, progress);
   progress({ stage: 'login', message: options.autoLogin ? 'Signing in to Joomla…' : 'Starting without an administrator session…' });
   const administrator = await restoreJoomlaSession(runtime, options, { sourceLoader });
-  if ((options.sourceDeployId ?? options.deployId) === 'jcb-mcp') await getMcpConnection(runtime, { sourceLoader, admin: administrator, initialize: true });
+  if (options.initializeMcp) await getMcpConnection(runtime, { sourceLoader, admin: administrator, initialize: true });
   await runtime.fs.writeFile(location.marker, JSON.stringify({
     state: 'complete', joomlaVersion: options.joomlaVersion, language: metadata.language, deployId: options.deployId,
     content: metadata.content, extensionWarnings, installedAt: new Date().toISOString(),
@@ -702,7 +703,7 @@ export async function importJoomlaSnapshot(runtime, config, {
   await applyJoomlaOverlays(runtime, options.overlays, { sourceLoader, progress, warnings: extensionWarnings, admin: administrator });
   await runDeploymentCommands(runtime, additions.startupCommands, config, extensionWarnings, sourceLoader, progress);
   await restoreJoomlaSession(runtime, options, { sourceLoader });
-  if ((options.sourceDeployId ?? options.deployId) === 'jcb-mcp') await getMcpConnection(runtime, { sourceLoader, admin: administrator, initialize: true });
+  if (options.initializeMcp) await getMcpConnection(runtime, { sourceLoader, admin: administrator, initialize: true });
   await runtime.fs.writeFile(location.marker, JSON.stringify({
     state: 'complete', joomlaVersion: options.joomlaVersion, language: metadata.language,
     deployId: options.deployId, extensionWarnings, importedAt: new Date().toISOString(),

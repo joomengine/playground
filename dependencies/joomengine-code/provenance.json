@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "integrationVersion": "40.1.0",
+  "integrationVersion": "40.1.1",
   "upstream": [
     {
       "name": "CodinGame Monaco VS Code integration",
-      "version": "40.1.0",
+      "version": "40.1.1",
       "repository": "https://github.com/CodinGame/monaco-vscode-api",
-      "revision": "c3b1b0f129047a3639fb129e08a2578a3a1cc8af",
+      "revision": "8bfcb1f0656fc3dae1ade9559a9de72e50498069",
       "licence": "MIT",
       "noticeFiles": [
         "LICENSE.codingame.txt"
@@ -106,7 +106,7 @@
   "localAdaptations": [
     {
       "component": "@codingame/monaco-vscode-api",
-      "version": "40.1.0",
+      "version": "40.1.1",
       "sourceFile": "@codingame/monaco-vscode-api/vscode/src/vs/workbench/services/textfile/common/encoding.js",
       "sourceSha256": "70f5165292a49dfb89323b40d22c3c6cce9dec3ebf4b649ea1e167abf4ac46e0",
       "buildScript": "scripts/code-assets.mjs",

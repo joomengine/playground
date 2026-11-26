@@ -1,14 +1,25 @@
 import { mkdir, readFile, writeFile, cp } from 'node:fs/promises';
 import path from 'node:path';
-import { downloadVerified } from './assets.mjs';
+import { downloadVerified, hashFile } from './assets.mjs';
 import { normalizeDeploy, normalizeDeployCatalog } from '../src/deploys.mjs';
+import { pinnedJcbPackages } from '../src/jcb-selection.mjs';
 import { prepareLanguagePackage } from './language-packages.mjs';
 
+async function optionalJSON(directory, name) {
+  if (!directory) return undefined;
+  try { return JSON.parse(await readFile(path.join(directory, name), 'utf8')); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+}
+
 /** Stage verified repository recipes and their packages on the playground origin. */
-export async function stageDeployCatalog({ root, staging, assets, cache, canonicalUrl }) {
+export async function stageDeployCatalog({ root, staging, assets, cache, canonicalUrl, siteDirectory, seedPackages = [] }) {
   const source = path.join(root, 'deploys');
   const target = path.join(staging, 'deploys');
-  const catalog = JSON.parse(await readFile(path.join(source, 'catalog.json'), 'utf8'));
+  const overrides = siteDirectory && path.join(siteDirectory, 'deploys');
+  const upstream = JSON.parse(await readFile(path.join(source, 'catalog.json'), 'utf8'));
+  const localCatalog = await optionalJSON(overrides, 'catalog.json');
+  const catalog = localCatalog === undefined ? upstream : localCatalog;
+  if (localCatalog && !Object.hasOwn(localCatalog, 'languages') && upstream.languages) catalog.languages = upstream.languages;
   const catalogUrl = new URL('deploys/catalog.json', canonicalUrl).href;
   normalizeDeployCatalog(catalog, { baseURL: catalogUrl });
   await mkdir(target, { recursive: true });
@@ -18,7 +29,22 @@ export async function stageDeployCatalog({ root, staging, assets, cache, canonic
   await mkdir(path.join(assets, 'packages'), { recursive: true });
   const downloaded = new Map();
 
+  async function verifySeed(pack) {
+    if (!/^[a-f0-9]{64}$/.test(pack.sha256) || pack.url !== `packages/${pack.sha256}.zip`
+      || await hashFile(path.join(assets, pack.url)) !== pack.sha256) {
+      throw new Error(`Reusable package failed verification: ${pack.sourceUrl}`);
+    }
+    return pack;
+  }
+
   async function stageLanguage(asset, major) {
+    const seed = seedPackages.find(pack => pack.language === asset.tag && pack.joomlaMajor === major
+      && pack.sourceUrl === asset.url && pack.sourceSha256 === asset.sha256);
+    if (seed) {
+      await verifySeed(seed);
+      downloaded.set(`language:${major}:${asset.tag}`, Promise.resolve(seed));
+      return { tag: asset.tag, url: `../assets/${seed.url}`, sourceUrl: asset.url, sha256: seed.sha256 };
+    }
     const derived = await prepareLanguagePackage({ root, cache, major, asset });
     if (!derived) return stagePackage(asset, `languages/${major}/${asset.tag}`);
     const filename = `${derived.sha256}.zip`;
@@ -42,6 +68,8 @@ export async function stageDeployCatalog({ root, staging, assets, cache, canonic
     const sha256 = asset.sha256.toLowerCase();
     if (!downloaded.has(sha256)) {
       downloaded.set(sha256, (async () => {
+        const seed = seedPackages.find(pack => !pack.language && pack.sha256 === sha256 && pack.sourceSha256 === sha256);
+        if (seed) return { ...await verifySeed(seed), sourceUrl: url.href };
         console.log(`Verifying deploy package ${context}…`);
         const archive = await downloadVerified(url.href, sha256, path.join(cache, 'packages', `${sha256}.zip`));
         const filename = `${sha256}.zip`;
@@ -75,6 +103,13 @@ export async function stageDeployCatalog({ root, staging, assets, cache, canonic
     catalog.languages[version] = await Promise.all(packages.map((asset) => stageLanguage(asset, version)));
   }
 
+  // The shared runtime pins remain selectable even when a site omits or replaces the JCB preset.
+  const jcb = await optionalJSON(source, 'jcb.json');
+  catalog.jcbPackages = {};
+  for (const [major, pin] of pinnedJcbPackages(jcb)) {
+    catalog.jcbPackages[major] = await stagePackage(pin.package, `jcb/${major}`);
+  }
+
   const ids = new Set();
   for (const descriptor of catalog.deploys) {
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(descriptor.id)
@@ -82,7 +117,9 @@ export async function stageDeployCatalog({ root, staging, assets, cache, canonic
       throw new Error('Deploy catalog entries must name distinct ./{id}.json files.');
     }
     ids.add(descriptor.id);
-    const deploy = JSON.parse(await readFile(path.join(source, `${descriptor.id}.json`), 'utf8'));
+    const filename = `${descriptor.id}.json`;
+    const local = await optionalJSON(overrides, filename);
+    const deploy = local === undefined ? JSON.parse(await readFile(path.join(source, filename), 'utf8')) : local;
     const baseURL = new URL(descriptor.file, catalogUrl).href;
     normalizeDeploy(deploy, { baseURL, requireIntegrity: true });
     if (deploy.id !== descriptor.id) throw new Error(`Deploy identity mismatch: ${descriptor.id}`);
@@ -91,7 +128,18 @@ export async function stageDeployCatalog({ root, staging, assets, cache, canonic
       await stageConfiguration(configuration, `${descriptor.id}/${version}`);
     }
     if (deploy.snapshot) deploy.snapshot = await stagePackage(deploy.snapshot, `${descriptor.id}/snapshot`);
-    normalizeDeploy(deploy, { baseURL, requireIntegrity: true });
+    const normalized = normalizeDeploy(deploy, { baseURL, requireIntegrity: true });
+    if (local !== undefined) {
+      // A replacement may change Joomla compatibility, packages, and the opening view.
+      descriptor.joomla = normalized.joomla;
+      descriptor.requirements = normalized.requirements;
+      if (localCatalog === undefined) {
+        descriptor.title = normalized.title;
+        descriptor.description = normalized.description;
+      }
+      descriptor.jcbVersions = {};
+      for (const [major, pin] of pinnedJcbPackages(normalized)) descriptor.jcbVersions[major] = pin.version;
+    }
     await writeFile(path.join(target, `${descriptor.id}.json`), `${JSON.stringify(deploy, null, 2)}\n`);
   }
   normalizeDeployCatalog(catalog, { baseURL: catalogUrl });

@@ -27,7 +27,7 @@ function fixture({ healthy = true, rejectClose = true } = {}) {
     return nodes.get(id);
   };
   const context = vm.createContext({
-    $, URL, busy: false, launching: false, initialized: true, catalog: {}, deployCatalog: {},
+    $, URL, siteFeatures: {}, siteStorageKey: key => key, busy: false, launching: false, initialized: true, catalog: {}, deployCatalog: {},
     runtime: undefined, stoppedSite: undefined, currentSitePath: '/administrator/index.php?option=com_content',
     currentConfig: undefined, currentInput: undefined, backupPanel: null, savedState: { sites: {} },
     requireOwnerForReplacement: () => true, readLiveMetadata: () => null,
@@ -90,12 +90,12 @@ test('owner clone and restore propagate the original database failure and preser
     technicalDetails: 'MariaDB initialize timed out after 120000 ms; token=private-token; user source-password',
   });
   const context = vm.createContext({
-    Error, crypto, presentError, initialized: true, companionView: false, busy: false, launching: false, closing: false,
+    Error, crypto, presentError, siteFeatures: {}, newDeployId: () => 'blank', initialized: true, companionView: false, busy: false, launching: false, closing: false,
     runtime: site, currentConfig: config, runningAdministrator: null, codeHost: null, databaseHost: null,
     $: () => ({value: '', close() {}}), document: { querySelector: () => null }, defaultSiteKey: () => 'copy',
     deploymentDescriptor: () => null, resolve: async configuration => ({configuration}), prepareUploadedSiteCopy: async () => ({}),
     setBusy() {}, pauseAutomaticLaunch() {}, administrator: () => config.admin, catalog: {}, deploymentURL: 'https://example.test/',
-    readSiteExport: async () => ({}), configurationForSiteExport: () => config,
+    readSiteExport: async () => ({ metadata: { joomlaVersion: '6.2.0' } }), configurationForSiteExport: () => config,
     async launch({ onFailure }) { launches++; onFailure(failure); return false; },
   });
   const owner = vm.runInContext([copy, transition, deployment, workspace, 'getOwnerWorkspace()'].join('\n'), context);

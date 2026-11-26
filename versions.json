@@ -41,31 +41,31 @@
   },
   "joomla": [
     {
-      "version": "5.4.10",
-      "label": "Joomla 5.4.10",
+      "version": "5.4.11",
+      "label": "Joomla 5.4.11",
       "php": [
         "8.3",
         "8.4",
         "8.5"
       ],
-      "url": "https://github.com/joomla/joomla-cms/releases/download/5.4.10/Joomla_5.4.10-Stable-Full_Package.zip",
-      "sha256": "06f8167586c0a3d08dcb6b3da497011e362ddefa273bef5f8e0855bfd00dca68"
+      "url": "https://github.com/joomla/joomla-cms/releases/download/5.4.11/Joomla_5.4.11-Stable-Full_Package.zip",
+      "sha256": "e513205ed33e853673080830ce95b765243061b9b5d4b1c36b25c30a06c752ae"
     },
     {
-      "version": "6.2.0",
-      "label": "Joomla 6.2.0",
+      "version": "6.2.1",
+      "label": "Joomla 6.2.1",
       "php": [
         "8.3",
         "8.4",
         "8.5"
       ],
-      "url": "https://github.com/joomla/joomla-cms/releases/download/6.2.0/Joomla_6.2.0-Stable-Full_Package.zip",
-      "sha256": "eaafc68b5990d7b9dd9156656d4c3c3547743d1d7a85682a92e2f9121b58f018"
+      "url": "https://github.com/joomla/joomla-cms/releases/download/6.2.1/Joomla_6.2.1-Stable-Full_Package.zip",
+      "sha256": "1587c4ec74131ac4cbcf44bce20af22f364486c4169d5c569fb53cf8029c169c"
     }
   ],
   "defaults": {
     "phpVersion": "8.4",
-    "joomlaVersion": "6.2.0"
+    "joomlaVersion": "6.2.1"
   },
   "runtime": {
     "repository": "joomengine/php-wasm-int64",
@@ -87,6 +87,30 @@
         "sha256": "17a2b4c7b352d0ead2592e7e5838ace8255bbcbdc71566d883e8e82ca3dacd8e",
         "sha512": "51dcfa77063f03b96bafc64d55e7a7f05ec2984e82a88045604e07d8ce0f8d085c40924736325c72e5306b88f05d172ce657a7e1c8d15ed285cecb8530e74917"
       }
+    }
+  ],
+  "retiredJoomla": [
+    {
+      "version": "5.4.10",
+      "label": "Joomla 5.4.10",
+      "php": [
+        "8.3",
+        "8.4",
+        "8.5"
+      ],
+      "url": "https://github.com/joomla/joomla-cms/releases/download/5.4.10/Joomla_5.4.10-Stable-Full_Package.zip",
+      "sha256": "06f8167586c0a3d08dcb6b3da497011e362ddefa273bef5f8e0855bfd00dca68"
+    },
+    {
+      "version": "6.2.0",
+      "label": "Joomla 6.2.0",
+      "php": [
+        "8.3",
+        "8.4",
+        "8.5"
+      ],
+      "url": "https://github.com/joomla/joomla-cms/releases/download/6.2.0/Joomla_6.2.0-Stable-Full_Package.zip",
+      "sha256": "eaafc68b5990d7b9dd9156656d4c3c3547743d1d7a85682a92e2f9121b58f018"
     }
   ]
 }

@@ -1,7 +1,7 @@
 import { deploymentRequiresJcb } from './deployment-compatibility.mjs';
 
 // Read the version from the upstream identity, not the name of a staged ZIP.
-function jcbVersion(entry) {
+export function jcbRecipeVersion(entry) {
   const source = entry?.sourceUrl || entry?.url || '';
   const match = /\/pkg-component-builder\/(?:archive\/refs\/tags\/|zip\/refs\/tags\/)?v?(\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?)(?:\.zip)?(?:$|[?#])/i.exec(source);
   return match?.[1]?.replace(/\.zip$/i, '') ?? null;
@@ -9,28 +9,41 @@ function jcbVersion(entry) {
 
 function recipeMajor(major, versions) { return major === '7' && !versions?.has('7') ? '6' : major; }
 
+/** A major-specific pin takes precedence over one in the common configuration. */
+export function recipeJcbEntry(deploy, major, version) {
+  const variant = deploy?.variants?.[major] ?? (major === '7' ? deploy?.variants?.['6'] : undefined);
+  for (const extensions of [variant?.extensions, deploy?.configuration?.extensions]) {
+    const match = extensions?.findLast(entry => {
+      const found = jcbRecipeVersion(entry);
+      return found && entry.sha256 && (version ? found === version : found.split('.')[0] === major || (major === '7' && found.startsWith('6.')));
+    });
+    if (match) return match;
+  }
+}
+
 export function pinnedJcbPackages(deploy) {
   const result = new Map();
-  for (const [major, variant] of Object.entries(deploy?.variants ?? {})) {
-    const entry = (variant.extensions || []).find(item => jcbVersion(item));
-    const version = jcbVersion(entry);
-    if (!version || version.split('.')[0] !== major || !entry.sha256) continue;
+  for (const major of deploy?.joomla ?? Object.keys(deploy?.variants ?? {})) {
+    const entry = recipeJcbEntry(deploy, major);
+    const version = jcbRecipeVersion(entry);
+    if (version?.split('.')[0] !== major) continue;
     result.set(major, { version, package: { url: entry.url, sha256: entry.sha256, ...(entry.sha512 ? { sha512: entry.sha512 } : {}) } });
   }
   return result;
 }
 
 export function recipeIncludesJcb(deploy, major, version) {
-  return [...(deploy?.configuration?.extensions ?? []), ...(deploy?.variants?.[recipeMajor(major, new Set(Object.keys(deploy?.variants ?? {})))]?.extensions ?? [])]
-    .some(entry => jcbVersion(entry) === version);
+  return Boolean(version && recipeJcbEntry(deploy, major, version));
 }
 
 export function initialJcbSelection({ input, deploy, major, pinned, isSaved }) {
   if (input.jcbVersion !== undefined) return { version: input.jcbVersion, omit: false, package: input.jcbPackage };
+  const recipe = jcbRecipeVersion(recipeJcbEntry(deploy, major));
+  // Historical sites without a selector resume without overriding their recorded instructions.
+  if (isSaved) return { version: recipe || 'none', omit: true };
   const fallback = pinned.get(recipeMajor(major, pinned))?.version;
-  // Historical sites without JCB selection must retain the original recipe.
-  if (isSaved) return { version: fallback && recipeIncludesJcb(deploy, major, fallback) ? fallback : 'none', omit: true };
-  return { version: fallback && (deploymentRequiresJcb(deploy) || recipeIncludesJcb(deploy, major, fallback)) ? fallback : 'none', omit: false };
+  const preferRecipe = recipe && (recipe.split('.')[0] === major || !pinned.has(major));
+  return { version: preferRecipe ? recipe : deploymentRequiresJcb(deploy) && fallback ? fallback : 'none', omit: false };
 }
 
 export function jcbSelectionInput({ selection, major, deploy, pinned, retired = [] }) {

@@ -6,6 +6,11 @@ export { normalizeDeploymentOverlays } from './deployment-overlays.mjs';
 import { parseMenus, parseTemplate, parseLanguageTags } from './site-configuration.mjs';
 export { parseMenus, parseTemplate, parseLanguageTags } from './site-configuration.mjs';
 
+// Public helpers also run directly from forked Pages sites and embedded modules.
+const deploymentBaseURL = new URL('../', import.meta.url);
+const defaultDocumentBaseURL = ['https:', 'http:'].includes(deploymentBaseURL.protocol)
+  ? deploymentBaseURL.href : 'https://playground.joomengine.org/';
+
 const VERSION = /^\d+\.\d+(?:\.\d+)?(?:-[A-Za-z0-9.-]+)?$/;
 const SHA256 = /^[a-f\d]{64}$/i;
 const SHA512 = /^[a-f\d]{128}$/i;
@@ -215,6 +220,7 @@ export function normalizeConfiguration(input = {}, { catalog, baseURL = 'https:/
   config.initialPath = normalizeInitialPath(config.initialPath);
   if (typeof config.storageKey !== 'string' || !STORAGE_KEY.test(config.storageKey)) throw new TypeError('Site key must use 1–64 letters, numbers, dots, underscores or hyphens.');
   for (const key of ['persistence', 'autoLogin', 'hideToolbar', 'fresh']) config[key] = requireBoolean(config[key], key);
+  if (config.initializeMcp !== undefined) config.initializeMcp = requireBoolean(config.initializeMcp, 'initializeMcp');
   config.language = normalizeLanguage(config.language);
   if (config.deployId !== undefined) config.deployId = normalizeDeployId(config.deployId);
   if (config.joomlaPackage !== undefined) {
@@ -404,7 +410,7 @@ export function createShareURL(location, config, { immediate = false } = {}) {
 
 export const MAX_DEPLOYMENT_BYTES = 1_048_576;
 export const MAX_SHARE_URL_LENGTH = 16_384;
-const DEPLOYMENT_FIELDS = ['deployId', 'joomlaVersion', 'joomlaPackage', 'jcbVersion', 'jcbPackage', 'phpVersion', 'siteName', 'initialPath', 'language', 'languageTags', 'multilingual', 'autoLogin', 'hideToolbar', 'persistence', 'fresh', 'extensions', 'startupCommands', 'languages', 'menus', 'template', 'phpSettings', 'content', 'overlays'];
+const DEPLOYMENT_FIELDS = ['deployId', 'joomlaVersion', 'joomlaPackage', 'jcbVersion', 'jcbPackage', 'phpVersion', 'siteName', 'initialPath', 'language', 'languageTags', 'multilingual', 'autoLogin', 'initializeMcp', 'hideToolbar', 'persistence', 'fresh', 'extensions', 'startupCommands', 'languages', 'menus', 'template', 'phpSettings', 'content', 'overlays'];
 const PROVENANCE_FIELDS = ['sourceDeployId', 'addonExtensions', 'addonStartupCommands', 'addonLanguages', 'addonTemplate'];
 
 function assertDocumentSize(value) {
@@ -463,7 +469,7 @@ function assertPublic(value, path = 'configuration') {
 }
 
 /** Public deployment instructions never contain a local site key or administrator. */
-export function createDeploymentDocument(config, { baseURL = 'https://playground.joomengine.org/', includePrivate = false, name, requirements } = {}) {
+export function createDeploymentDocument(config, { baseURL = defaultDocumentBaseURL, includePrivate = false, name, requirements } = {}) {
   if (includePrivate) return createFullDeploymentDocument(config, { baseURL, name, requirements });
   const selected = Object.fromEntries(DEPLOYMENT_FIELDS.filter((key) => config[key] !== undefined).map((key) => [key, config[key]]));
   if (config.deploymentRecipe) {
@@ -487,7 +493,7 @@ export function createDeploymentDocument(config, { baseURL = 'https://playground
 }
 
 /** A saved recipe is complete and portable; private downloads may include its administrator. */
-export function createFullDeploymentDocument(config, { name, requirements, baseURL = 'https://playground.joomengine.org/' } = {}) {
+export function createFullDeploymentDocument(config, { name, requirements, baseURL = defaultDocumentBaseURL } = {}) {
   const existing = config.deploymentRecipe ? normalizeDeploymentRecipe(config.deploymentRecipe, { baseURL }) : undefined;
   const merged = { ...existing?.configuration, ...config };
   const configuration = Object.fromEntries([...DEPLOYMENT_FIELDS, ...PROVENANCE_FIELDS, 'admin'].filter(key => merged[key] !== undefined).map(key => [key, merged[key]]));
@@ -497,7 +503,7 @@ export function createFullDeploymentDocument(config, { name, requirements, baseU
     configuration }, { baseURL });
 }
 
-export function normalizeDeploymentRecipe(input, { baseURL = 'https://playground.joomengine.org/', publicOnly = false } = {}) {
+export function normalizeDeploymentRecipe(input, { baseURL = defaultDocumentBaseURL, publicOnly = false } = {}) {
   input = readDocument(input);
   if (![2, 3].includes(input.schemaVersion)) throw new TypeError('A complete deployment recipe must use schemaVersion 2 or 3.');
   for (const key of Object.keys(input)) if (!['$schema', 'schemaVersion', 'name', 'requirements', 'configuration'].includes(key)) throw new TypeError(`Deployment document contains unsupported property ${key}.`);
@@ -510,7 +516,7 @@ export function normalizeDeploymentRecipe(input, { baseURL = 'https://playground
   return result;
 }
 
-export function parseDeploymentDocument(input, { baseURL = 'https://playground.joomengine.org/', publicOnly = false } = {}) {
+export function parseDeploymentDocument(input, { baseURL = defaultDocumentBaseURL, publicOnly = false } = {}) {
   input = readDocument(input);
   if ([2, 3].includes(input.schemaVersion)) {
     const deploymentRecipe = normalizeDeploymentRecipe(input, { baseURL, publicOnly });
@@ -541,7 +547,7 @@ function parseDocumentConfiguration(value, { baseURL, full, publicOnly }) {
   if (value.initialPath !== undefined) result.initialPath = normalizeInitialPath(value.initialPath);
   if (value.language !== undefined) result.language = normalizeLanguage(value.language);
   if (value.languageTags !== undefined) result.languageTags = parseLanguageTags(value.languageTags);
-  for (const key of ['autoLogin', 'hideToolbar', 'persistence', 'fresh', 'multilingual']) if (value[key] !== undefined) result[key] = requireBoolean(value[key], key);
+  for (const key of ['autoLogin', 'initializeMcp', 'hideToolbar', 'persistence', 'fresh', 'multilingual']) if (value[key] !== undefined) result[key] = requireBoolean(value[key], key);
   if (full) {
     result.addonExtensions = parseUserExtensions(value.addonExtensions ?? value.extensions ?? [], baseURL);
     const addonURLs = new Set(result.addonExtensions.map(entry => entry.url));
@@ -612,7 +618,7 @@ function decodeDocument(encoded) {
 }
 
 /** Fetch public setup JSON when it is too large to place directly in a link. */
-export async function loadDeploymentDocument(url, { fetcher = networkFetch, baseURL = 'https://playground.joomengine.org/' } = {}) {
+export async function loadDeploymentDocument(url, { fetcher = networkFetch, baseURL = defaultDocumentBaseURL } = {}) {
   const source = parseExtensions([{ url }], baseURL)[0];
   const response = await fetcher(source.url);
   if (!response.ok) throw new Error(`Deployment configuration download failed: HTTP ${response.status}.`);

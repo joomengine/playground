@@ -148,6 +148,14 @@ test('explicit MCP on Joomla 5 fails instead of silently changing the requested 
 test('MCP remains an explicit Joomla 6 choice with both pinned packages', async () => {
   const { configuration } = await resolveDeployConfiguration({ admin, deployId: 'jcb-mcp' }, options);
   assert.equal(configuration.deployId, 'jcb-mcp');
+  assert.equal(configuration.initializeMcp, true);
+  const legacyCopy = createFullDeploymentDocument(configuration, { name: 'Existing MCP copy' });
+  delete legacyCopy.configuration.initializeMcp;
+  const reopened = await resolveDeployConfiguration({ admin, deployId: 'custom-mcp', deploymentRecipe: legacyCopy }, options);
+  assert.equal(reopened.configuration.initializeMcp, true);
+  legacyCopy.configuration.initializeMcp = false;
+  const disabled = await resolveDeployConfiguration({ admin, deployId: 'custom-mcp', deploymentRecipe: legacyCopy }, options);
+  assert.equal(disabled.configuration.initializeMcp, false);
   assert.equal(configuration.extensions.length, 2);
   assert.equal(configuration.language, 'en-GB');
 });

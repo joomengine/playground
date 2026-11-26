@@ -13,7 +13,8 @@ export function syncThemeDocument(doc, state) {
   doc.documentElement.dataset.theme = resolved;
   doc.documentElement.dataset.themePreference = normalizeTheme(state?.preference);
   doc.documentElement.style.colorScheme = resolved;
-  const color = resolved === 'dark' ? '#080a27' : '#f5f7fc';
+  const canvas = doc.defaultView?.getComputedStyle?.(doc.documentElement).getPropertyValue('--canvas').trim();
+  const color = canvas || (resolved === 'dark' ? '#080a27' : '#f5f7fc');
   for (const [name, content] of [['color-scheme', resolved], ['theme-color', color]]) {
     let meta = doc.querySelector(`meta[name="${name}"]`);
     if (!meta && doc.head) { meta = doc.createElement('meta'); meta.name = name; doc.head.append(meta); }
