@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   checks:
-    if: github.repository == 'joomengine/playground'
+    if: (github.repository == 'joomengine/playground' || (vars.PLAYGROUND_FORK_PAGES != 'true' && vars.PLAYGROUND_FORK_PAGES != 'manual'))
     name: Fast source checks
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -319,7 +319,7 @@ jobs:
           retention-days: 14
 
   network-worker:
-    if: github.repository == 'joomengine/playground'
+    if: (github.repository == 'joomengine/playground' || (vars.PLAYGROUND_FORK_PAGES != 'true' && vars.PLAYGROUND_FORK_PAGES != 'manual'))
     name: Network Worker tests
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -550,7 +550,7 @@ jobs:
   validate:
     name: Validate playground
     needs: [checks, build, browser, interaction, compatibility, version-catalog, jcb-network, network-worker, php-network]
-    if: always() && github.repository == 'joomengine/playground'
+    if: always() && (github.repository == 'joomengine/playground' || (vars.PLAYGROUND_FORK_PAGES != 'true' && vars.PLAYGROUND_FORK_PAGES != 'manual'))
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:

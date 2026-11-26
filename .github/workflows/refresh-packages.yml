@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   resolve:
-    if: github.repository == 'joomengine/playground' && github.ref == 'refs/heads/main'
+    if: (github.repository == 'joomengine/playground' || (vars.PLAYGROUND_FORK_PAGES != 'true' && vars.PLAYGROUND_FORK_PAGES != 'manual')) && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     outputs:

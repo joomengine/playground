@@ -40,6 +40,35 @@ async function exportDeployment(page) {
 }
 
 for (const browserName of (process.env.PLAYGROUND_BROWSERS || 'chromium,firefox').split(',')) {
+test(`A fork can launch and edit a catalog without JCB or blank presets (${browserName})`, { timeout: 60_000 }, async t => {
+  const recipe = { schemaVersion: 1, id: 'training', title: 'Training site', joomla: ['5'],
+    configuration: { siteName: 'Training', startupCommands: [['cache:clean']] } };
+  const fixtures = { ...formFixtures,
+    'assets/manifest.json': JSON.stringify({ ...formManifest, joomla: [...formManifest.joomla, { version: '5.4.0', php: ['8.4'] }] }),
+    'deploys/catalog.json': JSON.stringify({ schemaVersion: 1, default: 'training', jcbPackages: {},
+      deploys: [{ id: 'training', title: 'Training site', file: './training.json', joomla: ['5'] }] }),
+    'deploys/training.json': JSON.stringify(recipe),
+  };
+  const server = await createStaticServer({ directory: fileURLToPath(new URL('../', import.meta.url)), fixtures });
+  t.after(() => server.close());
+  const executablePath = process.env[`PLAYGROUND_${browserName.toUpperCase()}_EXECUTABLE`];
+  const browser = await { chromium, firefox }[browserName].launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  const seen = [];
+  page.on('request', request => seen.push(new URL(request.url()).pathname));
+  await page.goto(`${server.url}?start=0`);
+  await page.locator('#embedded-launch:enabled').waitFor();
+  assert.equal(await page.locator('#joomla-version').inputValue(), '5.4.0');
+  await page.locator('#deploy-editor-button').click();
+  assert.deepEqual(await page.locator('#editor-deployment option').allTextContents(), ['Training site']);
+  await page.locator('#new-deployment').click();
+  await page.waitForFunction(() => document.getElementById('deployment-name').value.startsWith('New deployment'));
+  assert.equal(await page.locator('#editor-deployment').inputValue(), 'training');
+  assert.deepEqual(await jsonValue(page, 'startup-commands'), [['cache:clean']]);
+  assert.equal(seen.some(url => url.endsWith('/deploys/jcb.json') || url.endsWith('/deploys/blank.json')), false);
+});
+
 for (const preset of presets) {
 test(`Configure a deployment supports stable editing and saved copies for ${preset} (${browserName})`, { timeout: 90_000 }, async () => {
   const server = await createStaticServer({ directory: fileURLToPath(new URL('../', import.meta.url)), fixtures: formFixtures });

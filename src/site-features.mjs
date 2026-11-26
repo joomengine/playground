@@ -1,3 +1,5 @@
+import { selectDeploymentRuntime } from './deployment-compatibility.mjs';
+
 // Forks can opt out of these parts of the surrounding Playground. A required
 // entry remains available in every supported profile, including a chromeless one.
 const features = {
@@ -98,15 +100,38 @@ export function siteSharedConfiguration(input, config) {
   return filtered;
 }
 
-/** An older or differently branded live site must stay in its own saved slot. */
-export function allowedSiteSelection(site, config, defaults, deployCatalog) {
+/** Initial selection, reset and saved-site compatibility use the same recipe and PHP constraints. */
+export function siteRuntimeSelection(recipe, catalog, config, requested) {
+  if (config.phpVersion !== false) return selectDeploymentRuntime(recipe, catalog, requested);
+  const fixed = catalog.defaults.phpVersion;
+  const joomla = catalog.joomla.map(release => ({ ...release, php: release.php.filter(version => version === fixed) }));
+  return selectDeploymentRuntime(recipe, { ...catalog, joomla }, requested);
+}
+
+/** Keep compatible workspaces on their installed Joomla patch as the catalog advances. */
+export function allowedSiteSelection(site, config, catalog, deployCatalog) {
   if (!site) return false;
-  if (config.phpVersion === false && site.phpVersion !== defaults.phpVersion) return false;
-  if (config.joomlaVersion === false && site.joomlaVersion !== defaults.joomlaVersion) return false;
+  if (config.phpVersion === false && site.phpVersion !== catalog.defaults.phpVersion) return false;
+  if (config.joomlaVersion !== false && config.deployments !== false) return true;
+  const major = site.joomlaVersion?.split('.')[0];
+  const defaultMajor = catalog.defaults.joomlaVersion.split('.')[0];
+  const defaultId = deployCatalog.defaultsByJoomla?.[defaultMajor] ?? deployCatalog.default;
+  const selectedId = deployCatalog.defaultsByJoomla?.[major] ?? deployCatalog.default;
   if (config.deployments === false) {
-    const major = site.joomlaVersion?.split('.')[0];
-    const selected = deployCatalog.defaultsByJoomla?.[major] ?? deployCatalog.default;
-    if (site.deployId !== selected || site.deploymentRecipe || site.restoredSite) return false;
+    if (site.deploymentRecipe || site.restoredSite) return false;
+    if (site.deployId !== defaultId && (config.joomlaVersion === false || site.deployId !== selectedId)) return false;
+  }
+  if (config.joomlaVersion === false || (config.deployments === false && site.deployId !== selectedId)) {
+    const recipe = deployCatalog.deploys?.find(entry => entry.id === site.deployId) ?? site.deploymentRecipe;
+    if (!recipe) return false;
+    try { return siteRuntimeSelection(recipe, catalog, config).joomlaVersion.split('.')[0] === major; }
+    catch { return false; } // A previous recipe may no longer have an installable runtime.
   }
   return true;
+}
+
+/** Never reuse the live storage key of a site excluded by this distribution's settings. */
+export function siteStorageKey(key, sites, config, catalog, deployCatalog) {
+  if (!Object.hasOwn(sites, key) || allowedSiteSelection(sites[key], config, catalog, deployCatalog)) return key;
+  return `${key.slice(0, 22)}-site-${crypto.randomUUID()}`;
 }

@@ -26,7 +26,7 @@ function fixture({ healthy = true, rejectClose = true } = {}) {
     return nodes.get(id);
   };
   const context = vm.createContext({
-    $, URL, busy: false, launching: false, initialized: true, catalog: {}, deployCatalog: {},
+    $, URL, siteFeatures: {}, siteStorageKey: key => key, busy: false, launching: false, initialized: true, catalog: {}, deployCatalog: {},
     runtime: undefined, stoppedSite: undefined, currentSitePath: '/administrator/index.php?option=com_content',
     currentConfig: undefined, currentInput: undefined, backupPanel: null, savedState: { sites: {} },
     requireOwnerForReplacement: () => true, readLiveMetadata: () => null,

@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 const validation = readFileSync(new URL('../.github/workflows/validate.yml', import.meta.url), 'utf8');
+const sourceMode = "(github.repository == 'joomengine/playground' || (vars.PLAYGROUND_FORK_PAGES != 'true' && vars.PLAYGROUND_FORK_PAGES != 'manual'))";
 const publishing = readFileSync(new URL('../.github/workflows/pages.yml', import.meta.url), 'utf8');
 
 // Read the repository's job blocks without introducing a separate YAML runtime dependency.
@@ -70,7 +71,7 @@ test('downstream release validation requires every direct prerequisite to succee
 test('the aggregate fails for a failed, skipped, cancelled or absent required validation job', () => {
   const aggregate = job(validation, 'validate');
   assert.match(aggregate, /^    needs: \[[^\n]*\bjcb-network\b[^\n]*\]$/m);
-  assert.match(aggregate, /^    if: always\(\) && github\.repository == 'joomengine\/playground'$/m);
+  assert.equal(/^    if: (.+)$/m.exec(aggregate)?.[1], 'always() && ' + sourceMode);
   assert.match(aggregate, /^          JCB_NETWORK: \$\{\{ needs\.jcb-network\.result \}\}$/m);
   const script = aggregateScript();
   const baseline = { ...process.env, CHECKS: 'success', BUILD_REQUIRED: 'true', BUILD: 'success',
@@ -103,7 +104,7 @@ test('every pull-request update and main publication invokes the mandatory valid
   assert.doesNotMatch(publications, /^\s+(?:paths|paths-ignore):/m);
   const publicationValidation = job(publishing, 'validate');
   assert.match(publicationValidation, /^    uses: \.\/\.github\/workflows\/validate\.yml$/m);
-  assert.match(publicationValidation, /^    if: github\.repository == 'joomengine\/playground' && github\.ref == 'refs\/heads\/main'$/m);
+  assert.equal(/^    if: (.+)$/m.exec(publicationValidation)?.[1], sourceMode + " && github.ref == 'refs/heads/main'");
   assert.doesNotMatch(publicationValidation, /needs:|configuration|continue-on-error/,
     'Configuration publication must still run the complete validation chain independently.');
   const deploy = job(publishing, 'deploy');
@@ -112,4 +113,17 @@ test('every pull-request update and main publication invokes the mandatory valid
   assert.doesNotMatch(publishing, /publish-configuration|pages-config-release|healthz/);
   assert.ok(deploy.indexOf('actions/download-artifact@') < deploy.indexOf('actions/deploy-pages@'));
   assert.ok(deploy.indexOf('actions/deploy-pages@') < deploy.indexOf('run: node scripts/pages-smoke.mjs dist'));
+});
+
+test('forks retain full source CI until they explicitly choose manual or automatic downstream publication', () => {
+  const refresh = readFileSync(new URL('../.github/workflows/refresh-packages.yml', import.meta.url), 'utf8');
+  const downstream = readFileSync(new URL('../.github/workflows/fork-pages.yml', import.meta.url), 'utf8');
+  for (const name of ['checks', 'network-worker']) {
+    assert.equal(/^    if: (.+)$/m.exec(job(validation, name))?.[1], sourceMode);
+  }
+  assert.equal(/^    if: (.+)$/m.exec(job(refresh, 'resolve'))?.[1], sourceMode + " && github.ref == 'refs/heads/main'");
+  assert.equal(/^    if: (.+)$/m.exec(job(publishing, 'publish-engine'))?.[1], "github.repository == 'joomengine/playground'");
+  assert.ok(job(downstream, 'compose').includes("github.repository != 'joomengine/playground' &&"));
+  assert.ok(job(downstream, 'compose').includes("(vars.PLAYGROUND_FORK_PAGES == 'true' || (vars.PLAYGROUND_FORK_PAGES == 'manual' && github.event_name == 'workflow_dispatch'))"));
+  assert.ok(job(downstream, 'deploy').includes("github.event_name != 'pull_request'"));
 });
