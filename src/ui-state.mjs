@@ -1,7 +1,7 @@
 import { createShareURL, createFullDeploymentDocument } from './config.mjs';
 import { ISOLATION_PARAMETER, isolationMarker } from './isolation.mjs';
 const SITE_KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
-const SAVED_SETUP_FIELDS = ['restoredSite', 'deployId', 'sourceDeployId', 'joomlaVersion', 'joomlaPackage', 'jcbVersion', 'jcbPackage', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'phpSettings', 'menus', 'template', 'languageTags', 'multilingual', 'content', 'addonExtensions', 'addonStartupCommands', 'addonLanguages', 'addonTemplate', 'overlays'];
+const SAVED_SETUP_FIELDS = ['restoredSite', 'deployId', 'sourceDeployId', 'joomlaVersion', 'joomlaPackage', 'jcbVersion', 'jcbPackage', 'phpVersion', 'siteName', 'initialPath', 'storageKey', 'language', 'autoLogin', 'initializeMcp', 'hideToolbar', 'persistence', 'phpSettings', 'menus', 'template', 'languageTags', 'multilingual', 'content', 'addonExtensions', 'addonStartupCommands', 'addonLanguages', 'addonTemplate', 'overlays'];
 
 /** Setup identity preserves command argument boundaries as well as source URLs. */
 export function customSetupDetails(input) {

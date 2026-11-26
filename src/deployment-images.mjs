@@ -34,7 +34,7 @@ export async function deploymentImageFingerprint(config, manifest, { baseURL = D
   const php = manifest.php?.find(entry => entry.version === config.phpVersion);
   const joomla = config.joomlaPackage || manifest.joomla?.find(entry => entry.version === config.joomlaVersion);
   const fields = ['deployId', 'sourceDeployId', 'joomlaVersion', 'phpVersion', 'jcbVersion', 'jcbPackage', 'language',
-    'languageTags', 'multilingual', 'extensions', 'startupCommands', 'languages', 'menus', 'template', 'content', 'phpSettings', 'overlays'];
+    'languageTags', 'multilingual', 'initializeMcp', 'extensions', 'startupCommands', 'languages', 'menus', 'template', 'content', 'phpSettings', 'overlays'];
   const configuration = Object.fromEntries(fields.filter(key => config[key] !== undefined).map(key => [key, config[key]]));
   // Runtime discovery makes absent JCB explicit after installation. That does
   // not change the recipe, nor does normalizing an omitted overlay list to [].

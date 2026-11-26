@@ -118,7 +118,7 @@ function appFixture({ valid = true, runtime, check = async () => true, resolve, 
   fixture.document.querySelector = () => ({ classList: { toggle() {} } });
   const input = { storageKey: 'launch-media-test', persistence: true, deployId: 'blank', joomlaVersion: '6.0', phpVersion: '8.4' };
   const context = vm.createContext({
-    $, document: fixture.document, launchMedia: fixture.media,
+    $, siteFeatures: {}, document: fixture.document, launchMedia: fixture.media,
     busy: false, launching: false, initialized: true, catalog: {}, deployCatalog: {}, runtime,
     stoppedSite: undefined, readLiveMetadata: () => null, backupPanel: null, requireOwnerForReplacement: () => true,
     launchCountdown: { stop() {} }, buildUpdates: { check },

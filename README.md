@@ -46,6 +46,10 @@ Browser isolation does not require a network verification step.
 For an agent-oriented introduction to configuring a site, working with JCB,
 testing extensions and exporting results, see the canonical [Playground agent guide in JoomEngine Skills](https://github.com/joomengine/skills/blob/main/testing/playground/README.md).
 
+Extension developers can publish a Playground for their own component using the verified
+JoomEngine runtime. The [fork setup guide](docs/fork-playground.md) includes a working
+site profile with its own Joomla deployment, branding and visitor controls.
+
 ## Upstream foundations and credits
 
 This project builds directly on the work of these maintainers and contributors:
@@ -906,7 +910,7 @@ real PHP/MariaDB/Joomla startup in Chromium and WebKit; device names and screen 
 do not select a policy. See [browser compatibility](docs/browser-compatibility.md) for the tested
 engines and remaining physical-device checks.
 
-The **Publish playground to Pages** workflow runs on every push or merge to
+In the JoomEngine repository, the **Publish playground to Pages** workflow runs on every push or merge to
 `main`, daily at 03:15 UTC to refresh the current and nightly packages, and can
 also be started manually on `main`. It validates first, then deploys that exact
 tested artifact through the `github-pages` environment. Scheduled runs use the
@@ -916,7 +920,7 @@ Every build resolves the latest published stable PHP runtime and validates the
 resulting distribution. Publication requires a verified release and deploys the
 exact artifact that passed those checks.
 
-Configure Pages with source **GitHub Actions** and custom domain
+For the official site, configure Pages with source **GitHub Actions** and custom domain
 **playground.joomengine.org**. The committed `CNAME` is copied into the build.
 Point the domain's DNS CNAME record to `joomengine.github.io`, then enable HTTPS
 in Pages once GitHub has provisioned its certificate. Repository environment

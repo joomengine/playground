@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "brand": {
+    "name": "Field Notes",
+    "title": "Field Notes editorial desk",
+    "description": "Try the Field Notes editorial desk in Joomla.",
+    "productLabel": "EDITORIAL DESK",
+    "logo": { "dark": "assets/field-notes.svg", "light": "assets/field-notes.svg", "alt": "Field Notes" },
+    "footer": { "company": "Field Notes", "credit": "An editorial workspace powered by JoomEngine Playground." },
+    "colors": {
+      "dark": { "header-start": "#123b35", "header-end": "#132f2b", "focus": "#9ae4cc" },
+      "light": { "header-start": "#e8f5ef", "header-end": "#f6fcf8", "focus": "#16634f" }
+    }
+  },
+  "features": {
+    "deployments": false,
+    "editor": false,
+    "database": false,
+    "backups": false,
+    "phpSettings": false,
+    "phpVersion": false
+  },
+  "defaults": { "phpVersion": "8.4" }
+}

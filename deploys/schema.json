@@ -275,6 +275,9 @@
         "autoLogin": {
           "type": "boolean"
         },
+        "initializeMcp": {
+          "type": "boolean"
+        },
         "hideToolbar": {
           "type": "boolean"
         },

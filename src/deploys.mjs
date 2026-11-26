@@ -5,7 +5,7 @@ import {
   normalizeLanguage, normalizeJcbVersion, normalizeJcbPackage, catalogWithSelectedJoomlaPackage, parseExtensions, parseUserExtensions, parseUserTemplate, normalizeDeploymentRecipe, parseStartupCommands, resolveJoomlaVersion, parseMenus, parseTemplate, parseLanguageTags, readDeploymentBytes,
 } from './config.mjs';
 import { validateContent } from './joomla/index.mjs';
-import { deploymentRecipeMajor, deploymentRequiresJcb, deploymentPhpVersions } from './deployment-compatibility.mjs';
+import { deploymentRecipeMajor, deploymentRequiresJcb, deploymentPhpVersions, selectDeploymentRuntime } from './deployment-compatibility.mjs';
 import { pinnedJcbPackages } from './jcb-selection.mjs';
 import { normalizeDeploymentOverlays, sameDeploymentValue } from './deployment-overlays.mjs';
 
@@ -116,7 +116,7 @@ function normalizeContent(value, multilingual = value?.multilingual ?? false) {
 
 function normalizeSetup(value = {}, baseURL, requireIntegrity) {
   object(value, 'Deploy configuration');
-  properties(value, ['siteName', 'initialPath', 'joomlaVersion', 'phpVersion', 'language', 'autoLogin', 'hideToolbar', 'persistence', 'extensions', 'startupCommands', 'languages', 'languageTags', 'multilingual', 'menus', 'template', 'phpSettings', 'content', 'snapshot', 'overlays'], 'Deploy configuration');
+  properties(value, ['siteName', 'initialPath', 'joomlaVersion', 'phpVersion', 'language', 'autoLogin', 'initializeMcp', 'hideToolbar', 'persistence', 'extensions', 'startupCommands', 'languages', 'languageTags', 'multilingual', 'menus', 'template', 'phpSettings', 'content', 'snapshot', 'overlays'], 'Deploy configuration');
   const result = {};
   if (value.siteName !== undefined) result.siteName = text(value.siteName, 'Site name', 100);
   if (value.initialPath !== undefined) result.initialPath = normalizeInitialPath(value.initialPath);
@@ -127,7 +127,7 @@ function normalizeSetup(value = {}, baseURL, requireIntegrity) {
     }
   }
   if (value.language !== undefined) result.language = normalizeLanguage(value.language);
-  for (const name of ['autoLogin', 'hideToolbar', 'persistence', 'multilingual']) {
+  for (const name of ['autoLogin', 'initializeMcp', 'hideToolbar', 'persistence', 'multilingual']) {
     if (value[name] !== undefined) {
       if (typeof value[name] !== 'boolean') throw new TypeError(`${name} must be true or false.`);
       result[name] = value[name];
@@ -149,18 +149,23 @@ function normalizeSetup(value = {}, baseURL, requireIntegrity) {
 
 export function normalizeDeployCatalog(value, { baseURL = defaultCatalogURL.href, requireIntegrity = true } = {}) {
   object(value, 'Deploy catalog');
-  properties(value, ['$schema', 'schemaVersion', 'default', 'defaultsByJoomla', 'deploys', 'languages'], 'Deploy catalog');
+  properties(value, ['$schema', 'schemaVersion', 'default', 'defaultsByJoomla', 'deploys', 'languages', 'jcbPackages'], 'Deploy catalog');
   if (value.schemaVersion !== 1 || !Array.isArray(value.deploys) || !value.deploys.length || value.deploys.length > 100) throw new TypeError('The deploy catalog must use schema version 1 and list 1–100 deploys.');
   const seen = new Set();
   const deploys = value.deploys.map((entry) => {
     object(entry, 'Deploy entry');
-    properties(entry, ['id', 'title', 'description', 'file', 'joomla', 'requirements'], 'Deploy entry');
+    properties(entry, ['id', 'title', 'description', 'file', 'joomla', 'requirements', 'jcbVersions'], 'Deploy entry');
     const id = normalizeDeployId(entry.id);
     if (entry.id !== id || seen.has(id)) throw new TypeError(`Invalid or duplicate deploy ID: ${entry.id}.`);
     seen.add(id);
     if (entry.file !== `./${id}.json`) throw new TypeError(`Deploy ${id} must use ./${id}.json.`);
     if (entry.joomla !== undefined && (!Array.isArray(entry.joomla) || !entry.joomla.length || entry.joomla.some((major) => !['5', '6'].includes(major)))) throw new TypeError('Deploy catalog Joomla support must list supported major versions.');
-    return { id, ...(entry.joomla ? { joomla: [...new Set(entry.joomla)] } : {}), requirements: normalizeRequirements(entry.requirements, entry.joomla), title: text(entry.title, 'Deploy title'), description: text(entry.description ?? '', 'Deploy description', 1000, true), file: entry.file, url: new URL(entry.file, baseURL).href };
+    const jcbVersions = {};
+    for (const [major, version] of Object.entries(object(entry.jcbVersions ?? {}, 'Deployment JCB versions'))) {
+      if (normalizeJcbVersion(version).split('.')[0] !== major || !/^[1-9][0-9]*$/.test(major)) throw new TypeError('Invalid recipe JCB version pin.');
+      jcbVersions[major] = version;
+    }
+    return { id, ...(entry.jcbVersions ? { jcbVersions } : {}), ...(entry.joomla ? { joomla: [...new Set(entry.joomla)] } : {}), requirements: normalizeRequirements(entry.requirements, entry.joomla), title: text(entry.title, 'Deploy title'), description: text(entry.description ?? '', 'Deploy description', 1000, true), file: entry.file, url: new URL(entry.file, baseURL).href };
   });
   const defaultId = normalizeDeployId(value.default);
   if (!seen.has(defaultId)) throw new TypeError('The default deploy is missing from the catalog.');
@@ -176,7 +181,16 @@ export function normalizeDeployCatalog(value, { baseURL = defaultCatalogURL.href
     if (!['5', '6'].includes(major)) throw new TypeError(`Unsupported language catalog Joomla major: ${major}.`);
     languages[major] = languagePackages(entries, baseURL, requireIntegrity);
   }
-  return { schemaVersion: 1, default: defaultId, defaultsByJoomla, deploys, languages, url: new URL(baseURL).href };
+  const catalog = { schemaVersion: 1, default: defaultId, defaultsByJoomla, deploys, languages, url: new URL(baseURL).href };
+  if (value.jcbPackages !== undefined) {
+    catalog.jcbPackages = {};
+    for (const [major, entry] of Object.entries(object(value.jcbPackages, 'JCB package pins'))) {
+      const pin = packageEntry(entry, baseURL, requireIntegrity);
+      if (jcbRecipeVersion(pin)?.split('.')[0] !== major) throw new TypeError('A JCB package pin must match its declared major.');
+      catalog.jcbPackages[major] = pin;
+    }
+  }
+  return catalog;
 }
 
 export function normalizeDeploy(value, { baseURL = defaultCatalogURL.href, requireIntegrity = true } = {}) {
@@ -230,7 +244,12 @@ function jcbRecipeVersion(entry) {
   return match?.[1]?.replace(/\.zip$/i, '') ?? null;
 }
 
-async function sharedJcbPackages(registry, fetcher) {
+export async function sharedJcbPackages(registry, fetcher = networkFetch) {
+  if (registry.jcbPackages) {
+    const variants = Object.fromEntries(Object.entries(registry.jcbPackages).map(([major, pin]) => [major, { extensions: [pin] }]));
+    return pinnedJcbPackages({ variants });
+  }
+  // Catalogs produced before independent JCB pins used the official recipe.
   const descriptor = registry.deploys.find(entry => entry.id === 'jcb');
   if (!descriptor) return new Map();
   const url = descriptor.url ?? new URL(descriptor.file, registry.url ?? defaultCatalogURL).href;
@@ -282,6 +301,7 @@ async function resolveMaterializedDeployment(input, { catalog, deployCatalog, ba
       extensions: [...sourceDeploy.configuration.extensions, ...(variant.extensions ?? [])] };
     const targetMajor = deploymentRecipeMajor(sourceDeploy, setup.joomlaVersion);
     const targetVariant = targetMajor ? sourceDeploy.variants[targetMajor] ?? {} : {};
+    setup.initializeMcp ??= targetVariant.initializeMcp ?? sourceDeploy.configuration.initializeMcp;
     reviewedTarget = { ...sourceDeploy.configuration, ...targetVariant,
       extensions: [...sourceDeploy.configuration.extensions, ...(targetVariant.extensions ?? [])] };
     // Core variant arrays describe the same installation steps for each major.
@@ -374,7 +394,7 @@ export async function resolveDeployConfiguration(input = {}, {
   const manifestURL = descriptor.url ?? new URL(descriptor.file, registry.url ?? defaultCatalogURL).href;
   const deploy = normalizeDeploy(await fetchJSON(manifestURL, fetcher), { baseURL: manifestURL });
   if (deploy.id !== id) throw new TypeError(`Deploy manifest ID does not match ${id}.`);
-  let release = resolveJoomlaVersion(input.joomlaVersion ?? deploy.configuration.joomlaVersion ?? catalog.defaults.joomlaVersion, catalog);
+  let release = resolveJoomlaVersion(input.joomlaVersion ?? deploy.configuration.joomlaVersion ?? selectDeploymentRuntime(deploy, catalog).joomlaVersion, catalog);
   const major = release.split('.')[0];
   const recipeMajor = deploymentRecipeMajor(deploy, release);
   if (!recipeMajor) throw new TypeError(`${deploy.title} is not available for Joomla ${major}.`);
@@ -416,12 +436,7 @@ export async function resolveDeployConfiguration(input = {}, {
         else {
           // A pinned JCB package belongs to the shared package catalog, not only
           // to the JCB preset. Other recipes can opt in to the same exact bytes.
-          const jcbDescriptor = registry.deploys.find(entry => entry.id === 'jcb');
-          if (jcbDescriptor) {
-            const url = jcbDescriptor.url ?? new URL(jcbDescriptor.file, registry.url ?? defaultCatalogURL).href;
-            const jcbDeploy = id === 'jcb' ? deploy : normalizeDeploy(await fetchJSON(url, fetcher), { baseURL: url });
-            selectedPackage = [...pinnedJcbPackages(jcbDeploy).values()].find(entry => entry.version === selectedVersion)?.package;
-          }
+          selectedPackage = [...(await sharedJcbPackages(registry, fetcher)).values()].find(entry => entry.version === selectedVersion)?.package;
           selectedPackage ??= catalog.retiredJcb?.find(entry => entry.version === selectedVersion)?.package;
           if (!selectedPackage) throw new TypeError(`The selected JCB ${selectedVersion} package is unavailable.`);
         }

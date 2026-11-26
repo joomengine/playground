@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { stageDeployCatalog } from '../scripts/deploys.mjs';
 import { sha256 } from '../scripts/assets.mjs';
-import { normalizeDeploy, normalizeDeployCatalog } from '../src/deploys.mjs';
+import { normalizeDeploy, normalizeDeployCatalog, resolveDeployConfiguration } from '../src/deploys.mjs';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'playground-deploy-build-'));
@@ -69,4 +69,55 @@ test('repository deploy packages require HTTPS sources and pinned integrity', as
   deploy.configuration.extensions = [{ url: 'https://extensions.example/package.zip' }];
   await save();
   await assert.rejects(stageDeployCatalog(options), /SHA-256/);
+});
+
+test('a fork owns its complete catalog and recipes while sharing staged language and JCB packages', async t => {
+  const { options, asset, catalog, deploy, save } = await fixture(t);
+  const siteDirectory = path.join(options.root, 'site');
+  const directory = path.join(siteDirectory, 'deploys');
+  await mkdir(directory, { recursive: true });
+  const pin = { ...asset, url: 'https://github.com/joomengine/pkg-component-builder/archive/refs/tags/v6.1.2.zip' };
+  const upstreamJcb = { schemaVersion: 1, id: 'jcb', title: 'JCB', joomla: ['6'], variants: { 6: { extensions: [pin] } } };
+  await writeFile(path.join(options.root, 'deploys/jcb.json'), JSON.stringify(upstreamJcb));
+  const showcase = { schemaVersion: 1, id: 'showcase', title: 'Showcase', joomla: ['6'],
+    configuration: { startupCommands: [['cache:clean']], initializeMcp: true } };
+  const single = { schemaVersion: 1, default: 'showcase', deploys: [{ id: 'showcase', title: 'Showcase', file: './showcase.json' }] };
+  await writeFile(path.join(directory, 'catalog.json'), JSON.stringify(single));
+  await writeFile(path.join(directory, 'showcase.json'), JSON.stringify(showcase));
+  await stageDeployCatalog({ ...options, siteDirectory });
+  const read = async name => JSON.parse(await readFile(path.join(options.staging, 'deploys', name)));
+  const baseURL = 'https://example.org/fork/deploys/catalog.json';
+  const registry = normalizeDeployCatalog(await read('catalog.json'), { baseURL });
+  assert.deepEqual(registry.deploys.map(entry => entry.id), ['showcase']);
+  assert.equal(registry.default, 'showcase');
+  assert.equal(registry.languages['6'][0].tag, 'nl-NL');
+  assert.equal(registry.jcbPackages['6'].sourceUrl, pin.url);
+  const calls = [];
+  const resolved = await resolveDeployConfiguration({ jcbVersion: '6.1.2', admin: { password: 'test-showcase-password' } }, {
+    catalog: { defaults: { joomlaVersion: '6.2.0', phpVersion: '8.4' }, joomla: [{ version: '6.2.0', php: ['8.4'] }] },
+    deployCatalog: registry, baseURL, fetcher: async url => {
+      calls.push(url); return Response.json(await read(path.basename(url)));
+    },
+  });
+  assert.deepEqual(calls, [new URL('./showcase.json', baseURL).href]);
+  assert.equal(resolved.configuration.extensions[0].url, new URL(`../assets/packages/${asset.sha256}.zip`, baseURL).href);
+  assert.equal(resolved.configuration.initializeMcp, true);
+  assert.deepEqual(resolved.configuration.startupCommands, showcase.configuration.startupCommands);
+
+  // Overriding an existing ID alone replaces its instructions and visible metadata.
+  await rm(path.join(directory, 'catalog.json'));
+  const replaced = { ...showcase, id: 'sample', title: 'Local sample' };
+  await writeFile(path.join(directory, 'sample.json'), JSON.stringify(replaced));
+  const first = await stageDeployCatalog({ ...options, siteDirectory });
+  const output = await read('sample.json');
+  assert.deepEqual(output, replaced);
+  assert.equal((await read('catalog.json')).deploys[0].title, replaced.title);
+  catalog.deploys[0].title = 'Upstream renamed the preset';
+  deploy.configuration.startupCommands = [['upstream:change']];
+  await save();
+  await rm(options.cache, { recursive: true });
+  await stageDeployCatalog({ ...options, siteDirectory, seedPackages: first.packages });
+  assert.deepEqual(await read('sample.json'), output);
+  assert.equal((await read('catalog.json')).deploys[0].title, replaced.title);
+  assert.deepEqual(JSON.parse(await readFile(path.join(directory, 'sample.json'))), replaced);
 });

@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { normalizeNetworkConfig } from '../src/network-config.mjs';
 
-const files = ['assets/manifest.json', 'config/network.json', 'build.json', 'index.html', 'src/app.mjs'];
+export const publicationFiles = ['assets/manifest.json', 'config/network.json', 'build.json', 'index.html', 'src/app.mjs'];
 
 function publicURL(value) {
   const url = new URL(value);
@@ -39,11 +39,11 @@ export async function verifyPublishedPlayground({ directory = 'dist', baseURL, e
   publicURL(baseURL);
   assert.match(expectedCommit || '', /^[a-f0-9]{40}$/, 'The tested source commit is required.');
   assert.ok(Number.isSafeInteger(timeoutMs) && timeoutMs > 0 && Number.isSafeInteger(maxAttempts) && maxAttempts > 0);
-  const expected = new Map(await Promise.all(files.map(async file => [file, await readFile(path.join(directory, file))])));
-  const manifest = JSON.parse(expected.get(files[0]));
-  const config = JSON.parse(expected.get(files[1]));
+  const expected = new Map(await Promise.all(publicationFiles.map(async file => [file, await readFile(path.join(directory, file))])));
+  const manifest = JSON.parse(expected.get(publicationFiles[0]));
+  const config = JSON.parse(expected.get(publicationFiles[1]));
   const normalized = normalizeNetworkConfig(config);
-  const build = JSON.parse(expected.get(files[2]));
+  const build = JSON.parse(expected.get(publicationFiles[2]));
   // Pages may report a github.io URL that redirects to the reviewed CNAME.
   // Probe the tested artifact's canonical URL directly, without following redirects.
   const base = publicURL(manifest.deployment?.canonicalUrl);
@@ -64,7 +64,7 @@ export async function verifyPublishedPlayground({ directory = 'dist', baseURL, e
     for (attempts = 1; attempts <= maxAttempts; attempts++) {
       try {
         controller.signal.throwIfAborted();
-        for (const file of files) {
+        for (const file of publicationFiles) {
           const actual = await publicBytes(new URL(file === 'index.html' ? './' : file, base),
             Math.max(65536, expected.get(file).length + 1024), fetcher, controller.signal);
           if (file === 'assets/manifest.json') {
