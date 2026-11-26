@@ -24,7 +24,7 @@ import { administratorCaptureTargets } from './deployment-capture.mjs';
 import { normalizeDeploymentOverlays } from './deployment-overlays.mjs';
 import { deploymentRegistryKey, readDeploymentRegistry, saveCustomDeployment, deleteCustomDeployment, customDeploymentName } from './deployment-registry.mjs';
 import { initialJcbSelection, jcbSelectionInput, recipeIncludesJcb } from './jcb-selection.mjs';
-import { deploymentRequiresJcb, deploymentPhpVersions, selectDeploymentRuntime } from './deployment-compatibility.mjs';
+import { deploymentRequiresJcb, deploymentPhpVersions } from './deployment-compatibility.mjs';
 import { loadVersionCatalog } from './version-catalog.mjs';
 import { createBuildUpdateMonitor } from './build-updates.mjs';
 import { dynamicJoomlaChoices, matchingJcbChoices } from './dynamic-selection.mjs';
@@ -38,7 +38,7 @@ import { createStorageManagement, createRuntimeStorageAdapter, runtimeStorageIde
 import { createRuntimeViewHost, attachRuntimeView, readRuntimeViewURL, readActiveRuntimeView, runtimeViewURL } from './runtime-views.mjs';
 import { createMailController } from './mail/dialog.mjs';
 
-import { normalizeSiteFeatures, siteLaunchURL, siteSharedConfiguration, allowedSiteSelection } from './site-features.mjs';
+import { normalizeSiteFeatures, siteLaunchURL, siteSharedConfiguration, allowedSiteSelection, siteRuntimeSelection, siteStorageKey } from './site-features.mjs';
 
 const $ = (id) => document.getElementById(id);
 const siteFeatures = normalizeSiteFeatures(JSON.parse($('playground-site')?.textContent || '{}').features);
@@ -161,6 +161,10 @@ function renderBuildUpdate() {
 
 function defaultDeployId(joomlaVersion = catalog.defaults.joomlaVersion) {
   return deployCatalog.defaultsByJoomla[joomlaVersion.split('.')[0]] ?? deployCatalog.default;
+}
+
+function newDeployId(joomlaVersion) {
+  return deployCatalog.deploys.some(entry => entry.id === 'blank') ? 'blank' : defaultDeployId(joomlaVersion);
 }
 
 function deploymentDescriptor(id) {
@@ -647,7 +651,7 @@ function setupBackups() {
       onProgress: event => activity(event.message || event) }),
     async onRestore(blob, record) {
       const siteExport = await readSiteExport(blob);
-      const importedConfiguration = configurationForSiteExport(siteExport, catalog, { baseURL: deploymentURL, admin: administrator() });
+      const importedConfiguration = configurationForSiteExport(siteExport, catalog, { baseURL: deploymentURL, admin: administrator(), deployId: newDeployId(siteExport.metadata.joomlaVersion) });
       // The panel reserves its buttons; launch owns the runtime transition.
       setBusy(false);
       await launch({ siteExport, importedConfiguration, backupId: record.id });
@@ -930,9 +934,11 @@ function existingSiteConfiguration(input) {
 }
 async function resolve(input) {
   if (siteFeatures.phpVersion === false) input.phpVersion = catalog.defaults.phpVersion;
-  if (input.restoredSite) {
+  if (input.restoredSite || (input.deployId && !input.fresh && !deploymentDescriptor(input.deployId) && matchesInstalledSelection(input))) {
     if (input.jcbVersion !== editorConfiguration?.jcbVersion) await prepareDynamicInput(input);
-    return { configuration: existingSiteConfiguration(input), deploy: deploymentDescriptor(input.deployId) };
+    return { configuration: existingSiteConfiguration(input), deploy: deploymentDescriptor(input.deployId) ?? {
+      id: input.deployId, title: input.siteName || 'Saved deployment', joomla: [input.joomlaVersion.split('.')[0]], configuration: input,
+    } };
   }
   // An unchanged core recipe keeps additive setup identity in saved preferences,
   // while the editor retains its complete configuration for package-free resume.
@@ -952,7 +958,8 @@ async function resolve(input) {
   }
   input = customDeploymentInput(input);
   const descriptor = deploymentDescriptor(input.deployId ?? defaultDeployId(input.joomlaVersion));
-  input.joomlaVersion ||= descriptor ? selectDeploymentRuntime(descriptor, catalog).joomlaVersion : catalog.defaults.joomlaVersion;
+  if (descriptor) input.deployId ??= descriptor.id;
+  input.joomlaVersion ||= descriptor ? siteRuntimeSelection(descriptor, catalog, siteFeatures).joomlaVersion : catalog.defaults.joomlaVersion;
   const major = input.joomlaVersion.split('.')[0];
   const pinnedVersion = descriptor?.jcbVersions?.[major] ?? descriptor?.jcbVersions?.[descriptor.requirements?.joomlaFallbacks?.[major]];
   if (input.jcbVersion === undefined && pinnedVersion && !savedState.sites[input.storageKey]) input.jcbVersion = pinnedVersion;
@@ -1270,6 +1277,11 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
       input.storageKey = `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-fresh-${crypto.randomUUID().slice(0, 8)}`;
       fields.storageKey.value = input.storageKey;
     }
+    const availableKey = siteStorageKey(input.storageKey, savedState.sites, siteFeatures, catalog, deployCatalog);
+    if (availableKey !== input.storageKey) {
+      if (resumeOnly || checkpoint) throw new Error('The saved site uses another Playground configuration.');
+      input.storageKey = fields.storageKey.value = availableKey;
+    }
     const recipe = resumeOnly || checkpoint || input.restoredSite ? { configuration: input, changed: false } : await isolateSetup(savedState, input);
     input = recipe.configuration;
     if (recipe.changed) {
@@ -1489,7 +1501,7 @@ async function closeSite({ reset = false, save = false } = {}) {
 }
 
 async function openSavedSite(key) {
-  if (savedState.sites[key] && !allowedSiteSelection(savedState.sites[key], siteFeatures, catalog.defaults, deployCatalog)) {
+  if (savedState.sites[key] && !allowedSiteSelection(savedState.sites[key], siteFeatures, catalog, deployCatalog)) {
     feedback('This saved site uses another Playground configuration.', { error: true });
     renderSavedSites();
     return;
@@ -1559,9 +1571,7 @@ async function changeProfile({ refreshNightly = false, deploymentChanged = false
     const descriptor = deploymentDescriptor(fields.deployId.value);
     const installableCatalog = deploymentChanged ? { ...catalog, joomla: dynamicJoomlaChoices(pinnedCatalog, dynamicMetadata.joomla,
       new Map([...selectedJoomlaPackages].filter(([, entry]) => entry.url))).filter(entry => entry.php?.length) } : catalog;
-    const selectionCatalog = siteFeatures.phpVersion === false ? { ...installableCatalog,
-      joomla: installableCatalog.joomla.map(release => ({ ...release, php: selectablePhp(descriptor, release) })) } : installableCatalog;
-    const selected = deploymentChanged ? selectDeploymentRuntime(descriptor, selectionCatalog, {
+    const selected = deploymentChanged ? siteRuntimeSelection(descriptor, installableCatalog, siteFeatures, {
       joomlaVersion: fields.joomlaVersion.value, phpVersion: fields.phpVersion.value,
     }) : { joomlaVersion: fields.joomlaVersion.value, phpVersion: fields.phpVersion.value };
     const target = { deployId: fields.deployId.value, joomlaVersion: selected.joomlaVersion };
@@ -1720,7 +1730,7 @@ async function resetSite({ confirmed = false } = {}) {
     stoppedSite = undefined; sourceBackupId = undefined;
     preferences?.removeItem(liveMetadataKey);
     const deployId = defaultDeployId();
-    const target = selectDeploymentRuntime(deploymentDescriptor(deployId), catalog);
+    const target = siteRuntimeSelection(deploymentDescriptor(deployId), catalog, siteFeatures);
     const input = { deployId, ...target, persistence: true, fresh: false,
       storageKey: `${deployId.slice(0, 47)}-default-${crypto.randomUUID().slice(0, 8)}`, admin: { ...administrator(), password: password() } };
     const resolved = await resolve(input);
@@ -1744,7 +1754,7 @@ $('upload-site-file').addEventListener('change', async event => {
   let siteExport, importedConfiguration;
   try {
     siteExport = await readSiteExport(file);
-    importedConfiguration = configurationForSiteExport(siteExport, catalog, { baseURL: deploymentURL, admin: administrator() });
+    importedConfiguration = configurationForSiteExport(siteExport, catalog, { baseURL: deploymentURL, admin: administrator(), deployId: newDeployId(siteExport.metadata.joomlaVersion) });
   } catch (error) { feedback(error, { error: true, persistent: true }); return; }
   finally { setBusy(false); }
   await launch({ siteExport, importedConfiguration });
@@ -2363,7 +2373,7 @@ async function connectRuntimeView(selection) {
       if (companionRuntime) applyCompanionSnapshot(snapshot, state);
     },
   });
-  if (!allowedSiteSelection(latest?.configuration, siteFeatures, catalog.defaults, deployCatalog)) {
+  if (!allowedSiteSelection(latest?.configuration, siteFeatures, catalog, deployCatalog)) {
     proxy.dispose();
     throw new Error('The existing site uses another Playground configuration.');
   }
@@ -2435,7 +2445,7 @@ function setupInterface() {
   $('copy-deployment').addEventListener('click', () => void saveDeployment({ copy: true }));
   $('delete-deployment').addEventListener('click', () => void removeDeployment());
   $('new-deployment').addEventListener('click', async () => {
-    fields.deployId.value = deployCatalog.deploys.some(entry => entry.id === 'blank') ? 'blank' : defaultDeployId(fields.joomlaVersion.value);
+    fields.deployId.value = newDeployId(fields.joomlaVersion.value);
     await changeProfile({ deploymentChanged: true });
     $('deployment-name').value = customDeploymentName('New deployment', customRegistry.deployments.map(entry => entry.title));
     $('site-name').focus();
@@ -2480,6 +2490,8 @@ function setupInterface() {
   }
   $('information-button').addEventListener('click', () => openDialog('information-dialog'));
   if (siteFeatures.footer === false) {
+    const affiliation = $('site-footer').querySelector('[data-i18n="footer.affiliation"]');
+    $('information-dialog').querySelector('.credits-list').before(affiliation);
     $('site-credits').hidden = false;
     $('site-credits').addEventListener('click', () => openDialog('information-dialog'));
   }
@@ -2617,7 +2629,7 @@ async function initialize() {
     const keyed = parsed.config.storageKey && Object.hasOwn(savedState.sites, parsed.config.storageKey)
       ? savedState.sites[parsed.config.storageKey] : null;
     const candidate = keyed || (!hasOptions && (savedState.sites[live?.storageKey] || savedState.sites[savedState.active]));
-    const previous = allowedSiteSelection(candidate, siteFeatures, catalog.defaults, deployCatalog) ? candidate : null;
+    const previous = allowedSiteSelection(candidate, siteFeatures, catalog, deployCatalog) ? candidate : null;
     let input = { ...(previous || {}), ...(previous?.deployId ? { deployId: previous.deployId } : {}), ...parsed.config, persistence: true, admin: administrator() };
     // Shared exact package configurations retain their identity; plain version
     // links resolve against the small catalog published with this deployment.
@@ -2630,8 +2642,9 @@ async function initialize() {
     input.storageKey ||= defaultSiteKey(resolved.configuration.deployId, resolved.configuration.joomlaVersion);
     if (!hasOptions && !previous && !parsed.config.storageKey && !parsed.config.fresh) {
       const saved = findProfile(resolved.configuration.deployId, resolved.configuration.joomlaVersion);
-      if (allowedSiteSelection(saved, siteFeatures, catalog.defaults, deployCatalog)) input = { ...saved, ...parsed.config, persistence: true, admin: administrator() };
+      if (allowedSiteSelection(saved, siteFeatures, catalog, deployCatalog)) input = { ...saved, ...parsed.config, persistence: true, admin: administrator() };
     }
+    input.storageKey = siteStorageKey(input.storageKey, savedState.sites, siteFeatures, catalog, deployCatalog);
     resolved = await resolve(input);
     applyConfiguration(resolved.configuration, input, resolved.deploy);
     selectedSiteId = resolved.configuration.persistence && savedState.sites[resolved.configuration.storageKey] ? resolved.configuration.storageKey : null;
@@ -2722,7 +2735,7 @@ export function getOwnerWorkspace() {
       }
       case 'restore': {
         const siteExport = await readSiteExport(input.archive);
-        const importedConfiguration = configurationForSiteExport(siteExport, catalog, { baseURL: deploymentURL, admin: administrator() });
+        const importedConfiguration = configurationForSiteExport(siteExport, catalog, { baseURL: deploymentURL, admin: administrator(), deployId: newDeployId(siteExport.metadata.joomlaVersion) });
         await launch({ siteExport, importedConfiguration, replaceWorkspaceId: input.replaceWorkspaceId });
         if (!runtime?.healthy || identity() === previous) throw new Error('The site restore did not complete.');
         return { ...state(), restored: true, sha256: siteExport.sha256 };

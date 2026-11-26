@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { catalogWithSelectedJoomlaPackage, normalizeConfiguration, readURLConfiguration } from '../src/config.mjs';
 import { catalogForRestoredSite } from '../src/site-import.mjs';
 import { readRuntimeViewURL } from '../src/runtime-views.mjs';
-import { siteLaunchURL, siteSharedConfiguration, allowedSiteSelection } from '../src/site-features.mjs';
+import { siteLaunchURL, siteSharedConfiguration, allowedSiteSelection, siteStorageKey } from '../src/site-features.mjs';
 
 const source = await readFile(new URL('../src/app.mjs', import.meta.url), 'utf8');
 const initializeSource = source.slice(source.indexOf('async function initialize() {'), source.indexOf('\nasync function startInterface()'));
@@ -14,7 +14,7 @@ const liveSite = { deployId: 'jcb', joomlaVersion: '6.1.0', phpVersion: '8.4', s
 async function initialize({ url = base, saved = false, live = null, active = null, attachFailure = false, siteFeatures = {} } = {}) {
   const calls = { launch: [], attach: [], countdown: 0, errors: [] }, elements = new Map();
   const context = {
-    URL, Map, Boolean, Object, siteFeatures, siteLaunchURL, siteSharedConfiguration, allowedSiteSelection, setInterval() {},
+    URL, Map, Boolean, Object, siteFeatures, siteLaunchURL, siteSharedConfiguration, allowedSiteSelection, siteStorageKey, setInterval() {},
     location: { href: url }, document: { hidden: false, documentElement: { dataset: {} } },
     $: id => { if (!elements.has(id)) elements.set(id, {}); return elements.get(id); },
     fields: { phpVersion: {}, deployId: {} }, deploymentURL: base,
@@ -226,8 +226,22 @@ test('a fixed deployment ignores external recipes and preserves its PHP policy a
   assert.deepEqual(calls.errors, []);
   assert.equal(calls.countdown, 0);
   assert.equal(calls.launch.length, 0);
-  const defaults = { phpVersion: '8.4', joomlaVersion: liveSite.joomlaVersion }, catalog = { default: 'demo' };
-  assert.equal(allowedSiteSelection(liveSite, siteFeatures, defaults, catalog), false);
-  assert.equal(allowedSiteSelection({ ...liveSite, deployId: 'demo' }, siteFeatures, defaults, catalog), true);
-  assert.equal(allowedSiteSelection({ ...liveSite, deployId: 'demo', phpVersion: '8.5' }, siteFeatures, defaults, catalog), false);
+  const catalog = { default: 'demo' };
+  const runtime = { defaults: { phpVersion: '8.4', joomlaVersion: liveSite.joomlaVersion } };
+  assert.equal(allowedSiteSelection(liveSite, siteFeatures, runtime, catalog), false);
+  assert.equal(allowedSiteSelection({ ...liveSite, deployId: 'demo' }, siteFeatures, runtime, catalog), true);
+  assert.equal(allowedSiteSelection({ ...liveSite, deployId: 'demo', phpVersion: '8.5' }, siteFeatures, runtime, catalog), false);
+});
+
+test('a Joomla 5-only fork retains its installed patch and isolates a conflicting saved key', () => {
+  const profile = { phpVersion: false, joomlaVersion: false, deployments: false };
+  const runtime = { defaults: { phpVersion: '8.4', joomlaVersion: '6.2.1' },
+    joomla: [{ version: '6.2.1', php: ['8.4'] }, { version: '5.4.10', php: ['8.4'] }] };
+  const catalog = { default: 'my-demo', deploys: [{ id: 'my-demo', joomla: ['5'] }] };
+  const saved = { deployId: 'my-demo', joomlaVersion: '5.4.9', phpVersion: '8.4', storageKey: 'demo' };
+  assert.equal(allowedSiteSelection(saved, profile, runtime, catalog), true);
+  assert.equal(siteStorageKey('demo', { demo: saved }, profile, runtime, catalog), 'demo');
+  const incompatible = { demo: { ...saved, phpVersion: '8.5' } };
+  assert.notEqual(siteStorageKey('demo', incompatible, profile, runtime, catalog), 'demo');
+  assert.equal(incompatible.demo.phpVersion, '8.5');
 });

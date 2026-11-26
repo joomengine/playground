@@ -8,7 +8,8 @@ verified Joomla and PHP versions.
 ## Publish the working example
 
 1. Fork this repository. In the fork, enable GitHub Actions and select **Settings → Pages → Build and deployment → Source → GitHub Actions**.
-2. From a local checkout of the fork, copy the example into a new `site/` directory and commit it to the default branch.
+2. Under **Settings → Secrets and variables → Actions → Variables**, create the repository variable `PLAYGROUND_FORK_PAGES`. Choose `manual` to publish only when you run the fork workflow, or `true` to enable automatic updates as well.
+3. From a local checkout of the fork, copy the example into a new `site/` directory and commit it to the default branch.
 
    ```sh
    cp -R examples/fork-site site
@@ -17,8 +18,16 @@ verified Joomla and PHP versions.
    git push
    ```
 
-3. Open **Actions → Publish fork playground → Run workflow** on the default branch. Open the Pages URL from the deployment when the run finishes. GitHub Pages can serve the fork at its ordinary project URL, including the repository path.
-4. For automatic updates, set the repository Actions variable `PLAYGROUND_FORK_PAGES` to `true` under **Settings → Secrets and variables → Actions → Variables**. The fork checks for upstream publications every four hours and builds changes to `site/` on the default branch. Pull requests that change the site are validated before publication.
+4. Open **Actions → Publish fork playground → Run workflow** on the default branch. Open the Pages URL from the deployment when the run finishes. GitHub Pages can serve the fork at its ordinary project URL, including the repository path.
+
+| `PLAYGROUND_FORK_PAGES` in the fork | Publication behavior |
+| --- | --- |
+| Unset | The fork keeps its existing full source build, package refresh, validation and Pages publication. |
+| `manual` | **Run workflow** composes the local site with the published JoomEngine engine. The fork retains that deployment until its next manual run. |
+| `true` | In addition to manual runs, the fork checks for upstream publications every four hours and builds changes to `site/` on its default branch. Site pull requests validate without publishing. |
+
+Both opt-in modes replace the fork's full source workflows. The official
+JoomEngine repository always builds from source and publishes the shared engine.
 
 The example opens Joomla's Articles manager with one field report ready to
 edit. It uses PHP 8.4 and a single deployment. The header logo, colors and
@@ -89,9 +98,12 @@ Playground interface. Joomla permissions and the public JavaScript API have
 their own behavior.
 
 **About and credits** remain accessible when either or both bars are hidden.
-The supported profile rejects `"credits": false`. JoomEngine maintains these
-protected controls, the component credits, the distributed `LICENSE` and
-`NOTICE`. A fork owner still controls the source code they distribute.
+Disabling the footer gives visitors a separate About button and moves the
+Joomla affiliation and trademark notice into that dialog. The configuration
+rejects `"credits": false`. About lists the upstream projects and their licenses.
+The distribution includes the original `LICENSE`, `NOTICE` and dependency notices.
+Keep About, its links and the notices usable when writing custom CSS. Fork
+owners control the source and styles they distribute.
 
 ## Change the branding
 
@@ -112,20 +124,22 @@ relative to that file. For example, `url("./assets/pattern.svg")` refers to
 
 ## Hosting and updates
 
-The fork fetches the official published distribution, verifies the files
-against its inventory and applies the local `site/` configuration. This
-reuses the WebAssembly runtime, Joomla packages and version catalog from an
-upstream publication. The fork prepares its selected deployment recipes and
-publishes the assembled files under its own Pages address. Visitors load the
-runtime from the fork's site. Routine publications do not write back to the
-fork's source branch.
+After the official Pages deployment passes its publication check, JoomEngine
+publishes its tested distribution as `engine-<build-id>.tar.gz` and a matching
+`.sha256` file on the [dedicated engine prerelease](https://github.com/joomengine/playground/releases/tag/playground-engine-v1).
+The first fork build requires this publication to finish.
 
-The workflow compares the upstream build ID and the fork's source commit
-with its last publication. A new upstream publication can change the runtime even when the Git source commit
-stays the same. A logo or recipe change can publish a new fork build using
-the same upstream runtime. A failure while preparing a candidate stops
-publication of that candidate. The first fork build requires an official
-publication that includes the engine build identifier.
+The fork reads the official build ID, downloads its archive, and verifies
+the archive checksum and file inventory. This gives it the compiled WebAssembly
+runtime, Joomla packages and version catalog from that build. A matching
+prepared deployment reuses its verified upstream snapshot. For a new or
+changed recipe with `prebuild: true`, the fork prepares and verifies its
+own snapshot. Visitors load the finished distribution from the fork's site.
+
+Automatic runs skip publication when both the upstream build ID and fork
+commit match the last deployment. A manual run rebuilds on demand. A failed
+check during assembly leaves the previous site serving. The workflow only
+publishes build outputs to Pages and leaves the fork's source history alone.
 
 The fork workflow checks out the build tools for the selected upstream
 publication and loads your fork's `site/` from its own checkout. If you

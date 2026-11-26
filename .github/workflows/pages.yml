@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   validate:
-    if: github.repository == 'joomengine/playground' && github.ref == 'refs/heads/main'
+    if: (github.repository == 'joomengine/playground' || (vars.PLAYGROUND_FORK_PAGES != 'true' && vars.PLAYGROUND_FORK_PAGES != 'manual')) && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/validate.yml
 
   deploy:
@@ -56,3 +56,23 @@ jobs:
         env:
           PAGES_URL: ${{ steps.deployment.outputs.page_url }}
         run: node scripts/pages-smoke.mjs dist
+
+  publish-engine:
+    name: Publish tested engine for downstream sites
+    if: github.repository == 'joomengine/playground'
+    needs: deploy
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: playground-static
+          path: dist
+      - name: Publish the verified build-ID-addressed archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish-fork-engine.sh dist

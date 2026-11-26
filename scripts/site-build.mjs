@@ -6,11 +6,11 @@ import { stageDeployCatalog } from './deploys.mjs';
 import { stageSiteBrand } from './site-brand.mjs';
 import { normalizeSiteDefaults, normalizeSiteFeatures, siteFeatureStyles } from '../src/site-features.mjs';
 import { parseCatalog } from '../src/config.mjs';
+import { deploymentPhpVersions } from '../src/deployment-compatibility.mjs';
 
 export function sitePublicUrl(value) {
   const url = new URL(value);
-  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash
-      || !/^\/(?:[A-Za-z0-9._~-]+\/)*[A-Za-z0-9._~-]*$/.test(url.pathname)) {
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
     throw new Error('publicUrl must be an HTTPS site URL with an optional project path.');
   }
   if (!url.pathname.endsWith('/')) url.pathname += '/';
@@ -52,13 +52,15 @@ export async function readSiteProfile(siteDirectory) {
 
 export async function sourceBuildUrl({ root, profile, environment = process.env }) {
   if (profile.publicUrl || environment.PLAYGROUND_PUBLIC_URL) return sitePublicUrl(profile.publicUrl || environment.PLAYGROUND_PUBLIC_URL);
-  const repository = environment.GITHUB_REPOSITORY?.toLowerCase();
-  if (repository && repository !== 'joomengine/playground') {
+  const cnamePath = path.join(root, 'CNAME');
+  const domain = await optionalStat(cnamePath) ? (await readFile(cnamePath, 'utf8')).trim() : '';
+  const repository = environment.GITHUB_REPOSITORY;
+  // A source fork may already have its own custom CNAME committed.
+  if (repository && repository.toLowerCase() !== 'joomengine/playground' && (!domain || domain === 'playground.joomengine.org')) {
     const [owner, name] = repository.split('/');
-    const hostname = `${owner}.github.io`;
-    return sitePublicUrl(`https://${hostname}/${name === hostname ? '' : name}`);
+    const hostname = `${owner.toLowerCase()}.github.io`;
+    return sitePublicUrl(`https://${hostname}/${name.toLowerCase() === hostname ? '' : name}`);
   }
-  const domain = (await readFile(path.join(root, 'CNAME'), 'utf8')).trim();
   if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
     throw new Error('CNAME must contain one valid deployment hostname.');
   }
@@ -75,14 +77,24 @@ export async function stageSiteShell({ directory, siteDirectory, profile, manife
   const hasSite = Boolean(await optionalStat(siteDirectory));
   if (hasSite) await stageSiteBrand({ directory, siteDirectory, profile });
   if (profile.defaults?.phpVersion) {
-    manifest.defaults = { ...manifest.defaults, phpVersion: profile.defaults.phpVersion };
-    parseCatalog(manifest); // Reject a PHP default incompatible with the actual staged Joomla release.
+    const phpVersion = profile.defaults.phpVersion;
+    const catalog = parseCatalog(manifest);
+    const recipes = JSON.parse(await readFile(path.join(directory, 'deploys/catalog.json'), 'utf8'));
+    const compatible = catalog.joomla.filter(release => {
+      if (profile.features?.phpVersion !== false) return release.php.includes(phpVersion);
+      const id = recipes.defaultsByJoomla?.[release.version.split('.')[0]] ?? recipes.default;
+      const preset = recipes.deploys.find(entry => entry.id === id);
+      return deploymentPhpVersions(preset, release).includes(phpVersion);
+    });
+    const selected = compatible.find(release => release.version === catalog.defaults.joomlaVersion) ?? compatible[0];
+    if (!selected) throw new Error(`PHP ${phpVersion} is unavailable for this site's default deployment.`);
+    manifest.defaults = { ...manifest.defaults, joomlaVersion: selected.version, phpVersion };
   }
   const indexPath = path.join(directory, 'index.html');
   let html = await readFile(indexPath, 'utf8');
   const canonical = /<link rel="canonical" href="[^"]*">/;
   if (!canonical.test(html)) throw new Error('Missing canonical URL in Playground shell.');
-  html = html.replace(canonical, `<link rel="canonical" href="${canonicalUrl}">`);
+  html = html.replace(canonical, () => `<link rel="canonical" href="${canonicalUrl.replaceAll('&', '&amp;')}">`);
   if (hasSite) {
     const config = { schemaVersion: 1, features: profile.features ?? {}, defaults: profile.defaults ?? {} };
     const css = siteFeatureStyles(config.features);
