@@ -46,9 +46,9 @@ Browser isolation does not require a network verification step.
 For an agent-oriented introduction to configuring a site, working with JCB,
 testing extensions and exporting results, see the canonical [Playground agent guide in JoomEngine Skills](https://github.com/joomengine/skills/blob/main/testing/playground/README.md).
 
-Extension developers can publish a Playground for their own component using the verified
-JoomEngine runtime. The [fork setup guide](docs/fork-playground.md) includes a working
-site profile with its own Joomla deployment, branding and visitor controls.
+## White-label Playground for your extension
+
+Publish a fork under your own name with your logo, colors, footer and Joomla deployment recipes. Choose which Playground controls visitors see, or open directly into one component with a fixed PHP version. Your fork can reuse JoomEngine’s tested engine and receive updates automatically while keeping its configuration in `site/`. [White-label setup and complete override reference](docs/fork-playground.md)
 
 ## Upstream foundations and credits
 
