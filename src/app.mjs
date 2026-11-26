@@ -1104,7 +1104,10 @@ async function prepareDynamicInput(input) {
 }
 function renderJcbOptions(major, selection = jcbSelection) {
   const choices = matchingJcbChoices(major, dynamicMetadata.jcb, pinnedJcb);
-  const recipeVersion = jcbRecipeVersion(recipeJcbEntry(currentDeployRecipe, major));
+  const descriptor = deploymentDescriptor(fields.deployId.value);
+  const recipeVersion = descriptor?.jcbVersions?.[major]
+    ?? descriptor?.jcbVersions?.[descriptor.requirements?.joomlaFallbacks?.[major]]
+    ?? (editorConfiguration?.deploymentRecipe ? jcbRecipeVersion(recipeJcbEntry(currentDeployRecipe, major)) : undefined);
   if (recipeVersion && !choices.some(entry => entry.version === recipeVersion)) {
     choices.push({ version: recipeVersion, label: `JCB ${recipeVersion}`, channel: 'saved' });
   }
