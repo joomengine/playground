@@ -32,6 +32,7 @@ async function engineFixture(t, { stale = false, link = false } = {}) {
     const location = new URL(url); requests.push(location);
     if (location.origin === new URL(base).origin) return new Response(files[location.pathname.slice(1)]);
     assert.equal(location.hostname, 'github.com');
+    assert.equal(path.posix.dirname(location.pathname), `/joomengine/playground/releases/download/playground-engine-v1-${expected.buildId}`);
     if (location.pathname.endsWith('/' + archiveName)) return new Response(archive);
     assert.ok(location.pathname.endsWith('/' + archiveName + '.sha256'));
     return new Response(`${sha256(archive)}  ${archiveName}\n`);

@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import test from 'node:test';
 import { resolveSiteURL } from '../src/config.mjs';
+import { presentError } from '../src/error-presentation.mjs';
 import { safeSavedRoute } from '../src/ui-state.mjs';
 
 const app = await readFile(new URL('../src/app.mjs', import.meta.url), 'utf8');
@@ -67,11 +68,50 @@ test('a post-start UI error and rejected final save retain the healthy runtime f
 
 test('an unhealthy worker is cleared after post-start failure instead of being shown as recoverable live memory', async () => {
   const { context, calls, failure } = fixture({ healthy: false });
-  await context.launch();
+  const reported = [];
+  await context.launch({ onFailure: error => reported.push(error) });
+  assert.deepEqual(reported, [failure]);
   assert.equal(context.runtime, undefined);
   assert.deepEqual(calls.mounted, []);
   assert.deepEqual(calls.errors, [failure]);
   assert.equal(calls.close, 1);
+});
+
+test('owner clone and restore propagate the original database failure and preserve a declined source site', async () => {
+  const between = (start, end) => app.slice(app.indexOf(start), app.indexOf(end)).replace('export ', '');
+  const copy = between('async function copyDeployment(', 'async function useDeployment(');
+  const transition = between('async function requireOwnerTransition(', '/** Keep an attached agent');
+  const deployment = between('export async function ownerDeployment(', 'function populatePhpSettings(');
+  const workspace = between('export function getOwnerWorkspace()', '\nvoid startInterface();');
+  const config = { deployId: 'blank', jcbVersion: 'none', storageKey: 'source', deploymentRecipe: {}, admin: { password: 'source-password' } };
+  const site = { workspace: {id: 'source'}, healthy: true };
+  let launches = 0;
+  const failure = Object.assign(new Error('The saved database could not start.'), {
+    technicalDetails: 'MariaDB initialize timed out after 120000 ms; token=private-token; user source-password',
+  });
+  const context = vm.createContext({
+    Error, crypto, presentError, siteFeatures: {}, newDeployId: () => 'blank', initialized: true, companionView: false, busy: false, launching: false, closing: false,
+    runtime: site, currentConfig: config, runningAdministrator: null, codeHost: null, databaseHost: null,
+    $: () => ({value: '', close() {}}), document: { querySelector: () => null }, defaultSiteKey: () => 'copy',
+    deploymentDescriptor: () => null, resolve: async configuration => ({configuration}), prepareUploadedSiteCopy: async () => ({}),
+    setBusy() {}, pauseAutomaticLaunch() {}, administrator: () => config.admin, catalog: {}, deploymentURL: 'https://example.test/',
+    readSiteExport: async () => ({ metadata: { joomlaVersion: '6.2.0' } }), configurationForSiteExport: () => config,
+    async launch({ onFailure }) { launches++; onFailure(failure); return false; },
+  });
+  const owner = vm.runInContext([copy, transition, deployment, workspace, 'getOwnerWorkspace()'].join('\n'), context);
+  const clone = () => context.ownerDeployment('source', 'clone', {});
+  for (const request of [clone, () => owner.perform('restore', {replaceWorkspaceId: 'source'})]) {
+    await assert.rejects(request(), error => {
+      assert.match(error.message, /The saved database could not start/);
+      assert.match(error.message, /MariaDB initialize timed out after 120000 ms/);
+      assert.doesNotMatch(error.message, /private-token|source-password/);
+      return true;
+    });
+  }
+  context.codeHost = { beforeClose: async () => false };
+  await assert.rejects(clone(), /cancelled in JoomEngine Code/);
+  assert.equal(launches, 2);
+  assert.equal(owner.getRuntime(), site);
 });
 
 test('successful cleanup after a post-start failure releases the runtime normally', async () => {

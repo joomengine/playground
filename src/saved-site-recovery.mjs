@@ -1,3 +1,16 @@
+/** A timed-out initializer has terminated its worker and released its persistence lock.
+ * Reopen the same storage once, before exposing a database to PHP or importing site data.
+ */
+export async function initializeSiteDatabase(bridge, options, onRetry) {
+  try { return await bridge.createMariaDB(options); }
+  catch (cause) {
+    if (typeof bridge.MariaDBBridgeError !== 'function' ||
+        !(cause instanceof bridge.MariaDBBridgeError) || cause.code !== 'TIMEOUT') throw cause;
+    onRetry?.();
+    return bridge.createMariaDB(options);
+  }
+}
+
 /** A failed saved database must not prevent access to its separately stored files. */
 export async function openSiteDatabase(open, { recovery = false, persistent = false } = {}) {
   try { return { database: await open(), error: null }; }

@@ -148,7 +148,7 @@ relative to that file. For example, `url("./assets/pattern.svg")` refers to
 
 After the official Pages deployment passes its publication check, JoomEngine
 publishes its tested distribution as `engine-<build-id>.tar.gz` and a matching
-`.sha256` file on the [dedicated engine prerelease](https://github.com/joomengine/playground/releases/tag/playground-engine-v1).
+`.sha256` file together on an immutable [engine prerelease](https://github.com/joomengine/playground/releases) tagged `playground-engine-v1-<build-id>`.
 The first fork build requires this publication to finish.
 
 The fork reads the official build ID, downloads its archive, and verifies

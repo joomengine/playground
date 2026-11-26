@@ -1239,7 +1239,7 @@ function findProfile(deployId, joomlaVersion) {
   return drafts.get(`${deployId}:${joomlaVersion}`)
     || Object.values(savedState.sites).reverse().find((item) => item.deployId === deployId && item.joomlaVersion === joomlaVersion);
 }
-async function launch({ siteExport, checkpoint, importedConfiguration, deploymentChanges, jcbUpgrade, rotateAdministrator = false, resumeOnly = false, backupId, replaceWorkspaceId, retainPrevious = false, verifyUnusedStorage } = {}) {
+async function launch({ siteExport, checkpoint, importedConfiguration, deploymentChanges, jcbUpgrade, rotateAdministrator = false, resumeOnly = false, backupId, replaceWorkspaceId, retainPrevious = false, verifyUnusedStorage, onFailure } = {}) {
   if (!requireOwnerForReplacement()) return;
   if (busy || launching || !initialized || !catalog || !deployCatalog) return;
   launching = true;
@@ -1268,7 +1268,10 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
       previousView = ['welcome', 'error-view', 'site-mount'].find(name => !$(name).hidden) || 'welcome';
       show('loading-view');
     }
-    if (await buildUpdates.check({ force: true })) return;
+    if (await buildUpdates.check({ force: true })) {
+      onFailure?.(t(runtime ? 'buildUpdate.closeFirst' : 'buildUpdate.available'));
+      return;
+    }
     const nightly = dynamicMetadata.joomla.find(entry => entry.version === input.joomlaVersion && entry.source === 'nightly');
     if (!resumeOnly && nightly && input.joomlaPackage && refreshNightlyOnNextLaunch) {
       setBusy(true);
@@ -1304,7 +1307,10 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     if (runtime || (stoppedSite && stoppedSite.configuration.storageKey !== resolved.configuration.storageKey)) {
       if (replaceWorkspaceId !== undefined) {
         if (replaceWorkspaceId !== (runtime?.workspace.id || stoppedSite?.workspaceId)) throw new Error('The selected workspace changed before replacement.');
-      } else if (!resumeOnly && !await confirmLiveReplacement()) return;
+      } else if (!resumeOnly && !await confirmLiveReplacement()) {
+        onFailure?.('Site replacement was cancelled in the original Playground window.');
+        return;
+      }
     }
     // Validate a complete upload/backup in its own new live store before the
     // existing site is stopped. A failed restore never destroys the source.
@@ -1315,7 +1321,7 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     }
     if (runtime) {
       setBusy(false);
-      if (!await closeSite({ save: currentConfig.persistence })) return;
+      if (!await closeSite({ save: currentConfig.persistence, onFailure })) return;
     }
     switchingStarted = true;
     setBusy(true); show('loading-view');
@@ -1404,6 +1410,7 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     }
     return true;
   } catch (error) {
+    onFailure?.(error);
     if (!switchingStarted) {
       $('launch-form').reportValidity();
       feedback(error, { error: true, persistent: true }); return false;
@@ -1440,7 +1447,7 @@ async function launch({ siteExport, checkpoint, importedConfiguration, deploymen
     if (backupPanel?.isOpen) void backupPanel.refresh();
   }
 }
-async function closeSite({ reset = false, save = false } = {}) {
+async function closeSite({ reset = false, save = false, onFailure } = {}) {
   if (busy || closing || !runtime) return false;
   if (openingCode || openingDatabase) { feedback(t(openingDatabase ? 'database.loading' : 'code.loading')); return false; }
   const handle = runtime;
@@ -1449,7 +1456,10 @@ async function closeSite({ reset = false, save = false } = {}) {
   setBusy(true);
   try {
     if (runtimeViewHost && !await runtimeViewHost.prepareTransition(reset ? 'reset' : 'stop')) {
-      feedback(t('lifecycle.transitionBlocked'), { error: true, persistent: true }); return false;
+      const message = t('lifecycle.transitionBlocked');
+      feedback(message, { error: true, persistent: true });
+      onFailure?.(message);
+      return false;
     }
     if (previewDirty && !confirm(t('confirm.unsavedSiteForm'))) return false;
     if (handle.debugger.state !== 'idle') await handle.debugger.stop();
@@ -1485,6 +1495,7 @@ async function closeSite({ reset = false, save = false } = {}) {
     activity(reset ? t('lifecycle.resetConfirm') : t('lifecycle.stopped'));
     return true;
   } catch (error) {
+    onFailure?.(error);
     runtime = handle.healthy ? handle : undefined;
     if (runtime) {
       if (previewRemoved) mountPreview(resolveSiteURL(currentSitePath, runtime.baseUrl));
@@ -2015,7 +2026,7 @@ async function downloadConfiguration(input) {
   const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'joomengine-deploy.json';
   document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
-async function copyDeployment(input, sourceSite, storageKey, rotateAdministrator, replaceWorkspaceId) {
+async function copyDeployment(input, sourceSite, storageKey, rotateAdministrator, replaceWorkspaceId, onFailure) {
   setBusy(true);
   let copy;
   try {
@@ -2025,8 +2036,14 @@ async function copyDeployment(input, sourceSite, storageKey, rotateAdministrator
       if (!input.jcbPackage && pin) input.jcbPackage = structuredClone(pin.package);
     }
     input = (await resolve(input)).configuration;
-    if (codeHost && !codeHost.closed && !await codeHost.beforeClose()) return false;
-    if (databaseHost && !databaseHost.closed && !await databaseHost.beforeClose()) return false;
+    if (codeHost && !codeHost.closed && !await codeHost.beforeClose()) {
+      onFailure?.('The copy was cancelled in JoomEngine Code. Finish the pending edits before copying the site.');
+      return false;
+    }
+    if (databaseHost && !databaseHost.closed && !await databaseHost.beforeClose()) {
+      onFailure?.('The copy was cancelled in the database editor. Finish the pending edits before copying the site.');
+      return false;
+    }
     if (replaceWorkspaceId !== undefined && runtime?.workspace.id !== replaceWorkspaceId) throw new Error('The source workspace changed.');
     const sourceConfiguration = { ...sourceSite, storageKey: input.storageKey, admin: input.admin };
     copy = await prepareUploadedSiteCopy({ input, sourceConfiguration, runtime, storageKey, administratorEdited: rotateAdministrator,
@@ -2034,9 +2051,9 @@ async function copyDeployment(input, sourceSite, storageKey, rotateAdministrator
   } finally { setBusy(false); }
   freshKeyPending = false; selectedSiteId = null; resumeLastRoute = false;
   $('deploy-dialog').close();
-  await launch({ checkpoint: copy.checkpoint, importedConfiguration: copy.configuration, deploymentChanges: copy.changes,
-    rotateAdministrator: copy.rotateAdministrator, jcbUpgrade: copy.jcbUpgrade, replaceWorkspaceId, retainPrevious: replaceWorkspaceId !== undefined });
-  return runtime?.healthy && currentConfig?.storageKey === storageKey;
+  const opened = await launch({ checkpoint: copy.checkpoint, importedConfiguration: copy.configuration, deploymentChanges: copy.changes,
+    rotateAdministrator: copy.rotateAdministrator, jcbUpgrade: copy.jcbUpgrade, replaceWorkspaceId, retainPrevious: replaceWorkspaceId !== undefined, onFailure });
+  return opened && runtime?.healthy && currentConfig?.storageKey === storageKey;
 }
 async function useDeployment() {
   if (!requireOwnerForReplacement()) return;
@@ -2157,6 +2174,17 @@ async function updateRunningPhp(settings, minor = currentConfig.phpVersion) {
   updateRuntimeLocation();
 }
 
+// Dashboard transitions display and recover from errors locally. Return the same cause to the owner API.
+async function requireOwnerTransition(run, cancelled, password) {
+  const secrets = [password, currentConfig?.admin?.password, runningAdministrator?.password, $('admin-password').value];
+  let reason = cancelled;
+  try {
+    if (await run(error => { reason = error; })) return;
+  } catch (error) { reason = error; }
+  const { summary, details } = presentError(reason, { secrets });
+  throw new Error([summary, details].filter(Boolean).join('\n'));
+}
+
 /** Keep an attached agent's deployment changes in step with this owner's forms, saved state and preview. */
 export async function ownerDeployment(workspaceId, operation, options = {}) {
   if (!initialized || companionView || (runtime?.workspace.id ?? stoppedSite?.workspaceId ?? null) !== (workspaceId ?? null)) {
@@ -2197,7 +2225,8 @@ export async function ownerDeployment(workspaceId, operation, options = {}) {
       admin: { ...currentConfig.admin, ...options.admin } };
     if (options.jcbVersion && options.jcbVersion !== currentConfig.jcbVersion && !options.jcbPackage) delete input.jcbPackage;
     const storageKey = `${defaultSiteKey(input.deployId, input.joomlaVersion).slice(0, 44)}-site-${crypto.randomUUID().slice(0, 8)}`;
-    if (!await copyDeployment(input, currentConfig, storageKey, options.admin !== undefined, workspaceId)) throw new Error('The owner did not open the new site copy.');
+    await requireOwnerTransition(onFailure => copyDeployment(input, currentConfig, storageKey, options.admin !== undefined, workspaceId, onFailure),
+      'The site copy was cancelled. Check the original Playground window for pending edits or a confirmation.', input.admin?.password);
     return { workspaceId: runtime.workspace.id, siteName: currentConfig.siteName, deployId: currentConfig.deployId };
   }
   if (operation === 'apply') {
@@ -2743,8 +2772,10 @@ export function getOwnerWorkspace() {
       case 'restore': {
         const siteExport = await readSiteExport(input.archive);
         const importedConfiguration = configurationForSiteExport(siteExport, catalog, { baseURL: deploymentURL, admin: administrator(), deployId: newDeployId(siteExport.metadata.joomlaVersion) });
-        await launch({ siteExport, importedConfiguration, replaceWorkspaceId: input.replaceWorkspaceId });
-        if (!runtime?.healthy || identity() === previous) throw new Error('The site restore did not complete.');
+        await requireOwnerTransition(async onFailure => {
+          const opened = await launch({ siteExport, importedConfiguration, replaceWorkspaceId: input.replaceWorkspaceId, onFailure });
+          return opened && runtime?.healthy && identity() !== previous;
+        }, 'The site restore was cancelled. Check the original Playground window for pending edits or a confirmation.', importedConfiguration.admin?.password);
         return { ...state(), restored: true, sha256: siteExport.sha256 };
       }
       case 'start':

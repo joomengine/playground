@@ -70,7 +70,7 @@ function checkedInventory(entries) {
   return entries;
 }
 
-const releaseURL = 'https://github.com/joomengine/playground/releases/download/playground-engine-v1/';
+const releaseURL = 'https://github.com/joomengine/playground/releases/download/';
 
 async function releaseFile(url, fetcher) {
   // GitHub issues a temporary HTTPS redirect to its public release-asset storage.
@@ -83,7 +83,7 @@ async function releaseFile(url, fetcher) {
 export async function fetchEngine({ directory, expected, base = upstreamURL, fetcher = fetch, retryMs = 15_000, attempts = 32 }) {
   assert.deepEqual(await publishedEngine({ base, fetcher }), expected, 'Upstream changed since the fork selected its engine. Retry this build.');
   const name = `engine-${expected.buildId}.tar.gz`;
-  const archiveURL = new URL(name, releaseURL);
+  const archiveURL = new URL(`playground-engine-v1-${expected.buildId}/${name}`, releaseURL);
   let checksum;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const response = await releaseFile(`${archiveURL}.sha256`, fetcher);
